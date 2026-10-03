@@ -29,12 +29,21 @@ Written in `<id>.toml` for programs and inline for rows:
 |---|---|
 | `id`, `area` | Unique name and area |
 | `lean_version` | The Lean version of the native build that produced the expected values (4.34.0) |
-| `source` | Where the case came from: a finding id, the project that found it, and file:line |
+| `source` | Where the case came from: a finding id and the project that found it, plus file:line where there is one |
 | `normalize` | Optional list of `regex -> replacement` applied to both outputs before comparing (pids, times, addresses) |
 | `deviations` | Optional documented translator deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "plan §10 ..." }`. The expected value stays compiled Lean's; a listed deviation is the only difference allowed |
 | `files` | For IO cases: the expected directory tree after the run, with each file's SHA-256 |
 | `streams` | `"separate"` (default) or `"merged"` (stderr into stdout, to observe the order between the two) |
 | `expect` | Optional `{ nonterminating = true, timeout_s = N }` (N about 3 to 5) for a program that natively never exits. The output produced before the timeout is compared; the code is `timeout`. Each run starts in its own process group, which the runner kills by its id, never by name |
+
+## How a case runs
+
+`scripts/cases.py` runs every case:
+- in a fresh temporary working directory;
+- with stdin, stdout and stderr as pipes, so stdout is fully buffered (some
+  expectations, such as the order of a merged stream, depend on that);
+- inside a memory cap (4G by default) and a CPU-time limit;
+- in its own process group, killed by its id on timeout.
 
 ## Rules
 

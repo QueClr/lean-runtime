@@ -18,15 +18,33 @@ group by its id, never by name. A case's <id>.toml gives `streams`
 ("separate" or "merged": stderr into stdout) and optionally
 `expect = { nonterminating = true, timeout_s = N }`. Arguments, stdin and
 environment come from <id>.args, <id>.stdin and <id>.env. Every run starts in
-a fresh temporary working directory.
+a fresh temporary working directory, with stdin, stdout and stderr as pipes,
+inside a memory cap (LEAN_RUNTIME_CASE_MEM, default 4G, through a systemd user
+scope; LEAN_RUNTIME_NO_CAP=1 disables it) and a CPU-time limit.
 """
-import argparse, os, pathlib, shlex, signal, subprocess, sys, tempfile, tomllib
+import argparse, os, pathlib, resource, shlex, shutil, signal, subprocess, sys, tempfile, tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CASES = ROOT / "tests" / "cases"
 TOOLCHAIN = pathlib.Path(os.environ.get(
     "LEAN_TOOLCHAIN", pathlib.Path.home() / ".elan/toolchains/leanprover--lean4---v4.34.0"))
 DEFAULT_TIMEOUT = 60
+# Every build and run is capped: memory through a systemd user scope
+# (MemoryMax, default 4G per run; LEAN_RUNTIME_CASE_MEM), and CPU time through
+# RLIMIT_CPU (the run's timeout plus a margin). Address-space limits are not
+# used: translated programs reserve large stacks they never touch.
+CASE_MEM = os.environ.get("LEAN_RUNTIME_CASE_MEM", "4G")
+
+def capped(cmd):
+    if shutil.which("systemd-run") and not os.environ.get("LEAN_RUNTIME_NO_CAP"):
+        return ["systemd-run", "--user", "--scope", "--quiet", "--collect",
+                "-p", f"MemoryMax={CASE_MEM}", "-p", "MemorySwapMax=0"] + cmd
+    return cmd
+
+def cpu_limit(seconds):
+    def set_limit():
+        resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds + 5))
+    return set_limit
 
 def find_cases(names):
     all_cases = sorted(CASES.glob("**/*.lean"))
@@ -41,8 +59,10 @@ def meta(case):
 def build_native(case, outdir):
     c_file = outdir / (case.stem + ".c")
     exe = outdir / case.stem
-    subprocess.run([str(TOOLCHAIN / "bin/lean"), "-c", str(c_file), str(case)], check=True)
-    subprocess.run([str(TOOLCHAIN / "bin/leanc"), str(c_file), "-o", str(exe)], check=True)
+    subprocess.run(capped([str(TOOLCHAIN / "bin/lean"), "-c", str(c_file), str(case)]),
+                   check=True, preexec_fn=cpu_limit(600))
+    subprocess.run(capped([str(TOOLCHAIN / "bin/leanc"), str(c_file), "-o", str(exe)]),
+                   check=True, preexec_fn=cpu_limit(600))
     return exe
 
 def run(exe, case):
@@ -60,9 +80,11 @@ def run(exe, case):
     timeout = expect.get("timeout_s", 3) if nonterm else DEFAULT_TIMEOUT
     merged = m.get("streams", "separate") == "merged"
     workdir = tempfile.TemporaryDirectory()  # a fresh working directory per run
-    p = subprocess.Popen([str(exe)] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    def setup():
+        cpu_limit(timeout + 30)()
+    p = subprocess.Popen(capped([str(exe)] + args), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT if merged else subprocess.PIPE,
-                         env=env, cwd=workdir.name, start_new_session=True)
+                         env=env, cwd=workdir.name, start_new_session=True, preexec_fn=setup)
     try:
         out, err = p.communicate(stdin, timeout=timeout)
         code = str(p.returncode)
@@ -104,7 +126,9 @@ def cmd_check(ns):
         if (out, err, code) == want:
             print(f"PASS {case.stem}")
         else:
-            print(f"FAIL {case.stem}: code {code} (expected {want[2]})")
+            diffs = [name for name, got, exp in (("stdout", out, want[0]), ("stderr", err, want[1]),
+                                                  ("code", code, want[2])) if got != exp]
+            print(f"FAIL {case.stem}: {', '.join(diffs)} differ (code {code}, expected {want[2]})")
             failed += 1
     print(f"{failed} failed")
     return 1 if failed else 0
