@@ -1,0 +1,24 @@
+[package]
+name = "lean-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Lean 4.34.0's runtime behaviour, shared by the lean2rr and leanrs translators"
+publish = false
+
+[lib]
+name = "lean_runtime"
+path = "src/lib.rs"
+
+# No dependencies yet. The io/ layer will use vetted crates (nix or rustix),
+# vendored under vendor/ so that both projects build offline.
+[dependencies]
+
+[features]
+default = []
+# OS-level IO mirroring Lean's C runtime (files, handles, standard streams).
+io = []
+# The deferred task scheduler, promises and Std.Sync.
+sched = []
+# Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
+# CONTRIBUTING.md). The default build is unsafe-free.
+unsafe-fast = []
