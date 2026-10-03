@@ -44,4 +44,4 @@ extracting `semantics`, `io` and `sched` in that order. See `CONTRIBUTING.md`.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use.
 
-Run `scripts/check.sh` before every commit.
+Run `scripts/check.sh` before every commit. It caps its heavy steps at 16G of memory (`LEAN_RUNTIME_MEM`), since it runs on a shared host.
