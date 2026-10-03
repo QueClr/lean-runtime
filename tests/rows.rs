@@ -734,7 +734,6 @@ fn libm_fns(r: &mut Registry) {
         "abs" => libm::fabs, libm::fabsf; "acos" => libm::acos, libm::acosf;
         "acosh" => libm::acosh, libm::acoshf; "asin" => libm::asin, libm::asinf;
         "asinh" => libm::asinh, libm::asinhf; "atan" => libm::atan, libm::atanf;
-        "atanh" => libm::atanh, libm::atanhf; "cbrt" => libm::cbrt, libm::cbrtf;
         "ceil" => libm::ceil, libm::ceilf; "cos" => libm::cos, libm::cosf;
         "cosh" => libm::cosh, libm::coshf; "exp" => libm::exp, libm::expf;
         "exp2" => libm::exp2, libm::exp2f; "floor" => libm::floor, libm::floorf;
@@ -743,6 +742,15 @@ fn libm_fns(r: &mut Registry) {
         "sin" => libm::sin, libm::sinf; "sinh" => libm::sinh, libm::sinhf;
         "sqrt" => libm::sqrt, libm::sqrtf; "tan" => libm::tan, libm::tanf;
         "tanh" => libm::tanh, libm::tanhf;
+    }
+    // glibc's ports exist on aarch64 Linux only (semantics::libm); elsewhere their rows fail
+    // with "no glue".
+    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+    {
+        r.add("Float.cbrt", |a| fret(libm::cbrt(f64a(&a[0]))));
+        r.add("Float32.cbrt", |a| gret(libm::cbrtf(f32a(&a[0]))));
+        r.add("Float.atanh", |a| fret(libm::atanh(f64a(&a[0]))));
+        r.add("Float32.atanh", |a| gret(libm::atanhf(f32a(&a[0]))));
     }
     r.add("Float.atan2", |a| {
         fret(libm::atan2(f64a(&a[0]), f64a(&a[1])))

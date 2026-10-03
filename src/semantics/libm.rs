@@ -25,7 +25,13 @@
 //! folds them with the build host's own libm, which on the pinned host is the
 //! same glibc. `tests/libm_folding.rs` checks, in an optimized build, that
 //! every function gives the same bits on constant and on opaque operands.
-
+//!
+//! Platform: the rows of `tests/cases/libm/` are glibc 2.39's results on
+//! aarch64 Linux, the host both translators run on. The ports `cbrt`,
+//! `cbrtf`, `atanh` and `atanhf` reproduce glibc's aarch64 build (fused
+//! multiply-adds where it fuses) and are defined only on aarch64 Linux: on
+//! another target their callers fail to compile until a port for it is added
+//! and checked against that platform's native Lean.
 //!
 //! Source: leanrs_rt `src/libm.rs` (the `f32` functions), `src/float.rs`
 //! (`cbrt`, `atanh`, `pow`) and `src/float32.rs` (`cbrt`, `atanh`); the plain
@@ -101,6 +107,7 @@ const CBRT_FACTOR: [f64; 5] = [1.0 / SQR_CBRT2, 1.0 / CBRT2, 1.0, CBRT2, SQR_CBR
 /// and differs from glibc's on about half of all inputs.
 ///
 /// Source: leanrs_rt `src/float.rs` (`cbrt`), unchanged.
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 #[inline]
 pub fn cbrt(x: f64) -> f64 {
     let (xm, xe) = frexp_i32(x.abs());
@@ -124,6 +131,7 @@ pub fn cbrt(x: f64) -> f64 {
 /// `f64::atanh` is a different formula.
 ///
 /// Source: leanrs_rt `src/float.rs` (`atanh`), unchanged.
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 #[inline]
 pub fn atanh(x: f64) -> f64 {
     let xa = x.abs();
@@ -215,6 +223,7 @@ pub fn powf(x: f32, y: f32) -> f32 {
 /// correctly rounded and differs.
 ///
 /// Source: leanrs_rt `src/float32.rs` (`cbrt`), unchanged.
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 #[inline]
 pub fn cbrtf(x: f32) -> f32 {
     let x = black_box(x);
@@ -236,6 +245,7 @@ pub fn cbrtf(x: f32) -> f32 {
 /// calls glibc's `log1pf`). Rust's `f32::atanh` is a different formula.
 ///
 /// Source: leanrs_rt `src/float32.rs` (`atanh`), unchanged.
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 #[inline]
 pub fn atanhf(x: f32) -> f32 {
     let x = black_box(x);

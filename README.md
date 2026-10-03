@@ -42,7 +42,10 @@ the rest of `semantics`, `io` and `sched` in that order. See
   (`#![forbid(unsafe_code)]`). The opt-in feature `unsafe-fast` may enable
   faster implementations with the same behaviour (see `UNSAFE.md`).
 - Every expected value in the tests comes from a native build with Lean
-  4.34.0.
+  4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
+  on). The ports of glibc's `cbrt`, `cbrtf`, `atanh` and `atanhf` exist only
+  on aarch64 Linux; elsewhere their callers fail to compile until a port for
+  that platform is added.
 - Every bug or disagreement found in either translator's runtime becomes a
   test case in `tests/cases/`.
 - Each translator pins this crate by commit and upgrades only after its own

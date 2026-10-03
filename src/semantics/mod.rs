@@ -10,6 +10,14 @@
 //! The functions assume a 64-bit platform, as both translators do: `USize`
 //! and `ISize` are 64 bits, and positions are `u64`s that index with `as
 //! usize`.
+//!
+//! Platform pin: the expected values are native Lean 4.34.0 on aarch64 Linux
+//! with glibc 2.39, the host both translators run on. `libm` calls the
+//! platform's libm, so it matches native Lean wherever that libm is the same
+//! glibc; its ports of glibc's `cbrt`, `cbrtf`, `atanh` and `atanhf` reproduce
+//! glibc 2.39's aarch64 build and are defined only on aarch64 Linux. On
+//! another target, code that calls them fails to compile until a port for
+//! that platform is added and checked against its native Lean.
 
 pub mod float;
 pub mod float32;
