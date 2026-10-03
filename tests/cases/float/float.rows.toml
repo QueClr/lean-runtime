@@ -10,7 +10,7 @@ args = ["0.0"]
 bits = { args = ["0x0000000000000000"] }
 expected = '"0.000000"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_finite)"
 
 [[row]]
 id = "float/tostring.-0"
@@ -20,7 +20,7 @@ args = ["(-0.0)"]
 bits = { args = ["0x8000000000000000"] }
 expected = '"-0.000000"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_neg_zero)"
 
 [[row]]
 id = "float/tostring.1.0"
@@ -90,7 +90,7 @@ args = ["0.0078125"]
 bits = { args = ["0x3f80000000000000"] }
 expected = '"0.007812"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_tie)"
 
 [[row]]
 id = "float/tostring.0.0234375"
@@ -310,7 +310,7 @@ args = ["1e21"]
 bits = { args = ["0x444b1ae4d6e2ef50"] }
 expected = '"1000000000000000000000.000000"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_huge)"
 
 [[row]]
 id = "float/tostring.1e+22"
@@ -370,7 +370,7 @@ args = ["1.7976931348623157e308"]
 bits = { args = ["0x7fefffffffffffff"] }
 expected = '"179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_huge)"
 
 [[row]]
 id = "float/tostring.minnorm"
@@ -390,7 +390,7 @@ args = ["5e-324"]
 bits = { args = ["0x0000000000000001"] }
 expected = '"0.000000"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_tiny)"
 
 [[row]]
 id = "float/tostring.-minsub"
@@ -410,7 +410,7 @@ args = ["(1.0 / 0.0)"]
 bits = { args = ["0x7ff0000000000000"] }
 expected = '"inf"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_inf)"
 
 [[row]]
 id = "float/tostring.-inf"
@@ -420,7 +420,7 @@ args = ["(-1.0 / 0.0)"]
 bits = { args = ["0xfff0000000000000"] }
 expected = '"-inf"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_inf)"
 
 [[row]]
 id = "float/tostring.nan"
@@ -430,7 +430,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = '"NaN"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_nan)"
 
 [[row]]
 id = "float/tostring.-nan"
@@ -440,7 +440,7 @@ args = ["(-(0.0 / 0.0))"]
 bits = { args = ["0xfff8000000000000"] }
 expected = '"NaN"'
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_neg_nan)"
 
 [[row]]
 id = "float/tostring32.0"
@@ -610,7 +610,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u8)"
 
 [[row]]
 id = "float/touint8.-nan"
@@ -740,7 +740,7 @@ args = ["256.0"]
 bits = { args = ["0x4070000000000000"] }
 expected = "255"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u8)"
 
 [[row]]
 id = "float/touint8.1e+300"
@@ -800,7 +800,7 @@ args = ["65535.9"]
 bits = { args = ["0x40effffccccccccd"] }
 expected = "65535"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u16)"
 
 [[row]]
 id = "float/touint16.65536.0"
@@ -840,7 +840,7 @@ args = ["(-1.0)"]
 bits = { args = ["0xbff0000000000000"] }
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u32)"
 
 [[row]]
 id = "float/touint32.4294967295.5"
@@ -860,7 +860,7 @@ args = ["4294967296.0"]
 bits = { args = ["0x41f0000000000000"] }
 expected = "4294967295"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u32)"
 
 [[row]]
 id = "float/touint32.inf"
@@ -880,7 +880,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u64_nan)"
 
 [[row]]
 id = "float/touint64.-1.0"
@@ -890,7 +890,7 @@ args = ["(-1.0)"]
 bits = { args = ["0xbff0000000000000"] }
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u64_neg)"
 
 [[row]]
 id = "float/touint64.-0"
@@ -900,7 +900,7 @@ args = ["(-0.0)"]
 bits = { args = ["0x8000000000000000"] }
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u64_neg)"
 
 [[row]]
 id = "float/touint64.9.223372036854776e+18"
@@ -950,7 +950,7 @@ args = ["(1.0 / 0.0)"]
 bits = { args = ["0x7ff0000000000000"] }
 expected = "18446744073709551615"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_u64_big)"
 
 [[row]]
 id = "float/tousize.nan"
@@ -960,7 +960,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_usize)"
 
 [[row]]
 id = "float/tousize.-1.0"
@@ -2040,7 +2040,7 @@ args = ["(-(0.0 / 0.0))"]
 bits = { args = ["0xfff8000000000000"] }
 expected = "9221120237041090560"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_bits)"
 
 [[row]]
 id = "float/tobits.nan"
@@ -2050,7 +2050,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "9221120237041090560"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_bits)"
 
 [[row]]
 id = "float/tobits.-0"
@@ -2060,7 +2060,7 @@ args = ["(-0.0)"]
 bits = { args = ["0x8000000000000000"] }
 expected = "9223372036854775808"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_bits)"
 
 [[row]]
 id = "float/tobits.inf"
@@ -2070,7 +2070,7 @@ args = ["(1.0 / 0.0)"]
 bits = { args = ["0x7ff0000000000000"] }
 expected = "9218868437227405312"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_bits)"
 
 [[row]]
 id = "float/tobits.max"
@@ -2230,7 +2230,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "true"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_nan)"
 
 [[row]]
 id = "float/isnan.-nan"
@@ -2250,7 +2250,7 @@ args = ["(1.0 / 0.0)"]
 bits = { args = ["0x7ff0000000000000"] }
 expected = "false"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_nan)"
 
 [[row]]
 id = "float/isnan.-inf"
@@ -2260,7 +2260,7 @@ args = ["(-1.0 / 0.0)"]
 bits = { args = ["0xfff0000000000000"] }
 expected = "false"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_nan)"
 
 [[row]]
 id = "float/isnan.max"
@@ -2300,7 +2300,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "false"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_inf)"
 
 [[row]]
 id = "float/isinf.-nan"
@@ -2320,7 +2320,7 @@ args = ["(1.0 / 0.0)"]
 bits = { args = ["0x7ff0000000000000"] }
 expected = "true"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_inf)"
 
 [[row]]
 id = "float/isinf.-inf"
@@ -2330,7 +2330,7 @@ args = ["(-1.0 / 0.0)"]
 bits = { args = ["0xfff0000000000000"] }
 expected = "true"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_inf)"
 
 [[row]]
 id = "float/isinf.max"
@@ -2370,7 +2370,7 @@ args = ["(0.0 / 0.0)"]
 bits = { args = ["0x7ff8000000000000"] }
 expected = "false"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_finite)"
 
 [[row]]
 id = "float/isfinite.-nan"
@@ -2390,7 +2390,7 @@ args = ["(1.0 / 0.0)"]
 bits = { args = ["0x7ff0000000000000"] }
 expected = "false"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_finite)"
 
 [[row]]
 id = "float/isfinite.-inf"
@@ -2400,7 +2400,7 @@ args = ["(-1.0 / 0.0)"]
 bits = { args = ["0xfff0000000000000"] }
 expected = "false"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: classification"
+source = "lean-runtime batch 1: classification; matches leanrs rt/leanrs_rt/tests/float.rs (float_is_finite)"
 
 [[row]]
 id = "float/isfinite.max"
@@ -2900,7 +2900,7 @@ args = ["1.0", "1024"]
 bits = { args = ["0x3ff0000000000000"], result = "0x7ff0000000000000" }
 expected = "inf"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch; matches leanrs rt/leanrs_rt/tests/float.rs (float_scaleb)"
 
 [[row]]
 id = "float/scaleb.1.0.-1022"
@@ -2920,7 +2920,7 @@ args = ["1.0", "(-1074)"]
 bits = { args = ["0x3ff0000000000000"], result = "0x0000000000000001" }
 expected = "0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch; matches leanrs rt/leanrs_rt/tests/float.rs (float_scaleb)"
 
 [[row]]
 id = "float/scaleb.1.0.-1075"
@@ -2930,7 +2930,7 @@ args = ["1.0", "(-1075)"]
 bits = { args = ["0x3ff0000000000000"], result = "0x0000000000000000" }
 expected = "0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch; matches leanrs rt/leanrs_rt/tests/float.rs (float_scaleb)"
 
 [[row]]
 id = "float/scaleb.1.5.-1075"

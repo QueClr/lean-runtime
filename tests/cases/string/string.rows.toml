@@ -1936,7 +1936,7 @@ fn = "String.length"
 args = ['""']
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders; matches leanrs rt/leanrs_rt/tests/str_rows.rs (str_length)"
 
 [[row]]
 id = "string/length.a"

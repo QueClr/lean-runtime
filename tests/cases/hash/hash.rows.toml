@@ -99,7 +99,7 @@ fn = "String.hash"
 args = ['""']
 expected = "9877294847684254529"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_empty)"
 
 [[row]]
 id = "hash/string.len1"
@@ -108,7 +108,7 @@ fn = "String.hash"
 args = ['"a"']
 expected = "15917291556903334389"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_a)"
 
 [[row]]
 id = "hash/string.len2"
@@ -162,7 +162,7 @@ fn = "String.hash"
 args = ['"abcdefg"']
 expected = "934485623504580153"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_long)"
 
 [[row]]
 id = "hash/string.len8"
@@ -171,7 +171,7 @@ fn = "String.hash"
 args = ['"abcdefgh"']
 expected = "4343876127666658534"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_long)"
 
 [[row]]
 id = "hash/string.len9"
@@ -180,7 +180,7 @@ fn = "String.hash"
 args = ['"abcdefghi"']
 expected = "4853633868021991863"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_long)"
 
 [[row]]
 id = "hash/string.len10"
@@ -297,7 +297,7 @@ fn = "String.hash"
 args = ['"héllo world, this is a longer string"']
 expected = "3296536251469377572"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_long)"
 
 [[row]]
 id = "hash/string.leanrs-party"
@@ -306,7 +306,7 @@ fn = "String.hash"
 args = ['"🎉🎉"']
 expected = "10434634704761974208"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_long)"
 
 [[row]]
 id = "hash/string.nul"
@@ -333,7 +333,7 @@ fn = "ByteArray.hash"
 args = ["(ByteArray.mk #[])"]
 expected = "9877294847684254529"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold; matches leanrs rt/leanrs_rt/tests/hashing.rs (bytearray_hash)"
 
 [[row]]
 id = "hash/bytes.len1"
@@ -405,7 +405,7 @@ fn = "ByteArray.hash"
 args = ["(ByteArray.mk #[0, 255, 1, 254, 2, 253, 3, 252, 4])"]
 expected = "12354452588435165326"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold; matches leanrs rt/leanrs_rt/tests/hashing.rs (bytearray_hash)"
 
 [[row]]
 id = "hash/bytes.hello-equals-string"
@@ -414,7 +414,7 @@ fn = "ByteArray.hash"
 args = ["(ByteArray.mk #[104, 101, 108, 108, 111])"]
 expected = "9821865621596011261"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold; matches leanrs rt/leanrs_rt/tests/hashing.rs (bytearray_hash)"
 
 [[row]]
 id = "hash/string.hello"
@@ -423,7 +423,7 @@ fn = "String.hash"
 args = ['"hello"']
 expected = "9821865621596011261"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold; matches leanrs rt/leanrs_rt/tests/hashing.rs (str_hash_hello)"
 
 [[row]]
 id = "hash/slice.1.0.5"

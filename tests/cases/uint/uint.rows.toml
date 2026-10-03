@@ -234,7 +234,7 @@ fn = "UInt8.log2"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u8_log2)"
 
 [[row]]
 id = "uint/uint8.log2.1"
@@ -243,7 +243,7 @@ fn = "UInt8.log2"
 args = ["1"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u8_log2)"
 
 [[row]]
 id = "uint/uint8.log2.2"
@@ -270,7 +270,7 @@ fn = "UInt8.log2"
 args = ["255"]
 expected = "7"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u8_log2)"
 
 [[row]]
 id = "uint/uint8.log2.128"
@@ -279,7 +279,7 @@ fn = "UInt8.log2"
 args = ["128"]
 expected = "7"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u8_log2)"
 
 [[row]]
 id = "uint/uint8.log2.127"
@@ -378,7 +378,7 @@ fn = "UInt8.toNat"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u8_to_nat)"
 
 [[row]]
 id = "uint/uint8.tonat.255"
@@ -387,7 +387,7 @@ fn = "UInt8.toNat"
 args = ["255"]
 expected = "255"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u8_to_nat)"
 
 [[row]]
 id = "uint/uint16.div.7.0"
@@ -621,7 +621,7 @@ fn = "UInt16.log2"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u16_log2)"
 
 [[row]]
 id = "uint/uint16.log2.1"
@@ -630,7 +630,7 @@ fn = "UInt16.log2"
 args = ["1"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u16_log2)"
 
 [[row]]
 id = "uint/uint16.log2.2"
@@ -657,7 +657,7 @@ fn = "UInt16.log2"
 args = ["65535"]
 expected = "15"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u16_log2)"
 
 [[row]]
 id = "uint/uint16.log2.32768"
@@ -666,7 +666,7 @@ fn = "UInt16.log2"
 args = ["32768"]
 expected = "15"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u16_log2)"
 
 [[row]]
 id = "uint/uint16.log2.32767"
@@ -765,7 +765,7 @@ fn = "UInt16.toNat"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u16_to_nat)"
 
 [[row]]
 id = "uint/uint16.tonat.65535"
@@ -774,7 +774,7 @@ fn = "UInt16.toNat"
 args = ["65535"]
 expected = "65535"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u16_to_nat)"
 
 [[row]]
 id = "uint/uint32.div.7.0"
@@ -1008,7 +1008,7 @@ fn = "UInt32.log2"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u32_log2)"
 
 [[row]]
 id = "uint/uint32.log2.1"
@@ -1017,7 +1017,7 @@ fn = "UInt32.log2"
 args = ["1"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u32_log2)"
 
 [[row]]
 id = "uint/uint32.log2.2"
@@ -1044,7 +1044,7 @@ fn = "UInt32.log2"
 args = ["4294967295"]
 expected = "31"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u32_log2)"
 
 [[row]]
 id = "uint/uint32.log2.2147483648"
@@ -1053,7 +1053,7 @@ fn = "UInt32.log2"
 args = ["2147483648"]
 expected = "31"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u32_log2)"
 
 [[row]]
 id = "uint/uint32.log2.2147483647"
@@ -1152,7 +1152,7 @@ fn = "UInt32.toNat"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u32_to_nat)"
 
 [[row]]
 id = "uint/uint32.tonat.4294967295"
@@ -1161,7 +1161,7 @@ fn = "UInt32.toNat"
 args = ["4294967295"]
 expected = "4294967295"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u32_to_nat)"
 
 [[row]]
 id = "uint/uint64.div.7.0"
@@ -1395,7 +1395,7 @@ fn = "UInt64.log2"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u64_log2)"
 
 [[row]]
 id = "uint/uint64.log2.1"
@@ -1404,7 +1404,7 @@ fn = "UInt64.log2"
 args = ["1"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u64_log2)"
 
 [[row]]
 id = "uint/uint64.log2.2"
@@ -1431,7 +1431,7 @@ fn = "UInt64.log2"
 args = ["18446744073709551615"]
 expected = "63"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u64_log2)"
 
 [[row]]
 id = "uint/uint64.log2.9223372036854775808"
@@ -1440,7 +1440,7 @@ fn = "UInt64.log2"
 args = ["9223372036854775808"]
 expected = "63"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u64_log2)"
 
 [[row]]
 id = "uint/uint64.log2.9223372036854775807"
@@ -1530,7 +1530,7 @@ fn = "UInt64.toNat"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u64_to_nat)"
 
 [[row]]
 id = "uint/uint64.tonat.18446744073709551615"
@@ -1539,7 +1539,7 @@ fn = "UInt64.toNat"
 args = ["18446744073709551615"]
 expected = "18446744073709551615"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (u64_to_nat)"
 
 [[row]]
 id = "uint/usize.div.7.0"
@@ -1773,7 +1773,7 @@ fn = "USize.log2"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (usize_log2)"
 
 [[row]]
 id = "uint/usize.log2.1"
@@ -1782,7 +1782,7 @@ fn = "USize.log2"
 args = ["1"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (usize_log2)"
 
 [[row]]
 id = "uint/usize.log2.2"
@@ -1809,7 +1809,7 @@ fn = "USize.log2"
 args = ["18446744073709551615"]
 expected = "63"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (usize_log2)"
 
 [[row]]
 id = "uint/usize.log2.9223372036854775808"
@@ -1818,7 +1818,7 @@ fn = "USize.log2"
 args = ["9223372036854775808"]
 expected = "63"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (usize_log2)"
 
 [[row]]
 id = "uint/usize.log2.9223372036854775807"
@@ -1908,7 +1908,7 @@ fn = "USize.toNat"
 args = ["0"]
 expected = "0"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (usize_to_nat)"
 
 [[row]]
 id = "uint/usize.tonat.18446744073709551615"
@@ -1917,4 +1917,4 @@ fn = "USize.toNat"
 args = ["18446744073709551615"]
 expected = "18446744073709551615"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions; matches leanrs rt/leanrs_rt/tests/uint.rs (usize_to_nat)"
