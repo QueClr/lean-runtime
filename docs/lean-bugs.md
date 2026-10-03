@@ -81,17 +81,16 @@ recorded here only; the Upstream field notes what upstream already knows.
 ## Limits
 
 Implementation caps where Lean's definition has a value but the runtime
-stops. They are not bugs. The owner's decision (2026-10-03) was "just be
-consistent", so like every other non-bug they are followed exactly as
-native does it, by the shared crate and by both translators. The same cap,
-message and exit status apply even where a translator's own library could
-compute the value.
+stops. They are not bugs. The owner's decision (2026-10-03): "if we can lift
+the restrictions, then we can lift them". So the shared crate's rules impose
+no cap: each implementation computes the definition's result as far as it
+can.
 
 | Id | Summary | Where | Translators |
 |---|---|---|---|
-| LB-04 | `Nat.shiftRight` by 2^32 or more, of an operand with that many bits: `INTERNAL PANIC: Nat.shiftr exponent is too big` | object.cpp:1594-1612 (32-bit shift count) | both: native (leanrs's DV17 (a), which computed the value, is withdrawn) |
-| LB-05 | A `Nat` beyond GMP's limb count aborts (`gmp: overflow in mpz type`) | GMP `_mpz_realloc` (INT_MAX limbs), via mpz.cpp | both: native (leanrs DV17 (b) withdrawn) |
-| LB-06 | `ByteArray.copySlice` with an offset or length of 2^64 or more: `INTERNAL PANIC: out of memory` | object.cpp:2556-2565 (`lean_nat_to_size_t`) | both: native (leanrs's DV17 (c), which returned the clamped copy, is withdrawn) |
+| LB-04 | `Nat.shiftRight` by 2^32 or more, of an operand with that many bits: `INTERNAL PANIC: Nat.shiftr exponent is too big` | object.cpp:1594-1612 (32-bit shift count) | lifted: both compute the definition's result (leanrs DV17 (a)) |
+| LB-05 | A `Nat` beyond GMP's limb count aborts (`gmp: overflow in mpz type`) | GMP `_mpz_realloc` (INT_MAX limbs), via mpz.cpp | lifted where the big-number backend allows: leanrs computes (DV17 (b)); lean2rr computes unless an operation still goes through GMP's mpz layer, which keeps GMP's own abort |
+| LB-06 | `ByteArray.copySlice` with an offset or length of 2^64 or more: `INTERNAL PANIC: out of memory` | object.cpp:2556-2565 (`lean_nat_to_size_t`) | lifted: both return the definition's clamped copy (leanrs DV17 (c)) |
 
 Related upstream: #15193, #15194, #15439, PRs #14286 and #14274.
 
