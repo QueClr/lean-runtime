@@ -1,0 +1,5 @@
+id = "stdout_closed"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime: the .pipe mechanism (closed descriptors), 2026-10-03"
+streams = "separate"

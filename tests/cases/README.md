@@ -8,18 +8,37 @@ translators must reproduce it.
 
 **`program`**: a whole Lean file with a `main (args : List String)`.
 - `<id>.lean`, plus optional `<id>.args`, `<id>.stdin` and `<id>.env`;
+- optional `<id>.pipe`: a bash line run with `pipefail` instead of the
+  executable, with `$BIN` (the executable) and `$ARGS` (the arguments), for
+  closed descriptors (`$BIN >&-`), `ulimit`, `| head` or `2>&1 | od`;
+- optional `<id>.files/`: the starting directory tree, copied into the
+  working directory before the run;
 - `<id>.out`, `<id>.err` and `<id>.code` hold the stdout, stderr and exit code
   of the native build, recorded by `scripts/cases.py expect`, which builds
-  natively with Lean 4.34.0 and requires identical results over 5 runs;
+  natively with Lean 4.34.0 and requires identical results over 5 runs
+  (a `schedule_dependent` case records every outcome seen: the most frequent
+  as `<id>.out/.err/.code`, the others as `<id>.altK.out/.err/.code`, all of
+  them allowed);
 - a translator checks its own builds with
   `scripts/cases.py check --exe-dir DIR`, where `DIR/<id>` is its executable
   for each case.
 
-**`row`**: one function on given arguments, in `<area>.rows`, with fields:
-- `fn`: a Lean constant;
-- `args`: Lean term syntax, one per argument;
-- `expected`: Lean's `repr` of the result, or `panic: <message>` together
-  with the default value the function returns.
+**`row`**: one function call, as a TOML `[[row]]` table in
+`<area>/<area>.rows.toml`:
+- `fn` (a Lean constant) with `args` (Lean term syntax, one per argument),
+  or `expr` (one closed Lean expression);
+- `expected`: Lean's `repr` of the result; for a panic, `panic: <message>`
+  with `default` (the value returned) and `stderr`;
+- optional `bits = { args = [...], result = "0x…" }` for `Float`/`Float32`
+  values, since `repr` loses NaN payloads and `-0.0`;
+- optional `ends = { stderr = "…", code = N }` for a row that ends the
+  process (`INTERNAL PANIC`);
+- optional `sharing = "unique" | "shared" | "both"` for a row with an
+  in-place path: Lean's result does not depend on it, but each runtime has
+  two code paths.
+
+The oracle that records rows gets its inputs through argv, stdin or an
+opaque `IO` identity (`dyn`), so nothing is folded at compile time.
 
 ## Fields every case carries
 
@@ -35,16 +54,19 @@ Written in `<id>.toml` for programs and inline for rows:
 | `files` | For IO cases: the expected directory tree after the run, with each file's SHA-256 |
 | `streams` | `"separate"` (default) or `"merged"` (stderr into stdout, to observe the order between the two) |
 | `schedule_dependent` | Optional `true` when native Lean has more than one outcome depending on thread timing. The case records the dominant native outcome (the one every measured native run took); the `.toml` comment says what the other outcome is. A translator showing the other outcome shows another native schedule, not a semantic error |
-| `expect` | Optional `{ nonterminating = true, timeout_s = N }` (N about 3 to 5) for a program that natively never exits. The output produced before the timeout is compared; the code is `timeout`. Each run starts in its own process group, which the runner kills by its id, never by name |
+| `expect` | Optional `{ hang = N }` (N seconds, about 3 to 5) for a program that natively never exits. The output produced before the timeout is compared; the code is `timeout`. Each run starts in its own process group, which the runner kills by its id, never by name |
 
 ## How a case runs
 
 `scripts/cases.py` runs every case:
-- in a fresh temporary working directory;
+- in a fresh temporary working directory (with `<id>.files/` copied in);
+- from an empty environment plus `LEAN_BACKTRACE=0` and `<id>.env` (and a
+  minimal `PATH` for `.pipe` lines);
 - with stdin, stdout and stderr as pipes, so stdout is fully buffered (some
   expectations, such as the order of a merged stream, depend on that);
 - inside a memory cap (4G by default) and a CPU-time limit;
-- in its own process group, killed by its id on timeout.
+- in its own process group, killed by its id on timeout;
+- an exit by signal N is recorded as code 128+N.
 
 ## Rules
 

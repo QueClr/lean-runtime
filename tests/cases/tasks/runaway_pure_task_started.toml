@@ -3,4 +3,4 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs exit probes, 2026-10-03"
 streams = "separate"
-expect = { nonterminating = true, timeout_s = 3 }
+expect = { hang = 3 }

@@ -17,7 +17,9 @@ Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
 ("separate" or "merged": stderr into stdout) and optionally
 `expect = { nonterminating = true, timeout_s = N }`. Arguments, stdin and
-environment come from <id>.args, <id>.stdin and <id>.env. Every run starts in
+environment come from <id>.args, <id>.stdin and <id>.env; <id>.pipe, if present,
+is a bash line run with pipefail instead of the executable ($BIN, $ARGS);
+<id>.files/ is copied into the working directory first. Every run starts in
 a fresh temporary working directory, with stdin, stdout and stderr as pipes,
 inside a memory cap (LEAN_RUNTIME_CASE_MEM, default 4G, through a systemd user
 scope; LEAN_RUNTIME_NO_CAP=1 disables it) and a CPU-time limit.
@@ -65,29 +67,51 @@ def build_native(case, outdir):
                    check=True, preexec_fn=cpu_limit(600))
     return exe
 
+def expect_of(m):
+    e = m.get("expect", {})
+    hang = e.get("hang")
+    if hang is None and e.get("nonterminating"):
+        hang = e.get("timeout_s", 3)
+    return hang
+
 def run(exe, case):
     m = meta(case)
     args = shlex.split(case.with_suffix(".args").read_text()) if case.with_suffix(".args").exists() else []
     stdin = case.with_suffix(".stdin").read_bytes() if case.with_suffix(".stdin").exists() else b""
-    env = dict(os.environ, LEAN_BACKTRACE="0")
+    # An empty environment plus <id>.env (LEAN_BACKTRACE=0 unless <id>.env says
+    # otherwise, so panics print no stack trace).
+    env = {"LEAN_BACKTRACE": "0"}
     if case.with_suffix(".env").exists():
         for line in case.with_suffix(".env").read_text().splitlines():
             if "=" in line:
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip()
-    expect = m.get("expect", {})
-    nonterm = expect.get("nonterminating", False)
-    timeout = expect.get("timeout_s", 3) if nonterm else DEFAULT_TIMEOUT
+    hang = expect_of(m)
+    timeout = hang if hang is not None else DEFAULT_TIMEOUT
     merged = m.get("streams", "separate") == "merged"
     workdir = tempfile.TemporaryDirectory()  # a fresh working directory per run
+    files = case.parent / (case.stem + ".files")
+    if files.is_dir():
+        shutil.copytree(files, workdir.name, dirs_exist_ok=True)
+    cmd = [str(exe)] + args
+    pipe = case.with_suffix(".pipe")
+    if pipe.exists():
+        env["BIN"] = str(exe)
+        env["ARGS"] = " ".join(shlex.quote(a) for a in args)
+        cmd = ["/bin/bash", "-o", "pipefail", "-c", pipe.read_text().strip()]
     def setup():
         cpu_limit(timeout + 30)()
-    p = subprocess.Popen(capped([str(exe)] + args), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    if pipe.exists():
+        env.setdefault("PATH", "/usr/bin:/bin")
+    # systemd-run needs the caller's environment; the case itself gets only env.
+    cmd = ["env", "-i"] + [f"{k}={v}" for k, v in env.items()] + cmd
+    p = subprocess.Popen(capped(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT if merged else subprocess.PIPE,
-                         env=env, cwd=workdir.name, start_new_session=True, preexec_fn=setup)
+                         cwd=workdir.name, start_new_session=True, preexec_fn=setup)
     try:
         out, err = p.communicate(stdin, timeout=timeout)
-        code = str(p.returncode)
+        # an exit by signal N is recorded as 128+N, as a shell reports it
+        code = str(128 - p.returncode if p.returncode < 0 else p.returncode)
     except subprocess.TimeoutExpired:
         os.killpg(p.pid, signal.SIGKILL)  # the case's own process group only
         out, err = p.communicate()
@@ -100,16 +124,24 @@ def cmd_expect(ns):
     with tempfile.TemporaryDirectory() as d:
         for case in find_cases(ns.cases):
             exe = build_native(case, pathlib.Path(d))
-            results = {run(exe, case) for _ in range(ns.runs)}
-            if len(results) != 1:
-                print(f"NONDETERMINISTIC {case.stem}: {len(results)} different results in {ns.runs} runs")
+            runs = [run(exe, case) for _ in range(ns.runs)]
+            distinct = sorted(set(runs), key=runs.index)
+            if len(distinct) != 1 and not meta(case).get("schedule_dependent"):
+                print(f"NONDETERMINISTIC {case.stem}: {len(distinct)} different results in {ns.runs} runs"
+                      " (mark it schedule_dependent to record every outcome)")
                 ok = False
                 continue
-            out, err, code = results.pop()
-            case.with_suffix(".out").write_bytes(out)
-            case.with_suffix(".err").write_bytes(err)
-            case.with_suffix(".code").write_text(code + "\n")
-            print(f"recorded {case.stem}: code {code}")
+            # The most frequent outcome is the primary one; others are <id>.altK.*
+            distinct.sort(key=lambda r: -runs.count(r))
+            for old in case.parent.glob(case.stem + ".alt*.*"):
+                old.unlink()
+            for k, (out, err, code) in enumerate(distinct):
+                stem = case.stem if k == 0 else f"{case.stem}.alt{k}"
+                (case.parent / (stem + ".out")).write_bytes(out)
+                (case.parent / (stem + ".err")).write_bytes(err)
+                (case.parent / (stem + ".code")).write_text(code + "\n")
+            print(f"recorded {case.stem}: " + ", ".join(
+                f"code {c} x{runs.count((o, e, c))}" for o, e, c in distinct))
     return 0 if ok else 1
 
 def cmd_check(ns):
@@ -121,9 +153,13 @@ def cmd_check(ns):
             failed += 1
             continue
         out, err, code = run(exe, case)
-        want = (case.with_suffix(".out").read_bytes(), case.with_suffix(".err").read_bytes(),
-                case.with_suffix(".code").read_text().strip())
-        if (out, err, code) == want:
+        allowed = []
+        for stem in [case.stem] + sorted(p.name[:-len(".code")] for p in case.parent.glob(case.stem + ".alt*.code")):
+            allowed.append(((case.parent / (stem + ".out")).read_bytes(),
+                            (case.parent / (stem + ".err")).read_bytes(),
+                            (case.parent / (stem + ".code")).read_text().strip()))
+        want = allowed[0]
+        if (out, err, code) in allowed:
             print(f"PASS {case.stem}")
         else:
             diffs = [name for name, got, exp in (("stdout", out, want[0]), ("stderr", err, want[1]),
