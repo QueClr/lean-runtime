@@ -16,8 +16,9 @@ fi
 same=0; differ=0
 for f in benches/rust/src/bin/*.rs; do
   n=$(basename "$f" .rs)
-  r=$(benches/rust/target/release/"$n" "$N" | head -1)
-  l=$(LEAN_BACKTRACE=0 benches/native/.lake/build/bin/"$n" "$N" | head -1)
+  # whole outputs, then line 1 (no `| head`, whose early close would break the second write)
+  r=$(benches/rust/target/release/"$n" "$N"); r=${r%%$'\n'*}
+  l=$(LEAN_BACKTRACE=0 benches/native/.lake/build/bin/"$n" "$N"); l=${l%%$'\n'*}
   if [[ "$r" == "$l" ]]; then
     same=$((same + 1))
   else
