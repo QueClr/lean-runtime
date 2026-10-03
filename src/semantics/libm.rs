@@ -14,9 +14,10 @@
 //!   which can differ from glibc's `*f` function in the last bit, and `pow`
 //!   with a constant exponent is rewritten (`sqrt`, `x * x`, `1 / x`). Native
 //!   Lean always passes run-time values to the C call. So `pow`, `powf` and
-//!   every `*f` function here pass their operands through
+//!   every inexact `*f` function here pass their operands through
 //!   `core::hint::black_box`, and the call stays a call after inlining into a
-//!   translator's code.
+//!   translator's code. The exact ones (`fabsf`, `ceilf`, `floorf`, `roundf`,
+//!   `sqrtf`) fold to glibc's result and need no barrier.
 //!
 //! Every other `f64` function is the `f64` method, which calls glibc.
 //!
@@ -144,10 +145,32 @@ macro_rules! f32_unary {
 }
 
 f32_unary! {
-    fabsf => abs, acosf => acos, acoshf => acosh, asinf => asin, asinhf => asinh, atanf => atan,
-    ceilf => ceil, cosf => cos, coshf => cosh, expf => exp, exp2f => exp2, floorf => floor,
-    logf => ln, log10f => log10, log2f => log2, roundf => round, sinf => sin, sinhf => sinh,
-    sqrtf => sqrt, tanf => tan, tanhf => tanh,
+    acosf => acos, acoshf => acosh, asinf => asin, asinhf => asinh, atanf => atan, cosf => cos,
+    coshf => cosh, expf => exp, exp2f => exp2, logf => ln, log10f => log10, log2f => log2,
+    sinf => sin, sinhf => sinh, tanf => tan, tanhf => tanh,
+}
+
+macro_rules! f32_exact {
+    ($($name:ident => $method:ident),* $(,)?) => {
+        $(
+            #[doc = concat!("`Float32` extern `", stringify!($name), "`, through `f32::",
+                stringify!($method), "`.")]
+            ///
+            /// An exact operation (one correctly rounded result, or none to round), so a
+            /// compile-time evaluation of a constant operand gives glibc's result and the
+            /// operand needs no `black_box`; the call stays one instruction, as natively.
+            ///
+            /// Source: leanrs_rt `src/libm.rs` (`unary!`), adapted: no `black_box`.
+            #[inline]
+            pub fn $name(x: f32) -> f32 {
+                x.$method()
+            }
+        )*
+    };
+}
+
+f32_exact! {
+    fabsf => abs, ceilf => ceil, floorf => floor, roundf => round, sqrtf => sqrt,
 }
 
 /// `Float32.atan2` (extern `atan2f`): glibc's `atan2f(y, x)`.
