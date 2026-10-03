@@ -1,0 +1,5 @@
+id = "write_after_read"
+area = "io"
+lean_version = "4.34.0"
+source = "leanrs step-1 finding A812, 2026-10-03"
+streams = "separate"

@@ -1,0 +1,3 @@
+before flush 96
+after flush 200
+size 10000

@@ -17,7 +17,8 @@ Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
 ("separate" or "merged": stderr into stdout) and optionally
 `expect = { nonterminating = true, timeout_s = N }`. Arguments, stdin and
-environment come from <id>.args, <id>.stdin and <id>.env.
+environment come from <id>.args, <id>.stdin and <id>.env. Every run starts in
+a fresh temporary working directory.
 """
 import argparse, os, pathlib, shlex, signal, subprocess, sys, tempfile, tomllib
 
@@ -58,9 +59,10 @@ def run(exe, case):
     nonterm = expect.get("nonterminating", False)
     timeout = expect.get("timeout_s", 3) if nonterm else DEFAULT_TIMEOUT
     merged = m.get("streams", "separate") == "merged"
+    workdir = tempfile.TemporaryDirectory()  # a fresh working directory per run
     p = subprocess.Popen([str(exe)] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT if merged else subprocess.PIPE,
-                         env=env, start_new_session=True)
+                         env=env, cwd=workdir.name, start_new_session=True)
     try:
         out, err = p.communicate(stdin, timeout=timeout)
         code = str(p.returncode)
@@ -68,6 +70,7 @@ def run(exe, case):
         os.killpg(p.pid, signal.SIGKILL)  # the case's own process group only
         out, err = p.communicate()
         code = "timeout"
+    workdir.cleanup()
     return out, (err or b""), code
 
 def cmd_expect(ns):

@@ -1,0 +1,5 @@
+id = "exit_flush_order"
+area = "io"
+lean_version = "4.34.0"
+source = "leanrs step-1 finding A811, 2026-10-03"
+streams = "separate"
