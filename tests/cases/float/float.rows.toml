@@ -1,0 +1,3293 @@
+# Row cases of area `float` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/float/float.rows.toml`.
+
+[[row]]
+id = "float/tostring.0"
+area = "float"
+fn = "Float.toString"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-0"
+area = "float"
+fn = "Float.toString"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = '"-0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1.0"
+area = "float"
+fn = "Float.toString"
+args = ["1.0"]
+bits = { args = ["0x3ff0000000000000"] }
+expected = '"1.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-1.0"
+area = "float"
+fn = "Float.toString"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"] }
+expected = '"-1.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.5"
+area = "float"
+fn = "Float.toString"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"] }
+expected = '"0.500000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.1"
+area = "float"
+fn = "Float.toString"
+args = ["0.1"]
+bits = { args = ["0x3fb999999999999a"] }
+expected = '"0.100000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.3333333333333333"
+area = "float"
+fn = "Float.toString"
+args = ["0.3333333333333333"]
+bits = { args = ["0x3fd5555555555555"] }
+expected = '"0.333333"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.6666666666666666"
+area = "float"
+fn = "Float.toString"
+args = ["0.6666666666666666"]
+bits = { args = ["0x3fe5555555555555"] }
+expected = '"0.666667"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.0078125"
+area = "float"
+fn = "Float.toString"
+args = ["0.0078125"]
+bits = { args = ["0x3f80000000000000"] }
+expected = '"0.007812"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.0234375"
+area = "float"
+fn = "Float.toString"
+args = ["0.0234375"]
+bits = { args = ["0x3f98000000000000"] }
+expected = '"0.023438"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-0.0078125"
+area = "float"
+fn = "Float.toString"
+args = ["(-0.0078125)"]
+bits = { args = ["0xbf80000000000000"] }
+expected = '"-0.007812"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1.0078125"
+area = "float"
+fn = "Float.toString"
+args = ["1.0078125"]
+bits = { args = ["0x3ff0200000000000"] }
+expected = '"1.007812"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.5e-07"
+area = "float"
+fn = "Float.toString"
+args = ["5e-07"]
+bits = { args = ["0x3ea0c6f7a0b5ed8d"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e-06"
+area = "float"
+fn = "Float.toString"
+args = ["1e-06"]
+bits = { args = ["0x3eb0c6f7a0b5ed8d"] }
+expected = '"0.000001"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.9.999995e-07"
+area = "float"
+fn = "Float.toString"
+args = ["9.999995e-07"]
+bits = { args = ["0x3eb0c6f713f92184"] }
+expected = '"0.000001"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.4.999999e-07"
+area = "float"
+fn = "Float.toString"
+args = ["4.999999e-07"]
+bits = { args = ["0x3ea0c6f7686a68bd"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-1e-09"
+area = "float"
+fn = "Float.toString"
+args = ["(-1e-09)"]
+bits = { args = ["0xbe112e0be826d695"] }
+expected = '"-0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.2.5e-07"
+area = "float"
+fn = "Float.toString"
+args = ["2.5e-07"]
+bits = { args = ["0x3e90c6f7a0b5ed8d"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.3"
+area = "float"
+fn = "Float.toString"
+args = ["0.3"]
+bits = { args = ["0x3fd3333333333333"] }
+expected = '"0.300000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.100.0"
+area = "float"
+fn = "Float.toString"
+args = ["100.0"]
+bits = { args = ["0x4059000000000000"] }
+expected = '"100.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e-05"
+area = "float"
+fn = "Float.toString"
+args = ["1e-05"]
+bits = { args = ["0x3ee4f8b588e368f1"] }
+expected = '"0.000010"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.123456.789"
+area = "float"
+fn = "Float.toString"
+args = ["123456.789"]
+bits = { args = ["0x40fe240c9fbe76c9"] }
+expected = '"123456.789000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.12345678.0"
+area = "float"
+fn = "Float.toString"
+args = ["12345678.0"]
+bits = { args = ["0x41678c29c0000000"] }
+expected = '"12345678.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.000123"
+area = "float"
+fn = "Float.toString"
+args = ["0.000123"]
+bits = { args = ["0x3f201f31f46ed246"] }
+expected = '"0.000123"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.9999995"
+area = "float"
+fn = "Float.toString"
+args = ["0.9999995"]
+bits = { args = ["0x3feffffef39085f5"] }
+expected = '"1.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.0.99999949"
+area = "float"
+fn = "Float.toString"
+args = ["0.99999949"]
+bits = { args = ["0x3feffffeee32223c"] }
+expected = '"0.999999"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.999999.9999995"
+area = "float"
+fn = "Float.toString"
+args = ["999999.9999995"]
+bits = { args = ["0x412e847fffffef39"] }
+expected = '"999999.999999"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1000000000000000.0"
+area = "float"
+fn = "Float.toString"
+args = ["1000000000000000.0"]
+bits = { args = ["0x430c6bf526340000"] }
+expected = '"1000000000000000.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e+16"
+area = "float"
+fn = "Float.toString"
+args = ["1e16"]
+bits = { args = ["0x4341c37937e08000"] }
+expected = '"10000000000000000.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.9007199254740992.0"
+area = "float"
+fn = "Float.toString"
+args = ["9007199254740992.0"]
+bits = { args = ["0x4340000000000000"] }
+expected = '"9007199254740992.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e+21"
+area = "float"
+fn = "Float.toString"
+args = ["1e21"]
+bits = { args = ["0x444b1ae4d6e2ef50"] }
+expected = '"1000000000000000000000.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e+22"
+area = "float"
+fn = "Float.toString"
+args = ["1e22"]
+bits = { args = ["0x4480f0cf064dd592"] }
+expected = '"10000000000000000000000.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e+23"
+area = "float"
+fn = "Float.toString"
+args = ["1e23"]
+bits = { args = ["0x44b52d02c7e14af6"] }
+expected = '"99999999999999991611392.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.9.223372036854776e+18"
+area = "float"
+fn = "Float.toString"
+args = ["9.223372036854776e18"]
+bits = { args = ["0x43e0000000000000"] }
+expected = '"9223372036854775808.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1.8446744073709552e+19"
+area = "float"
+fn = "Float.toString"
+args = ["1.8446744073709552e19"]
+bits = { args = ["0x43f0000000000000"] }
+expected = '"18446744073709551616.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.1e+300"
+area = "float"
+fn = "Float.toString"
+args = ["1e300"]
+bits = { args = ["0x7e37e43c8800759c"] }
+expected = '"1000000000000000052504760255204420248704468581108159154915854115511802457988908195786371375080447864043704443832883878176942523235360430575644792184786706982848387200926575803737830233794788090059368953234970799945081119038967640880074652742780142494579258788820056842838115669472196386865459400540160.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.max"
+area = "float"
+fn = "Float.toString"
+args = ["1.7976931348623157e308"]
+bits = { args = ["0x7fefffffffffffff"] }
+expected = '"179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.minnorm"
+area = "float"
+fn = "Float.toString"
+args = ["2.2250738585072014e-308"]
+bits = { args = ["0x0010000000000000"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.minsub"
+area = "float"
+fn = "Float.toString"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-minsub"
+area = "float"
+fn = "Float.toString"
+args = ["(-5e-324)"]
+bits = { args = ["0x8000000000000001"] }
+expected = '"-0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.inf"
+area = "float"
+fn = "Float.toString"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = '"inf"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-inf"
+area = "float"
+fn = "Float.toString"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = '"-inf"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.nan"
+area = "float"
+fn = "Float.toString"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = '"NaN"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring.-nan"
+area = "float"
+fn = "Float.toString"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = '"NaN"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit"
+
+[[row]]
+id = "float/tostring32.0"
+area = "float"
+fn = "Float32.toString"
+args = ["0.0"]
+bits = { args = ["0x00000000"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.-0"
+area = "float"
+fn = "Float32.toString"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"] }
+expected = '"-0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.0.1"
+area = "float"
+fn = "Float32.toString"
+args = ["0.1"]
+bits = { args = ["0x3dcccccd"] }
+expected = '"0.100000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.0.3333333333333333"
+area = "float"
+fn = "Float32.toString"
+args = ["0.33333334"]
+bits = { args = ["0x3eaaaaab"] }
+expected = '"0.333333"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.16777217.0"
+area = "float"
+fn = "Float32.toString"
+args = ["16777216.0"]
+bits = { args = ["0x4b800000"] }
+expected = '"16777216.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.max"
+area = "float"
+fn = "Float32.toString"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"] }
+expected = '"340282346638528859811704183484516925440.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.minsub"
+area = "float"
+fn = "Float32.toString"
+args = ["1e-45"]
+bits = { args = ["0x00000001"] }
+expected = '"0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.-minsub"
+area = "float"
+fn = "Float32.toString"
+args = ["(-1e-45)"]
+bits = { args = ["0x80000001"] }
+expected = '"-0.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.0.0078125"
+area = "float"
+fn = "Float32.toString"
+args = ["0.0078125"]
+bits = { args = ["0x3c000000"] }
+expected = '"0.007812"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.10000000000.0"
+area = "float"
+fn = "Float32.toString"
+args = ["1e10"]
+bits = { args = ["0x501502f9"] }
+expected = '"10000000000.000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.3.14159"
+area = "float"
+fn = "Float32.toString"
+args = ["3.14159"]
+bits = { args = ["0x40490fd0"] }
+expected = '"3.141590"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.-2.5"
+area = "float"
+fn = "Float32.toString"
+args = ["(-2.5)"]
+bits = { args = ["0xc0200000"] }
+expected = '"-2.500000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.inf"
+area = "float"
+fn = "Float32.toString"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = '"inf"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.-inf"
+area = "float"
+fn = "Float32.toString"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"] }
+expected = '"-inf"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.nan"
+area = "float"
+fn = "Float32.toString"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = '"NaN"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/tostring32.-nan"
+area = "float"
+fn = "Float32.toString"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xffc00000"] }
+expected = '"NaN"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.toString, %f of the value promoted to double"
+
+[[row]]
+id = "float/touint8.nan"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.-nan"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.-inf"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.-1.5"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(-1.5)"]
+bits = { args = ["0xbff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.-0.5"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(-0.5)"]
+bits = { args = ["0xbfe0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.-0"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.0"
+area = "float"
+fn = "Float.toUInt8"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.minsub"
+area = "float"
+fn = "Float.toUInt8"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.0.99"
+area = "float"
+fn = "Float.toUInt8"
+args = ["0.99"]
+bits = { args = ["0x3fefae147ae147ae"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.1.0"
+area = "float"
+fn = "Float.toUInt8"
+args = ["1.0"]
+bits = { args = ["0x3ff0000000000000"] }
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.254.99"
+area = "float"
+fn = "Float.toUInt8"
+args = ["254.99"]
+bits = { args = ["0x406fdfae147ae148"] }
+expected = "254"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.255.0"
+area = "float"
+fn = "Float.toUInt8"
+args = ["255.0"]
+bits = { args = ["0x406fe00000000000"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.255.9"
+area = "float"
+fn = "Float.toUInt8"
+args = ["255.9"]
+bits = { args = ["0x406ffccccccccccd"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.256.0"
+area = "float"
+fn = "Float.toUInt8"
+args = ["256.0"]
+bits = { args = ["0x4070000000000000"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.1e+300"
+area = "float"
+fn = "Float.toUInt8"
+args = ["1e300"]
+bits = { args = ["0x7e37e43c8800759c"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint8.inf"
+area = "float"
+fn = "Float.toUInt8"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint16.nan"
+area = "float"
+fn = "Float.toUInt16"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint16.-1.0"
+area = "float"
+fn = "Float.toUInt16"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint16.0.5"
+area = "float"
+fn = "Float.toUInt16"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint16.65535.9"
+area = "float"
+fn = "Float.toUInt16"
+args = ["65535.9"]
+bits = { args = ["0x40effffccccccccd"] }
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint16.65536.0"
+area = "float"
+fn = "Float.toUInt16"
+args = ["65536.0"]
+bits = { args = ["0x40f0000000000000"] }
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint16.inf"
+area = "float"
+fn = "Float.toUInt16"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint32.nan"
+area = "float"
+fn = "Float.toUInt32"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint32.-1.0"
+area = "float"
+fn = "Float.toUInt32"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint32.4294967295.5"
+area = "float"
+fn = "Float.toUInt32"
+args = ["4294967295.5"]
+bits = { args = ["0x41effffffff00000"] }
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint32.4294967296.0"
+area = "float"
+fn = "Float.toUInt32"
+args = ["4294967296.0"]
+bits = { args = ["0x41f0000000000000"] }
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint32.inf"
+area = "float"
+fn = "Float.toUInt32"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.nan"
+area = "float"
+fn = "Float.toUInt64"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.-1.0"
+area = "float"
+fn = "Float.toUInt64"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.-0"
+area = "float"
+fn = "Float.toUInt64"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.9.223372036854776e+18"
+area = "float"
+fn = "Float.toUInt64"
+args = ["9.223372036854776e18"]
+bits = { args = ["0x43e0000000000000"] }
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.1.844674407370955e+19"
+area = "float"
+fn = "Float.toUInt64"
+args = ["1.844674407370955e19"]
+bits = { args = ["0x43efffffffffffff"] }
+expected = "18446744073709549568"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.1.8446744073709552e+19"
+area = "float"
+fn = "Float.toUInt64"
+args = ["1.8446744073709552e19"]
+bits = { args = ["0x43f0000000000000"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.1e+20"
+area = "float"
+fn = "Float.toUInt64"
+args = ["1e20"]
+bits = { args = ["0x4415af1d78b58c40"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint64.inf"
+area = "float"
+fn = "Float.toUInt64"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize.nan"
+area = "float"
+fn = "Float.toUSize"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize.-1.0"
+area = "float"
+fn = "Float.toUSize"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize.1.844674407370955e+19"
+area = "float"
+fn = "Float.toUSize"
+args = ["1.844674407370955e19"]
+bits = { args = ["0x43efffffffffffff"] }
+expected = "18446744073709549568"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize.1.8446744073709552e+19"
+area = "float"
+fn = "Float.toUSize"
+args = ["1.8446744073709552e19"]
+bits = { args = ["0x43f0000000000000"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.nan"
+area = "float"
+fn = "Float.toInt8"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-nan"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-inf"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-129.0"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-129.0)"]
+bits = { args = ["0xc060200000000000"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-128.99"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-128.99)"]
+bits = { args = ["0xc0601fae147ae148"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-128.5"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-128.5)"]
+bits = { args = ["0xc060100000000000"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-128.0"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-128.0)"]
+bits = { args = ["0xc060000000000000"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-127.5"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-127.5)"]
+bits = { args = ["0xc05fe00000000000"] }
+expected = "-127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-0.5"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-0.5)"]
+bits = { args = ["0xbfe0000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.-0"
+area = "float"
+fn = "Float.toInt8"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.0"
+area = "float"
+fn = "Float.toInt8"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.126.9"
+area = "float"
+fn = "Float.toInt8"
+args = ["126.9"]
+bits = { args = ["0x405fb9999999999a"] }
+expected = "126"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.127.0"
+area = "float"
+fn = "Float.toInt8"
+args = ["127.0"]
+bits = { args = ["0x405fc00000000000"] }
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.127.99"
+area = "float"
+fn = "Float.toInt8"
+args = ["127.99"]
+bits = { args = ["0x405fff5c28f5c28f"] }
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.128.0"
+area = "float"
+fn = "Float.toInt8"
+args = ["128.0"]
+bits = { args = ["0x4060000000000000"] }
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint8.inf"
+area = "float"
+fn = "Float.toInt8"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.nan"
+area = "float"
+fn = "Float.toInt16"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.-32769.0"
+area = "float"
+fn = "Float.toInt16"
+args = ["(-32769.0)"]
+bits = { args = ["0xc0e0002000000000"] }
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.-32768.5"
+area = "float"
+fn = "Float.toInt16"
+args = ["(-32768.5)"]
+bits = { args = ["0xc0e0001000000000"] }
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.-32768.0"
+area = "float"
+fn = "Float.toInt16"
+args = ["(-32768.0)"]
+bits = { args = ["0xc0e0000000000000"] }
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.32767.9"
+area = "float"
+fn = "Float.toInt16"
+args = ["32767.9"]
+bits = { args = ["0x40dffff99999999a"] }
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.32768.0"
+area = "float"
+fn = "Float.toInt16"
+args = ["32768.0"]
+bits = { args = ["0x40e0000000000000"] }
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.-inf"
+area = "float"
+fn = "Float.toInt16"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint16.inf"
+area = "float"
+fn = "Float.toInt16"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.nan"
+area = "float"
+fn = "Float.toInt32"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.-2147483649.0"
+area = "float"
+fn = "Float.toInt32"
+args = ["(-2147483649.0)"]
+bits = { args = ["0xc1e0000000200000"] }
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.-2147483648.5"
+area = "float"
+fn = "Float.toInt32"
+args = ["(-2147483648.5)"]
+bits = { args = ["0xc1e0000000100000"] }
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.-2147483648.0"
+area = "float"
+fn = "Float.toInt32"
+args = ["(-2147483648.0)"]
+bits = { args = ["0xc1e0000000000000"] }
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.2147483647.5"
+area = "float"
+fn = "Float.toInt32"
+args = ["2147483647.5"]
+bits = { args = ["0x41dfffffffe00000"] }
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.2147483648.0"
+area = "float"
+fn = "Float.toInt32"
+args = ["2147483648.0"]
+bits = { args = ["0x41e0000000000000"] }
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.-inf"
+area = "float"
+fn = "Float.toInt32"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint32.inf"
+area = "float"
+fn = "Float.toInt32"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.nan"
+area = "float"
+fn = "Float.toInt64"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.-9.223372036854778e+18"
+area = "float"
+fn = "Float.toInt64"
+args = ["(-9.223372036854778e18)"]
+bits = { args = ["0xc3e0000000000001"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.-9.223372036854776e+18"
+area = "float"
+fn = "Float.toInt64"
+args = ["(-9.223372036854776e18)"]
+bits = { args = ["0xc3e0000000000000"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.-9.223372036854775e+18"
+area = "float"
+fn = "Float.toInt64"
+args = ["(-9.223372036854775e18)"]
+bits = { args = ["0xc3dfffffffffffff"] }
+expected = "-9223372036854774784"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.9.223372036854775e+18"
+area = "float"
+fn = "Float.toInt64"
+args = ["9.223372036854775e18"]
+bits = { args = ["0x43dfffffffffffff"] }
+expected = "9223372036854774784"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.9.223372036854776e+18"
+area = "float"
+fn = "Float.toInt64"
+args = ["9.223372036854776e18"]
+bits = { args = ["0x43e0000000000000"] }
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.-inf"
+area = "float"
+fn = "Float.toInt64"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.inf"
+area = "float"
+fn = "Float.toInt64"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint64.1.5"
+area = "float"
+fn = "Float.toInt64"
+args = ["1.5"]
+bits = { args = ["0x3ff8000000000000"] }
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize.nan"
+area = "float"
+fn = "Float.toISize"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize.-9.223372036854778e+18"
+area = "float"
+fn = "Float.toISize"
+args = ["(-9.223372036854778e18)"]
+bits = { args = ["0xc3e0000000000001"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize.9.223372036854776e+18"
+area = "float"
+fn = "Float.toISize"
+args = ["9.223372036854776e18"]
+bits = { args = ["0x43e0000000000000"] }
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize.-1.5"
+area = "float"
+fn = "Float.toISize"
+args = ["(-1.5)"]
+bits = { args = ["0xbff8000000000000"] }
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.nan"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.-inf"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.-0.5"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["(-0.5)"]
+bits = { args = ["0xbf000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.0"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["0.0"]
+bits = { args = ["0x00000000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.255.99998474121094"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["255.99998"]
+bits = { args = ["0x437fffff"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.256.0"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["256.0"]
+bits = { args = ["0x43800000"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint832.inf"
+area = "float"
+fn = "Float32.toUInt8"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint1632.nan"
+area = "float"
+fn = "Float32.toUInt16"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint1632.-1.0"
+area = "float"
+fn = "Float32.toUInt16"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint1632.65535.5"
+area = "float"
+fn = "Float32.toUInt16"
+args = ["65535.5"]
+bits = { args = ["0x477fff80"] }
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint1632.65536.0"
+area = "float"
+fn = "Float32.toUInt16"
+args = ["65536.0"]
+bits = { args = ["0x47800000"] }
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint3232.nan"
+area = "float"
+fn = "Float32.toUInt32"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint3232.-1.0"
+area = "float"
+fn = "Float32.toUInt32"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint3232.4294967040.0"
+area = "float"
+fn = "Float32.toUInt32"
+args = ["4.294967e09"]
+bits = { args = ["0x4f7fffff"] }
+expected = "4294967040"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint3232.4294967296.0"
+area = "float"
+fn = "Float32.toUInt32"
+args = ["4.2949673e09"]
+bits = { args = ["0x4f800000"] }
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint6432.nan"
+area = "float"
+fn = "Float32.toUInt64"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint6432.-1.0"
+area = "float"
+fn = "Float32.toUInt64"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint6432.1.8446742974197924e+19"
+area = "float"
+fn = "Float32.toUInt64"
+args = ["1.8446743e19"]
+bits = { args = ["0x5f7fffff"] }
+expected = "18446742974197923840"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint6432.1.8446744073709552e+19"
+area = "float"
+fn = "Float32.toUInt64"
+args = ["1.8446744e19"]
+bits = { args = ["0x5f800000"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/touint6432.inf"
+area = "float"
+fn = "Float32.toUInt64"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize32.nan"
+area = "float"
+fn = "Float32.toUSize"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize32.1.8446744073709552e+19"
+area = "float"
+fn = "Float32.toUSize"
+args = ["1.8446744e19"]
+bits = { args = ["0x5f800000"] }
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/tousize32.-1.0"
+area = "float"
+fn = "Float32.toUSize"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint832.nan"
+area = "float"
+fn = "Float32.toInt8"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint832.-nan"
+area = "float"
+fn = "Float32.toInt8"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xffc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint832.-129.0"
+area = "float"
+fn = "Float32.toInt8"
+args = ["(-129.0)"]
+bits = { args = ["0xc3010000"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint832.-128.5"
+area = "float"
+fn = "Float32.toInt8"
+args = ["(-128.5)"]
+bits = { args = ["0xc3008000"] }
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint832.127.5"
+area = "float"
+fn = "Float32.toInt8"
+args = ["127.5"]
+bits = { args = ["0x42ff0000"] }
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint832.128.0"
+area = "float"
+fn = "Float32.toInt8"
+args = ["128.0"]
+bits = { args = ["0x43000000"] }
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint1632.nan"
+area = "float"
+fn = "Float32.toInt16"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint1632.-32769.0"
+area = "float"
+fn = "Float32.toInt16"
+args = ["(-32769.0)"]
+bits = { args = ["0xc7000100"] }
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint1632.-32768.5"
+area = "float"
+fn = "Float32.toInt16"
+args = ["(-32768.5)"]
+bits = { args = ["0xc7000080"] }
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint1632.32767.5"
+area = "float"
+fn = "Float32.toInt16"
+args = ["32767.5"]
+bits = { args = ["0x46ffff00"] }
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint1632.32768.0"
+area = "float"
+fn = "Float32.toInt16"
+args = ["32768.0"]
+bits = { args = ["0x47000000"] }
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint3232.nan"
+area = "float"
+fn = "Float32.toInt32"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint3232.-2147483904.0"
+area = "float"
+fn = "Float32.toInt32"
+args = ["(-2.147484e09)"]
+bits = { args = ["0xcf000001"] }
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint3232.-2147483648.0"
+area = "float"
+fn = "Float32.toInt32"
+args = ["(-2.1474836e09)"]
+bits = { args = ["0xcf000000"] }
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint3232.2147483520.0"
+area = "float"
+fn = "Float32.toInt32"
+args = ["2.1474835e09"]
+bits = { args = ["0x4effffff"] }
+expected = "2147483520"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint3232.2147483648.0"
+area = "float"
+fn = "Float32.toInt32"
+args = ["2.1474836e09"]
+bits = { args = ["0x4f000000"] }
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.nan"
+area = "float"
+fn = "Float32.toInt64"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.-9.223373136366404e+18"
+area = "float"
+fn = "Float32.toInt64"
+args = ["(-9.223373e18)"]
+bits = { args = ["0xdf000001"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.-9.223372036854776e+18"
+area = "float"
+fn = "Float32.toInt64"
+args = ["(-9.223372e18)"]
+bits = { args = ["0xdf000000"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.9.223371487098962e+18"
+area = "float"
+fn = "Float32.toInt64"
+args = ["9.2233715e18"]
+bits = { args = ["0x5effffff"] }
+expected = "9223371487098961920"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.9.223372036854776e+18"
+area = "float"
+fn = "Float32.toInt64"
+args = ["9.223372e18"]
+bits = { args = ["0x5f000000"] }
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.-inf"
+area = "float"
+fn = "Float32.toInt64"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toint6432.inf"
+area = "float"
+fn = "Float32.toInt64"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize32.nan"
+area = "float"
+fn = "Float32.toISize"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize32.-9.223373136366404e+18"
+area = "float"
+fn = "Float32.toISize"
+args = ["(-9.223373e18)"]
+bits = { args = ["0xdf000001"] }
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize32.9.223372036854776e+18"
+area = "float"
+fn = "Float32.toISize"
+args = ["9.223372e18"]
+bits = { args = ["0x5f000000"] }
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/toisize32.-1.5"
+area = "float"
+fn = "Float32.toISize"
+args = ["(-1.5)"]
+bits = { args = ["0xbfc00000"] }
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's saturating Float to integer conversions"
+
+[[row]]
+id = "float/ofbits.0"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x0"]
+bits = { result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.8000000000000000"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x8000000000000000"]
+bits = { result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.7ff0000000000000"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x7ff0000000000000"]
+bits = { result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.7ff0000000000001"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x7ff0000000000001"]
+bits = { result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.7ff8000000000001"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x7ff8000000000001"]
+bits = { result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.fff8000000000000"
+area = "float"
+fn = "Float.ofBits"
+args = ["0xfff8000000000000"]
+bits = { result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.ffffffffffffffff"
+area = "float"
+fn = "Float.ofBits"
+args = ["0xffffffffffffffff"]
+bits = { result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.1"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x1"]
+bits = { result = "0x0000000000000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits.3ff0000000000000"
+area = "float"
+fn = "Float.ofBits"
+args = ["0x3ff0000000000000"]
+bits = { result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits.-nan"
+area = "float"
+fn = "Float.toBits"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = "9221120237041090560"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits.nan"
+area = "float"
+fn = "Float.toBits"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "9221120237041090560"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits.-0"
+area = "float"
+fn = "Float.toBits"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits.inf"
+area = "float"
+fn = "Float.toBits"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "9218868437227405312"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits.max"
+area = "float"
+fn = "Float.toBits"
+args = ["1.7976931348623157e308"]
+bits = { args = ["0x7fefffffffffffff"] }
+expected = "9218868437227405311"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits.0.1"
+area = "float"
+fn = "Float.toBits"
+args = ["0.1"]
+bits = { args = ["0x3fb999999999999a"] }
+expected = "4591870180066957722"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.0"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0x0"]
+bits = { result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.80000000"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0x80000000"]
+bits = { result = "0x80000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.7f800000"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0x7f800000"]
+bits = { result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.7f800001"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0x7f800001"]
+bits = { result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.7fc00001"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0x7fc00001"]
+bits = { result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.ffc00000"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0xffc00000"]
+bits = { result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.ffffffff"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0xffffffff"]
+bits = { result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/ofbits32.1"
+area = "float"
+fn = "Float32.ofBits"
+args = ["0x1"]
+bits = { result = "0x00000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits32.-nan"
+area = "float"
+fn = "Float32.toBits"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xffc00000"] }
+expected = "2143289344"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits32.nan"
+area = "float"
+fn = "Float32.toBits"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "2143289344"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits32.-0"
+area = "float"
+fn = "Float32.toBits"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"] }
+expected = "2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits32.inf"
+area = "float"
+fn = "Float32.toBits"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "2139095040"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/tobits32.0.1"
+area = "float"
+fn = "Float32.toBits"
+args = ["0.1"]
+bits = { args = ["0x3dcccccd"] }
+expected = "1036831949"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ofBits/toBits, every NaN canonical"
+
+[[row]]
+id = "float/isnan.nan"
+area = "float"
+fn = "Float.isNaN"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan.-nan"
+area = "float"
+fn = "Float.isNaN"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan.inf"
+area = "float"
+fn = "Float.isNaN"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan.-inf"
+area = "float"
+fn = "Float.isNaN"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan.max"
+area = "float"
+fn = "Float.isNaN"
+args = ["1.7976931348623157e308"]
+bits = { args = ["0x7fefffffffffffff"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan.minsub"
+area = "float"
+fn = "Float.isNaN"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan.-0"
+area = "float"
+fn = "Float.isNaN"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.nan"
+area = "float"
+fn = "Float.isInf"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.-nan"
+area = "float"
+fn = "Float.isInf"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.inf"
+area = "float"
+fn = "Float.isInf"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.-inf"
+area = "float"
+fn = "Float.isInf"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.max"
+area = "float"
+fn = "Float.isInf"
+args = ["1.7976931348623157e308"]
+bits = { args = ["0x7fefffffffffffff"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.minsub"
+area = "float"
+fn = "Float.isInf"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf.-0"
+area = "float"
+fn = "Float.isInf"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.nan"
+area = "float"
+fn = "Float.isFinite"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.-nan"
+area = "float"
+fn = "Float.isFinite"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xfff8000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.inf"
+area = "float"
+fn = "Float.isFinite"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.-inf"
+area = "float"
+fn = "Float.isFinite"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.max"
+area = "float"
+fn = "Float.isFinite"
+args = ["1.7976931348623157e308"]
+bits = { args = ["0x7fefffffffffffff"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.minsub"
+area = "float"
+fn = "Float.isFinite"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite.-0"
+area = "float"
+fn = "Float.isFinite"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan32.nan"
+area = "float"
+fn = "Float32.isNaN"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan32.-nan"
+area = "float"
+fn = "Float32.isNaN"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xffc00000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan32.inf"
+area = "float"
+fn = "Float32.isNaN"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan32.-inf"
+area = "float"
+fn = "Float32.isNaN"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan32.max"
+area = "float"
+fn = "Float32.isNaN"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isnan32.minsub"
+area = "float"
+fn = "Float32.isNaN"
+args = ["1e-45"]
+bits = { args = ["0x00000001"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf32.nan"
+area = "float"
+fn = "Float32.isInf"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf32.-nan"
+area = "float"
+fn = "Float32.isInf"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xffc00000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf32.inf"
+area = "float"
+fn = "Float32.isInf"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf32.-inf"
+area = "float"
+fn = "Float32.isInf"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf32.max"
+area = "float"
+fn = "Float32.isInf"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isinf32.minsub"
+area = "float"
+fn = "Float32.isInf"
+args = ["1e-45"]
+bits = { args = ["0x00000001"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite32.nan"
+area = "float"
+fn = "Float32.isFinite"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite32.-nan"
+area = "float"
+fn = "Float32.isFinite"
+args = ["(-(0.0 / 0.0))"]
+bits = { args = ["0xffc00000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite32.inf"
+area = "float"
+fn = "Float32.isFinite"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite32.-inf"
+area = "float"
+fn = "Float32.isFinite"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"] }
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite32.max"
+area = "float"
+fn = "Float32.isFinite"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/isfinite32.minsub"
+area = "float"
+fn = "Float32.isFinite"
+args = ["1e-45"]
+bits = { args = ["0x00000001"] }
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: classification"
+
+[[row]]
+id = "float/frexp.0"
+area = "float"
+fn = "Float.frExp"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"], result = "0x0000000000000000" }
+expected = "(0.000000, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.-0"
+area = "float"
+fn = "Float.frExp"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "(-0.000000, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.1.0"
+area = "float"
+fn = "Float.frExp"
+args = ["1.0"]
+bits = { args = ["0x3ff0000000000000"], result = "0x3fe0000000000000" }
+expected = "(0.500000, 1)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.0.75"
+area = "float"
+fn = "Float.frExp"
+args = ["0.75"]
+bits = { args = ["0x3fe8000000000000"], result = "0x3fe8000000000000" }
+expected = "(0.750000, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.3.0"
+area = "float"
+fn = "Float.frExp"
+args = ["3.0"]
+bits = { args = ["0x4008000000000000"], result = "0x3fe8000000000000" }
+expected = "(0.750000, 2)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.-5.5"
+area = "float"
+fn = "Float.frExp"
+args = ["(-5.5)"]
+bits = { args = ["0xc016000000000000"], result = "0xbfe6000000000000" }
+expected = "(-0.687500, 3)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.0.5"
+area = "float"
+fn = "Float.frExp"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"], result = "0x3fe0000000000000" }
+expected = "(0.500000, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.1e+308"
+area = "float"
+fn = "Float.frExp"
+args = ["1e308"]
+bits = { args = ["0x7fe1ccf385ebc8a0"], result = "0x3fe1ccf385ebc8a0" }
+expected = "(0.556268, 1024)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.max"
+area = "float"
+fn = "Float.frExp"
+args = ["1.7976931348623157e308"]
+bits = { args = ["0x7fefffffffffffff"], result = "0x3fefffffffffffff" }
+expected = "(1.000000, 1024)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.minnorm"
+area = "float"
+fn = "Float.frExp"
+args = ["2.2250738585072014e-308"]
+bits = { args = ["0x0010000000000000"], result = "0x3fe0000000000000" }
+expected = "(0.500000, -1021)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.minsub"
+area = "float"
+fn = "Float.frExp"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"], result = "0x3fe0000000000000" }
+expected = "(0.500000, -1073)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.maxsub"
+area = "float"
+fn = "Float.frExp"
+args = ["2.225073858507201e-308"]
+bits = { args = ["0x000fffffffffffff"], result = "0x3feffffffffffffe" }
+expected = "(1.000000, -1022)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.1e-310"
+area = "float"
+fn = "Float.frExp"
+args = ["1e-310"]
+bits = { args = ["0x000012688b70e62b"], result = "0x3fe2688b70e62b00" }
+expected = "(0.575262, -1029)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.inf"
+area = "float"
+fn = "Float.frExp"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "(inf, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.-inf"
+area = "float"
+fn = "Float.frExp"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"], result = "0xfff0000000000000" }
+expected = "(-inf, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp.nan"
+area = "float"
+fn = "Float.frExp"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "(NaN, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.0"
+area = "float"
+fn = "Float32.frExp"
+args = ["0.0"]
+bits = { args = ["0x00000000"], result = "0x00000000" }
+expected = "(0.000000, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.-0"
+area = "float"
+fn = "Float32.frExp"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"], result = "0x80000000" }
+expected = "(-0.000000, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.1.0"
+area = "float"
+fn = "Float32.frExp"
+args = ["1.0"]
+bits = { args = ["0x3f800000"], result = "0x3f000000" }
+expected = "(0.500000, 1)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.-5.5"
+area = "float"
+fn = "Float32.frExp"
+args = ["(-5.5)"]
+bits = { args = ["0xc0b00000"], result = "0xbf300000" }
+expected = "(-0.687500, 3)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.max"
+area = "float"
+fn = "Float32.frExp"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"], result = "0x3f7fffff" }
+expected = "(1.000000, 128)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.minnorm"
+area = "float"
+fn = "Float32.frExp"
+args = ["1.1754944e-38"]
+bits = { args = ["0x00800000"], result = "0x3f000000" }
+expected = "(0.500000, -125)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.minsub"
+area = "float"
+fn = "Float32.frExp"
+args = ["1e-45"]
+bits = { args = ["0x00000001"], result = "0x3f000000" }
+expected = "(0.500000, -148)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.maxsub"
+area = "float"
+fn = "Float32.frExp"
+args = ["1.1754942e-38"]
+bits = { args = ["0x007fffff"], result = "0x3f7ffffe" }
+expected = "(1.000000, -126)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.inf"
+area = "float"
+fn = "Float32.frExp"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"], result = "0x7f800000" }
+expected = "(inf, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/frexp32.nan"
+area = "float"
+fn = "Float32.frExp"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "(NaN, 0)"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1 and leanrs rt/leanrs_rt/tests/float.rs (float_frexp): frExp"
+
+[[row]]
+id = "float/scaleb.1.0.0"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "0"]
+bits = { args = ["0x3ff0000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.1023"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "1023"]
+bits = { args = ["0x3ff0000000000000"], result = "0x7fe0000000000000" }
+expected = "89884656743115795386465259539451236680898848947115328636715040578866337902750481566354238661203768010560056939935696678829394884407208311246423715319737062188883946712432742638151109800623047059726541476042502884419075341171231440736956555270413618581675255342293149119973622969239858152417678164812112068608.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.1024"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "1024"]
+bits = { args = ["0x3ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.-1022"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "(-1022)"]
+bits = { args = ["0x3ff0000000000000"], result = "0x0010000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.-1074"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "(-1074)"]
+bits = { args = ["0x3ff0000000000000"], result = "0x0000000000000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.-1075"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "(-1075)"]
+bits = { args = ["0x3ff0000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.5.-1075"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.5", "(-1075)"]
+bits = { args = ["0x3ff8000000000000"], result = "0x0000000000000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.3.0.-1075"
+area = "float"
+fn = "Float.scaleB"
+args = ["3.0", "(-1075)"]
+bits = { args = ["0x4008000000000000"], result = "0x0000000000000002" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.max.-2098"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.7976931348623157e308", "(-2098)"]
+bits = { args = ["0x7fefffffffffffff"], result = "0x0000000000000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.minsub.2097"
+area = "float"
+fn = "Float.scaleB"
+args = ["5e-324", "2097"]
+bits = { args = ["0x0000000000000001"], result = "0x7fe0000000000000" }
+expected = "89884656743115795386465259539451236680898848947115328636715040578866337902750481566354238661203768010560056939935696678829394884407208311246423715319737062188883946712432742638151109800623047059726541476042502884419075341171231440736956555270413618581675255342293149119973622969239858152417678164812112068608.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.minsub.2098"
+area = "float"
+fn = "Float.scaleB"
+args = ["5e-324", "2098"]
+bits = { args = ["0x0000000000000001"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-1.0.-2147483648"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-1.0)", "(-2147483648)"]
+bits = { args = ["0xbff0000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-1.0.-2147483649"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-1.0)", "(-2147483649)"]
+bits = { args = ["0xbff0000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.2147483647"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "2147483647"]
+bits = { args = ["0x3ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.1.0.2147483648"
+area = "float"
+fn = "Float.scaleB"
+args = ["1.0", "2147483648"]
+bits = { args = ["0x3ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-0.5"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-0.0)", "5"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-0.1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-0.0)", "1099511627776"]
+bits = { args = ["0x8000000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.0.-1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["0.0", "(-1099511627776)"]
+bits = { args = ["0x0000000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-1.0.-1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-1.0)", "(-1099511627776)"]
+bits = { args = ["0xbff0000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.nan.-1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(0.0 / 0.0)", "(-1099511627776)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.nan.1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(0.0 / 0.0)", "1099511627776"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.nan.3"
+area = "float"
+fn = "Float.scaleB"
+args = ["(0.0 / 0.0)", "3"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.inf.-1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(1.0 / 0.0)", "(-1099511627776)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.inf.-5"
+area = "float"
+fn = "Float.scaleB"
+args = ["(1.0 / 0.0)", "(-5)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-inf.1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-1.0 / 0.0)", "1099511627776"]
+bits = { args = ["0xfff0000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-2.0.1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-2.0)", "1099511627776"]
+bits = { args = ["0xc000000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.2.0.1267650600228229401496703205376"
+area = "float"
+fn = "Float.scaleB"
+args = ["2.0", "1267650600228229401496703205376"]
+bits = { args = ["0x4000000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.2.0.-1267650600228229401496703205376"
+area = "float"
+fn = "Float.scaleB"
+args = ["2.0", "(-1267650600228229401496703205376)"]
+bits = { args = ["0x4000000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.0.127"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.0", "127"]
+bits = { args = ["0x3f800000"], result = "0x7f000000" }
+expected = "170141183460469231731687303715884105728.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.0.128"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.0", "128"]
+bits = { args = ["0x3f800000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.0.-149"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.0", "(-149)"]
+bits = { args = ["0x3f800000"], result = "0x00000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.0.-150"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.0", "(-150)"]
+bits = { args = ["0x3f800000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.5.-150"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.5", "(-150)"]
+bits = { args = ["0x3fc00000"], result = "0x00000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.3.0.-150"
+area = "float"
+fn = "Float32.scaleB"
+args = ["3.0", "(-150)"]
+bits = { args = ["0x40400000"], result = "0x00000002" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.max.-277"
+area = "float"
+fn = "Float32.scaleB"
+args = ["3.4028235e38", "(-277)"]
+bits = { args = ["0x7f7fffff"], result = "0x00000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.minsub.276"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1e-45", "276"]
+bits = { args = ["0x00000001"], result = "0x7f000000" }
+expected = "170141183460469231731687303715884105728.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.-1.0.-2147483649"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(-1.0)", "(-2147483649)"]
+bits = { args = ["0xbf800000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.nan.-1099511627776"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(0.0 / 0.0)", "(-1099511627776)"]
+bits = { args = ["0x7fc00000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.nan.1099511627776"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(0.0 / 0.0)", "1099511627776"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.0.300"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.0", "300"]
+bits = { args = ["0x3f800000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.1.0.-300"
+area = "float"
+fn = "Float32.scaleB"
+args = ["1.0", "(-300)"]
+bits = { args = ["0x3f800000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.-0.1099511627776"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(-0.0)", "1099511627776"]
+bits = { args = ["0x80000000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
