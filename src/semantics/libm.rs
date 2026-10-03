@@ -10,16 +10,22 @@
 //! - `atanh`, `atanhf`: Rust's are a different formula; here they are ports of
 //!   glibc's over `log1p`/`log1pf`.
 //! - Constant operands. LLVM evaluates a libm call with constant operands at
-//!   compile time: `f32` calls by a `double` evaluation rounded to `float`,
-//!   which can differ from glibc's `*f` function in the last bit, and `pow`
+//!   compile time, and not always as glibc does: `f32` calls by a `double`
+//!   evaluation rounded to `float`, which can differ from glibc's `*f`
+//!   function in the last bit; `exp2` as `pow(2, x)`
+//!   (`exp2(-0.3)`: folded `0x3fe9fdf8bcce533e`, glibc `...533d`); and `pow`
 //!   with a constant exponent is rewritten (`sqrt`, `x * x`, `1 / x`). Native
-//!   Lean always passes run-time values to the C call. So `pow`, `powf` and
-//!   every inexact `*f` function here pass their operands through
+//!   Lean always passes run-time values to the C call. So `exp2`, `pow`,
+//!   `powf` and every inexact `*f` function here pass their operands through
 //!   `core::hint::black_box`, and the call stays a call after inlining into a
 //!   translator's code. The exact ones (`fabsf`, `ceilf`, `floorf`, `roundf`,
 //!   `sqrtf`) fold to glibc's result and need no barrier.
 //!
-//! Every other `f64` function is the `f64` method, which calls glibc.
+//! The other `f64` functions are the `f64` methods, which call glibc; LLVM
+//! folds them with the build host's own libm, which on the pinned host is the
+//! same glibc. `tests/libm_folding.rs` checks, in an optimized build, that
+//! every function gives the same bits on constant and on opaque operands.
+
 //!
 //! Source: leanrs_rt `src/libm.rs` (the `f32` functions), `src/float.rs`
 //! (`cbrt`, `atanh`, `pow`) and `src/float32.rs` (`cbrt`, `atanh`); the plain
@@ -49,9 +55,20 @@ macro_rules! f64_unary {
 
 f64_unary! {
     fabs => abs, acos => acos, acosh => acosh, asin => asin, asinh => asinh, atan => atan,
-    ceil => ceil, cos => cos, cosh => cosh, exp => exp, exp2 => exp2, floor => floor,
-    log => ln, log10 => log10, log2 => log2, round => round, sin => sin, sinh => sinh,
-    sqrt => sqrt, tan => tan, tanh => tanh,
+    ceil => ceil, cos => cos, cosh => cosh, exp => exp, floor => floor, log => ln,
+    log10 => log10, log2 => log2, round => round, sin => sin, sinh => sinh, sqrt => sqrt,
+    tan => tan, tanh => tanh,
+}
+
+/// `Float.exp2` (extern `exp2`): glibc's `exp2`, on an operand the compiler
+/// cannot see. LLVM folds a constant `exp2(c)` as `pow(2, c)`, which differs
+/// from glibc's `exp2` in the last bit (`exp2(35.74477454358792)`: folded
+/// `...5afd`, native `...5afe`; leanrs review S1-1).
+///
+/// Source: new (`f64::exp2` behind `black_box`).
+#[inline]
+pub fn exp2(x: f64) -> f64 {
+    black_box(x).exp2()
 }
 
 /// `Float.atan2` (extern `atan2`): glibc's `atan2(y, x)`.

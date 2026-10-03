@@ -34,6 +34,9 @@ for tc in "${TOOLCHAINS[@]}"; do
     echo "== $tc clippy features=[${f}]"
     cargo +"$tc" clippy --offline --quiet ${f:+--features "$f"} -- -D warnings
   done
+  # Constant folding of libm calls happens only in optimized builds.
+  echo "== $tc release test libm_folding"
+  capped cargo +"$tc" test --release --offline --quiet --test libm_folding
   for with_features in no yes; do
     cfgs=()
     [[ $with_features == yes ]] && cfgs=(--cfg 'feature="io"' --cfg 'feature="sched"')
