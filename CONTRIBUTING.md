@@ -49,8 +49,12 @@ once.
   default.
 - **Benchmarks.** `benches/` holds one micro-benchmark per public function,
   and next to it a native Lean program timing the same operation through
-  Lean's normal API, so boxing and reference counting are counted alike.
-  Inputs come from argv.
+  Lean's normal API; the Rust side does the glue a translator's code does
+  (boxed `Nat`/`Int` words, new string objects), so the pair does the same
+  work (`benches/README.md`). Only N, the number of iterations, comes from
+  argv; the operands come from a fixed-seed LCG and fixed strings, built
+  before the timed region and passed through an opaque sink (`black_box`,
+  `Bench.pin`), so neither compiler can fold them.
 - **Measurement protocol** (shared with leanrs):
   - **The timing lock.** A session holds an exclusive `flock` on
     `/tmp/leanrs-timing.lock`, taken without waiting. It refuses to start if

@@ -6,7 +6,7 @@
 //! Source: leanrs_rt `src/hash.rs`, adapted (one entry point per C function,
 //! and the seeded `hash_str` public under its C name). lean2rr's leanrt
 //! `src/hash.rs` is the same algorithm; both agree with native Lean 4.34.0 on
-//! the rows in `tests/cases/hash.rows`.
+//! the rows in `tests/cases/hash/hash.rows.toml`.
 
 /// The multiplier and shift shared by both hashes (`hash.h`, `hash.cpp`).
 const M: u64 = 0xc6a4_a793_5bd1_e995;

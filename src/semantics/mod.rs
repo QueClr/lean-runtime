@@ -5,7 +5,8 @@
 //!
 //! Each public function names the Lean 4.34.0 C function it mirrors and the
 //! implementation it came from (leanrs_rt, lean2rr's leanrt, or new), and is
-//! checked against native Lean 4.34.0 by the rows in `tests/cases/*.rows`.
+//! checked against native Lean 4.34.0 by the rows in
+//! `tests/cases/<area>/<area>.rows.toml`.
 //!
 //! The functions assume a 64-bit platform, as both translators do: `USize`
 //! and `ISize` are 64 bits, and positions are `u64`s that index with `as

@@ -31,7 +31,8 @@ const fn is_nan_bits(bits: u64) -> bool {
 ///
 /// Source: leanrs_rt `src/float.rs` (`float_to_string`), adapted to write into
 /// a caller-supplied `fmt::Write`. Rust's `{:.6}` is an exact conversion with
-/// the same rounding as glibc's `%f` (rows `float.tostring.*`).
+/// the same rounding as glibc's `%f` (rows `float/tostring.*` in
+/// `tests/cases/float/float.rows.toml`).
 #[inline]
 pub fn to_string(x: f64, out: &mut impl fmt::Write) -> fmt::Result {
     if x.is_nan() {
