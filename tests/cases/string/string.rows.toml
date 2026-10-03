@@ -2261,3 +2261,1076 @@ args = ['(("a€😀é".toSlice.drop 1).dropEnd 1)', '(("€".toSlice.drop 0).dr
 expected = "false"
 lean_version = "4.34.0"
 source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"
+
+[[row]]
+id = "string/get.boundary.at0"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨0⟩"]
+expected = "'\\x7f'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at1"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at2"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨2⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at3"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "'߿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at4"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨4⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at5"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "'ࠀ'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at6"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨6⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at7"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨7⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at8"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "'퟿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at9"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨9⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at10"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨10⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at11"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at12"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨12⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at13"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨13⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at14"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "'￿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at15"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨15⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at16"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨16⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at17"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "'𐀀'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at18"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨18⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at19"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨19⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at20"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨20⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at21"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "'􏿿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at22"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨22⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at23"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨23⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at24"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨24⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at25"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨25⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.at26"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨26⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at0"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨0⟩"]
+expected = "some '\\x7f'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at1"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "some ''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at2"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨2⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at3"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "some '߿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at4"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨4⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at5"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "some 'ࠀ'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at6"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨6⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at7"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨7⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at8"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "some '퟿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at9"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨9⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at10"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨10⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at11"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "some ''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at12"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨12⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at13"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨13⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at14"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "some '￿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at15"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨15⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at16"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨16⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at17"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "some '𐀀'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at18"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨18⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at19"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨19⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at20"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨20⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at21"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "some '􏿿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at22"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨22⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at23"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨23⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at24"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨24⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at25"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨25⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getopt.boundary.at26"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨26⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at0"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨0⟩"]
+expected = "'\\x7f'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at1"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at2"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨2⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at3"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "'߿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at4"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨4⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at5"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "'ࠀ'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at6"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨6⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at7"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨7⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at8"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "'퟿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at9"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨9⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at10"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨10⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at11"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at12"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨12⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at13"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨13⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at14"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "'￿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at15"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨15⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at16"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨16⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at17"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "'𐀀'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at18"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨18⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at19"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨19⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at20"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨20⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at21"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "'􏿿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at22"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨22⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at23"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨23⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at24"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨24⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at25"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨25⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getbang.boundary.at26"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨26⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at0"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨0⟩"]
+expected = "'\\x7f'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at1"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at2"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨2⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at3"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "'߿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at4"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨4⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at5"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "'ࠀ'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at6"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨6⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at7"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨7⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at8"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "'퟿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at9"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨9⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at10"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨10⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at11"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at12"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨12⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at13"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨13⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at14"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "'￿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at15"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨15⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at16"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨16⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at17"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "'𐀀'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at18"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨18⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at19"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨19⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at20"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨20⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at21"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "'􏿿'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at22"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨22⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at23"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨23⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/getfast.boundary.at24"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨24⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (a): the decoder at every byte position of the string of code points at each UTF-8 length boundary"
+
+[[row]]
+id = "string/get.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/getopt.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/getbang.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/next.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "{ byteIdx := 18446744073709551616 }"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/prev.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "{ byteIdx := 18446744073709551614 }"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/atend.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/isvalid.mixed.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨18446744073709551615⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/extract.mixed.18446744073709551615.0"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨18446744073709551615⟩", "⟨0⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/extract.mixed.1.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨1⟩", "⟨18446744073709551615⟩"]
+expected = '"€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"

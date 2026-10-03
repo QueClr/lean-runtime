@@ -13,7 +13,8 @@ and the other fields are kept; the file is rewritten in a canonical layout.
 A `Float`/`Float32` argument is written in `args` as a Lean term (a literal
 such as `0.7`, `(-0.0)`, `(1.0 / 0.0)`, `(0.0 / 0.0)`), and its exact bits are
 the next entry of `bits.args` (16 hex digits for `Float`, 8 for `Float32`);
-the oracle receives the bits.
+the oracle receives the bits (a negative NaN as the negation of the quiet NaN,
+the only NaNs Lean can build from bits).
 
 --check   rewrite nothing; report the rows whose expected values differ and
           exit 1 if any does (to compare toolchains, e.g. `--toolchain
@@ -103,11 +104,20 @@ def wire_of(term, float_bits):
             raise RowError(f"no bits.args entry for the float argument {t}")
         b = float_bits.pop(0)
         hexd = b[2:] if b.startswith("0x") else b
-        if len(hexd) == 16:
-            return "f:" + hexd
-        if len(hexd) == 8:
-            return "g:" + hexd
-        raise RowError(f"bits must have 8 or 16 hex digits: {b}")
+        if len(hexd) not in (16, 8):
+            raise RowError(f"bits must have 8 or 16 hex digits: {b}")
+        v, wide = int(hexd, 16), len(hexd) == 16
+        sign = 1 << (63 if wide else 31)
+        exp = 0x7FF0000000000000 if wide else 0x7F800000
+        quiet = 0x7FF8000000000000 if wide else 0x7FC00000
+        mag = v & ~sign
+        if mag > exp and mag != quiet:
+            # Float.ofBits makes every NaN the quiet one; negation only flips the sign
+            raise RowError(f"the oracle can only build the quiet NaN and its negation: {b}")
+        if v & sign and mag > exp:
+            # a negative NaN: the negation of Float.ofBits, which keeps the sign bit
+            return ("F:" if wide else "G:") + "%0*x" % (len(hexd), mag)
+        return ("f:" if wide else "g:") + hexd
     if t.startswith('"'):
         s, j = parse_string_literal(t, 0)
         if j != len(t):

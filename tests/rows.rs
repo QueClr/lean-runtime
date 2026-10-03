@@ -330,8 +330,9 @@ fn parse_arg(term: &str, float_bits: &mut std::vec::IntoIter<String>) -> Result<
         let hex = b.strip_prefix("0x").ok_or("bits without 0x")?;
         let n = u64::from_str_radix(hex, 16).map_err(|e| e.to_string())?;
         return match hex.len() {
-            16 => Ok(Arg::F64(float::of_bits(n))),
-            8 => Ok(Arg::F32(float32::of_bits(n as u32))),
+            // the exact bits, a negative NaN included (`of_bits` would make it the quiet NaN)
+            16 => Ok(Arg::F64(f64::from_bits(n))),
+            8 => Ok(Arg::F32(f32::from_bits(n as u32))),
             _ => Err(format!("bits of 8 or 16 hex digits: {b}")),
         };
     }
