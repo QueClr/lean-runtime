@@ -70,9 +70,9 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Field | Content |
 |---|---|
 | Summary | `IO.Process.getCurrentDir` after the working directory was removed crashes with SIGSEGV instead of raising an `IO.Error`: the error decoder dereferences a null file name |
-| Where | `src/runtime/process.cpp:318-325` (`decode_io_error(errno, nullptr)` after `getcwd` fails); `src/runtime/io.cpp:276-279` (`UV_ENOENT`: `lean_assert(fname != nullptr); inc_ref(fname)`), and `io.cpp:259-262` (`UV_EINTR`, same shape). The same applies to every caller passing no name: `waitpid`, `kill`, `flock`, `fflush`, `fseek`, `ftruncate`, `fread`, `fwrite`, getline, `fputs` |
+| Where | `src/runtime/process.cpp:318-325` (`decode_io_error(errno, nullptr)` after `getcwd` fails); `src/runtime/io.cpp:276-279` (`UV_ENOENT`: `lean_assert(fname != nullptr); inc_ref(fname)`), and `io.cpp:259-262` (`UV_EINTR`, same shape). The same applies to every caller passing no name: `waitpid`, `kill`, `flock`, `fflush`, `fseek`, `ftruncate`, `fread`, `fwrite`, getline, `fputs`, and `decode_uv_error(ret, nullptr)` in `createTempFile`/`createTempDir` (io.cpp:1266, 1297, 1312, 1343) and at io.cpp:919 |
 | Why it is a bug | A crash (status 139, buffered stdout lost) where the type promises an `IO.Error`, and Lean's own `lean_assert(fname != nullptr)` states the intent |
-| Native repro | `createDirAll d; setCurrentDir d; removeDir d; getCurrentDir` inside a `try … catch`: segmentation fault, the `catch` never runs. Case: `io/error_without_file_name` |
+| Native repro | `createDirAll d; setCurrentDir d; removeDir d; getCurrentDir` inside a `try … catch`: segmentation fault, the `catch` never runs. Also `TMPDIR=/nonexistent` then `IO.FS.createTempFile` inside `try … catch`: segmentation fault (found by leanrs's docs review). Cases: `io/error_without_file_name`, `io/temp_file_error` |
 | Our behaviour | Raise the error class's `IO.Error` without a file name (`noFileOrDirectory "" 2 "no such file or directory"` here), for every error class |
 | Translators | lean2rr: plan §10, "Runtime"; leanrs: DV18 (a) |
 | Upstream | Not reported (owner: record only) |
