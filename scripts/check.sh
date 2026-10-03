@@ -9,6 +9,12 @@
 # 16G). Set LEAN_RUNTIME_NO_CAP=1 when the caller already provides one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Hold the host's timing lock shared, as every build here does: a timing
+# session takes it exclusively and must not overlap with builds.
+if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
+  export LEAN_RUNTIME_LOCKED=1
+  exec flock -s /tmp/leanrs-timing.lock "$0" "$@"
+fi
 TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
 FEATURE_SETS=("" "io,sched" "unsafe-fast" "io,sched,unsafe-fast")
 

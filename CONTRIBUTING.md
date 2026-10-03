@@ -41,6 +41,36 @@ once.
   lands in a translator.
 - Unit tests next to the code use values from the same cases.
 
+## Performance
+
+- **The floor.** The default build of every function must be at least as
+  fast as Lean 4.34.0's native runtime for the same operation; `unsafe-fast`
+  only goes further. A slower safe implementation is not merged as the
+  default.
+- **Benchmarks.** `benches/` holds one micro-benchmark per public function,
+  and next to it a native Lean program timing the same operation through
+  Lean's normal API, so boxing and reference counting are counted alike.
+  Inputs come from argv.
+- **Measurement protocol** (shared with leanrs):
+  - **The timing lock.** A session holds an exclusive `flock` on
+    `/tmp/leanrs-timing.lock`, taken without waiting. It refuses to start if
+    the 1-minute load average is above 1.0 or any lake, cargo, rustc, clang
+    or lean process is running. Every build and test script holds the same
+    lock shared (`scripts/check.sh` does).
+  - **Pinning.** One quiet core per session, set with `sched_setaffinity`;
+    one timed process at a time; one warm-up per side, then nine alternating
+    pairs, each a fresh process.
+  - **What is timed.** Each binary reports its own kernel time: monotonic
+    clock reads around the call, input built before and result consumed
+    after, through opaque sinks. The statistic is the median of nine. A case
+    whose native median is under 20 ms is `too-small` and gets a larger
+    size.
+  - **Spread.** (max - min) / median above 0.15 means a rerun as nineteen
+    pairs. A micro still noisy after that is not used.
+  - **Memory.** `ru_maxrss` of both sides, reported beside the time ratio.
+- **Approval.** Timing sessions run only with the owner's approval, and
+  never at the same time as another project's.
+
 ## Commits
 
 Small commits with a plain description of the change and its reason.
