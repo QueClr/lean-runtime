@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use lean_runtime::semantics::{float, float32, hash};
+use lean_runtime::semantics::{float, float32, hash, libm};
 
 // ------------------------------------------------------------------ TOML
 
@@ -627,6 +627,7 @@ fn registry() -> Registry {
     let mut r = Registry(HashMap::new());
     hash_fns(&mut r);
     float_fns(&mut r);
+    libm_fns(&mut r);
     r
 }
 
@@ -719,6 +720,41 @@ fn float_fns(r: &mut Registry) {
     });
 }
 
+fn libm_fns(r: &mut Registry) {
+    macro_rules! unary {
+        ($($lean:literal => $f:path, $g:path;)*) => {
+            $(
+                r.add(concat!("Float.", $lean), |a| fret($f(f64a(&a[0]))));
+                r.add(concat!("Float32.", $lean), |a| gret($g(f32a(&a[0]))));
+            )*
+        };
+    }
+    unary! {
+        "abs" => libm::fabs, libm::fabsf; "acos" => libm::acos, libm::acosf;
+        "acosh" => libm::acosh, libm::acoshf; "asin" => libm::asin, libm::asinf;
+        "asinh" => libm::asinh, libm::asinhf; "atan" => libm::atan, libm::atanf;
+        "atanh" => libm::atanh, libm::atanhf; "cbrt" => libm::cbrt, libm::cbrtf;
+        "ceil" => libm::ceil, libm::ceilf; "cos" => libm::cos, libm::cosf;
+        "cosh" => libm::cosh, libm::coshf; "exp" => libm::exp, libm::expf;
+        "exp2" => libm::exp2, libm::exp2f; "floor" => libm::floor, libm::floorf;
+        "log" => libm::log, libm::logf; "log10" => libm::log10, libm::log10f;
+        "log2" => libm::log2, libm::log2f; "round" => libm::round, libm::roundf;
+        "sin" => libm::sin, libm::sinf; "sinh" => libm::sinh, libm::sinhf;
+        "sqrt" => libm::sqrt, libm::sqrtf; "tan" => libm::tan, libm::tanf;
+        "tanh" => libm::tanh, libm::tanhf;
+    }
+    r.add("Float.atan2", |a| {
+        fret(libm::atan2(f64a(&a[0]), f64a(&a[1])))
+    });
+    r.add("Float32.atan2", |a| {
+        gret(libm::atan2f(f32a(&a[0]), f32a(&a[1])))
+    });
+    r.add("Float.pow", |a| fret(libm::pow(f64a(&a[0]), f64a(&a[1]))));
+    r.add("Float32.pow", |a| {
+        gret(libm::powf(f32a(&a[0]), f32a(&a[1])))
+    });
+}
+
 // ------------------------------------------------------------------ the tests
 
 /// Whether the call's output is the row's: `expected` (or, for a panic,
@@ -782,4 +818,11 @@ fn hash_rows() {
 #[test]
 fn float_rows() {
     run("float", include_str!("cases/float/float.rows.toml"));
+}
+
+/// glibc's libm is foreign code, which Miri does not run.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn libm_rows() {
+    run("libm", include_str!("cases/libm/libm.rows.toml"));
 }

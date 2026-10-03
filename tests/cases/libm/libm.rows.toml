@@ -1,0 +1,3093 @@
+# Row cases of area `libm` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/libm/libm.rows.toml`.
+
+[[row]]
+id = "libm/cbrt.nan"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0.001"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.001"]
+bits = { args = ["0x3f50624dd2f1a9fc"], result = "0x3fb999999999999a" }
+expected = "0.100000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0.1"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.1"]
+bits = { args = ["0x3fb999999999999a"], result = "0x3fddb4c7760bcff4" }
+expected = "0.464159"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-0.3"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-0.3)"]
+bits = { args = ["0xbfd3333333333333"], result = "0xbfe56bfea66ef78c" }
+expected = "-0.669433"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0.45"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.45"]
+bits = { args = ["0x3fdccccccccccccd"], result = "0x3fe8859b5bd7e46b" }
+expected = "0.766309"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0.51"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.51"]
+bits = { args = ["0x3fe051eb851eb852"], result = "0x3fe9910e374df4b1" }
+expected = "0.798957"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-0.5"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-0.5)"]
+bits = { args = ["0xbfe0000000000000"], result = "0xbfe965fea53d6e3d" }
+expected = "-0.793701"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0.7"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fec69b5a72f1a9a" }
+expected = "0.887904"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-0.999"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-0.999)"]
+bits = { args = ["0xbfeff7ced916872b"], result = "0xbfeffd44b7580664" }
+expected = "-0.999667"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.0.99"
+area = "libm"
+fn = "Float.cbrt"
+args = ["0.99"]
+bits = { args = ["0x3fefae147ae147ae"], result = "0x3fefe49a0fb2bf3e" }
+expected = "0.996655"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.100.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["100.0"]
+bits = { args = ["0x4059000000000000"], result = "0x401290fca9c761f7" }
+expected = "4.641589"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.inf"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.10.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["10.0"]
+bits = { args = ["0x4024000000000000"], result = "0x40013c484138704e" }
+expected = "2.154435"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-1.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"], result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.1.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["1.0"]
+bits = { args = ["0x3ff0000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.123.456"
+area = "libm"
+fn = "Float.cbrt"
+args = ["123.456"]
+bits = { args = ["0x405edd2f1a9fbe77"], result = "0x4013ead4f488ee36" }
+expected = "4.979328"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-1e+100"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-1e100)"]
+bits = { args = ["0xd4b249ad2594c37d"], result = "0xc6da8e327ba6c9c9" }
+expected = "-2154434690031883848421259404640256.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.1e+308"
+area = "libm"
+fn = "Float.cbrt"
+args = ["1e308"]
+bits = { args = ["0x7fe1ccf385ebc8a0"], result = "0x55409438d5a385ea" }
+expected = "4641588833612779530528991991149445789091831853450001786208012117677618425517031019987794403794654068736.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.1e-310"
+area = "libm"
+fn = "Float.cbrt"
+args = ["1e-310"]
+bits = { args = ["0x000012688b70e62b"], result = "0x2a7a9d1b0b5d7426" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.1e-05"
+area = "libm"
+fn = "Float.cbrt"
+args = ["1e-05"]
+bits = { args = ["0x3ee4f8b588e368f1"], result = "0x3f960fb8a566f626" }
+expected = "0.021544"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.2.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["2.0"]
+bits = { args = ["0x4000000000000000"], result = "0x3ff428a2f98d728c" }
+expected = "1.259921"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.2.5"
+area = "libm"
+fn = "Float.cbrt"
+args = ["2.5"]
+bits = { args = ["0x4004000000000000"], result = "0x3ff5b7209557b0ed" }
+expected = "1.357209"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.-27.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-27.0)"]
+bits = { args = ["0xc03b000000000000"], result = "0xc008000000000001" }
+expected = "-3.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.3.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["3.0"]
+bits = { args = ["0x4008000000000000"], result = "0x3ff7137449123ef7" }
+expected = "1.442250"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.3.7252902984e-09"
+area = "libm"
+fn = "Float.cbrt"
+args = ["3.7252902984e-09"]
+bits = { args = ["0x3e2ffffffffdb73d"], result = "0x3f5965fea53cd386" }
+expected = "0.001550"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.5e-324"
+area = "libm"
+fn = "Float.cbrt"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"], result = "0x298fffffffffffff" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt.7.0"
+area = "libm"
+fn = "Float.cbrt"
+args = ["7.0"]
+bits = { args = ["0x401c000000000000"], result = "0x3ffe9b5dba58189d" }
+expected = "1.912931"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.nan"
+area = "libm"
+fn = "Float.atanh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0.001"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.001"]
+bits = { args = ["0x3f50624dd2f1a9fc"], result = "0x3f50624e2e91ed17" }
+expected = "0.001000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-0"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0.1"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.1"]
+bits = { args = ["0x3fb999999999999a"], result = "0x3fb9af93cd234412" }
+expected = "0.100335"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-0.3"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.3)"]
+bits = { args = ["0xbfd3333333333333"], result = "0xbfd3cf2b50617c96" }
+expected = "-0.309520"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0.45"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.45"]
+bits = { args = ["0x3fdccccccccccccd"], result = "0x3fdf0554513b1b4c" }
+expected = "0.484700"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0.51"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.51"]
+bits = { args = ["0x3fe051eb851eb852"], result = "0x3fe201e1dc7b4c9e" }
+expected = "0.562730"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-0.5"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.5)"]
+bits = { args = ["0xbfe0000000000000"], result = "0xbfe193ea7aad030a" }
+expected = "-0.549306"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0.7"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3febc0ed0947fbe8" }
+expected = "0.867301"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-0.999"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.999)"]
+bits = { args = ["0xbfeff7ced916872b"], result = "0xc00e66cfde9c7c2d" }
+expected = "-3.800201"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.0.99"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.99"]
+bits = { args = ["0x3fefae147ae147ae"], result = "0x40052c581997cd85" }
+expected = "2.646652"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.100.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["100.0"]
+bits = { args = ["0x4059000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.inf"
+area = "libm"
+fn = "Float.atanh"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.10.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["10.0"]
+bits = { args = ["0x4024000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-1.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.1.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["1.0"]
+bits = { args = ["0x3ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.123.456"
+area = "libm"
+fn = "Float.atanh"
+args = ["123.456"]
+bits = { args = ["0x405edd2f1a9fbe77"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-1e+100"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-1e100)"]
+bits = { args = ["0xd4b249ad2594c37d"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.1e+308"
+area = "libm"
+fn = "Float.atanh"
+args = ["1e308"]
+bits = { args = ["0x7fe1ccf385ebc8a0"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.1e-310"
+area = "libm"
+fn = "Float.atanh"
+args = ["1e-310"]
+bits = { args = ["0x000012688b70e62b"], result = "0x000012688b70e62b" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.1e-05"
+area = "libm"
+fn = "Float.atanh"
+args = ["1e-05"]
+bits = { args = ["0x3ee4f8b588e368f1"], result = "0x3ee4f8b588e6698f" }
+expected = "0.000010"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.2.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["2.0"]
+bits = { args = ["0x4000000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.2.5"
+area = "libm"
+fn = "Float.atanh"
+args = ["2.5"]
+bits = { args = ["0x4004000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.-27.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-27.0)"]
+bits = { args = ["0xc03b000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.3.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["3.0"]
+bits = { args = ["0x4008000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.3.7252902984e-09"
+area = "libm"
+fn = "Float.atanh"
+args = ["3.7252902984e-09"]
+bits = { args = ["0x3e2ffffffffdb73d"], result = "0x3e2ffffffffdb73d" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.5e-324"
+area = "libm"
+fn = "Float.atanh"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"], result = "0x0000000000000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/atanh.7.0"
+area = "libm"
+fn = "Float.atanh"
+args = ["7.0"]
+bits = { args = ["0x401c000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/float.rs (float_cbrt, float_atanh), re-probed on 4.34.0"
+
+[[row]]
+id = "libm/cbrt32.nan"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.0"]
+bits = { args = ["0x00000000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.-0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"], result = "0x80000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.0.1"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.1"]
+bits = { args = ["0x3dcccccd"], result = "0x3eeda63c" }
+expected = "0.464159"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.-0.3"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-0.3)"]
+bits = { args = ["0xbe99999a"], result = "0xbf2b5ff5" }
+expected = "-0.669433"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.0.45"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.45"]
+bits = { args = ["0x3ee66666"], result = "0x3f442cdb" }
+expected = "0.766309"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.0.5"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.5"]
+bits = { args = ["0x3f000000"], result = "0x3f4b2ff5" }
+expected = "0.793701"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.0.51"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.51"]
+bits = { args = ["0x3f028f5c"], result = "0x3f4c8872" }
+expected = "0.798957"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.-0.999"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-0.999)"]
+bits = { args = ["0xbf7fbe77"], result = "0xbf7fea26" }
+expected = "-0.999667"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.0.99"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.99"]
+bits = { args = ["0x3f7d70a4"], result = "0x3f7f24d1" }
+expected = "0.996656"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.1.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["1.0"]
+bits = { args = ["0x3f800000"], result = "0x3f800000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.-1.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"], result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.2.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["2.0"]
+bits = { args = ["0x40000000"], result = "0x3fa14518" }
+expected = "1.259921"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.7.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["7.0"]
+bits = { args = ["0x40e00000"], result = "0x3ff4daee" }
+expected = "1.912931"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.-27.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-27.0)"]
+bits = { args = ["0xc1d80000"], result = "0xc0400000" }
+expected = "-3.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.100.0"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["1e02"]
+bits = { args = ["0x42c80000"], result = "0x409487e5" }
+expected = "4.641589"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.1e-05"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["1e-05"]
+bits = { args = ["0x3727c5ac"], result = "0x3cb07dc5" }
+expected = "0.021544"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.3.7252902984e-09"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["3.7252903e-09"]
+bits = { args = ["0x31800000"], result = "0x3acb2ff5" }
+expected = "0.001550"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.minsub"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["1e-45"]
+bits = { args = ["0x00000001"], result = "0x26a14518" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.max"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"], result = "0x54cb2ff5" }
+expected = "6981463572480.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.inf"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt32.-inf"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"], result = "0xff800000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.nan"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.0"]
+bits = { args = ["0x00000000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.-0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"], result = "0x80000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.0.1"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.1"]
+bits = { args = ["0x3dcccccd"], result = "0x3dcd7c9e" }
+expected = "0.100335"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.-0.3"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.3)"]
+bits = { args = ["0xbe99999a"], result = "0xbe9e795b" }
+expected = "-0.309520"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.0.45"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.45"]
+bits = { args = ["0x3ee66666"], result = "0x3ef82aa2" }
+expected = "0.484700"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.0.5"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.5"]
+bits = { args = ["0x3f000000"], result = "0x3f0c9f54" }
+expected = "0.549306"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.0.51"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.51"]
+bits = { args = ["0x3f028f5c"], result = "0x3f100f0f" }
+expected = "0.562730"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.-0.999"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.999)"]
+bits = { args = ["0xbf7fbe77"], result = "0xc073369a" }
+expected = "-3.800208"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.0.99"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.99"]
+bits = { args = ["0x3f7d70a4"], result = "0x402962c3" }
+expected = "2.646653"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.1.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["1.0"]
+bits = { args = ["0x3f800000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.-1.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"], result = "0xff800000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.2.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["2.0"]
+bits = { args = ["0x40000000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.7.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["7.0"]
+bits = { args = ["0x40e00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.-27.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-27.0)"]
+bits = { args = ["0xc1d80000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.100.0"
+area = "libm"
+fn = "Float32.atanh"
+args = ["1e02"]
+bits = { args = ["0x42c80000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.1e-05"
+area = "libm"
+fn = "Float32.atanh"
+args = ["1e-05"]
+bits = { args = ["0x3727c5ac"], result = "0x3727c5ac" }
+expected = "0.000010"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.3.7252902984e-09"
+area = "libm"
+fn = "Float32.atanh"
+args = ["3.7252903e-09"]
+bits = { args = ["0x31800000"], result = "0x31800000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.minsub"
+area = "libm"
+fn = "Float32.atanh"
+args = ["1e-45"]
+bits = { args = ["0x00000001"], result = "0x00000001" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.max"
+area = "libm"
+fn = "Float32.atanh"
+args = ["3.4028235e38"]
+bits = { args = ["0x7f7fffff"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.inf"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/atanh32.-inf"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xff800000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Float32.cbrt and Float32.atanh, glibc's algorithms"
+
+[[row]]
+id = "libm/cbrt.rustdiff.3ebdc1b77ae0bf34"
+area = "libm"
+fn = "Float.cbrt"
+args = ["1.7736378867920078e-06"]
+bits = { args = ["0x3ebdc1b77ae0bf34"], result = "0x3f88ca5ce7de1957" }
+expected = "0.012105"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt.rustdiff.3ed7b07ce91e5906"
+area = "libm"
+fn = "Float.cbrt"
+args = ["5.647994514654128e-06"]
+bits = { args = ["0x3ed7b07ce91e5906"], result = "0x3f923c6f6fa5c784" }
+expected = "0.017809"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt.rustdiff.bee305f050c368dc"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-9.070967756864513e-06)"]
+bits = { args = ["0xbee305f050c368dc"], result = "0xbf955b1c1bf4ce1f" }
+expected = "-0.020855"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt.rustdiff.bf097101dce4e7bf"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-4.8525685644354e-05)"]
+bits = { args = ["0xbf097101dce4e7bf"], result = "0xbfa2accc8c56573a" }
+expected = "-0.036475"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt.rustdiff.3f19ad2e144d6e8f"
+area = "libm"
+fn = "Float.cbrt"
+args = ["9.794801469580949e-05"]
+bits = { args = ["0x3f19ad2e144d6e8f"], result = "0x3fa799ec1e91ad9a" }
+expected = "0.046096"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt.rustdiff.bf2d9aa792e1af47"
+area = "libm"
+fn = "Float.cbrt"
+args = ["(-0.00022586150720670993)"]
+bits = { args = ["0xbf2d9aa792e1af47"], result = "0xbfaf2e39c3a681e9" }
+expected = "-0.060900"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh.rustdiff.3f479457fb676948"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.0007195882415616328"]
+bits = { args = ["0x3f479457fb676948"], result = "0x3f4794583faf6355" }
+expected = "0.000720"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh.rustdiff.bf44628e115a7b75"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.0006221002283445092)"]
+bits = { args = ["0xbf44628e115a7b75"], result = "0xbf44628e3d790d88" }
+expected = "-0.000622"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh.rustdiff.bfe4c53a47d78eb0"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.6490756419338677)"]
+bits = { args = ["0xbfe4c53a47d78eb0"], result = "0xbfe8c225f98616b2" }
+expected = "-0.773700"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh.rustdiff.3f2b77af611d9a90"
+area = "libm"
+fn = "Float.atanh"
+args = ["0.00020956054555228533"]
+bits = { args = ["0x3f2b77af611d9a90"], result = "0x3f2b77af67dc8b0e" }
+expected = "0.000210"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh.rustdiff.bfedc2e2c011c5d8"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.9300397635799369)"]
+bits = { args = ["0xbfedc2e2c011c5d8"], result = "0xbffa89f8aeaa7278" }
+expected = "-1.658684"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh.rustdiff.bf35a398973466e1"
+area = "libm"
+fn = "Float.atanh"
+args = ["(-0.00033018565518859287)"]
+bits = { args = ["0xbf35a398973466e1"], result = "0xbf35a398a465e286" }
+expected = "-0.000330"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt32.rustdiff.b84b880f"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-4.8525686e-05)"]
+bits = { args = ["0xb84b880f"], result = "0xbd156665" }
+expected = "-0.036475"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt32.rustdiff.bf497d97"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-0.7870726)"]
+bits = { args = ["0xbf497d97"], result = "0xbf6c5cc1" }
+expected = "-0.923290"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt32.rustdiff.c42dc947"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-695.14496)"]
+bits = { args = ["0xc42dc947"], result = "0xc10dbc46" }
+expected = "-8.858465"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt32.rustdiff.3bf9d9b2"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.0076248283"]
+bits = { args = ["0x3bf9d9b2"], result = "0x3e498c11" }
+expected = "0.196823"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt32.rustdiff.3dc4a3db"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["0.096015655"]
+bits = { args = ["0x3dc4a3db"], result = "0x3eea7341" }
+expected = "0.457911"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/cbrt32.rustdiff.be251d71"
+area = "libm"
+fn = "Float32.cbrt"
+args = ["(-0.16124512)"]
+bits = { args = ["0xbe251d71"], result = "0xbf0b5677" }
+expected = "-0.544288"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh32.rustdiff.bd1f062e"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.038824253)"]
+bits = { args = ["0xbd1f062e"], result = "0xbd1f1aa7" }
+expected = "-0.038844"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh32.rustdiff.bf2629d2"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.6490756)"]
+bits = { args = ["0xbf2629d2"], result = "0xbf461130" }
+expected = "-0.773700"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh32.rustdiff.395bbd7b"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.00020956055"]
+bits = { args = ["0x395bbd7b"], result = "0x395bbd7b" }
+expected = "0.000210"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh32.rustdiff.38fee3f5"
+area = "libm"
+fn = "Float32.atanh"
+args = ["0.00012154124"]
+bits = { args = ["0x38fee3f5"], result = "0x38fee3f6" }
+expected = "0.000122"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh32.rustdiff.bf22a4f5"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.63532954)"]
+bits = { args = ["0xbf22a4f5"], result = "0xbf4013d7" }
+expected = "-0.750303"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/atanh32.rustdiff.bf63c077"
+area = "libm"
+fn = "Float32.atanh"
+args = ["(-0.88965553)"]
+bits = { args = ["0xbf63c077"], result = "0xbfb5cb74" }
+expected = "-1.420271"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: inputs where Rust's own cbrt/atanh (correctly rounded cbrt, a different atanh formula) differ from glibc's, which native Lean calls"
+
+[[row]]
+id = "libm/pow.2.0.0.5"
+area = "libm"
+fn = "Float.pow"
+args = ["2.0", "0.5"]
+bits = { args = ["0x4000000000000000", "0x3fe0000000000000"], result = "0x3ff6a09e667f3bcd" }
+expected = "1.414214"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.-0.0.5"
+area = "libm"
+fn = "Float.pow"
+args = ["(-0.0)", "0.5"]
+bits = { args = ["0x8000000000000000", "0x3fe0000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.-inf.0.5"
+area = "libm"
+fn = "Float.pow"
+args = ["(-1.0 / 0.0)", "0.5"]
+bits = { args = ["0xfff0000000000000", "0x3fe0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.3.0.2.0"
+area = "libm"
+fn = "Float.pow"
+args = ["3.0", "2.0"]
+bits = { args = ["0x4008000000000000", "0x4000000000000000"], result = "0x4022000000000000" }
+expected = "9.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.3.0.-1.0"
+area = "libm"
+fn = "Float.pow"
+args = ["3.0", "(-1.0)"]
+bits = { args = ["0x4008000000000000", "0xbff0000000000000"], result = "0x3fd5555555555555" }
+expected = "0.333333"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.2.0.0.7"
+area = "libm"
+fn = "Float.pow"
+args = ["2.0", "0.7"]
+bits = { args = ["0x4000000000000000", "0x3fe6666666666666"], result = "0x3ff9fdf8bcce533d" }
+expected = "1.624505"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.-8.0.0.3333333333333333"
+area = "libm"
+fn = "Float.pow"
+args = ["(-8.0)", "0.3333333333333333"]
+bits = { args = ["0xc020000000000000", "0x3fd5555555555555"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.nan.0"
+area = "libm"
+fn = "Float.pow"
+args = ["(0.0 / 0.0)", "0.0"]
+bits = { args = ["0x7ff8000000000000", "0x0000000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.1.0.nan"
+area = "libm"
+fn = "Float.pow"
+args = ["1.0", "(0.0 / 0.0)"]
+bits = { args = ["0x3ff0000000000000", "0x7ff8000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.-1.0.inf"
+area = "libm"
+fn = "Float.pow"
+args = ["(-1.0)", "(1.0 / 0.0)"]
+bits = { args = ["0xbff0000000000000", "0x7ff0000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.0.-1.0"
+area = "libm"
+fn = "Float.pow"
+args = ["0.0", "(-1.0)"]
+bits = { args = ["0x0000000000000000", "0xbff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.-0.-3.0"
+area = "libm"
+fn = "Float.pow"
+args = ["(-0.0)", "(-3.0)"]
+bits = { args = ["0x8000000000000000", "0xc008000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.1.0000001.1000000000.0"
+area = "libm"
+fn = "Float.pow"
+args = ["1.0000001", "1000000000.0"]
+bits = { args = ["0x3ff000001ad7f29b", "0x41cdcd6500000000"], result = "0x48f349445c228792" }
+expected = "26881038582144647470035137871132316907077632.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.10.0.308.0"
+area = "libm"
+fn = "Float.pow"
+args = ["10.0", "308.0"]
+bits = { args = ["0x4024000000000000", "0x4073400000000000"], result = "0x7fe1ccf385ebc8a0" }
+expected = "100000000000000001097906362944045541740492309677311846336810682903157585404911491537163328978494688899061249669721172515611590283743140088328307009198146046031271664502933027185697489699588559043338384466165001178426897626212945177628091195786707458122783970171784415105291802893207873272974885715430223118336.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow.10.0.309.0"
+area = "libm"
+fn = "Float.pow"
+args = ["10.0", "309.0"]
+bits = { args = ["0x4024000000000000", "0x4073500000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.2.0.0.5"
+area = "libm"
+fn = "Float32.pow"
+args = ["2.0", "0.5"]
+bits = { args = ["0x40000000", "0x3f000000"], result = "0x3fb504f3" }
+expected = "1.414214"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.-0.0.5"
+area = "libm"
+fn = "Float32.pow"
+args = ["(-0.0)", "0.5"]
+bits = { args = ["0x80000000", "0x3f000000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.-inf.0.5"
+area = "libm"
+fn = "Float32.pow"
+args = ["(-1.0 / 0.0)", "0.5"]
+bits = { args = ["0xff800000", "0x3f000000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.3.0.2.0"
+area = "libm"
+fn = "Float32.pow"
+args = ["3.0", "2.0"]
+bits = { args = ["0x40400000", "0x40000000"], result = "0x41100000" }
+expected = "9.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.3.0.-1.0"
+area = "libm"
+fn = "Float32.pow"
+args = ["3.0", "(-1.0)"]
+bits = { args = ["0x40400000", "0xbf800000"], result = "0x3eaaaaab" }
+expected = "0.333333"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.2.0.0.7"
+area = "libm"
+fn = "Float32.pow"
+args = ["2.0", "0.7"]
+bits = { args = ["0x40000000", "0x3f333333"], result = "0x3fcfefc6" }
+expected = "1.624505"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/pow32.1.0000001.10000000.0"
+area = "libm"
+fn = "Float32.pow"
+args = ["1.0000001", "1e07"]
+bits = { args = ["0x3f800001", "0x4b189680"], result = "0x4052d05e" }
+expected = "3.293968"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan2.0.-0"
+area = "libm"
+fn = "Float.atan2"
+args = ["0.0", "(-0.0)"]
+bits = { args = ["0x0000000000000000", "0x8000000000000000"], result = "0x400921fb54442d18" }
+expected = "3.141593"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan2.-0.-0"
+area = "libm"
+fn = "Float.atan2"
+args = ["(-0.0)", "(-0.0)"]
+bits = { args = ["0x8000000000000000", "0x8000000000000000"], result = "0xc00921fb54442d18" }
+expected = "-3.141593"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan2.0.5.2"
+area = "libm"
+fn = "Float.atan2"
+args = ["0.5", "2.0"]
+bits = { args = ["0x3fe0000000000000", "0x4000000000000000"], result = "0x3fcf5b75f92c80dd" }
+expected = "0.244979"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan2.-1.-1"
+area = "libm"
+fn = "Float.atan2"
+args = ["(-1.0)", "(-1.0)"]
+bits = { args = ["0xbff0000000000000", "0xbff0000000000000"], result = "0xc002d97c7f3321d2" }
+expected = "-2.356194"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan2.inf.inf"
+area = "libm"
+fn = "Float.atan2"
+args = ["(1.0 / 0.0)", "(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000", "0x7ff0000000000000"], result = "0x3fe921fb54442d18" }
+expected = "0.785398"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan232.0.-0"
+area = "libm"
+fn = "Float32.atan2"
+args = ["0.0", "(-0.0)"]
+bits = { args = ["0x00000000", "0x80000000"], result = "0x40490fdb" }
+expected = "3.141593"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan232.0.5.2"
+area = "libm"
+fn = "Float32.atan2"
+args = ["0.5", "2.0"]
+bits = { args = ["0x3f000000", "0x40000000"], result = "0x3e7adbb0" }
+expected = "0.244979"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/atan232.-1.-1"
+area = "libm"
+fn = "Float32.atan2"
+args = ["(-1.0)", "(-1.0)"]
+bits = { args = ["0xbf800000", "0xbf800000"], result = "0xc016cbe4" }
+expected = "-2.356194"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: pow, special operands and constant-exponent rewrites"
+
+[[row]]
+id = "libm/abs.-0"
+area = "libm"
+fn = "Float.abs"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/abs.-3.5"
+area = "libm"
+fn = "Float.abs"
+args = ["(-3.5)"]
+bits = { args = ["0xc00c000000000000"], result = "0x400c000000000000" }
+expected = "3.500000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/abs.-inf"
+area = "libm"
+fn = "Float.abs"
+args = ["(-1.0 / 0.0)"]
+bits = { args = ["0xfff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/abs.nan"
+area = "libm"
+fn = "Float.abs"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos.0.5"
+area = "libm"
+fn = "Float.acos"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"], result = "0x3ff0c152382d7366" }
+expected = "1.047198"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos.2.0"
+area = "libm"
+fn = "Float.acos"
+args = ["2.0"]
+bits = { args = ["0x4000000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos.-1.0"
+area = "libm"
+fn = "Float.acos"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"], result = "0x400921fb54442d18" }
+expected = "3.141593"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos.nan"
+area = "libm"
+fn = "Float.acos"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh.0.5"
+area = "libm"
+fn = "Float.acosh"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh.1.0"
+area = "libm"
+fn = "Float.acosh"
+args = ["1.0"]
+bits = { args = ["0x3ff0000000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh.1.5"
+area = "libm"
+fn = "Float.acosh"
+args = ["1.5"]
+bits = { args = ["0x3ff8000000000000"], result = "0x3feecc2caec5160a" }
+expected = "0.962424"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh.1e+300"
+area = "libm"
+fn = "Float.acosh"
+args = ["1e300"]
+bits = { args = ["0x7e37e43c8800759c"], result = "0x40859bbfd8b83e43" }
+expected = "691.468675"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh.nan"
+area = "libm"
+fn = "Float.acosh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin.0.5"
+area = "libm"
+fn = "Float.asin"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"], result = "0x3fe0c152382d7366" }
+expected = "0.523599"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin.2.0"
+area = "libm"
+fn = "Float.asin"
+args = ["2.0"]
+bits = { args = ["0x4000000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin.-0"
+area = "libm"
+fn = "Float.asin"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin.nan"
+area = "libm"
+fn = "Float.asin"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh.0.7"
+area = "libm"
+fn = "Float.asinh"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fe4e2a4fe9085dd" }
+expected = "0.652667"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh.-0"
+area = "libm"
+fn = "Float.asinh"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh.1e-300"
+area = "libm"
+fn = "Float.asinh"
+args = ["1e-300"]
+bits = { args = ["0x01a56e1fc2f8f359"], result = "0x01a56e1fc2f8f359" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh.1e+300"
+area = "libm"
+fn = "Float.asinh"
+args = ["1e300"]
+bits = { args = ["0x7e37e43c8800759c"], result = "0x40859bbfd8b83e43" }
+expected = "691.468675"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh.nan"
+area = "libm"
+fn = "Float.asinh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan.0.7"
+area = "libm"
+fn = "Float.atan"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fe38b112d7bd4ad" }
+expected = "0.610726"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan.inf"
+area = "libm"
+fn = "Float.atan"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x3ff921fb54442d18" }
+expected = "1.570796"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan.-0"
+area = "libm"
+fn = "Float.atan"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan.nan"
+area = "libm"
+fn = "Float.atan"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil.-1.2"
+area = "libm"
+fn = "Float.ceil"
+args = ["(-1.2)"]
+bits = { args = ["0xbff3333333333333"], result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil.1.2"
+area = "libm"
+fn = "Float.ceil"
+args = ["1.2"]
+bits = { args = ["0x3ff3333333333333"], result = "0x4000000000000000" }
+expected = "2.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil.-0.5"
+area = "libm"
+fn = "Float.ceil"
+args = ["(-0.5)"]
+bits = { args = ["0xbfe0000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil.nan"
+area = "libm"
+fn = "Float.ceil"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos.0.7"
+area = "libm"
+fn = "Float.cos"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fe87996529f9d93" }
+expected = "0.764842"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos.1e+22"
+area = "libm"
+fn = "Float.cos"
+args = ["1e22"]
+bits = { args = ["0x4480f0cf064dd592"], result = "0x3fe0be2cef01c8f4" }
+expected = "0.523215"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos.inf"
+area = "libm"
+fn = "Float.cos"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7ff0000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos.nan"
+area = "libm"
+fn = "Float.cos"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh.0.7"
+area = "libm"
+fn = "Float.cosh"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3ff4152c1862342f" }
+expected = "1.255169"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh.710.0"
+area = "libm"
+fn = "Float.cosh"
+args = ["710.0"]
+bits = { args = ["0x4086300000000000"], result = "0x7fe3e21a464507fa" }
+expected = "111699738308085565748547283851556905924712174127239557075359318714351762534385024092639262900671422166656146148496350301415279788562554923271026299758072753595916123054866238259776947907091629366786135887116212072552734216500374593021203412995371138001243485476740130667762828049759451271612651033515404558336.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh.-0"
+area = "libm"
+fn = "Float.cosh"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh.nan"
+area = "libm"
+fn = "Float.cosh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp.0.7"
+area = "libm"
+fn = "Float.exp"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x40001c2a61268987" }
+expected = "2.013753"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp.709.8"
+area = "libm"
+fn = "Float.exp"
+args = ["709.8"]
+bits = { args = ["0x40862e6666666666"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp.-745.2"
+area = "libm"
+fn = "Float.exp"
+args = ["(-745.2)"]
+bits = { args = ["0xc08749999999999a"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp.-746.0"
+area = "libm"
+fn = "Float.exp"
+args = ["(-746.0)"]
+bits = { args = ["0xc087500000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp.nan"
+area = "libm"
+fn = "Float.exp"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp2.0.7"
+area = "libm"
+fn = "Float.exp2"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3ff9fdf8bcce533d" }
+expected = "1.624505"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp2.1024.0"
+area = "libm"
+fn = "Float.exp2"
+args = ["1024.0"]
+bits = { args = ["0x4090000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp2.-1075.0"
+area = "libm"
+fn = "Float.exp2"
+args = ["(-1075.0)"]
+bits = { args = ["0xc090cc0000000000"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp2.nan"
+area = "libm"
+fn = "Float.exp2"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor.-1.8"
+area = "libm"
+fn = "Float.floor"
+args = ["(-1.8)"]
+bits = { args = ["0xbffccccccccccccd"], result = "0xc000000000000000" }
+expected = "-2.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor.1.8"
+area = "libm"
+fn = "Float.floor"
+args = ["1.8"]
+bits = { args = ["0x3ffccccccccccccd"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor.-0"
+area = "libm"
+fn = "Float.floor"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor.nan"
+area = "libm"
+fn = "Float.floor"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log.0.7"
+area = "libm"
+fn = "Float.log"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0xbfd6d3c324e13f50" }
+expected = "-0.356675"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log.0"
+area = "libm"
+fn = "Float.log"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log.-1.0"
+area = "libm"
+fn = "Float.log"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log.5e-324"
+area = "libm"
+fn = "Float.log"
+args = ["5e-324"]
+bits = { args = ["0x0000000000000001"], result = "0xc0874385446d71c3" }
+expected = "-744.440072"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log.nan"
+area = "libm"
+fn = "Float.log"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log10.1000.0"
+area = "libm"
+fn = "Float.log10"
+args = ["1000.0"]
+bits = { args = ["0x408f400000000000"], result = "0x4008000000000000" }
+expected = "3.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log10.0.7"
+area = "libm"
+fn = "Float.log10"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0xbfc3d3d3d21ccf04" }
+expected = "-0.154902"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log10.0"
+area = "libm"
+fn = "Float.log10"
+args = ["0.0"]
+bits = { args = ["0x0000000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log10.nan"
+area = "libm"
+fn = "Float.log10"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log2.0.7"
+area = "libm"
+fn = "Float.log2"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0xbfe0776228967d13" }
+expected = "-0.514573"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log2.1024.0"
+area = "libm"
+fn = "Float.log2"
+args = ["1024.0"]
+bits = { args = ["0x4090000000000000"], result = "0x4024000000000000" }
+expected = "10.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log2.-0"
+area = "libm"
+fn = "Float.log2"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log2.nan"
+area = "libm"
+fn = "Float.log2"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round.0.5"
+area = "libm"
+fn = "Float.round"
+args = ["0.5"]
+bits = { args = ["0x3fe0000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round.-0.5"
+area = "libm"
+fn = "Float.round"
+args = ["(-0.5)"]
+bits = { args = ["0xbfe0000000000000"], result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round.2.5"
+area = "libm"
+fn = "Float.round"
+args = ["2.5"]
+bits = { args = ["0x4004000000000000"], result = "0x4008000000000000" }
+expected = "3.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round.-2.5"
+area = "libm"
+fn = "Float.round"
+args = ["(-2.5)"]
+bits = { args = ["0xc004000000000000"], result = "0xc008000000000000" }
+expected = "-3.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round.0.49999999999999994"
+area = "libm"
+fn = "Float.round"
+args = ["0.49999999999999994"]
+bits = { args = ["0x3fdfffffffffffff"], result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round.nan"
+area = "libm"
+fn = "Float.round"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin.0.7"
+area = "libm"
+fn = "Float.sin"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fe49d6e694619b8" }
+expected = "0.644218"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin.1e+22"
+area = "libm"
+fn = "Float.sin"
+args = ["1e22"]
+bits = { args = ["0x4480f0cf064dd592"], result = "0xbfeb453ab76bf397" }
+expected = "-0.852201"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin.-0"
+area = "libm"
+fn = "Float.sin"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin.nan"
+area = "libm"
+fn = "Float.sin"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh.0.7"
+area = "libm"
+fn = "Float.sinh"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fe8465153d5bdbc" }
+expected = "0.758584"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh.710.5"
+area = "libm"
+fn = "Float.sinh"
+args = ["710.5"]
+bits = { args = ["0x4086340000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh.0.0078125"
+area = "libm"
+fn = "Float.sinh"
+args = ["0.0078125"]
+bits = { args = ["0x3f80000000000000"], result = "0x3f80000aaaaccccd" }
+expected = "0.007813"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh.nan"
+area = "libm"
+fn = "Float.sinh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt.2.0"
+area = "libm"
+fn = "Float.sqrt"
+args = ["2.0"]
+bits = { args = ["0x4000000000000000"], result = "0x3ff6a09e667f3bcd" }
+expected = "1.414214"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt.-0"
+area = "libm"
+fn = "Float.sqrt"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt.-1.0"
+area = "libm"
+fn = "Float.sqrt"
+args = ["(-1.0)"]
+bits = { args = ["0xbff0000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt.nan"
+area = "libm"
+fn = "Float.sqrt"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan.0.7"
+area = "libm"
+fn = "Float.tan"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3feaf406c2fc78ae" }
+expected = "0.842288"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan.1.5707963267948966"
+area = "libm"
+fn = "Float.tan"
+args = ["1.5707963267948966"]
+bits = { args = ["0x3ff921fb54442d18"], result = "0x434d02967c31cdb5" }
+expected = "16331239353195370.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan.-0"
+area = "libm"
+fn = "Float.tan"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan.nan"
+area = "libm"
+fn = "Float.tan"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh.0.7"
+area = "libm"
+fn = "Float.tanh"
+args = ["0.7"]
+bits = { args = ["0x3fe6666666666666"], result = "0x3fe356fb17af2e92" }
+expected = "0.604368"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh.20.0"
+area = "libm"
+fn = "Float.tanh"
+args = ["20.0"]
+bits = { args = ["0x4034000000000000"], result = "0x3ff0000000000000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh.-0"
+area = "libm"
+fn = "Float.tanh"
+args = ["(-0.0)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh.nan"
+area = "libm"
+fn = "Float.tanh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/abs32.-0"
+area = "libm"
+fn = "Float32.abs"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/abs32.-3.5"
+area = "libm"
+fn = "Float32.abs"
+args = ["(-3.5)"]
+bits = { args = ["0xc0600000"], result = "0x40600000" }
+expected = "3.500000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/abs32.nan"
+area = "libm"
+fn = "Float32.abs"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos32.0.5"
+area = "libm"
+fn = "Float32.acos"
+args = ["0.5"]
+bits = { args = ["0x3f000000"], result = "0x3f860a92" }
+expected = "1.047198"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos32.2.0"
+area = "libm"
+fn = "Float32.acos"
+args = ["2.0"]
+bits = { args = ["0x40000000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acos32.nan"
+area = "libm"
+fn = "Float32.acos"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh32.1.5"
+area = "libm"
+fn = "Float32.acosh"
+args = ["1.5"]
+bits = { args = ["0x3fc00000"], result = "0x3f766166" }
+expected = "0.962424"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh32.1.0"
+area = "libm"
+fn = "Float32.acosh"
+args = ["1.0"]
+bits = { args = ["0x3f800000"], result = "0x00000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/acosh32.nan"
+area = "libm"
+fn = "Float32.acosh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin32.0.5"
+area = "libm"
+fn = "Float32.asin"
+args = ["0.5"]
+bits = { args = ["0x3f000000"], result = "0x3f060a92" }
+expected = "0.523599"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin32.2.0"
+area = "libm"
+fn = "Float32.asin"
+args = ["2.0"]
+bits = { args = ["0x40000000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asin32.nan"
+area = "libm"
+fn = "Float32.asin"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh32.0.7"
+area = "libm"
+fn = "Float32.asinh"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f271528" }
+expected = "0.652667"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh32.-0"
+area = "libm"
+fn = "Float32.asinh"
+args = ["(-0.0)"]
+bits = { args = ["0x80000000"], result = "0x80000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/asinh32.nan"
+area = "libm"
+fn = "Float32.asinh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan32.0.7"
+area = "libm"
+fn = "Float32.atan"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f1c5889" }
+expected = "0.610726"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan32.inf"
+area = "libm"
+fn = "Float32.atan"
+args = ["(1.0 / 0.0)"]
+bits = { args = ["0x7f800000"], result = "0x3fc90fdb" }
+expected = "1.570796"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/atan32.nan"
+area = "libm"
+fn = "Float32.atan"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil32.-1.2"
+area = "libm"
+fn = "Float32.ceil"
+args = ["(-1.2)"]
+bits = { args = ["0xbf99999a"], result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil32.1.2"
+area = "libm"
+fn = "Float32.ceil"
+args = ["1.2"]
+bits = { args = ["0x3f99999a"], result = "0x40000000" }
+expected = "2.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/ceil32.nan"
+area = "libm"
+fn = "Float32.ceil"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos32.0.7"
+area = "libm"
+fn = "Float32.cos"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f43ccb3" }
+expected = "0.764842"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos32.10000000000.0"
+area = "libm"
+fn = "Float32.cos"
+args = ["1e10"]
+bits = { args = ["0x501502f9"], result = "0x3f5f84c5" }
+expected = "0.873120"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cos32.nan"
+area = "libm"
+fn = "Float32.cos"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh32.0.7"
+area = "libm"
+fn = "Float32.cosh"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3fa0a961" }
+expected = "1.255169"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh32.90.0"
+area = "libm"
+fn = "Float32.cosh"
+args = ["9e01"]
+bits = { args = ["0x42b40000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/cosh32.nan"
+area = "libm"
+fn = "Float32.cosh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp32.0.7"
+area = "libm"
+fn = "Float32.exp"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x4000e153" }
+expected = "2.013753"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp32.88.8"
+area = "libm"
+fn = "Float32.exp"
+args = ["88.8"]
+bits = { args = ["0x42b1999a"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp32.nan"
+area = "libm"
+fn = "Float32.exp"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp232.0.7"
+area = "libm"
+fn = "Float32.exp2"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3fcfefc6" }
+expected = "1.624505"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp232.128.0"
+area = "libm"
+fn = "Float32.exp2"
+args = ["128.0"]
+bits = { args = ["0x43000000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/exp232.nan"
+area = "libm"
+fn = "Float32.exp2"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor32.-1.8"
+area = "libm"
+fn = "Float32.floor"
+args = ["(-1.8)"]
+bits = { args = ["0xbfe66666"], result = "0xc0000000" }
+expected = "-2.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor32.1.8"
+area = "libm"
+fn = "Float32.floor"
+args = ["1.8"]
+bits = { args = ["0x3fe66666"], result = "0x3f800000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/floor32.nan"
+area = "libm"
+fn = "Float32.floor"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log32.0.7"
+area = "libm"
+fn = "Float32.log"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0xbeb69e1a" }
+expected = "-0.356675"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log32.0"
+area = "libm"
+fn = "Float32.log"
+args = ["0.0"]
+bits = { args = ["0x00000000"], result = "0xff800000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log32.nan"
+area = "libm"
+fn = "Float32.log"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log1032.1000.0"
+area = "libm"
+fn = "Float32.log10"
+args = ["1e03"]
+bits = { args = ["0x447a0000"], result = "0x40400000" }
+expected = "3.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log1032.0.7"
+area = "libm"
+fn = "Float32.log10"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0xbe1e9ea0" }
+expected = "-0.154902"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log1032.nan"
+area = "libm"
+fn = "Float32.log10"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log232.0.7"
+area = "libm"
+fn = "Float32.log2"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0xbf03bb12" }
+expected = "-0.514573"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log232.0"
+area = "libm"
+fn = "Float32.log2"
+args = ["0.0"]
+bits = { args = ["0x00000000"], result = "0xff800000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/log232.nan"
+area = "libm"
+fn = "Float32.log2"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round32.0.5"
+area = "libm"
+fn = "Float32.round"
+args = ["0.5"]
+bits = { args = ["0x3f000000"], result = "0x3f800000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round32.-2.5"
+area = "libm"
+fn = "Float32.round"
+args = ["(-2.5)"]
+bits = { args = ["0xc0200000"], result = "0xc0400000" }
+expected = "-3.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/round32.nan"
+area = "libm"
+fn = "Float32.round"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin32.0.7"
+area = "libm"
+fn = "Float32.sin"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f24eb73" }
+expected = "0.644218"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin32.10000000000.0"
+area = "libm"
+fn = "Float32.sin"
+args = ["1e10"]
+bits = { args = ["0x501502f9"], result = "0xbef99a64" }
+expected = "-0.487506"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sin32.nan"
+area = "libm"
+fn = "Float32.sin"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh32.0.7"
+area = "libm"
+fn = "Float32.sinh"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f42328a" }
+expected = "0.758584"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh32.0.0078125"
+area = "libm"
+fn = "Float32.sinh"
+args = ["0.0078125"]
+bits = { args = ["0x3c000000"], result = "0x3c000056" }
+expected = "0.007813"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sinh32.nan"
+area = "libm"
+fn = "Float32.sinh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt32.2.0"
+area = "libm"
+fn = "Float32.sqrt"
+args = ["2.0"]
+bits = { args = ["0x40000000"], result = "0x3fb504f3" }
+expected = "1.414214"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt32.-1.0"
+area = "libm"
+fn = "Float32.sqrt"
+args = ["(-1.0)"]
+bits = { args = ["0xbf800000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/sqrt32.nan"
+area = "libm"
+fn = "Float32.sqrt"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan32.0.7"
+area = "libm"
+fn = "Float32.tan"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f57a036" }
+expected = "0.842288"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan32.10000000000.0"
+area = "libm"
+fn = "Float32.tan"
+args = ["1e10"]
+bits = { args = ["0x501502f9"], result = "0xbf0ef000" }
+expected = "-0.558350"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tan32.nan"
+area = "libm"
+fn = "Float32.tan"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh32.0.7"
+area = "libm"
+fn = "Float32.tanh"
+args = ["0.7"]
+bits = { args = ["0x3f333333"], result = "0x3f1ab7d8" }
+expected = "0.604368"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh32.10.0"
+area = "libm"
+fn = "Float32.tanh"
+args = ["1e01"]
+bits = { args = ["0x41200000"], result = "0x3f800000" }
+expected = "1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
+
+[[row]]
+id = "libm/tanh32.nan"
+area = "libm"
+fn = "Float32.tanh"
+args = ["(0.0 / 0.0)"]
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each"
