@@ -1,0 +1,6 @@
+name = "oracle"
+defaultTargets = ["oracle"]
+
+[[lean_exe]]
+name = "oracle"
+root = "Oracle"

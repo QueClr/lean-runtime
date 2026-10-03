@@ -40,6 +40,23 @@ translators must reproduce it.
 The oracle that records rows gets its inputs through argv, stdin or an
 opaque `IO` identity (`dyn`), so nothing is folded at compile time.
 
+**Recording and running rows.** `scripts/gen_rows.py
+tests/cases/<area>/<area>.rows.toml` rewrites every `fn`/`args` row's
+`expected`, `default`, `stderr` and `bits.result` from `scripts/oracle`, a
+Lean program built natively with Lean 4.34.0 that reads the inputs from
+stdin (`--check` only compares; `--toolchain v4.34.0-rc1` compares against
+another version). `tests/rows.rs` runs every row against the crate. The
+argument terms it reads:
+- numerals (`7`, `0xff`), negative ones in parentheses (`(-128)`), string
+  literals, positions `⟨5⟩`, `(ByteArray.mk #[1, 2])` and slices
+  `(("héllo".toSlice.drop 1).dropEnd 0)`; a fixed-width integer argument is
+  the numeral's value in that type, as in Lean;
+- a `Float`/`Float32` argument is a Lean term (`0.7`, `(-0.0)`,
+  `(1.0 / 0.0)`, `(0.0 / 0.0)`) whose exact value is the next entry of
+  `bits.args` (16 hex digits for `Float`, 8 for `Float32`);
+- for a panic, `<message>` is the string Lean passes to `lean_panic_fn`, and
+  `stderr` is what Lean printed with `LEAN_BACKTRACE=0`.
+
 ## Fields every case carries
 
 Written in `<id>.toml` for programs and inline for rows:
