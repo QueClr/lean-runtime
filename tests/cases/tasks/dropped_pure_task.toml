@@ -3,3 +3,11 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs exit probes, 2026-10-03"
 streams = "separate"
+# Natively the outcome depends on the schedule: the process exits only if the
+# dropped task is deactivated before a worker picks it up, and otherwise hangs
+# at exit. The window is one thread wake-up, and every native run so far took
+# the exiting schedule. This case enforces that dominant native schedule,
+# which the deferred task model produces every time. A translator that hangs
+# here shows another native schedule, not a semantic error. It is the
+# adoption target for sched/.
+schedule_dependent = true
