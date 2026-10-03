@@ -19,8 +19,9 @@ Every confirmed bug has:
   native is nondeterministic, the correct output), with `deviations` naming
   the entry.
 
-Each translator also lists it among its intended differences. Reporting a bug
-to Lean upstream is the owner's decision; the entry records the status.
+Each translator also lists it among its intended differences. The owner's
+decision (2026-10-03): these bugs are not reported upstream. They are
+recorded here only; the Upstream field notes what upstream already knows.
 
 ## Entry format
 
@@ -61,7 +62,7 @@ to Lean upstream is the owner's decision; the entry records the status.
 | Native repro | `write` handle: `putStr "lost"`, `read 5000` fails with EBADF and the file stays `""` after flush, close and exit (correct: `"lost"`). `readWrite` on `"0123456789"`: `putStr "abc"`, `read 5000` returns `"0123456789"` (correct: `"3456789"`, file `"abc3456789"`). `append` and stdout lose the same way. Deterministic. Case: `io/read_after_write` |
 | Our behaviour | Before `read n` (n > 0) or `getLine` on a handle whose last operation was output, write the pending bytes, then read from the cursor (or fail with native's EBADF on a write-only handle). `read 0` stays a no-op |
 | Translators | lean2rr: plan §10, "Runtime"; leanrs: DV20 (a) |
-| Upstream | Not reported |
+| Upstream | Not reported (owner: record only) |
 | Verdict | lean2rr-side judge, 2026-10-03 |
 
 ### LB-03: an error without a file name can crash
@@ -74,20 +75,23 @@ to Lean upstream is the owner's decision; the entry records the status.
 | Native repro | `createDirAll d; setCurrentDir d; removeDir d; getCurrentDir` inside a `try … catch`: segmentation fault, the `catch` never runs. Case: `io/error_without_file_name` |
 | Our behaviour | Raise the error class's `IO.Error` without a file name (`noFileOrDirectory "" 2 "no such file or directory"` here), for every error class |
 | Translators | lean2rr: plan §10, "Runtime"; leanrs: DV18 (a) |
-| Upstream | Not reported |
+| Upstream | Not reported (owner: record only) |
 | Verdict | leanrs-side judge, 2026-10-03 |
 
 ## Limits
 
 Implementation caps where Lean's definition has a value but the runtime
-stops. They are not bugs. Whether a translator may lift them (leanrs
-does; lean2rr follows native) is an open question for the owner.
+stops. They are not bugs. The owner's decision (2026-10-03) was "just be
+consistent", so like every other non-bug they are followed exactly as
+native does it, by the shared crate and by both translators. The same cap,
+message and exit status apply even where a translator's own library could
+compute the value.
 
 | Id | Summary | Where | Translators |
 |---|---|---|---|
-| LB-04 | `Nat.shiftRight` by 2^32 or more, of an operand with that many bits: `INTERNAL PANIC: Nat.shiftr exponent is too big` | object.cpp:1594-1612 (32-bit shift count) | leanrs DV17 (a): computes; lean2rr: native |
-| LB-05 | A `Nat` beyond GMP's limb count aborts (`gmp: overflow in mpz type`) | GMP `_mpz_realloc` (INT_MAX limbs), via mpz.cpp | leanrs DV17 (b); lean2rr: native |
-| LB-06 | `ByteArray.copySlice` with an offset or length of 2^64 or more: `INTERNAL PANIC: out of memory` | object.cpp:2556-2565 (`lean_nat_to_size_t`) | leanrs DV17 (c): returns the definition's clamped copy; lean2rr: native |
+| LB-04 | `Nat.shiftRight` by 2^32 or more, of an operand with that many bits: `INTERNAL PANIC: Nat.shiftr exponent is too big` | object.cpp:1594-1612 (32-bit shift count) | both: native (leanrs's DV17 (a), which computed the value, is withdrawn) |
+| LB-05 | A `Nat` beyond GMP's limb count aborts (`gmp: overflow in mpz type`) | GMP `_mpz_realloc` (INT_MAX limbs), via mpz.cpp | both: native (leanrs DV17 (b) withdrawn) |
+| LB-06 | `ByteArray.copySlice` with an offset or length of 2^64 or more: `INTERNAL PANIC: out of memory` | object.cpp:2556-2565 (`lean_nat_to_size_t`) | both: native (leanrs's DV17 (c), which returned the clamped copy, is withdrawn) |
 
 Related upstream: #15193, #15194, #15439, PRs #14286 and #14274.
 
