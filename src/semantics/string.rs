@@ -2,12 +2,17 @@
 //! the string's UTF-8 bytes (without C's terminating NUL) and plain positions.
 //! The C sources are `include/lean/lean.h` and `src/runtime/object.cpp`.
 //!
-//! A `String.Pos.Raw` is a `Nat` byte offset. The functions take it as a
-//! `u64`: a caller whose position does not fit (a big `Nat`) passes
-//! `u64::MAX`, which every function here treats as past the end, as Lean's C
-//! treats a non-scalar position, except `utf8_next` and `utf8_prev`, whose C
-//! versions then compute `p + 1` and `p - 1` with `Nat` arithmetic; for those
-//! the caller does the arithmetic on its own `Nat` (see each function).
+//! A `String.Pos.Raw` is a `Nat` byte offset. Lean's C handles a position
+//! below 2^63 as a scalar and a bigger one as a big number, which is always
+//! past the end. Here positions are `u64`s:
+//! - `utf8_next`, `utf8_next_fast` and `utf8_prev` take a position below
+//!   2^63. For a bigger one C computes `p + 1` or `p - 1` with `Nat`
+//!   arithmetic, which the caller does on its own `Nat` instead of calling
+//!   these. (In debug builds they assert the bound; in release builds they
+//!   still return `p + 1` / `p - 1` modulo 2^64 and never panic.)
+//! - Every other function takes any `u64` and treats a position at or past
+//!   the end as C treats a big one, so the caller passes a big position as
+//!   itself if it fits in a `u64`, or as `u64::MAX`.
 //!
 //! The functions follow the C code on any bytes, but a Lean `String` is always
 //! valid UTF-8, and the tests only use valid strings. Results are plain data:
@@ -46,14 +51,17 @@ fn is_utf8_first_byte(c: u8) -> bool {
     c < 0x80 || (0xC0..0xF8).contains(&c)
 }
 
-/// The byte size `lean_string_utf8_next` steps over at a lead byte `c`: 2, 3
-/// or 4 for `110xxxxx`, `1110xxxx`, `11110xxx`, otherwise 1 (ASCII, a
-/// continuation byte, `0xF8`..`0xFF`).
+/// The byte size `lean_string_utf8_next` steps over at a non-ASCII byte `c`
+/// (`lean_string_utf8_next_fast_cold`): 2, 3 or 4 for `110xxxxx`,
+/// `1110xxxx`, `11110xxx`, otherwise 1 (a continuation byte, `0xF8`..`0xFF`).
+/// Out of line, as in C: the caller's ASCII test stays a branch, so on ASCII
+/// text the next position does not wait for the byte load (review RS1-02).
 ///
 /// Source: lean2rr leanrt `src/string.rs` (`next`), rewritten on the count of
 /// leading ones.
-#[inline]
-fn next_step(c: u8) -> u64 {
+#[cold]
+#[inline(never)]
+fn next_step_cold(c: u8) -> u64 {
     match c.leading_ones() {
         n @ 2..=4 => u64::from(n),
         _ => 1,
@@ -171,28 +179,23 @@ pub fn utf8_get_fast(s: &[u8], pos: u64) -> u32 {
 /// `pos` plus the byte size of the character that starts there; `pos + 1` in
 /// the middle of a character and at or past the end.
 ///
-/// `pos` must be below `u64::MAX`. A big `Nat` position is past the end: C
-/// returns `p + 1` by `Nat` addition, which the caller does on its own `Nat`
-/// instead of calling this. (A small position `p < 2^63` gives at most
-/// `2^63`, which C returns as a big `Nat`.)
+/// `pos` must be below 2^63 (see the module doc): for a bigger one the
+/// caller computes `p + 1` on its own `Nat`, as C does. The result is at most
+/// 2^63, which Lean's C returns as a big `Nat`.
 ///
-/// Source: lean2rr leanrt `src/string.rs` (`next`), adapted to return
-/// `pos + 1` past the end instead of a sentinel.
+/// Source: lean2rr leanrt `src/string.rs` (`next`), adapted: `pos + 1` past
+/// the end instead of a sentinel; the ASCII test inline and the other lead
+/// bytes out of line, as C's `lean_string_utf8_next_fast`.
 #[inline]
 pub fn utf8_next(s: &[u8], pos: u64) -> u64 {
+    debug_assert!(
+        pos < 1 << 63,
+        "utf8_next: a position at or above 2^63 is the caller's"
+    );
     match s.get(pos as usize) {
-        Some(&c) => pos + next_step(c),
-        None => past_end_next(pos),
-    }
-}
-
-/// `p + 1` for a position at or past the end.
-#[cold]
-#[inline(never)]
-fn past_end_next(pos: u64) -> u64 {
-    match pos.checked_add(1) {
-        Some(n) => n,
-        None => panic!("utf8_next: position u64::MAX; a big Nat position is the caller's"),
+        Some(&c) if c < 0x80 => pos + 1,
+        Some(&c) => pos + next_step_cold(c),
+        None => pos.wrapping_add(1),
     }
 }
 
@@ -202,12 +205,15 @@ fn past_end_next(pos: u64) -> u64 {
 /// before the end (`pos + 1` in the middle of a character). At `pos ==
 /// s.len()` C reads its NUL terminator and returns `pos + 1`, as this does.
 ///
-/// Source: lean2rr leanrt `src/string.rs` (`next_fast`), adapted.
+/// Source: lean2rr leanrt `src/string.rs` (`next_fast`), adapted: the ASCII
+/// test inline and the other lead bytes out of line, as C.
 #[inline]
 pub fn utf8_next_fast(s: &[u8], pos: u64) -> u64 {
+    debug_assert!(pos < 1 << 63, "utf8_next_fast: a position at or above 2^63");
     match s.get(pos as usize) {
-        Some(&c) => pos + next_step(c),
-        None => past_end_next(pos),
+        Some(&c) if c < 0x80 => pos + 1,
+        Some(&c) => pos + next_step_cold(c),
+        None => pos.wrapping_add(1),
     }
 }
 
@@ -215,15 +221,18 @@ pub fn utf8_next_fast(s: &[u8], pos: u64) -> u64 {
 /// the start of the character before `pos` (of the character containing `pos`
 /// when `pos` is in the middle of one); 0 at 0; `pos - 1` past the end.
 ///
-/// A big `Nat` position is past the end: C returns `p - 1` by `Nat`
-/// subtraction, which the caller does on its own `Nat`; any `u64` is accepted
-/// here.
+/// `pos` must be below 2^63 (see the module doc): for a bigger one the
+/// caller computes `p - 1` on its own `Nat`, as C does.
 ///
 /// Source: lean2rr leanrt `src/string.rs` (`prev`), adapted to search the
 /// prefix with `rposition` (no bounds checks in the loop). C walks back with no
 /// lower bound, relying on byte 0 being a first byte; this stops at 0.
 #[inline]
 pub fn utf8_prev(s: &[u8], pos: u64) -> u64 {
+    debug_assert!(
+        pos < 1 << 63,
+        "utf8_prev: a position at or above 2^63 is the caller's"
+    );
     if pos == 0 {
         0
     } else if pos > s.len() as u64 {
@@ -314,19 +323,37 @@ pub fn get_byte_fast(s: &[u8], pos: u64) -> u8 {
     }
 }
 
-/// `String.length` (`lean_string_length`, `lean.h`, which returns the
-/// `m_length` that `lean_utf8_n_strlen`, `src/runtime/utf8.cpp`, counts when a
-/// string is made): the number of characters, counted as the bytes that are
-/// not continuation bytes. On valid UTF-8 this equals `lean_utf8_n_strlen`'s
-/// count by lead-byte sizes. Both translators cache the count with the string,
-/// as Lean does; this is the count to cache.
+/// The number of characters of UTF-8 bytes, as `lean_utf8_n_strlen`
+/// (`src/runtime/utf8.cpp`) counts it when Lean makes a string (it counts by
+/// lead-byte sizes; on valid UTF-8 that equals the number of bytes that are
+/// not continuation bytes, which is what this counts, vectorized).
+///
+/// This is the count a translator caches when it makes a string, as Lean
+/// caches it in `m_length`. `String.length` (`lean_string_length`) must read
+/// that cached count, never call this: counting is O(n) where Lean's is O(1).
 ///
 /// Source: leanrs_rt `src/str.rs` (`count_chars`) and lean2rr leanrt
-/// `src/string.rs` (`utf8_count`), the same count; written as one filter,
-/// which LLVM vectorizes.
+/// `src/string.rs` (`utf8_count`), the same count, written as one filter.
 #[inline]
-pub fn length(s: &[u8]) -> u64 {
+pub fn utf8_strlen(s: &[u8]) -> u64 {
     s.iter().filter(|&&b| (b as i8) >= -0x40).count() as u64
+}
+
+/// `utf8_strlen` at compile time, for a string literal's cached count (a
+/// translator's literal strings are constants).
+///
+/// Source: leanrs_rt `src/str.rs` (`count_chars`, a `const fn`).
+#[inline]
+pub const fn utf8_strlen_const(s: &[u8]) -> u64 {
+    let mut i = 0;
+    let mut n = 0;
+    while i < s.len() {
+        if (s[i] as i8) >= -0x40 {
+            n += 1;
+        }
+        i += 1;
+    }
+    n
 }
 
 /// `String.Slice.Pattern.Internal.memcmpStr` (`lean_string_memcmp`,
@@ -367,4 +394,18 @@ pub fn lt(a: &[u8], b: &[u8]) -> bool {
 #[inline]
 pub fn compare(a: &[u8], b: &[u8]) -> Ordering {
     a.cmp(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `utf8_strlen_const` runs at compile time.
+    const LITERAL: u64 = utf8_strlen_const("a€😀é".as_bytes());
+
+    #[test]
+    fn const_count() {
+        assert_eq!(LITERAL, 4);
+        assert_eq!(LITERAL, utf8_strlen("a€😀é".as_bytes()));
+    }
 }

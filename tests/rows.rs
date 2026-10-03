@@ -918,13 +918,14 @@ fn string_fns(r: &mut Registry) {
     r.add("String.decodeChar", |a| {
         char_repr(string::utf8_get_fast(bytes(&a[0]), pos_sat(&a[1])))
     });
-    // A position that is a big `Nat` (or `u64::MAX`) gets `p + 1` / `p - 1`
-    // from the caller's own `Nat` arithmetic, as the crate documents.
+    // A position at or above 2^63 (a big `Nat` in Lean's C) gets `p + 1` /
+    // `p - 1` from the caller's own `Nat` arithmetic, as the crate documents.
     r.add("String.Pos.Raw.next", |a| {
         let p = nat(&a[1]);
-        match u64::try_from(p) {
-            Ok(q) if q < u64::MAX => pos_repr(u128::from(string::utf8_next(bytes(&a[0]), q))),
-            _ => pos_repr(p + 1),
+        if p < 1 << 63 {
+            pos_repr(u128::from(string::utf8_next(bytes(&a[0]), p as u64)))
+        } else {
+            pos_repr(p + 1)
         }
     });
     r.add("String.Pos.Raw.next'", |a| {
@@ -935,9 +936,10 @@ fn string_fns(r: &mut Registry) {
     });
     r.add("String.Pos.Raw.prev", |a| {
         let p = nat(&a[1]);
-        match u64::try_from(p) {
-            Ok(q) => pos_repr(u128::from(string::utf8_prev(bytes(&a[0]), q))),
-            Err(_) => pos_repr(p - 1),
+        if p < 1 << 63 {
+            pos_repr(u128::from(string::utf8_prev(bytes(&a[0]), p as u64)))
+        } else {
+            pos_repr(p - 1)
         }
     });
     r.add("String.Pos.Raw.atEnd", |a| {
@@ -960,8 +962,12 @@ fn string_fns(r: &mut Registry) {
     r.add("String.Internal.ugetUTF8Byte", |a| {
         string::get_byte_fast(bytes(&a[0]), pos_sat(&a[1])).to_string()
     });
+    // `String.length` is the count cached when the string is made: the count
+    // `utf8_strlen` gives (and its `const` twin, for literals).
     r.add("String.length", |a| {
-        string::length(bytes(&a[0])).to_string()
+        let n = string::utf8_strlen(bytes(&a[0]));
+        assert_eq!(n, string::utf8_strlen_const(bytes(&a[0])));
+        n.to_string()
     });
     r.add("String.Slice.Pattern.Internal.memcmpStr", |a| {
         string::memcmp(
