@@ -20,8 +20,10 @@ the oracle receives the bits.
           v4.34.0-rc1`).
 
 The oracle is copied to and built in $LEAN_RUNTIME_ORACLE_DIR/<toolchain>
-(default target/oracle/<toolchain>) with elan's `lake`. LEAN_RUNTIME_WRAP is
-an optional command prefix for the build and the run (a memory cap).
+(default target/oracle/<toolchain>) with elan's `lake`. The build and the run
+are capped as in scripts/check.sh: a systemd user scope with
+MemoryMax=$LEAN_RUNTIME_MEM (default 16G), unless LEAN_RUNTIME_NO_CAP=1;
+LEAN_RUNTIME_WRAP, if set, is a command prefix used instead (another cap).
 """
 
 import argparse
@@ -214,6 +216,17 @@ def read_rows(path):
 # ---------------------------------------------------------------- the oracle
 
 
+def capped_prefix():
+    """The command prefix that caps a build or run's memory (scripts/check.sh's `capped`)."""
+    if os.environ.get("LEAN_RUNTIME_WRAP"):
+        return shlex.split(os.environ["LEAN_RUNTIME_WRAP"])
+    if os.environ.get("LEAN_RUNTIME_NO_CAP") == "1" or not shutil.which("systemd-run"):
+        return []
+    mem = os.environ.get("LEAN_RUNTIME_MEM", "16G")
+    return ["systemd-run", "--user", "--scope", "--quiet", "--collect",
+            "-p", f"MemoryMax={mem}", "-p", "MemorySwapMax=0"]
+
+
 def oracle_binary(toolchain):
     base = pathlib.Path(os.environ.get("LEAN_RUNTIME_ORACLE_DIR", ROOT / "target" / "oracle"))
     build = base / toolchain
@@ -223,7 +236,7 @@ def oracle_binary(toolchain):
         if not dst.exists() or dst.read_bytes() != src.read_bytes():
             shutil.copyfile(src, dst)
     (build / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
-    wrap = shlex.split(os.environ.get("LEAN_RUNTIME_WRAP", ""))
+    wrap = capped_prefix()
     subprocess.run(wrap + ["lake", "build"], cwd=build, check=True, stdout=sys.stderr)
     return wrap, build / ".lake" / "build" / "bin" / "oracle"
 
