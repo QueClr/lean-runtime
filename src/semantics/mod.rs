@@ -16,7 +16,7 @@
 //! with glibc 2.39, the host both translators run on. `libm` calls the
 //! platform's libm, so it matches native Lean wherever that libm is the same
 //! glibc; its ports of glibc's `cbrt`, `cbrtf`, `atanh` and `atanhf` reproduce
-//! glibc 2.39's aarch64 build and are defined only on aarch64 Linux. On
+//! glibc 2.39's aarch64 build and are defined only on aarch64 Linux with glibc (target_env = "gnu"). On
 //! another target, code that calls them fails to compile until a port for
 //! that platform is added and checked against its native Lean.
 

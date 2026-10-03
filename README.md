@@ -44,7 +44,7 @@ the rest of `semantics`, `io` and `sched` in that order. See
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
   on). The ports of glibc's `cbrt`, `cbrtf`, `atanh` and `atanhf` exist only
-  on aarch64 Linux; elsewhere their callers fail to compile until a port for
+  on aarch64 Linux with glibc (target_env = "gnu"); elsewhere their callers fail to compile until a port for
   that platform is added.
 - Every bug or disagreement found in either translator's runtime becomes a
   test case in `tests/cases/`.

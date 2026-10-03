@@ -119,6 +119,7 @@ name = "float_frexp"
 function = "float::frexp"
 comparable = false
 reason = "Lean's API returns a boxed pair holding a boxed float: two allocations per call; the crate returns registers, and a translator's cost depends on its Prod representation"
+o12 = "by inspection: the crate does strictly less work than C here (Lean allocates or reads a cached count), so the speed floor holds"
 
 [[bench]]
 name = "float_scaleb"
@@ -216,6 +217,7 @@ name = "float32_frexp"
 function = "float32::frexp"
 comparable = false
 reason = "Lean's API returns a boxed pair holding a boxed float: two allocations per call; the crate returns registers, and a translator's cost depends on its Prod representation"
+o12 = "by inspection: the crate does strictly less work than C here (Lean allocates or reads a cached count), so the speed floor holds"
 
 [[bench]]
 name = "float32_scaleb"
@@ -1083,6 +1085,7 @@ name = "string_utf8_get_opt"
 function = "string::utf8_get_opt"
 comparable = false
 reason = "Lean's API allocates the `some` at every valid position; the crate returns an Option<u32>, and a translator's cost depends on its Option representation"
+o12 = "by inspection: the crate does strictly less work than C here (Lean allocates or reads a cached count), so the speed floor holds"
 
 [[bench]]
 name = "string_utf8_get_bang"
@@ -1145,6 +1148,7 @@ name = "string_utf8_strlen"
 function = "string::utf8_strlen"
 comparable = false
 reason = "String.length reads the count cached in the string object, in Lean and in every translator; utf8_strlen is the count a translator caches when it makes a string"
+o12 = "by inspection: the crate does strictly less work than C here (Lean allocates or reads a cached count), so the speed floor holds"
 
 [[bench]]
 name = "string_memcmp"

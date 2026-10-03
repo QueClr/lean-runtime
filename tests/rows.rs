@@ -746,7 +746,7 @@ fn libm_fns(r: &mut Registry) {
     }
     // glibc's ports exist on aarch64 Linux only (semantics::libm); elsewhere their rows fail
     // with "no glue".
-    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+    #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
     {
         r.add("Float.cbrt", |a| fret(libm::cbrt(f64a(&a[0]))));
         r.add("Float32.cbrt", |a| gret(libm::cbrtf(f32a(&a[0]))));

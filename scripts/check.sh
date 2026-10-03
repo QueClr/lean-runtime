@@ -32,7 +32,7 @@ for tc in "${TOOLCHAINS[@]}"; do
     echo "== $tc test features=[${f}]"
     capped cargo +"$tc" test --offline --quiet ${f:+--features "$f"}
     echo "== $tc clippy features=[${f}]"
-    cargo +"$tc" clippy --offline --quiet ${f:+--features "$f"} -- -D warnings
+    cargo +"$tc" clippy --offline --quiet --all-targets ${f:+--features "$f"} -- -D warnings
   done
   # Constant folding of libm calls happens only in optimized builds.
   echo "== $tc release test libm_folding"

@@ -12,6 +12,9 @@
 //! drawn over its domain with a fixed seed, plus a few chosen ones
 //! (`35.74477454358792` is leanrs's `exp2` counterexample, review S1-1).
 
+// The operands are written with every digit Lean prints, on purpose.
+#![allow(clippy::excessive_precision)]
+
 use core::hint::black_box;
 
 use lean_runtime::semantics::{float, float32, libm};
@@ -366,7 +369,7 @@ unary!(
         867343.4271756546_f64
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     atanh,
     libm::atanh,
@@ -419,7 +422,7 @@ unary!(
         -0.2012424523039118_f64
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     cbrt,
     libm::cbrt,
@@ -1712,7 +1715,7 @@ unary!(
         -390023.031_f32
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     atanhf,
     libm::atanhf,
@@ -1765,7 +1768,7 @@ unary!(
         -0.785994589_f32
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     cbrtf,
     libm::cbrtf,
