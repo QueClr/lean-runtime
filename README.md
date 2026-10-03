@@ -44,4 +44,6 @@ extracting `semantics`, `io` and `sched` in that order. See `CONTRIBUTING.md`.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use.
 
+Bugs in Lean's own runtime that both translators deliberately do not reproduce, each verified first, are listed in `docs/lean-bugs.md`.
+
 Run `scripts/check.sh` before every commit. It caps its heavy steps at 16G of memory (`LEAN_RUNTIME_MEM`), since it runs on a shared host.
