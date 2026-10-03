@@ -1,0 +1,2263 @@
+# Row cases of area `string` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/string/string.rows.toml`.
+
+[[row]]
+id = "string/get.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "'a'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "'€'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "'😀'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "'é'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.empty.0"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['""', "⟨0⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.empty.1"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['""', "⟨1⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "some 'a'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "some '€'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "some '😀'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "some 'é'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.empty.0"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['""', "⟨0⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getopt.empty.1"
+area = "string"
+fn = "String.Pos.Raw.get?"
+args = ['""', "⟨1⟩"]
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "'a'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "'€'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "'😀'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "'é'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.empty.0"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['""', "⟨0⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getbang.empty.1"
+area = "string"
+fn = "String.Pos.Raw.get!"
+args = ['""', "⟨1⟩"]
+expected = "panic: Error: invalid `String.Pos` at `String.get!`"
+default = "'A'"
+stderr = "Error: invalid `String.Pos` at `String.get!`\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "{ byteIdx := 3 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "{ byteIdx := 6 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "{ byteIdx := 7 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "{ byteIdx := 10 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "{ byteIdx := 10 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "{ byteIdx := 11 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "{ byteIdx := 12 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "{ byteIdx := 9223372036854775808 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "{ byteIdx := 9223372036854775809 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "{ byteIdx := 18446744073709551617 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "{ byteIdx := 18446744073709551618 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.empty.0"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['""', "⟨0⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/next.empty.1"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['""', "⟨1⟩"]
+expected = "{ byteIdx := 2 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "{ byteIdx := 0 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "{ byteIdx := 0 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "{ byteIdx := 10 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "{ byteIdx := 9223372036854775806 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "{ byteIdx := 9223372036854775807 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "{ byteIdx := 18446744073709551615 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "{ byteIdx := 18446744073709551616 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.empty.0"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['""', "⟨0⟩"]
+expected = "{ byteIdx := 0 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/prev.empty.1"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['""', "⟨1⟩"]
+expected = "{ byteIdx := 0 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.empty.0"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['""', "⟨0⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/atend.empty.1"
+area = "string"
+fn = "String.Pos.Raw.atEnd"
+args = ['""', "⟨1⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.10"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨10⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.11"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨11⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨9223372036854775807⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨9223372036854775808⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨18446744073709551616⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.mixed.18446744073709551617"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['"a€😀é"', "⟨18446744073709551617⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.empty.0"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['""', "⟨0⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/isvalid.empty.1"
+area = "string"
+fn = "String.Pos.Raw.isValid"
+args = ['""', "⟨1⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "'a'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "'€'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "'😀'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "'é'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/getfast.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.get'"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "'A'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.0"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.1"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.2"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨2⟩"]
+expected = "{ byteIdx := 3 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.3"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "{ byteIdx := 4 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.4"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨4⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.5"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨5⟩"]
+expected = "{ byteIdx := 6 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.6"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨6⟩"]
+expected = "{ byteIdx := 7 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.7"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨7⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.8"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨8⟩"]
+expected = "{ byteIdx := 10 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/nextfast.mixed.9"
+area = "string"
+fn = "String.Pos.Raw.next'"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "{ byteIdx := 10 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/decodechar.mixed.0"
+area = "string"
+fn = "String.decodeChar"
+args = ['"a€😀é"', "0"]
+expected = "'a'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/decodechar.mixed.1"
+area = "string"
+fn = "String.decodeChar"
+args = ['"a€😀é"', "1"]
+expected = "'€'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/decodechar.mixed.4"
+area = "string"
+fn = "String.decodeChar"
+args = ['"a€😀é"', "4"]
+expected = "'😀'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/decodechar.mixed.8"
+area = "string"
+fn = "String.decodeChar"
+args = ['"a€😀é"', "8"]
+expected = "'é'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every byte position of a string with 1- to 4-byte characters, past the end, big positions"
+
+[[row]]
+id = "string/get.boundary.7f"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨0⟩"]
+expected = "'\\x7f'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.7f"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨0⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.7f"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "{ byteIdx := 0 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.80"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.80"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨1⟩"]
+expected = "{ byteIdx := 3 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.80"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "{ byteIdx := 1 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.7ff"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "'߿'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.7ff"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨3⟩"]
+expected = "{ byteIdx := 5 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.7ff"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "{ byteIdx := 3 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.800"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "'ࠀ'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.800"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨5⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.800"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "{ byteIdx := 5 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.d7ff"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "'퟿'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.d7ff"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨8⟩"]
+expected = "{ byteIdx := 11 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.d7ff"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "{ byteIdx := 8 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.e000"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "''"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.e000"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨11⟩"]
+expected = "{ byteIdx := 14 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.e000"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "{ byteIdx := 11 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.ffff"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "'￿'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.ffff"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨14⟩"]
+expected = "{ byteIdx := 17 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.ffff"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "{ byteIdx := 14 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.10000"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "'𐀀'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.10000"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨17⟩"]
+expected = "{ byteIdx := 21 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.10000"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "{ byteIdx := 17 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/get.boundary.10ffff"
+area = "string"
+fn = "String.Pos.Raw.get"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "'􏿿'"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/next.boundary.10ffff"
+area = "string"
+fn = "String.Pos.Raw.next"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨21⟩"]
+expected = "{ byteIdx := 25 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/prev.boundary.10ffff"
+area = "string"
+fn = "String.Pos.Raw.prev"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"', "⟨25⟩"]
+expected = "{ byteIdx := 21 }"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/length.boundary"
+area = "string"
+fn = "String.length"
+args = ['"\x7f߿ࠀ퟿￿𐀀􏿿"']
+expected = "9"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: code points at every UTF-8 length boundary"
+
+[[row]]
+id = "string/extract.mixed.0.10"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨0⟩", "⟨10⟩"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.1.4"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨1⟩", "⟨4⟩"]
+expected = '"€"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.4.8"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨4⟩", "⟨8⟩"]
+expected = '"😀"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.2.4"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨2⟩", "⟨4⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.1.2"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨1⟩", "⟨2⟩"]
+expected = '"€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.1.5"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨1⟩", "⟨5⟩"]
+expected = '"€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.0.0"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨0⟩", "⟨0⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.4.1"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨4⟩", "⟨1⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.10.11"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨10⟩", "⟨11⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.0.100"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨0⟩", "⟨100⟩"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.0.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨0⟩", "⟨18446744073709551616⟩"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.18446744073709551616.0"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨18446744073709551616⟩", "⟨0⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.1.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨1⟩", "⟨9223372036854775808⟩"]
+expected = '"€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.8.9"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨8⟩", "⟨9⟩"]
+expected = '"é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.8.10"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨8⟩", "⟨10⟩"]
+expected = '"é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.9.10"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨9⟩", "⟨10⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.3.3"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨3⟩", "⟨3⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.mixed.9.15"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['"a€😀é"', "⟨9⟩", "⟨15⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.empty.0.0"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['""', "⟨0⟩", "⟨0⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extract.empty.0.5"
+area = "string"
+fn = "String.Pos.Raw.extract"
+args = ['""', "⟨0⟩", "⟨5⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.0.10"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨0⟩", "⟨10⟩"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.1.4"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨1⟩", "⟨4⟩"]
+expected = '"€"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.4.1"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨4⟩", "⟨1⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.4.4"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨4⟩", "⟨4⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.0.0"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨0⟩", "⟨0⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.10.10"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨10⟩", "⟨10⟩"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/extractfast.mixed.8.10"
+area = "string"
+fn = "String.extract"
+args = ['"a€😀é"', "⟨8⟩", "⟨10⟩"]
+expected = '"é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: Pos.Raw.extract at valid, mid-character, reversed, past-the-end and big bounds"
+
+[[row]]
+id = "string/getbyte.mixed.0"
+area = "string"
+fn = "String.getUTF8Byte"
+args = ['"a€😀é"', "⟨0⟩"]
+expected = "97"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/getbyte.mixed.1"
+area = "string"
+fn = "String.getUTF8Byte"
+args = ['"a€😀é"', "⟨1⟩"]
+expected = "226"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/getbyte.mixed.3"
+area = "string"
+fn = "String.getUTF8Byte"
+args = ['"a€😀é"', "⟨3⟩"]
+expected = "172"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/getbyte.mixed.9"
+area = "string"
+fn = "String.getUTF8Byte"
+args = ['"a€😀é"', "⟨9⟩"]
+expected = "169"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/ugetbyte.mixed.0"
+area = "string"
+fn = "String.Internal.ugetUTF8Byte"
+args = ['"a€😀é"', "0"]
+expected = "97"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/ugetbyte.mixed.5"
+area = "string"
+fn = "String.Internal.ugetUTF8Byte"
+args = ['"a€😀é"', "5"]
+expected = "159"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.empty"
+area = "string"
+fn = "String.length"
+args = ['""']
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.a"
+area = "string"
+fn = "String.length"
+args = ['"a"']
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.euro"
+area = "string"
+fn = "String.length"
+args = ['"€"']
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.emoji"
+area = "string"
+fn = "String.length"
+args = ['"😀"']
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.mixed"
+area = "string"
+fn = "String.length"
+args = ['"a€😀é"']
+expected = "4"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.wide"
+area = "string"
+fn = "String.length"
+args = ['"ｈéllo wörld 🎉"']
+expected = "13"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/length.long"
+area = "string"
+fn = "String.length"
+args = ['"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé"']
+expected = "60"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/memcmp.hello.yellow.1.1.4"
+area = "string"
+fn = "String.Slice.Pattern.Internal.memcmpStr"
+args = ['"hello"', '"yellow"', "⟨1⟩", "⟨1⟩", "⟨4⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/memcmp.hello.yellow.0.0.1"
+area = "string"
+fn = "String.Slice.Pattern.Internal.memcmpStr"
+args = ['"hello"', '"yellow"', "⟨0⟩", "⟨0⟩", "⟨1⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/memcmp.abc.abc.0.0.0"
+area = "string"
+fn = "String.Slice.Pattern.Internal.memcmpStr"
+args = ['"abc"', '"abc"', "⟨0⟩", "⟨0⟩", "⟨0⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/memcmp.a€b.x€y.1.1.3"
+area = "string"
+fn = "String.Slice.Pattern.Internal.memcmpStr"
+args = ['"a€b"', '"x€y"', "⟨1⟩", "⟨1⟩", "⟨3⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/memcmp.a€b.x€y.0.0.5"
+area = "string"
+fn = "String.Slice.Pattern.Internal.memcmpStr"
+args = ['"a€b"', '"x€y"', "⟨0⟩", "⟨0⟩", "⟨5⟩"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/memcmp.e.e.0.0.0"
+area = "string"
+fn = "String.Slice.Pattern.Internal.memcmpStr"
+args = ['""', '""', "⟨0⟩", "⟨0⟩", "⟨0⟩"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.e.e"
+area = "string"
+fn = "String.decidableLT"
+args = ['""', '""']
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.e.e"
+area = "string"
+fn = "String.compare"
+args = ['""', '""']
+expected = "Ordering.eq"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.e.a"
+area = "string"
+fn = "String.decidableLT"
+args = ['""', '"a"']
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.e.a"
+area = "string"
+fn = "String.compare"
+args = ['""', '"a"']
+expected = "Ordering.lt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.a.e"
+area = "string"
+fn = "String.decidableLT"
+args = ['"a"', '""']
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.a.e"
+area = "string"
+fn = "String.compare"
+args = ['"a"', '""']
+expected = "Ordering.gt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.abc.abd"
+area = "string"
+fn = "String.decidableLT"
+args = ['"abc"', '"abd"']
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.abc.abd"
+area = "string"
+fn = "String.compare"
+args = ['"abc"', '"abd"']
+expected = "Ordering.lt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.ab.abc"
+area = "string"
+fn = "String.decidableLT"
+args = ['"ab"', '"abc"']
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.ab.abc"
+area = "string"
+fn = "String.compare"
+args = ['"ab"', '"abc"']
+expected = "Ordering.lt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.é.z"
+area = "string"
+fn = "String.decidableLT"
+args = ['"é"', '"z"']
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.é.z"
+area = "string"
+fn = "String.compare"
+args = ['"é"', '"z"']
+expected = "Ordering.gt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.z.é"
+area = "string"
+fn = "String.decidableLT"
+args = ['"z"', '"é"']
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.z.é"
+area = "string"
+fn = "String.compare"
+args = ['"z"', '"é"']
+expected = "Ordering.lt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.😀.￿"
+area = "string"
+fn = "String.decidableLT"
+args = ['"😀"', '"￿"']
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.😀.￿"
+area = "string"
+fn = "String.compare"
+args = ['"😀"', '"￿"']
+expected = "Ordering.gt"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/declt.abc.abc"
+area = "string"
+fn = "String.decidableLT"
+args = ['"abc"', '"abc"']
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/compare.abc.abc"
+area = "string"
+fn = "String.compare"
+args = ['"abc"', '"abc"']
+expected = "Ordering.eq"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: byte reads, lengths, memcmp and the orders"
+
+[[row]]
+id = "string/slicelt.héllo.1.0.éllo.0.0"
+area = "string"
+fn = "String.Slice.instDecidableLt"
+args = ['(("héllo".toSlice.drop 1).dropEnd 0)', '(("éllo".toSlice.drop 0).dropEnd 0)']
+expected = "false"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"
+
+[[row]]
+id = "string/slicelt.abc.1.0.abd.1.0"
+area = "string"
+fn = "String.Slice.instDecidableLt"
+args = ['(("abc".toSlice.drop 1).dropEnd 0)', '(("abd".toSlice.drop 1).dropEnd 0)']
+expected = "true"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"
+
+[[row]]
+id = "string/slicelt.zz.1.0.za.0.0"
+area = "string"
+fn = "String.Slice.instDecidableLt"
+args = ['(("zz".toSlice.drop 1).dropEnd 0)', '(("za".toSlice.drop 0).dropEnd 0)']
+expected = "true"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"
+
+[[row]]
+id = "string/slicelt.ab.2.0.b.1.0"
+area = "string"
+fn = "String.Slice.instDecidableLt"
+args = ['(("ab".toSlice.drop 2).dropEnd 0)', '(("b".toSlice.drop 1).dropEnd 0)']
+expected = "false"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"
+
+[[row]]
+id = "string/slicelt.xabcx.1.1.abd.0.0"
+area = "string"
+fn = "String.Slice.instDecidableLt"
+args = ['(("xabcx".toSlice.drop 1).dropEnd 1)', '(("abd".toSlice.drop 0).dropEnd 0)']
+expected = "true"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"
+
+[[row]]
+id = "string/slicelt.a€😀é.1.1.€.0.0"
+area = "string"
+fn = "String.Slice.instDecidableLt"
+args = ['(("a€😀é".toSlice.drop 1).dropEnd 1)', '(("€".toSlice.drop 0).dropEnd 0)']
+expected = "false"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_dec_lt) and lean-runtime batch 1"

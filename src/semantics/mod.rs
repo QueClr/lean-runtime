@@ -16,6 +16,7 @@ pub mod float32;
 pub mod hash;
 pub mod libm;
 pub mod sint;
+pub mod string;
 pub mod uint;
 
 const _: () = assert!(

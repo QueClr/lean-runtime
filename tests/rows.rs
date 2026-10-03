@@ -7,13 +7,11 @@
 //! panic of `String.Pos.Raw.get!` reported, and the result rendered as Lean's
 //! `repr`, with the bits of a float result.
 
-#![allow(dead_code)] // some helpers serve areas whose rows come in later commits
-
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use lean_runtime::semantics::{float, float32, hash, libm, sint, uint};
+use lean_runtime::semantics::{float, float32, hash, libm, sint, string, uint};
 
 // ------------------------------------------------------------------ TOML
 
@@ -630,6 +628,7 @@ fn registry() -> Registry {
     libm_fns(&mut r);
     uint_fns(&mut r);
     sint_fns(&mut r);
+    string_fns(&mut r);
     r
 }
 
@@ -885,6 +884,98 @@ fn sint_fns(r: &mut Registry) {
     }
 }
 
+fn string_fns(r: &mut Registry) {
+    r.add("String.Pos.Raw.get", |a| {
+        char_repr(string::utf8_get(bytes(&a[0]), pos_sat(&a[1])))
+    });
+    r.add("String.Pos.Raw.get?", |a| {
+        match string::utf8_get_opt(bytes(&a[0]), pos_sat(&a[1])) {
+            Some(c) => format!("some {}", char_repr(c)),
+            None => "none".to_string(),
+        }
+    });
+    r.add("String.Pos.Raw.get!", |a| {
+        match string::utf8_get_bang(bytes(&a[0]), pos_sat(&a[1])) {
+            Some(c) => Out::from(char_repr(c)),
+            None => Out {
+                panic: Some(string::GET_BANG_PANIC.to_string()),
+                value: char_repr(string::CHAR_DEFAULT),
+                bits: None,
+            },
+        }
+    });
+    r.add("String.Pos.Raw.get'", |a| {
+        char_repr(string::utf8_get_fast(bytes(&a[0]), pos_sat(&a[1])))
+    });
+    r.add("String.decodeChar", |a| {
+        char_repr(string::utf8_get_fast(bytes(&a[0]), pos_sat(&a[1])))
+    });
+    // A position that is a big `Nat` (or `u64::MAX`) gets `p + 1` / `p - 1`
+    // from the caller's own `Nat` arithmetic, as the crate documents.
+    r.add("String.Pos.Raw.next", |a| {
+        let p = nat(&a[1]);
+        match u64::try_from(p) {
+            Ok(q) if q < u64::MAX => pos_repr(u128::from(string::utf8_next(bytes(&a[0]), q))),
+            _ => pos_repr(p + 1),
+        }
+    });
+    r.add("String.Pos.Raw.next'", |a| {
+        pos_repr(u128::from(string::utf8_next_fast(
+            bytes(&a[0]),
+            pos_sat(&a[1]),
+        )))
+    });
+    r.add("String.Pos.Raw.prev", |a| {
+        let p = nat(&a[1]);
+        match u64::try_from(p) {
+            Ok(q) => pos_repr(u128::from(string::utf8_prev(bytes(&a[0]), q))),
+            Err(_) => pos_repr(p - 1),
+        }
+    });
+    r.add("String.Pos.Raw.atEnd", |a| {
+        string::utf8_at_end(bytes(&a[0]), pos_sat(&a[1])).to_string()
+    });
+    r.add("String.Pos.Raw.isValid", |a| {
+        string::is_valid_pos(bytes(&a[0]), pos_sat(&a[1])).to_string()
+    });
+    r.add("String.Pos.Raw.extract", |a| {
+        let s = bytes(&a[0]);
+        str_repr(&s[string::utf8_extract(s, pos_sat(&a[1]), pos_sat(&a[2]))])
+    });
+    r.add("String.extract", |a| {
+        let s = bytes(&a[0]);
+        str_repr(&s[string::utf8_extract_fast(s, pos_sat(&a[1]), pos_sat(&a[2]))])
+    });
+    r.add("String.getUTF8Byte", |a| {
+        string::get_byte_fast(bytes(&a[0]), pos_sat(&a[1])).to_string()
+    });
+    r.add("String.Internal.ugetUTF8Byte", |a| {
+        string::get_byte_fast(bytes(&a[0]), pos_sat(&a[1])).to_string()
+    });
+    r.add("String.length", |a| {
+        string::length(bytes(&a[0])).to_string()
+    });
+    r.add("String.Slice.Pattern.Internal.memcmpStr", |a| {
+        string::memcmp(
+            bytes(&a[0]),
+            bytes(&a[1]),
+            pos_sat(&a[2]),
+            pos_sat(&a[3]),
+            pos_sat(&a[4]),
+        )
+        .to_string()
+    });
+    r.add("String.decidableLT", |a| {
+        string::lt(bytes(&a[0]), bytes(&a[1])).to_string()
+    });
+    r.add("String.compare", |a| {
+        ordering_repr(string::compare(bytes(&a[0]), bytes(&a[1])))
+    });
+    r.add("String.Slice.instDecidableLt", |a| {
+        string::lt(slice(&a[0]), slice(&a[1])).to_string()
+    });
+}
+
 // ------------------------------------------------------------------ the tests
 
 /// Whether the call's output is the row's: `expected` (or, for a panic,
@@ -965,4 +1056,9 @@ fn uint_rows() {
 #[test]
 fn sint_rows() {
     run("sint", include_str!("cases/sint/sint.rows.toml"));
+}
+
+#[test]
+fn string_rows() {
+    run("string", include_str!("cases/string/string.rows.toml"));
 }
