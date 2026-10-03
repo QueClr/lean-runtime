@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use lean_runtime::semantics::{float, float32};
+use lean_runtime::semantics::{float, float32, hash};
 
 // ------------------------------------------------------------------ TOML
 
@@ -625,8 +625,24 @@ impl Registry {
 
 fn registry() -> Registry {
     let mut r = Registry(HashMap::new());
+    hash_fns(&mut r);
     float_fns(&mut r);
     r
+}
+
+fn hash_fns(r: &mut Registry) {
+    r.add("mixHash", |a| {
+        hash::uint64_mix_hash(nat_low64(&a[0]), nat_low64(&a[1])).to_string()
+    });
+    r.add("String.hash", |a| {
+        hash::string_hash(bytes(&a[0])).to_string()
+    });
+    r.add("ByteArray.hash", |a| {
+        hash::byte_array_hash(bytes(&a[0])).to_string()
+    });
+    r.add("String.Slice.hash", |a| {
+        hash::slice_hash(slice(&a[0])).to_string()
+    });
 }
 
 fn float_fns(r: &mut Registry) {
@@ -756,6 +772,11 @@ fn run(file: &str, text: &str) {
         rows.len(),
         failures.join("\n")
     );
+}
+
+#[test]
+fn hash_rows() {
+    run("hash", include_str!("cases/hash/hash.rows.toml"));
 }
 
 #[test]

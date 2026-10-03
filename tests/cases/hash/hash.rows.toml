@@ -1,0 +1,498 @@
+# Row cases of area `hash` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/hash/hash.rows.toml`.
+
+[[row]]
+id = "hash/mix.1.2"
+area = "hash"
+fn = "mixHash"
+args = ["1", "2"]
+expected = "16582581243253999004"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.0.0"
+area = "hash"
+fn = "mixHash"
+args = ["0", "0"]
+expected = "3866779316627607737"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.18446744073709551615.1"
+area = "hash"
+fn = "mixHash"
+args = ["18446744073709551615", "1"]
+expected = "4361747246808984046"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.11.13"
+area = "hash"
+fn = "mixHash"
+args = ["11", "13"]
+expected = "12985447592232525038"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.12345.67890"
+area = "hash"
+fn = "mixHash"
+args = ["12345", "67890"]
+expected = "6417489475506850606"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.7.0"
+area = "hash"
+fn = "mixHash"
+args = ["7", "0"]
+expected = "16265762236657882106"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.0.7"
+area = "hash"
+fn = "mixHash"
+args = ["0", "7"]
+expected = "483365771082190995"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.9223372036854775808.9223372036854775807"
+area = "hash"
+fn = "mixHash"
+args = ["9223372036854775808", "9223372036854775807"]
+expected = "4572441564856894184"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.3.18446744073709551615"
+area = "hash"
+fn = "mixHash"
+args = ["3", "18446744073709551615"]
+expected = "4248554627862200231"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/mix.100.200"
+area = "hash"
+fn = "mixHash"
+args = ["100", "200"]
+expected = "9889895501311098892"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (mix_hash_1_2), re-probed on 4.34.0"
+
+[[row]]
+id = "hash/string.len0"
+area = "hash"
+fn = "String.hash"
+args = ['""']
+expected = "9877294847684254529"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len1"
+area = "hash"
+fn = "String.hash"
+args = ['"a"']
+expected = "15917291556903334389"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len2"
+area = "hash"
+fn = "String.hash"
+args = ['"ab"']
+expected = "1859847562730075588"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len3"
+area = "hash"
+fn = "String.hash"
+args = ['"abc"']
+expected = "13471000911841882655"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len4"
+area = "hash"
+fn = "String.hash"
+args = ['"abcd"']
+expected = "11774739814239950349"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len5"
+area = "hash"
+fn = "String.hash"
+args = ['"abcde"']
+expected = "9879683515900917099"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len6"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdef"']
+expected = "3908226602854121306"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len7"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefg"']
+expected = "934485623504580153"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len8"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefgh"']
+expected = "4343876127666658534"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len9"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghi"']
+expected = "4853633868021991863"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len10"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghij"']
+expected = "13591273013636353742"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len11"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijk"']
+expected = "16840220840137896361"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len12"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijkl"']
+expected = "15118158046629458853"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len13"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijklm"']
+expected = "10723254943300190083"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len14"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijklmn"']
+expected = "11063154514736088531"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len15"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijklmno"']
+expected = "4849408229862914980"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len16"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijklmnop"']
+expected = "9532572014013698213"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.len17"
+area = "hash"
+fn = "String.hash"
+args = ['"abcdefghijklmnopq"']
+expected = "10292012499202201976"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.e-acute"
+area = "hash"
+fn = "String.hash"
+args = ['"é"']
+expected = "9832775717084913874"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.euro"
+area = "hash"
+fn = "String.hash"
+args = ['"€"']
+expected = "16230809048046883122"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.emoji"
+area = "hash"
+fn = "String.hash"
+args = ['"😀"']
+expected = "10513925242104159437"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.mixed"
+area = "hash"
+fn = "String.hash"
+args = ['"a€😀é"']
+expected = "8202864465264686004"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.leanrs-long"
+area = "hash"
+fn = "String.hash"
+args = ['"héllo world, this is a longer string"']
+expected = "3296536251469377572"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.leanrs-party"
+area = "hash"
+fn = "String.hash"
+args = ['"🎉🎉"']
+expected = "10434634704761974208"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.nul"
+area = "hash"
+fn = "String.hash"
+args = ['"\x00"']
+expected = "962983613142996970"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/string.boundaries"
+area = "hash"
+fn = "String.hash"
+args = ['"\x7f߿ࠀ￿𐀀􏿿"']
+expected = "2398708114951135583"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: every tail length (0 to 7) and block count of MurmurHash64A"
+
+[[row]]
+id = "hash/bytes.len0"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[])"]
+expected = "9877294847684254529"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len1"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255])"]
+expected = "14920860174008174849"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len7"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255, 218, 181, 144, 107, 70, 33])"]
+expected = "2632751700016565194"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len8"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255, 218, 181, 144, 107, 70, 33, 252])"]
+expected = "15211632653112489336"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len9"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255, 218, 181, 144, 107, 70, 33, 252, 215])"]
+expected = "7479886621221359984"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len15"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255, 218, 181, 144, 107, 70, 33, 252, 215, 178, 141, 104, 67, 30, 249])"]
+expected = "8173074295350574472"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len16"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255, 218, 181, 144, 107, 70, 33, 252, 215, 178, 141, 104, 67, 30, 249, 212])"]
+expected = "9696487056476089420"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.len17"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[255, 218, 181, 144, 107, 70, 33, 252, 215, 178, 141, 104, 67, 30, 249, 212, 175])"]
+expected = "17955122256789918585"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.leanrs"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[0, 255, 1, 254, 2, 253, 3, 252, 4])"]
+expected = "12354452588435165326"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/bytes.hello-equals-string"
+area = "hash"
+fn = "ByteArray.hash"
+args = ["(ByteArray.mk #[104, 101, 108, 108, 111])"]
+expected = "9821865621596011261"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/string.hello"
+area = "hash"
+fn = "String.hash"
+args = ['"hello"']
+expected = "9821865621596011261"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: ByteArray.hash on bytes no String can hold"
+
+[[row]]
+id = "hash/slice.1.0.5"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("héllo".toSlice.drop 1).dropEnd 0)']
+expected = "2979950484794234192"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/slice.0.0.5"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("héllo".toSlice.drop 0).dropEnd 0)']
+expected = "18129298664182168036"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/slice.3.0.3"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("abc".toSlice.drop 3).dropEnd 0)']
+expected = "9877294847684254529"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/slice.1.1.4"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("a€😀é".toSlice.drop 1).dropEnd 1)']
+expected = "3017207457148493311"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/slice.2.2.4"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("a€😀é".toSlice.drop 2).dropEnd 2)']
+expected = "9877294847684254529"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/slice.3.2.17"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("abcdefghijklmnopq".toSlice.drop 3).dropEnd 2)']
+expected = "6127382063744391540"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/slice.0.0.0"
+area = "hash"
+fn = "String.Slice.hash"
+args = ['(("".toSlice.drop 0).dropEnd 0)']
+expected = "9877294847684254529"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"
+
+[[row]]
+id = "hash/string.ello"
+area = "hash"
+fn = "String.hash"
+args = ['"éllo"']
+expected = "2979950484794234192"
+lean_version = "4.34.0"
+source = "leanrs rt/leanrs_rt/tests/hashing.rs (str_slice_hash_eq_copy) and lean-runtime batch 1"

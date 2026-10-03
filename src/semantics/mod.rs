@@ -13,6 +13,7 @@
 
 pub mod float;
 pub mod float32;
+pub mod hash;
 
 const _: () = assert!(
     usize::BITS == 64,
