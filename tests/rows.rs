@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use lean_runtime::semantics::{float, float32, hash, libm};
+use lean_runtime::semantics::{float, float32, hash, libm, sint, uint};
 
 // ------------------------------------------------------------------ TOML
 
@@ -628,6 +628,8 @@ fn registry() -> Registry {
     hash_fns(&mut r);
     float_fns(&mut r);
     libm_fns(&mut r);
+    uint_fns(&mut r);
+    sint_fns(&mut r);
     r
 }
 
@@ -755,6 +757,134 @@ fn libm_fns(r: &mut Registry) {
     });
 }
 
+fn uint_fns(r: &mut Registry) {
+    macro_rules! uint {
+        ($($lean:literal: $t:ty => $div:ident $rem:ident $shl:ident $shr:ident $log2:ident
+            $of_nat:ident $to_nat:ident;)*) => {
+            $(
+                r.add(concat!($lean, ".div"), |a| {
+                    uint::$div(nat_low64(&a[0]) as $t, nat_low64(&a[1]) as $t).to_string()
+                });
+                r.add(concat!($lean, ".mod"), |a| {
+                    uint::$rem(nat_low64(&a[0]) as $t, nat_low64(&a[1]) as $t).to_string()
+                });
+                r.add(concat!($lean, ".shiftLeft"), |a| {
+                    uint::$shl(nat_low64(&a[0]) as $t, nat_low64(&a[1]) as $t).to_string()
+                });
+                r.add(concat!($lean, ".shiftRight"), |a| {
+                    uint::$shr(nat_low64(&a[0]) as $t, nat_low64(&a[1]) as $t).to_string()
+                });
+                r.add(concat!($lean, ".log2"), |a| uint::$log2(nat_low64(&a[0]) as $t).to_string());
+                r.add(concat!($lean, ".ofNat"), |a| uint::$of_nat(nat_low64(&a[0])).to_string());
+                r.add(concat!($lean, ".toNat"), |a| {
+                    uint::$to_nat(nat_low64(&a[0]) as $t).to_string()
+                });
+            )*
+        };
+    }
+    uint! {
+        "UInt8": u8 => uint8_div uint8_mod uint8_shift_left uint8_shift_right uint8_log2
+            uint8_of_nat uint8_to_nat;
+        "UInt16": u16 => uint16_div uint16_mod uint16_shift_left uint16_shift_right uint16_log2
+            uint16_of_nat uint16_to_nat;
+        "UInt32": u32 => uint32_div uint32_mod uint32_shift_left uint32_shift_right uint32_log2
+            uint32_of_nat uint32_to_nat;
+        "UInt64": u64 => uint64_div uint64_mod uint64_shift_left uint64_shift_right uint64_log2
+            uint64_of_nat uint64_to_nat;
+        "USize": usize => usize_div usize_mod usize_shift_left usize_shift_right usize_log2
+            usize_of_nat usize_to_nat;
+    }
+}
+
+fn sint_fns(r: &mut Registry) {
+    macro_rules! sint {
+        ($($lean:literal: $u:ty as $s:ty => $div:ident $rem:ident $shl:ident $shr:ident $abs:ident
+            $lt:ident $le:ident $to_int:ident $of_int:ident $of_nat:ident $to_float:ident
+            $to_float32:ident;)*) => {
+            $(
+                r.add(concat!($lean, ".div"), |a| {
+                    (sint::$div(int_low64(&a[0]) as $u, int_low64(&a[1]) as $u) as $s).to_string()
+                });
+                r.add(concat!($lean, ".mod"), |a| {
+                    (sint::$rem(int_low64(&a[0]) as $u, int_low64(&a[1]) as $u) as $s).to_string()
+                });
+                r.add(concat!($lean, ".shiftLeft"), |a| {
+                    (sint::$shl(int_low64(&a[0]) as $u, int_low64(&a[1]) as $u) as $s).to_string()
+                });
+                r.add(concat!($lean, ".shiftRight"), |a| {
+                    (sint::$shr(int_low64(&a[0]) as $u, int_low64(&a[1]) as $u) as $s).to_string()
+                });
+                r.add(concat!($lean, ".abs"), |a| {
+                    (sint::$abs(int_low64(&a[0]) as $u) as $s).to_string()
+                });
+                r.add(concat!($lean, ".decLt"), |a| {
+                    sint::$lt(int_low64(&a[0]) as $u, int_low64(&a[1]) as $u).to_string()
+                });
+                r.add(concat!($lean, ".decLe"), |a| {
+                    sint::$le(int_low64(&a[0]) as $u, int_low64(&a[1]) as $u).to_string()
+                });
+                r.add(concat!($lean, ".toInt"), |a| sint::$to_int(int_low64(&a[0]) as $u).to_string());
+                r.add(concat!($lean, ".ofInt"), |a| {
+                    (sint::$of_int(int_low64(&a[0])) as $s).to_string()
+                });
+                r.add(concat!($lean, ".ofNat"), |a| {
+                    (sint::$of_nat(nat_low64(&a[0])) as $s).to_string()
+                });
+                r.add(concat!($lean, ".toFloat"), |a| {
+                    fret(sint::$to_float(int_low64(&a[0]) as $u))
+                });
+                r.add(concat!($lean, ".toFloat32"), |a| {
+                    gret(sint::$to_float32(int_low64(&a[0]) as $u))
+                });
+            )*
+        };
+    }
+    sint! {
+        "Int8": u8 as i8 => int8_div int8_mod int8_shift_left int8_shift_right int8_abs
+            int8_dec_lt int8_dec_le int8_to_int int8_of_int int8_of_nat int8_to_float
+            int8_to_float32;
+        "Int16": u16 as i16 => int16_div int16_mod int16_shift_left int16_shift_right int16_abs
+            int16_dec_lt int16_dec_le int16_to_int int16_of_int int16_of_nat int16_to_float
+            int16_to_float32;
+        "Int32": u32 as i32 => int32_div int32_mod int32_shift_left int32_shift_right int32_abs
+            int32_dec_lt int32_dec_le int32_to_int int32_of_int int32_of_nat int32_to_float
+            int32_to_float32;
+        "Int64": u64 as i64 => int64_div int64_mod int64_shift_left int64_shift_right int64_abs
+            int64_dec_lt int64_dec_le int64_to_int_sint int64_of_int int64_of_nat int64_to_float
+            int64_to_float32;
+        "ISize": usize as isize => isize_div isize_mod isize_shift_left isize_shift_right isize_abs
+            isize_dec_lt isize_dec_le isize_to_int isize_of_int isize_of_nat isize_to_float
+            isize_to_float32;
+    }
+    macro_rules! convert {
+        ($($lean:literal => $f:ident: $u:ty => $ts:ty;)*) => {
+            $( r.add($lean, |a| (sint::$f(int_low64(&a[0]) as $u) as $ts).to_string()); )*
+        };
+    }
+    convert! {
+        "Int8.toInt16" => int8_to_int16: u8 => i16;
+        "Int8.toInt32" => int8_to_int32: u8 => i32;
+        "Int8.toInt64" => int8_to_int64: u8 => i64;
+        "Int8.toISize" => int8_to_isize: u8 => isize;
+        "Int16.toInt8" => int16_to_int8: u16 => i8;
+        "Int16.toInt32" => int16_to_int32: u16 => i32;
+        "Int16.toInt64" => int16_to_int64: u16 => i64;
+        "Int16.toISize" => int16_to_isize: u16 => isize;
+        "Int32.toInt8" => int32_to_int8: u32 => i8;
+        "Int32.toInt16" => int32_to_int16: u32 => i16;
+        "Int32.toInt64" => int32_to_int64: u32 => i64;
+        "Int32.toISize" => int32_to_isize: u32 => isize;
+        "Int64.toInt8" => int64_to_int8: u64 => i8;
+        "Int64.toInt16" => int64_to_int16: u64 => i16;
+        "Int64.toInt32" => int64_to_int32: u64 => i32;
+        "Int64.toISize" => int64_to_isize: u64 => isize;
+        "ISize.toInt8" => isize_to_int8: usize => i8;
+        "ISize.toInt16" => isize_to_int16: usize => i16;
+        "ISize.toInt32" => isize_to_int32: usize => i32;
+        "ISize.toInt64" => isize_to_int64: usize => i64;
+    }
+}
+
 // ------------------------------------------------------------------ the tests
 
 /// Whether the call's output is the row's: `expected` (or, for a panic,
@@ -825,4 +955,14 @@ fn float_rows() {
 #[cfg_attr(miri, ignore)]
 fn libm_rows() {
     run("libm", include_str!("cases/libm/libm.rows.toml"));
+}
+
+#[test]
+fn uint_rows() {
+    run("uint", include_str!("cases/uint/uint.rows.toml"));
+}
+
+#[test]
+fn sint_rows() {
+    run("sint", include_str!("cases/sint/sint.rows.toml"));
 }

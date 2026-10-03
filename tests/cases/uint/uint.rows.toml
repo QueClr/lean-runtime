@@ -1,0 +1,1920 @@
+# Row cases of area `uint` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/uint/uint.rows.toml`.
+
+[[row]]
+id = "uint/uint8.div.7.0"
+area = "uint"
+fn = "UInt8.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.div.0.0"
+area = "uint"
+fn = "UInt8.div"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.div.255.1"
+area = "uint"
+fn = "UInt8.div"
+args = ["255", "1"]
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.div.255.255"
+area = "uint"
+fn = "UInt8.div"
+args = ["255", "255"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.div.7.2"
+area = "uint"
+fn = "UInt8.div"
+args = ["7", "2"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.div.255.0"
+area = "uint"
+fn = "UInt8.div"
+args = ["255", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.mod.7.0"
+area = "uint"
+fn = "UInt8.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.mod.255.0"
+area = "uint"
+fn = "UInt8.mod"
+args = ["255", "0"]
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.mod.7.2"
+area = "uint"
+fn = "UInt8.mod"
+args = ["7", "2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.mod.255.255"
+area = "uint"
+fn = "UInt8.mod"
+args = ["255", "255"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.mod.0.0"
+area = "uint"
+fn = "UInt8.mod"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.1.7"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["1", "7"]
+expected = "128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.255.7"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["255", "7"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.1.8"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["1", "8"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.255.8"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["255", "8"]
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.1.9"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["1", "9"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.255.9"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["255", "9"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.1.255"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["1", "255"]
+expected = "128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.255.255"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["255", "255"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.255.1"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["255", "1"]
+expected = "254"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.255.1"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["255", "1"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.5.0"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.5.0"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shl.3.19"
+area = "uint"
+fn = "UInt8.shiftLeft"
+args = ["3", "19"]
+expected = "24"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.shr.3.19"
+area = "uint"
+fn = "UInt8.shiftRight"
+args = ["3", "19"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.0"
+area = "uint"
+fn = "UInt8.log2"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.1"
+area = "uint"
+fn = "UInt8.log2"
+args = ["1"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.2"
+area = "uint"
+fn = "UInt8.log2"
+args = ["2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.3"
+area = "uint"
+fn = "UInt8.log2"
+args = ["3"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.255"
+area = "uint"
+fn = "UInt8.log2"
+args = ["255"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.128"
+area = "uint"
+fn = "UInt8.log2"
+args = ["128"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.log2.127"
+area = "uint"
+fn = "UInt8.log2"
+args = ["127"]
+expected = "6"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.0"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.255"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["255"]
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.256"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["256"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.18446744073709551616"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["18446744073709551616"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.18446744073709551621"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["18446744073709551621"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.1267650600228229401496703205379"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["1267650600228229401496703205379"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.9223372036854775808"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.9223372036854775807"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["9223372036854775807"]
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.ofnat.300"
+area = "uint"
+fn = "UInt8.ofNat"
+args = ["300"]
+expected = "44"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.tonat.0"
+area = "uint"
+fn = "UInt8.toNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint8.tonat.255"
+area = "uint"
+fn = "UInt8.toNat"
+args = ["255"]
+expected = "255"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.div.7.0"
+area = "uint"
+fn = "UInt16.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.div.0.0"
+area = "uint"
+fn = "UInt16.div"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.div.65535.1"
+area = "uint"
+fn = "UInt16.div"
+args = ["65535", "1"]
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.div.65535.65535"
+area = "uint"
+fn = "UInt16.div"
+args = ["65535", "65535"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.div.7.2"
+area = "uint"
+fn = "UInt16.div"
+args = ["7", "2"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.div.65535.0"
+area = "uint"
+fn = "UInt16.div"
+args = ["65535", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.mod.7.0"
+area = "uint"
+fn = "UInt16.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.mod.65535.0"
+area = "uint"
+fn = "UInt16.mod"
+args = ["65535", "0"]
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.mod.7.2"
+area = "uint"
+fn = "UInt16.mod"
+args = ["7", "2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.mod.65535.65535"
+area = "uint"
+fn = "UInt16.mod"
+args = ["65535", "65535"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.mod.0.0"
+area = "uint"
+fn = "UInt16.mod"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.1.15"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["1", "15"]
+expected = "32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.65535.15"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["65535", "15"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.1.16"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["1", "16"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.65535.16"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["65535", "16"]
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.1.17"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["1", "17"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.65535.17"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["65535", "17"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.1.65535"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["1", "65535"]
+expected = "32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.65535.65535"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["65535", "65535"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.65535.1"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["65535", "1"]
+expected = "65534"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.65535.1"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["65535", "1"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.5.0"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.5.0"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shl.3.35"
+area = "uint"
+fn = "UInt16.shiftLeft"
+args = ["3", "35"]
+expected = "24"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.shr.3.35"
+area = "uint"
+fn = "UInt16.shiftRight"
+args = ["3", "35"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.0"
+area = "uint"
+fn = "UInt16.log2"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.1"
+area = "uint"
+fn = "UInt16.log2"
+args = ["1"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.2"
+area = "uint"
+fn = "UInt16.log2"
+args = ["2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.3"
+area = "uint"
+fn = "UInt16.log2"
+args = ["3"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.65535"
+area = "uint"
+fn = "UInt16.log2"
+args = ["65535"]
+expected = "15"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.32768"
+area = "uint"
+fn = "UInt16.log2"
+args = ["32768"]
+expected = "15"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.log2.32767"
+area = "uint"
+fn = "UInt16.log2"
+args = ["32767"]
+expected = "14"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.0"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.65535"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["65535"]
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.65536"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["65536"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.18446744073709551616"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["18446744073709551616"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.18446744073709551621"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["18446744073709551621"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.1267650600228229401496703205379"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["1267650600228229401496703205379"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.9223372036854775808"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.9223372036854775807"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["9223372036854775807"]
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.ofnat.300"
+area = "uint"
+fn = "UInt16.ofNat"
+args = ["300"]
+expected = "300"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.tonat.0"
+area = "uint"
+fn = "UInt16.toNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint16.tonat.65535"
+area = "uint"
+fn = "UInt16.toNat"
+args = ["65535"]
+expected = "65535"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.div.7.0"
+area = "uint"
+fn = "UInt32.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.div.0.0"
+area = "uint"
+fn = "UInt32.div"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.div.4294967295.1"
+area = "uint"
+fn = "UInt32.div"
+args = ["4294967295", "1"]
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.div.4294967295.4294967295"
+area = "uint"
+fn = "UInt32.div"
+args = ["4294967295", "4294967295"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.div.7.2"
+area = "uint"
+fn = "UInt32.div"
+args = ["7", "2"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.div.4294967295.0"
+area = "uint"
+fn = "UInt32.div"
+args = ["4294967295", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.mod.7.0"
+area = "uint"
+fn = "UInt32.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.mod.4294967295.0"
+area = "uint"
+fn = "UInt32.mod"
+args = ["4294967295", "0"]
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.mod.7.2"
+area = "uint"
+fn = "UInt32.mod"
+args = ["7", "2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.mod.4294967295.4294967295"
+area = "uint"
+fn = "UInt32.mod"
+args = ["4294967295", "4294967295"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.mod.0.0"
+area = "uint"
+fn = "UInt32.mod"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.1.31"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["1", "31"]
+expected = "2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.4294967295.31"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["4294967295", "31"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.1.32"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["1", "32"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.4294967295.32"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["4294967295", "32"]
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.1.33"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["1", "33"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.4294967295.33"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["4294967295", "33"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.1.4294967295"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["1", "4294967295"]
+expected = "2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.4294967295.4294967295"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["4294967295", "4294967295"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.4294967295.1"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["4294967295", "1"]
+expected = "4294967294"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.4294967295.1"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["4294967295", "1"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.5.0"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.5.0"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shl.3.67"
+area = "uint"
+fn = "UInt32.shiftLeft"
+args = ["3", "67"]
+expected = "24"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.shr.3.67"
+area = "uint"
+fn = "UInt32.shiftRight"
+args = ["3", "67"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.0"
+area = "uint"
+fn = "UInt32.log2"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.1"
+area = "uint"
+fn = "UInt32.log2"
+args = ["1"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.2"
+area = "uint"
+fn = "UInt32.log2"
+args = ["2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.3"
+area = "uint"
+fn = "UInt32.log2"
+args = ["3"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.4294967295"
+area = "uint"
+fn = "UInt32.log2"
+args = ["4294967295"]
+expected = "31"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.2147483648"
+area = "uint"
+fn = "UInt32.log2"
+args = ["2147483648"]
+expected = "31"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.log2.2147483647"
+area = "uint"
+fn = "UInt32.log2"
+args = ["2147483647"]
+expected = "30"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.0"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.4294967295"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["4294967295"]
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.4294967296"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["4294967296"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.18446744073709551616"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["18446744073709551616"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.18446744073709551621"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["18446744073709551621"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.1267650600228229401496703205379"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["1267650600228229401496703205379"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.9223372036854775808"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.9223372036854775807"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["9223372036854775807"]
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.ofnat.300"
+area = "uint"
+fn = "UInt32.ofNat"
+args = ["300"]
+expected = "300"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.tonat.0"
+area = "uint"
+fn = "UInt32.toNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint32.tonat.4294967295"
+area = "uint"
+fn = "UInt32.toNat"
+args = ["4294967295"]
+expected = "4294967295"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.div.7.0"
+area = "uint"
+fn = "UInt64.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.div.0.0"
+area = "uint"
+fn = "UInt64.div"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.div.18446744073709551615.1"
+area = "uint"
+fn = "UInt64.div"
+args = ["18446744073709551615", "1"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.div.18446744073709551615.18446744073709551615"
+area = "uint"
+fn = "UInt64.div"
+args = ["18446744073709551615", "18446744073709551615"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.div.7.2"
+area = "uint"
+fn = "UInt64.div"
+args = ["7", "2"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.div.18446744073709551615.0"
+area = "uint"
+fn = "UInt64.div"
+args = ["18446744073709551615", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.mod.7.0"
+area = "uint"
+fn = "UInt64.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.mod.18446744073709551615.0"
+area = "uint"
+fn = "UInt64.mod"
+args = ["18446744073709551615", "0"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.mod.7.2"
+area = "uint"
+fn = "UInt64.mod"
+args = ["7", "2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.mod.18446744073709551615.18446744073709551615"
+area = "uint"
+fn = "UInt64.mod"
+args = ["18446744073709551615", "18446744073709551615"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.mod.0.0"
+area = "uint"
+fn = "UInt64.mod"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.1.63"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["1", "63"]
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.18446744073709551615.63"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["18446744073709551615", "63"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.1.64"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["1", "64"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.18446744073709551615.64"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["18446744073709551615", "64"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.1.65"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["1", "65"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.18446744073709551615.65"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["18446744073709551615", "65"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.1.18446744073709551615"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["1", "18446744073709551615"]
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.18446744073709551615.18446744073709551615"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["18446744073709551615", "18446744073709551615"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.18446744073709551615.1"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["18446744073709551615", "1"]
+expected = "18446744073709551614"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.18446744073709551615.1"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["18446744073709551615", "1"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.5.0"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.5.0"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shl.3.131"
+area = "uint"
+fn = "UInt64.shiftLeft"
+args = ["3", "131"]
+expected = "24"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.shr.3.131"
+area = "uint"
+fn = "UInt64.shiftRight"
+args = ["3", "131"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.0"
+area = "uint"
+fn = "UInt64.log2"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.1"
+area = "uint"
+fn = "UInt64.log2"
+args = ["1"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.2"
+area = "uint"
+fn = "UInt64.log2"
+args = ["2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.3"
+area = "uint"
+fn = "UInt64.log2"
+args = ["3"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.18446744073709551615"
+area = "uint"
+fn = "UInt64.log2"
+args = ["18446744073709551615"]
+expected = "63"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.9223372036854775808"
+area = "uint"
+fn = "UInt64.log2"
+args = ["9223372036854775808"]
+expected = "63"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.log2.9223372036854775807"
+area = "uint"
+fn = "UInt64.log2"
+args = ["9223372036854775807"]
+expected = "62"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.0"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.18446744073709551615"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["18446744073709551615"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.18446744073709551616"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["18446744073709551616"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.18446744073709551621"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["18446744073709551621"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.1267650600228229401496703205379"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["1267650600228229401496703205379"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.9223372036854775808"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["9223372036854775808"]
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.9223372036854775807"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.ofnat.300"
+area = "uint"
+fn = "UInt64.ofNat"
+args = ["300"]
+expected = "300"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.tonat.0"
+area = "uint"
+fn = "UInt64.toNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/uint64.tonat.18446744073709551615"
+area = "uint"
+fn = "UInt64.toNat"
+args = ["18446744073709551615"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.div.7.0"
+area = "uint"
+fn = "USize.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.div.0.0"
+area = "uint"
+fn = "USize.div"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.div.18446744073709551615.1"
+area = "uint"
+fn = "USize.div"
+args = ["18446744073709551615", "1"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.div.18446744073709551615.18446744073709551615"
+area = "uint"
+fn = "USize.div"
+args = ["18446744073709551615", "18446744073709551615"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.div.7.2"
+area = "uint"
+fn = "USize.div"
+args = ["7", "2"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.div.18446744073709551615.0"
+area = "uint"
+fn = "USize.div"
+args = ["18446744073709551615", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.mod.7.0"
+area = "uint"
+fn = "USize.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.mod.18446744073709551615.0"
+area = "uint"
+fn = "USize.mod"
+args = ["18446744073709551615", "0"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.mod.7.2"
+area = "uint"
+fn = "USize.mod"
+args = ["7", "2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.mod.18446744073709551615.18446744073709551615"
+area = "uint"
+fn = "USize.mod"
+args = ["18446744073709551615", "18446744073709551615"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.mod.0.0"
+area = "uint"
+fn = "USize.mod"
+args = ["0", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.1.63"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["1", "63"]
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.18446744073709551615.63"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["18446744073709551615", "63"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.1.64"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["1", "64"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.18446744073709551615.64"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["18446744073709551615", "64"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.1.65"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["1", "65"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.18446744073709551615.65"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["18446744073709551615", "65"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.1.18446744073709551615"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["1", "18446744073709551615"]
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.18446744073709551615.18446744073709551615"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["18446744073709551615", "18446744073709551615"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.18446744073709551615.1"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["18446744073709551615", "1"]
+expected = "18446744073709551614"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.18446744073709551615.1"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["18446744073709551615", "1"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.5.0"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.5.0"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["5", "0"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shl.3.131"
+area = "uint"
+fn = "USize.shiftLeft"
+args = ["3", "131"]
+expected = "24"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.shr.3.131"
+area = "uint"
+fn = "USize.shiftRight"
+args = ["3", "131"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.0"
+area = "uint"
+fn = "USize.log2"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.1"
+area = "uint"
+fn = "USize.log2"
+args = ["1"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.2"
+area = "uint"
+fn = "USize.log2"
+args = ["2"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.3"
+area = "uint"
+fn = "USize.log2"
+args = ["3"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.18446744073709551615"
+area = "uint"
+fn = "USize.log2"
+args = ["18446744073709551615"]
+expected = "63"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.9223372036854775808"
+area = "uint"
+fn = "USize.log2"
+args = ["9223372036854775808"]
+expected = "63"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.log2.9223372036854775807"
+area = "uint"
+fn = "USize.log2"
+args = ["9223372036854775807"]
+expected = "62"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.0"
+area = "uint"
+fn = "USize.ofNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.18446744073709551615"
+area = "uint"
+fn = "USize.ofNat"
+args = ["18446744073709551615"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.18446744073709551616"
+area = "uint"
+fn = "USize.ofNat"
+args = ["18446744073709551616"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.18446744073709551621"
+area = "uint"
+fn = "USize.ofNat"
+args = ["18446744073709551621"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.1267650600228229401496703205379"
+area = "uint"
+fn = "USize.ofNat"
+args = ["1267650600228229401496703205379"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.9223372036854775808"
+area = "uint"
+fn = "USize.ofNat"
+args = ["9223372036854775808"]
+expected = "9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.9223372036854775807"
+area = "uint"
+fn = "USize.ofNat"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.ofnat.300"
+area = "uint"
+fn = "USize.ofNat"
+args = ["300"]
+expected = "300"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.tonat.0"
+area = "uint"
+fn = "USize.toNat"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"
+
+[[row]]
+id = "uint/usize.tonat.18446744073709551615"
+area = "uint"
+fn = "USize.toNat"
+args = ["18446744073709551615"]
+expected = "18446744073709551615"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's UIntN rows: x/0, x%0, shifts mod width, log2, Nat conversions"

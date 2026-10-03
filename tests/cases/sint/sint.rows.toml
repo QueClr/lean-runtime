@@ -1,0 +1,3606 @@
+# Row cases of area `sint` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/sint/sint.rows.toml`.
+
+[[row]]
+id = "sint/int8.div.7.0"
+area = "sint"
+fn = "Int8.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.-128.-1"
+area = "sint"
+fn = "Int8.div"
+args = ["(-128)", "(-1)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.-128.1"
+area = "sint"
+fn = "Int8.div"
+args = ["(-128)", "1"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.-7.2"
+area = "sint"
+fn = "Int8.div"
+args = ["(-7)", "2"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.7.-2"
+area = "sint"
+fn = "Int8.div"
+args = ["7", "(-2)"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.-7.-2"
+area = "sint"
+fn = "Int8.div"
+args = ["(-7)", "(-2)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.127.-1"
+area = "sint"
+fn = "Int8.div"
+args = ["127", "(-1)"]
+expected = "-127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.0.-1"
+area = "sint"
+fn = "Int8.div"
+args = ["0", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.div.-128.0"
+area = "sint"
+fn = "Int8.div"
+args = ["(-128)", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.7.0"
+area = "sint"
+fn = "Int8.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.-128.-1"
+area = "sint"
+fn = "Int8.mod"
+args = ["(-128)", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.-7.2"
+area = "sint"
+fn = "Int8.mod"
+args = ["(-7)", "2"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.7.-2"
+area = "sint"
+fn = "Int8.mod"
+args = ["7", "(-2)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.-7.-2"
+area = "sint"
+fn = "Int8.mod"
+args = ["(-7)", "(-2)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.-128.0"
+area = "sint"
+fn = "Int8.mod"
+args = ["(-128)", "0"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.mod.-128.127"
+area = "sint"
+fn = "Int8.mod"
+args = ["(-128)", "127"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.1.7"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["1", "7"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.1.8"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["1", "8"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.1.-1"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["1", "(-1)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.-1.3"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["(-1)", "3"]
+expected = "-8"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.1.9"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["1", "9"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.3.-128"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["3", "(-128)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shl.1.127"
+area = "sint"
+fn = "Int8.shiftLeft"
+args = ["1", "127"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.-128.1"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["(-128)", "1"]
+expected = "-64"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.-1.7"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["(-1)", "7"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.-128.8"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["(-128)", "8"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.64.-1"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["64", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.-128.7"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["(-128)", "7"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.127.-9"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["127", "(-9)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.shr.-5.127"
+area = "sint"
+fn = "Int8.shiftRight"
+args = ["(-5)", "127"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.abs.-128"
+area = "sint"
+fn = "Int8.abs"
+args = ["(-128)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.abs.-1"
+area = "sint"
+fn = "Int8.abs"
+args = ["(-1)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.abs.0"
+area = "sint"
+fn = "Int8.abs"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.abs.127"
+area = "sint"
+fn = "Int8.abs"
+args = ["127"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.lt.-128.127"
+area = "sint"
+fn = "Int8.decLt"
+args = ["(-128)", "127"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.le.-128.127"
+area = "sint"
+fn = "Int8.decLe"
+args = ["(-128)", "127"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.lt.-1.0"
+area = "sint"
+fn = "Int8.decLt"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.le.-1.0"
+area = "sint"
+fn = "Int8.decLe"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.lt.0.-1"
+area = "sint"
+fn = "Int8.decLt"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.le.0.-1"
+area = "sint"
+fn = "Int8.decLe"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.lt.-1.-1"
+area = "sint"
+fn = "Int8.decLt"
+args = ["(-1)", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.le.-1.-1"
+area = "sint"
+fn = "Int8.decLe"
+args = ["(-1)", "(-1)"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint.-128"
+area = "sint"
+fn = "Int8.toInt"
+args = ["(-128)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint.-1"
+area = "sint"
+fn = "Int8.toInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint.127"
+area = "sint"
+fn = "Int8.toInt"
+args = ["127"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.-1"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.-129"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["(-129)"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.128"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["128"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.1180591620717411303429"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["1180591620717411303429"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.-1180591620717411303429"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["(-1180591620717411303429)"]
+expected = "-5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.-18446744073709551616"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["(-18446744073709551616)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.18446744073709551615"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofint.-2147483649"
+area = "sint"
+fn = "Int8.ofInt"
+args = ["(-2147483649)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofnat.128"
+area = "sint"
+fn = "Int8.ofNat"
+args = ["128"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofnat.18446744073709551615"
+area = "sint"
+fn = "Int8.ofNat"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofnat.1267650600228229401496703205376"
+area = "sint"
+fn = "Int8.ofNat"
+args = ["1267650600228229401496703205376"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofnat.9223372036854775808"
+area = "sint"
+fn = "Int8.ofNat"
+args = ["9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.ofnat.200"
+area = "sint"
+fn = "Int8.ofNat"
+args = ["200"]
+expected = "-56"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.tofloat.-128"
+area = "sint"
+fn = "Int8.toFloat"
+args = ["(-128)"]
+bits = { result = "0xc060000000000000" }
+expected = "-128.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.tofloat32.-128"
+area = "sint"
+fn = "Int8.toFloat32"
+args = ["(-128)"]
+bits = { result = "0xc3000000" }
+expected = "-128.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.tofloat.127"
+area = "sint"
+fn = "Int8.toFloat"
+args = ["127"]
+bits = { result = "0x405fc00000000000" }
+expected = "127.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.tofloat32.127"
+area = "sint"
+fn = "Int8.toFloat32"
+args = ["127"]
+bits = { result = "0x42fe0000" }
+expected = "127.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.tofloat.-1"
+area = "sint"
+fn = "Int8.toFloat"
+args = ["(-1)"]
+bits = { result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.tofloat32.-1"
+area = "sint"
+fn = "Int8.toFloat32"
+args = ["(-1)"]
+bits = { result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint16.-1"
+area = "sint"
+fn = "Int8.toInt16"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint16.-128"
+area = "sint"
+fn = "Int8.toInt16"
+args = ["(-128)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint16.127"
+area = "sint"
+fn = "Int8.toInt16"
+args = ["127"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint16.67"
+area = "sint"
+fn = "Int8.toInt16"
+args = ["67"]
+expected = "67"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint32.-1"
+area = "sint"
+fn = "Int8.toInt32"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint32.-128"
+area = "sint"
+fn = "Int8.toInt32"
+args = ["(-128)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint32.127"
+area = "sint"
+fn = "Int8.toInt32"
+args = ["127"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint32.67"
+area = "sint"
+fn = "Int8.toInt32"
+args = ["67"]
+expected = "67"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint64.-1"
+area = "sint"
+fn = "Int8.toInt64"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint64.-128"
+area = "sint"
+fn = "Int8.toInt64"
+args = ["(-128)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint64.127"
+area = "sint"
+fn = "Int8.toInt64"
+args = ["127"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toint64.67"
+area = "sint"
+fn = "Int8.toInt64"
+args = ["67"]
+expected = "67"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toisize.-1"
+area = "sint"
+fn = "Int8.toISize"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toisize.-128"
+area = "sint"
+fn = "Int8.toISize"
+args = ["(-128)"]
+expected = "-128"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toisize.127"
+area = "sint"
+fn = "Int8.toISize"
+args = ["127"]
+expected = "127"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int8.toisize.67"
+area = "sint"
+fn = "Int8.toISize"
+args = ["67"]
+expected = "67"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.7.0"
+area = "sint"
+fn = "Int16.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.-32768.-1"
+area = "sint"
+fn = "Int16.div"
+args = ["(-32768)", "(-1)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.-32768.1"
+area = "sint"
+fn = "Int16.div"
+args = ["(-32768)", "1"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.-7.2"
+area = "sint"
+fn = "Int16.div"
+args = ["(-7)", "2"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.7.-2"
+area = "sint"
+fn = "Int16.div"
+args = ["7", "(-2)"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.-7.-2"
+area = "sint"
+fn = "Int16.div"
+args = ["(-7)", "(-2)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.32767.-1"
+area = "sint"
+fn = "Int16.div"
+args = ["32767", "(-1)"]
+expected = "-32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.0.-1"
+area = "sint"
+fn = "Int16.div"
+args = ["0", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.div.-32768.0"
+area = "sint"
+fn = "Int16.div"
+args = ["(-32768)", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.7.0"
+area = "sint"
+fn = "Int16.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.-32768.-1"
+area = "sint"
+fn = "Int16.mod"
+args = ["(-32768)", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.-7.2"
+area = "sint"
+fn = "Int16.mod"
+args = ["(-7)", "2"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.7.-2"
+area = "sint"
+fn = "Int16.mod"
+args = ["7", "(-2)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.-7.-2"
+area = "sint"
+fn = "Int16.mod"
+args = ["(-7)", "(-2)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.-32768.0"
+area = "sint"
+fn = "Int16.mod"
+args = ["(-32768)", "0"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.mod.-32768.32767"
+area = "sint"
+fn = "Int16.mod"
+args = ["(-32768)", "32767"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.1.15"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["1", "15"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.1.16"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["1", "16"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.1.-1"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["1", "(-1)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.-1.3"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["(-1)", "3"]
+expected = "-8"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.1.17"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["1", "17"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.3.-32768"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["3", "(-32768)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shl.1.32767"
+area = "sint"
+fn = "Int16.shiftLeft"
+args = ["1", "32767"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.-32768.1"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["(-32768)", "1"]
+expected = "-16384"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.-1.15"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["(-1)", "15"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.-32768.16"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["(-32768)", "16"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.64.-1"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["64", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.-32768.15"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["(-32768)", "15"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.32767.-17"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["32767", "(-17)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.shr.-5.32767"
+area = "sint"
+fn = "Int16.shiftRight"
+args = ["(-5)", "32767"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.abs.-32768"
+area = "sint"
+fn = "Int16.abs"
+args = ["(-32768)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.abs.-1"
+area = "sint"
+fn = "Int16.abs"
+args = ["(-1)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.abs.0"
+area = "sint"
+fn = "Int16.abs"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.abs.32767"
+area = "sint"
+fn = "Int16.abs"
+args = ["32767"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.lt.-32768.32767"
+area = "sint"
+fn = "Int16.decLt"
+args = ["(-32768)", "32767"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.le.-32768.32767"
+area = "sint"
+fn = "Int16.decLe"
+args = ["(-32768)", "32767"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.lt.-1.0"
+area = "sint"
+fn = "Int16.decLt"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.le.-1.0"
+area = "sint"
+fn = "Int16.decLe"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.lt.0.-1"
+area = "sint"
+fn = "Int16.decLt"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.le.0.-1"
+area = "sint"
+fn = "Int16.decLe"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.lt.-1.-1"
+area = "sint"
+fn = "Int16.decLt"
+args = ["(-1)", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.le.-1.-1"
+area = "sint"
+fn = "Int16.decLe"
+args = ["(-1)", "(-1)"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint.-32768"
+area = "sint"
+fn = "Int16.toInt"
+args = ["(-32768)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint.-1"
+area = "sint"
+fn = "Int16.toInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint.32767"
+area = "sint"
+fn = "Int16.toInt"
+args = ["32767"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.-1"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.-32769"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["(-32769)"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.32768"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["32768"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.1180591620717411303429"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["1180591620717411303429"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.-1180591620717411303429"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["(-1180591620717411303429)"]
+expected = "-5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.-18446744073709551616"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["(-18446744073709551616)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.18446744073709551615"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofint.-2147483649"
+area = "sint"
+fn = "Int16.ofInt"
+args = ["(-2147483649)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofnat.32768"
+area = "sint"
+fn = "Int16.ofNat"
+args = ["32768"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofnat.18446744073709551615"
+area = "sint"
+fn = "Int16.ofNat"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofnat.1267650600228229401496703205376"
+area = "sint"
+fn = "Int16.ofNat"
+args = ["1267650600228229401496703205376"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofnat.9223372036854775808"
+area = "sint"
+fn = "Int16.ofNat"
+args = ["9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.ofnat.200"
+area = "sint"
+fn = "Int16.ofNat"
+args = ["200"]
+expected = "200"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.tofloat.-32768"
+area = "sint"
+fn = "Int16.toFloat"
+args = ["(-32768)"]
+bits = { result = "0xc0e0000000000000" }
+expected = "-32768.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.tofloat32.-32768"
+area = "sint"
+fn = "Int16.toFloat32"
+args = ["(-32768)"]
+bits = { result = "0xc7000000" }
+expected = "-32768.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.tofloat.32767"
+area = "sint"
+fn = "Int16.toFloat"
+args = ["32767"]
+bits = { result = "0x40dfffc000000000" }
+expected = "32767.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.tofloat32.32767"
+area = "sint"
+fn = "Int16.toFloat32"
+args = ["32767"]
+bits = { result = "0x46fffe00" }
+expected = "32767.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.tofloat.-1"
+area = "sint"
+fn = "Int16.toFloat"
+args = ["(-1)"]
+bits = { result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.tofloat32.-1"
+area = "sint"
+fn = "Int16.toFloat32"
+args = ["(-1)"]
+bits = { result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint8.-1"
+area = "sint"
+fn = "Int16.toInt8"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint8.-32768"
+area = "sint"
+fn = "Int16.toInt8"
+args = ["(-32768)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint8.32767"
+area = "sint"
+fn = "Int16.toInt8"
+args = ["32767"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint8.16387"
+area = "sint"
+fn = "Int16.toInt8"
+args = ["16387"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint32.-1"
+area = "sint"
+fn = "Int16.toInt32"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint32.-32768"
+area = "sint"
+fn = "Int16.toInt32"
+args = ["(-32768)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint32.32767"
+area = "sint"
+fn = "Int16.toInt32"
+args = ["32767"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint32.16387"
+area = "sint"
+fn = "Int16.toInt32"
+args = ["16387"]
+expected = "16387"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint64.-1"
+area = "sint"
+fn = "Int16.toInt64"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint64.-32768"
+area = "sint"
+fn = "Int16.toInt64"
+args = ["(-32768)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint64.32767"
+area = "sint"
+fn = "Int16.toInt64"
+args = ["32767"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toint64.16387"
+area = "sint"
+fn = "Int16.toInt64"
+args = ["16387"]
+expected = "16387"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toisize.-1"
+area = "sint"
+fn = "Int16.toISize"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toisize.-32768"
+area = "sint"
+fn = "Int16.toISize"
+args = ["(-32768)"]
+expected = "-32768"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toisize.32767"
+area = "sint"
+fn = "Int16.toISize"
+args = ["32767"]
+expected = "32767"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int16.toisize.16387"
+area = "sint"
+fn = "Int16.toISize"
+args = ["16387"]
+expected = "16387"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.7.0"
+area = "sint"
+fn = "Int32.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.-2147483648.-1"
+area = "sint"
+fn = "Int32.div"
+args = ["(-2147483648)", "(-1)"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.-2147483648.1"
+area = "sint"
+fn = "Int32.div"
+args = ["(-2147483648)", "1"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.-7.2"
+area = "sint"
+fn = "Int32.div"
+args = ["(-7)", "2"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.7.-2"
+area = "sint"
+fn = "Int32.div"
+args = ["7", "(-2)"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.-7.-2"
+area = "sint"
+fn = "Int32.div"
+args = ["(-7)", "(-2)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.2147483647.-1"
+area = "sint"
+fn = "Int32.div"
+args = ["2147483647", "(-1)"]
+expected = "-2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.0.-1"
+area = "sint"
+fn = "Int32.div"
+args = ["0", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.div.-2147483648.0"
+area = "sint"
+fn = "Int32.div"
+args = ["(-2147483648)", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.7.0"
+area = "sint"
+fn = "Int32.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.-2147483648.-1"
+area = "sint"
+fn = "Int32.mod"
+args = ["(-2147483648)", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.-7.2"
+area = "sint"
+fn = "Int32.mod"
+args = ["(-7)", "2"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.7.-2"
+area = "sint"
+fn = "Int32.mod"
+args = ["7", "(-2)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.-7.-2"
+area = "sint"
+fn = "Int32.mod"
+args = ["(-7)", "(-2)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.-2147483648.0"
+area = "sint"
+fn = "Int32.mod"
+args = ["(-2147483648)", "0"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.mod.-2147483648.2147483647"
+area = "sint"
+fn = "Int32.mod"
+args = ["(-2147483648)", "2147483647"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.1.31"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["1", "31"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.1.32"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["1", "32"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.1.-1"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["1", "(-1)"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.-1.3"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["(-1)", "3"]
+expected = "-8"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.1.33"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["1", "33"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.3.-2147483648"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["3", "(-2147483648)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shl.1.2147483647"
+area = "sint"
+fn = "Int32.shiftLeft"
+args = ["1", "2147483647"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.-2147483648.1"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["(-2147483648)", "1"]
+expected = "-1073741824"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.-1.31"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["(-1)", "31"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.-2147483648.32"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["(-2147483648)", "32"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.64.-1"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["64", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.-2147483648.31"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["(-2147483648)", "31"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.2147483647.-33"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["2147483647", "(-33)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.shr.-5.2147483647"
+area = "sint"
+fn = "Int32.shiftRight"
+args = ["(-5)", "2147483647"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.abs.-2147483648"
+area = "sint"
+fn = "Int32.abs"
+args = ["(-2147483648)"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.abs.-1"
+area = "sint"
+fn = "Int32.abs"
+args = ["(-1)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.abs.0"
+area = "sint"
+fn = "Int32.abs"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.abs.2147483647"
+area = "sint"
+fn = "Int32.abs"
+args = ["2147483647"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.lt.-2147483648.2147483647"
+area = "sint"
+fn = "Int32.decLt"
+args = ["(-2147483648)", "2147483647"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.le.-2147483648.2147483647"
+area = "sint"
+fn = "Int32.decLe"
+args = ["(-2147483648)", "2147483647"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.lt.-1.0"
+area = "sint"
+fn = "Int32.decLt"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.le.-1.0"
+area = "sint"
+fn = "Int32.decLe"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.lt.0.-1"
+area = "sint"
+fn = "Int32.decLt"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.le.0.-1"
+area = "sint"
+fn = "Int32.decLe"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.lt.-1.-1"
+area = "sint"
+fn = "Int32.decLt"
+args = ["(-1)", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.le.-1.-1"
+area = "sint"
+fn = "Int32.decLe"
+args = ["(-1)", "(-1)"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint.-2147483648"
+area = "sint"
+fn = "Int32.toInt"
+args = ["(-2147483648)"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint.-1"
+area = "sint"
+fn = "Int32.toInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint.2147483647"
+area = "sint"
+fn = "Int32.toInt"
+args = ["2147483647"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.-1"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.-2147483649"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["(-2147483649)"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.2147483648"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["2147483648"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.1180591620717411303429"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["1180591620717411303429"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.-1180591620717411303429"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["(-1180591620717411303429)"]
+expected = "-5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.-18446744073709551616"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["(-18446744073709551616)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofint.18446744073709551615"
+area = "sint"
+fn = "Int32.ofInt"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofnat.2147483648"
+area = "sint"
+fn = "Int32.ofNat"
+args = ["2147483648"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofnat.18446744073709551615"
+area = "sint"
+fn = "Int32.ofNat"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofnat.1267650600228229401496703205376"
+area = "sint"
+fn = "Int32.ofNat"
+args = ["1267650600228229401496703205376"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofnat.9223372036854775808"
+area = "sint"
+fn = "Int32.ofNat"
+args = ["9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.ofnat.200"
+area = "sint"
+fn = "Int32.ofNat"
+args = ["200"]
+expected = "200"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.tofloat.-2147483648"
+area = "sint"
+fn = "Int32.toFloat"
+args = ["(-2147483648)"]
+bits = { result = "0xc1e0000000000000" }
+expected = "-2147483648.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.tofloat32.-2147483648"
+area = "sint"
+fn = "Int32.toFloat32"
+args = ["(-2147483648)"]
+bits = { result = "0xcf000000" }
+expected = "-2147483648.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.tofloat.2147483647"
+area = "sint"
+fn = "Int32.toFloat"
+args = ["2147483647"]
+bits = { result = "0x41dfffffffc00000" }
+expected = "2147483647.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.tofloat32.2147483647"
+area = "sint"
+fn = "Int32.toFloat32"
+args = ["2147483647"]
+bits = { result = "0x4f000000" }
+expected = "2147483648.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.tofloat.-1"
+area = "sint"
+fn = "Int32.toFloat"
+args = ["(-1)"]
+bits = { result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.tofloat32.-1"
+area = "sint"
+fn = "Int32.toFloat32"
+args = ["(-1)"]
+bits = { result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint8.-1"
+area = "sint"
+fn = "Int32.toInt8"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint8.-2147483648"
+area = "sint"
+fn = "Int32.toInt8"
+args = ["(-2147483648)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint8.2147483647"
+area = "sint"
+fn = "Int32.toInt8"
+args = ["2147483647"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint8.1073741827"
+area = "sint"
+fn = "Int32.toInt8"
+args = ["1073741827"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint16.-1"
+area = "sint"
+fn = "Int32.toInt16"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint16.-2147483648"
+area = "sint"
+fn = "Int32.toInt16"
+args = ["(-2147483648)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint16.2147483647"
+area = "sint"
+fn = "Int32.toInt16"
+args = ["2147483647"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint16.1073741827"
+area = "sint"
+fn = "Int32.toInt16"
+args = ["1073741827"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint64.-1"
+area = "sint"
+fn = "Int32.toInt64"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint64.-2147483648"
+area = "sint"
+fn = "Int32.toInt64"
+args = ["(-2147483648)"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint64.2147483647"
+area = "sint"
+fn = "Int32.toInt64"
+args = ["2147483647"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toint64.1073741827"
+area = "sint"
+fn = "Int32.toInt64"
+args = ["1073741827"]
+expected = "1073741827"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toisize.-1"
+area = "sint"
+fn = "Int32.toISize"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toisize.-2147483648"
+area = "sint"
+fn = "Int32.toISize"
+args = ["(-2147483648)"]
+expected = "-2147483648"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toisize.2147483647"
+area = "sint"
+fn = "Int32.toISize"
+args = ["2147483647"]
+expected = "2147483647"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int32.toisize.1073741827"
+area = "sint"
+fn = "Int32.toISize"
+args = ["1073741827"]
+expected = "1073741827"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.7.0"
+area = "sint"
+fn = "Int64.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.-9223372036854775808.-1"
+area = "sint"
+fn = "Int64.div"
+args = ["(-9223372036854775808)", "(-1)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.-9223372036854775808.1"
+area = "sint"
+fn = "Int64.div"
+args = ["(-9223372036854775808)", "1"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.-7.2"
+area = "sint"
+fn = "Int64.div"
+args = ["(-7)", "2"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.7.-2"
+area = "sint"
+fn = "Int64.div"
+args = ["7", "(-2)"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.-7.-2"
+area = "sint"
+fn = "Int64.div"
+args = ["(-7)", "(-2)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.9223372036854775807.-1"
+area = "sint"
+fn = "Int64.div"
+args = ["9223372036854775807", "(-1)"]
+expected = "-9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.0.-1"
+area = "sint"
+fn = "Int64.div"
+args = ["0", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.div.-9223372036854775808.0"
+area = "sint"
+fn = "Int64.div"
+args = ["(-9223372036854775808)", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.7.0"
+area = "sint"
+fn = "Int64.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.-9223372036854775808.-1"
+area = "sint"
+fn = "Int64.mod"
+args = ["(-9223372036854775808)", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.-7.2"
+area = "sint"
+fn = "Int64.mod"
+args = ["(-7)", "2"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.7.-2"
+area = "sint"
+fn = "Int64.mod"
+args = ["7", "(-2)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.-7.-2"
+area = "sint"
+fn = "Int64.mod"
+args = ["(-7)", "(-2)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.-9223372036854775808.0"
+area = "sint"
+fn = "Int64.mod"
+args = ["(-9223372036854775808)", "0"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.mod.-9223372036854775808.9223372036854775807"
+area = "sint"
+fn = "Int64.mod"
+args = ["(-9223372036854775808)", "9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.1.63"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["1", "63"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.1.64"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["1", "64"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.1.-1"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["1", "(-1)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.-1.3"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["(-1)", "3"]
+expected = "-8"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.1.65"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["1", "65"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.3.-9223372036854775808"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["3", "(-9223372036854775808)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shl.1.9223372036854775807"
+area = "sint"
+fn = "Int64.shiftLeft"
+args = ["1", "9223372036854775807"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.-9223372036854775808.1"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["(-9223372036854775808)", "1"]
+expected = "-4611686018427387904"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.-1.63"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["(-1)", "63"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.-9223372036854775808.64"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["(-9223372036854775808)", "64"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.64.-1"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["64", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.-9223372036854775808.63"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["(-9223372036854775808)", "63"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.9223372036854775807.-65"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["9223372036854775807", "(-65)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.shr.-5.9223372036854775807"
+area = "sint"
+fn = "Int64.shiftRight"
+args = ["(-5)", "9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.abs.-9223372036854775808"
+area = "sint"
+fn = "Int64.abs"
+args = ["(-9223372036854775808)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.abs.-1"
+area = "sint"
+fn = "Int64.abs"
+args = ["(-1)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.abs.0"
+area = "sint"
+fn = "Int64.abs"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.abs.9223372036854775807"
+area = "sint"
+fn = "Int64.abs"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.lt.-9223372036854775808.9223372036854775807"
+area = "sint"
+fn = "Int64.decLt"
+args = ["(-9223372036854775808)", "9223372036854775807"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.le.-9223372036854775808.9223372036854775807"
+area = "sint"
+fn = "Int64.decLe"
+args = ["(-9223372036854775808)", "9223372036854775807"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.lt.-1.0"
+area = "sint"
+fn = "Int64.decLt"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.le.-1.0"
+area = "sint"
+fn = "Int64.decLe"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.lt.0.-1"
+area = "sint"
+fn = "Int64.decLt"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.le.0.-1"
+area = "sint"
+fn = "Int64.decLe"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.lt.-1.-1"
+area = "sint"
+fn = "Int64.decLt"
+args = ["(-1)", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.le.-1.-1"
+area = "sint"
+fn = "Int64.decLe"
+args = ["(-1)", "(-1)"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint.-9223372036854775808"
+area = "sint"
+fn = "Int64.toInt"
+args = ["(-9223372036854775808)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint.-1"
+area = "sint"
+fn = "Int64.toInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint.9223372036854775807"
+area = "sint"
+fn = "Int64.toInt"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.-1"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.-9223372036854775809"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["(-9223372036854775809)"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.9223372036854775808"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["9223372036854775808"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.1180591620717411303429"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["1180591620717411303429"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.-1180591620717411303429"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["(-1180591620717411303429)"]
+expected = "-5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.-18446744073709551616"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["(-18446744073709551616)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.18446744073709551615"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofint.-2147483649"
+area = "sint"
+fn = "Int64.ofInt"
+args = ["(-2147483649)"]
+expected = "-2147483649"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofnat.9223372036854775808"
+area = "sint"
+fn = "Int64.ofNat"
+args = ["9223372036854775808"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofnat.18446744073709551615"
+area = "sint"
+fn = "Int64.ofNat"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofnat.1267650600228229401496703205376"
+area = "sint"
+fn = "Int64.ofNat"
+args = ["1267650600228229401496703205376"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.ofnat.200"
+area = "sint"
+fn = "Int64.ofNat"
+args = ["200"]
+expected = "200"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.tofloat.-9223372036854775808"
+area = "sint"
+fn = "Int64.toFloat"
+args = ["(-9223372036854775808)"]
+bits = { result = "0xc3e0000000000000" }
+expected = "-9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.tofloat32.-9223372036854775808"
+area = "sint"
+fn = "Int64.toFloat32"
+args = ["(-9223372036854775808)"]
+bits = { result = "0xdf000000" }
+expected = "-9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.tofloat.9223372036854775807"
+area = "sint"
+fn = "Int64.toFloat"
+args = ["9223372036854775807"]
+bits = { result = "0x43e0000000000000" }
+expected = "9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.tofloat32.9223372036854775807"
+area = "sint"
+fn = "Int64.toFloat32"
+args = ["9223372036854775807"]
+bits = { result = "0x5f000000" }
+expected = "9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.tofloat.-1"
+area = "sint"
+fn = "Int64.toFloat"
+args = ["(-1)"]
+bits = { result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.tofloat32.-1"
+area = "sint"
+fn = "Int64.toFloat32"
+args = ["(-1)"]
+bits = { result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint8.-1"
+area = "sint"
+fn = "Int64.toInt8"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint8.-9223372036854775808"
+area = "sint"
+fn = "Int64.toInt8"
+args = ["(-9223372036854775808)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint8.9223372036854775807"
+area = "sint"
+fn = "Int64.toInt8"
+args = ["9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint8.4611686018427387907"
+area = "sint"
+fn = "Int64.toInt8"
+args = ["4611686018427387907"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint16.-1"
+area = "sint"
+fn = "Int64.toInt16"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint16.-9223372036854775808"
+area = "sint"
+fn = "Int64.toInt16"
+args = ["(-9223372036854775808)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint16.9223372036854775807"
+area = "sint"
+fn = "Int64.toInt16"
+args = ["9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint16.4611686018427387907"
+area = "sint"
+fn = "Int64.toInt16"
+args = ["4611686018427387907"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint32.-1"
+area = "sint"
+fn = "Int64.toInt32"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint32.-9223372036854775808"
+area = "sint"
+fn = "Int64.toInt32"
+args = ["(-9223372036854775808)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint32.9223372036854775807"
+area = "sint"
+fn = "Int64.toInt32"
+args = ["9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toint32.4611686018427387907"
+area = "sint"
+fn = "Int64.toInt32"
+args = ["4611686018427387907"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toisize.-1"
+area = "sint"
+fn = "Int64.toISize"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toisize.-9223372036854775808"
+area = "sint"
+fn = "Int64.toISize"
+args = ["(-9223372036854775808)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toisize.9223372036854775807"
+area = "sint"
+fn = "Int64.toISize"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/int64.toisize.4611686018427387907"
+area = "sint"
+fn = "Int64.toISize"
+args = ["4611686018427387907"]
+expected = "4611686018427387907"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.7.0"
+area = "sint"
+fn = "ISize.div"
+args = ["7", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.-9223372036854775808.-1"
+area = "sint"
+fn = "ISize.div"
+args = ["(-9223372036854775808)", "(-1)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.-9223372036854775808.1"
+area = "sint"
+fn = "ISize.div"
+args = ["(-9223372036854775808)", "1"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.-7.2"
+area = "sint"
+fn = "ISize.div"
+args = ["(-7)", "2"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.7.-2"
+area = "sint"
+fn = "ISize.div"
+args = ["7", "(-2)"]
+expected = "-3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.-7.-2"
+area = "sint"
+fn = "ISize.div"
+args = ["(-7)", "(-2)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.9223372036854775807.-1"
+area = "sint"
+fn = "ISize.div"
+args = ["9223372036854775807", "(-1)"]
+expected = "-9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.0.-1"
+area = "sint"
+fn = "ISize.div"
+args = ["0", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.div.-9223372036854775808.0"
+area = "sint"
+fn = "ISize.div"
+args = ["(-9223372036854775808)", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.7.0"
+area = "sint"
+fn = "ISize.mod"
+args = ["7", "0"]
+expected = "7"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.-9223372036854775808.-1"
+area = "sint"
+fn = "ISize.mod"
+args = ["(-9223372036854775808)", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.-7.2"
+area = "sint"
+fn = "ISize.mod"
+args = ["(-7)", "2"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.7.-2"
+area = "sint"
+fn = "ISize.mod"
+args = ["7", "(-2)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.-7.-2"
+area = "sint"
+fn = "ISize.mod"
+args = ["(-7)", "(-2)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.-9223372036854775808.0"
+area = "sint"
+fn = "ISize.mod"
+args = ["(-9223372036854775808)", "0"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.mod.-9223372036854775808.9223372036854775807"
+area = "sint"
+fn = "ISize.mod"
+args = ["(-9223372036854775808)", "9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.1.63"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["1", "63"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.1.64"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["1", "64"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.1.-1"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["1", "(-1)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.-1.3"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["(-1)", "3"]
+expected = "-8"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.1.65"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["1", "65"]
+expected = "2"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.3.-9223372036854775808"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["3", "(-9223372036854775808)"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shl.1.9223372036854775807"
+area = "sint"
+fn = "ISize.shiftLeft"
+args = ["1", "9223372036854775807"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.-9223372036854775808.1"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["(-9223372036854775808)", "1"]
+expected = "-4611686018427387904"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.-1.63"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["(-1)", "63"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.-9223372036854775808.64"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["(-9223372036854775808)", "64"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.64.-1"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["64", "(-1)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.-9223372036854775808.63"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["(-9223372036854775808)", "63"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.9223372036854775807.-65"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["9223372036854775807", "(-65)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.shr.-5.9223372036854775807"
+area = "sint"
+fn = "ISize.shiftRight"
+args = ["(-5)", "9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.abs.-9223372036854775808"
+area = "sint"
+fn = "ISize.abs"
+args = ["(-9223372036854775808)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.abs.-1"
+area = "sint"
+fn = "ISize.abs"
+args = ["(-1)"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.abs.0"
+area = "sint"
+fn = "ISize.abs"
+args = ["0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.abs.9223372036854775807"
+area = "sint"
+fn = "ISize.abs"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.lt.-9223372036854775808.9223372036854775807"
+area = "sint"
+fn = "ISize.decLt"
+args = ["(-9223372036854775808)", "9223372036854775807"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.le.-9223372036854775808.9223372036854775807"
+area = "sint"
+fn = "ISize.decLe"
+args = ["(-9223372036854775808)", "9223372036854775807"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.lt.-1.0"
+area = "sint"
+fn = "ISize.decLt"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.le.-1.0"
+area = "sint"
+fn = "ISize.decLe"
+args = ["(-1)", "0"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.lt.0.-1"
+area = "sint"
+fn = "ISize.decLt"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.le.0.-1"
+area = "sint"
+fn = "ISize.decLe"
+args = ["0", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.lt.-1.-1"
+area = "sint"
+fn = "ISize.decLt"
+args = ["(-1)", "(-1)"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.le.-1.-1"
+area = "sint"
+fn = "ISize.decLe"
+args = ["(-1)", "(-1)"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint.-9223372036854775808"
+area = "sint"
+fn = "ISize.toInt"
+args = ["(-9223372036854775808)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint.-1"
+area = "sint"
+fn = "ISize.toInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint.9223372036854775807"
+area = "sint"
+fn = "ISize.toInt"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.-1"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.-9223372036854775809"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["(-9223372036854775809)"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.9223372036854775808"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["9223372036854775808"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.1180591620717411303429"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["1180591620717411303429"]
+expected = "5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.-1180591620717411303429"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["(-1180591620717411303429)"]
+expected = "-5"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.-18446744073709551616"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["(-18446744073709551616)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.18446744073709551615"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofint.-2147483649"
+area = "sint"
+fn = "ISize.ofInt"
+args = ["(-2147483649)"]
+expected = "-2147483649"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofnat.9223372036854775808"
+area = "sint"
+fn = "ISize.ofNat"
+args = ["9223372036854775808"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofnat.18446744073709551615"
+area = "sint"
+fn = "ISize.ofNat"
+args = ["18446744073709551615"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofnat.1267650600228229401496703205376"
+area = "sint"
+fn = "ISize.ofNat"
+args = ["1267650600228229401496703205376"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.ofnat.200"
+area = "sint"
+fn = "ISize.ofNat"
+args = ["200"]
+expected = "200"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.tofloat.-9223372036854775808"
+area = "sint"
+fn = "ISize.toFloat"
+args = ["(-9223372036854775808)"]
+bits = { result = "0xc3e0000000000000" }
+expected = "-9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.tofloat32.-9223372036854775808"
+area = "sint"
+fn = "ISize.toFloat32"
+args = ["(-9223372036854775808)"]
+bits = { result = "0xdf000000" }
+expected = "-9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.tofloat.9223372036854775807"
+area = "sint"
+fn = "ISize.toFloat"
+args = ["9223372036854775807"]
+bits = { result = "0x43e0000000000000" }
+expected = "9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.tofloat32.9223372036854775807"
+area = "sint"
+fn = "ISize.toFloat32"
+args = ["9223372036854775807"]
+bits = { result = "0x5f000000" }
+expected = "9223372036854775808.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.tofloat.-1"
+area = "sint"
+fn = "ISize.toFloat"
+args = ["(-1)"]
+bits = { result = "0xbff0000000000000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.tofloat32.-1"
+area = "sint"
+fn = "ISize.toFloat32"
+args = ["(-1)"]
+bits = { result = "0xbf800000" }
+expected = "-1.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint8.-1"
+area = "sint"
+fn = "ISize.toInt8"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint8.-9223372036854775808"
+area = "sint"
+fn = "ISize.toInt8"
+args = ["(-9223372036854775808)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint8.9223372036854775807"
+area = "sint"
+fn = "ISize.toInt8"
+args = ["9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint8.4611686018427387907"
+area = "sint"
+fn = "ISize.toInt8"
+args = ["4611686018427387907"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint16.-1"
+area = "sint"
+fn = "ISize.toInt16"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint16.-9223372036854775808"
+area = "sint"
+fn = "ISize.toInt16"
+args = ["(-9223372036854775808)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint16.9223372036854775807"
+area = "sint"
+fn = "ISize.toInt16"
+args = ["9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint16.4611686018427387907"
+area = "sint"
+fn = "ISize.toInt16"
+args = ["4611686018427387907"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint32.-1"
+area = "sint"
+fn = "ISize.toInt32"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint32.-9223372036854775808"
+area = "sint"
+fn = "ISize.toInt32"
+args = ["(-9223372036854775808)"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint32.9223372036854775807"
+area = "sint"
+fn = "ISize.toInt32"
+args = ["9223372036854775807"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint32.4611686018427387907"
+area = "sint"
+fn = "ISize.toInt32"
+args = ["4611686018427387907"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint64.-1"
+area = "sint"
+fn = "ISize.toInt64"
+args = ["(-1)"]
+expected = "-1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint64.-9223372036854775808"
+area = "sint"
+fn = "ISize.toInt64"
+args = ["(-9223372036854775808)"]
+expected = "-9223372036854775808"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint64.9223372036854775807"
+area = "sint"
+fn = "ISize.toInt64"
+args = ["9223372036854775807"]
+expected = "9223372036854775807"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
+
+[[row]]
+id = "sint/isize.toint64.4611686018427387907"
+area = "sint"
+fn = "ISize.toInt64"
+args = ["4611686018427387907"]
+expected = "4611686018427387907"
+lean_version = "4.34.0"
+source = "lean-runtime batch 1: lean.h's IntN rows: division overflow and by zero, smod shifts, conversions"
