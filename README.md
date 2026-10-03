@@ -26,9 +26,15 @@ translator can wrap them without converting values.
 
 ## Status
 
-The skeleton is in place, with nothing extracted yet. The two projects are
-finishing a cross-test of their runtimes, then moving to Lean 4.34.0, then
-extracting `semantics`, `io` and `sched` in that order. See `CONTRIBUTING.md`.
+The first part of `semantics` is in: hashing, `Float`/`Float32` formatting
+and conversions, the libm rows, the fixed-width integer rows and the `String`
+position functions, checked by the rows in `tests/cases/*/*.rows.toml`
+(expected values from native Lean 4.34.0, `scripts/gen_rows.py`), with one
+micro-benchmark per public function and its native-Lean twin in `benches/`
+(`scripts/gen_benches.py`; not timed yet). The two projects are finishing a
+cross-test of their runtimes, then moving to Lean 4.34.0, then extracting
+the rest of `semantics`, `io` and `sched` in that order. See
+`CONTRIBUTING.md`.
 
 ## Rules in short
 
