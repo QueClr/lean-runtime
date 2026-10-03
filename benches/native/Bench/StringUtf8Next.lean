@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::string::utf8_next` mirrors, through Lean's
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.StringUtf8Next
 
-partial def loop (s : String) (k m : UInt64) (n i x : UInt64) (acc : UInt64) : UInt64 :=
+partial def loop (inp : PosInput) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop s k m n (i + 1) x (acc + (String.Pos.Raw.next s ⟨(x % m).toNat⟩).byteIdx.toUInt64)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((String.Pos.Raw.next inp.s ⟨inp.ps[(x >>> 52).toNat]!⟩).byteIdx.toUInt64))
   else acc
 
-def kernel (inp : String) (n : UInt64) : UInt64 :=
-  let s := inp; let k := s.utf8ByteSize.toUInt64; let m := k + 2; loop s k m n 0 Bench.SEED 0
+def kernel (inp : PosInput) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.StringUtf8Next
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure Bench.mixed) Bench.StringUtf8Next.kernel (fun out => toString (out)) args
+  Bench.run (fun _ => pure (posInput mixed 0)) Bench.StringUtf8Next.kernel args

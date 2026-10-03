@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::libm::cbrt` mirrors, through Lean's API.
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.LibmCbrt
 
-partial def loop (n i x : UInt64) (acc : Float) : Float :=
+partial def loop (inp : FloatArray) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + Float.cbrt (-1048576.0 + ((x >>> 11).toFloat * 1.1102230246251565e-16) * 2097152.0))
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((Float.cbrt (inp.get! (x >>> 52).toNat)).toBits))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : Float :=
-  loop n 0 Bench.SEED 0.0
+def kernel (inp : FloatArray) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.LibmCbrt
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.LibmCbrt.kernel (fun out => toString (out.toBits)) args
+  Bench.run (fun _ => pure (f64Operands 0xC130000000000000 0x4140000000000000 false)) Bench.LibmCbrt.kernel args

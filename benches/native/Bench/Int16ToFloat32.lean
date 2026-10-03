@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::sint::int16_to_float32` mirrors, through L
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.Int16ToFloat32
 
-partial def loop (n i x : UInt64) (acc : Float32) : Float32 :=
+partial def loop (inp : Unit) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + Int16.toFloat32 ((x >>> 48).toUInt16).toInt16)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((Int16.toFloat32 ((x >>> 48).toUInt16).toInt16).toBits.toUInt64))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : Float32 :=
-  loop n 0 Bench.SEED 0.0
+def kernel (inp : Unit) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.Int16ToFloat32
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.Int16ToFloat32.kernel (fun out => toString (out.toBits)) args
+  Bench.run (fun _ => pure ()) Bench.Int16ToFloat32.kernel args

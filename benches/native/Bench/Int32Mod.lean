@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::sint::int32_mod` mirrors, through Lean's A
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.Int32Mod
 
-partial def loop (n i x : UInt64) (acc : UInt64) : UInt64 :=
+partial def loop (inp : Unit) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + (Int32.mod ((x >>> 32).toUInt32).toInt32 (x.toUInt32).toInt32).toUInt32.toUInt64)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((Int32.mod ((x >>> 32).toUInt32).toInt32 (x.toUInt32).toInt32).toUInt32.toUInt64))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : UInt64 :=
-  loop n 0 Bench.SEED 0
+def kernel (inp : Unit) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.Int32Mod
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.Int32Mod.kernel (fun out => toString (out)) args
+  Bench.run (fun _ => pure ()) Bench.Int32Mod.kernel args

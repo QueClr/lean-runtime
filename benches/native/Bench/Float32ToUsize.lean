@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::float32::to_usize` mirrors, through Lean's
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.Float32ToUsize
 
-partial def loop (n i x : UInt64) (acc : UInt64) : UInt64 :=
+partial def loop (inp : FloatArray) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + (Float32.toUSize ((-2e19 + ((x >>> 11).toFloat * 1.1102230246251565e-16) * 4e19)).toFloat32).toUInt64)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((Float32.toUSize (inp.get! (x >>> 52).toNat).toFloat32).toUInt64))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : UInt64 :=
-  loop n 0 Bench.SEED 0
+def kernel (inp : FloatArray) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.Float32ToUsize
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.Float32ToUsize.kernel (fun out => toString (out)) args
+  Bench.run (fun _ => pure (f64Operands 0xC3F158E460913D00 0x440158E460913D00 true)) Bench.Float32ToUsize.kernel args

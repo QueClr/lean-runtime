@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::uint::uint64_log2` mirrors, through Lean's
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.Uint64Log2
 
-partial def loop (n i x : UInt64) (acc : UInt64) : UInt64 :=
+partial def loop (inp : Unit) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + (UInt64.log2 x).toUInt64)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((UInt64.log2 x).toUInt64))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : UInt64 :=
-  loop n 0 Bench.SEED 0
+def kernel (inp : Unit) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.Uint64Log2
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.Uint64Log2.kernel (fun out => toString (out)) args
+  Bench.run (fun _ => pure ()) Bench.Uint64Log2.kernel args

@@ -2,36 +2,35 @@
 //! native twin is `benches/native/Bench/StringUtf8GetBang.lean`.
 //! at character starts only: an invalid position would print a panic message
 
+#![allow(unused_parens, unused_imports, unused_variables, unused_mut)]
 #![allow(
-    unused_parens,
     clippy::double_parens,
     clippy::unnecessary_cast,
     clippy::redundant_closure
 )]
+#![allow(clippy::identity_op, clippy::let_and_return)]
 
 use lean_runtime::semantics::string;
-use lean_runtime_bench::{mixed, run, step, SEED};
+use lean_runtime_bench::*;
+use std::hint::black_box;
 
-#[allow(unused_variables)]
-fn kernel(inp: &(String, Vec<u64>), n: u64) -> u64 {
-    let (s, ps) = (inp.0.as_bytes(), &inp.1);
-    let np = ps.len() as u64;
+#[inline(never)]
+fn kernel(inp: &PosInput, n: u64) -> u64 {
+    let (s, ps) = (inp.s.as_bytes(), &inp.ps[..]);
     let (mut x, mut acc) = (SEED, 0u64);
     for _ in 0..n {
         x = step(x);
-        acc =
-            acc.wrapping_add(string::utf8_get_bang(s, ps[(x % np) as usize]).map_or(0, u64::from));
+        acc = mix(
+            acc,
+            u64::from(
+                string::utf8_get_bang(s, nat_unbox(get_word(ps, x >> 52)))
+                    .unwrap_or(string::CHAR_DEFAULT),
+            ),
+        );
     }
-    acc as u64
+    acc
 }
 
 fn main() {
-    run(
-        || {
-            let s = mixed();
-            let ps = s.char_indices().map(|(i, _)| i as u64).collect();
-            (s, ps)
-        },
-        kernel,
-    )
+    run(|| pos_input(mixed(), Positions::Starts), kernel)
 }

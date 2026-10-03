@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::sint::isize_to_float` mirrors, through Lea
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.IsizeToFloat
 
-partial def loop (n i x : UInt64) (acc : Float) : Float :=
+partial def loop (inp : Unit) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + ISize.toFloat (x).toUSize.toISize)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((ISize.toFloat (x).toUSize.toISize).toBits))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : Float :=
-  loop n 0 Bench.SEED 0.0
+def kernel (inp : Unit) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.IsizeToFloat
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.IsizeToFloat.kernel (fun out => toString (out.toBits)) args
+  Bench.run (fun _ => pure ()) Bench.IsizeToFloat.kernel args

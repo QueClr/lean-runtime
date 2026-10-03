@@ -4,18 +4,20 @@ timing what `lean_runtime::semantics::sint::isize_to_int64` mirrors, through Lea
 -/
 import Bench.Harness
 
+open Bench
+
 namespace Bench.IsizeToInt64
 
-partial def loop (n i x : UInt64) (acc : UInt64) : UInt64 :=
+partial def loop (inp : Unit) (n i x acc : UInt64) : UInt64 :=
   if i < n then
-    let x := Bench.step x
-    loop n (i + 1) x (acc + (ISize.toInt64 (x).toUSize.toISize).toUInt64.toUInt64)
+    let x := step x
+    loop inp n (i + 1) x (mix acc ((ISize.toInt64 (x).toUSize.toISize).toUInt64.toUInt64))
   else acc
 
-def kernel (_inp : Unit) (n : UInt64) : UInt64 :=
-  loop n 0 Bench.SEED 0
+def kernel (inp : Unit) (n : UInt64) : UInt64 :=
+  loop inp n 0 SEED 0
 
 end Bench.IsizeToInt64
 
 def main (args : List String) : IO UInt32 :=
-  Bench.run (fun _ => pure ()) Bench.IsizeToInt64.kernel (fun out => toString (out)) args
+  Bench.run (fun _ => pure ()) Bench.IsizeToInt64.kernel args
