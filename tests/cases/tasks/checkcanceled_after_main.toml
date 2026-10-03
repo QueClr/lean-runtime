@@ -1,0 +1,5 @@
+id = "checkcanceled_after_main"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs exit probes, 2026-10-03"
+streams = "separate"

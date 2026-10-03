@@ -1,0 +1,5 @@
+id = "sleep_polling_spin"
+area = "tasks"
+lean_version = "4.34.0"
+source = "shared-runtime decisions Q5 refinement B (polling yields), 2026-10-03"
+streams = "separate"
