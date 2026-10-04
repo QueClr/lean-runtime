@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sched · lean-runtime</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><a href="index.html">lean-runtime</a><span>Lean 4.34.0's runtime in safe Rust</span></div>
+  <nav class="main" aria-label="Pages">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="semantics.html">semantics</a>
+    <a href="io.html">io</a>
+    <a href="sched.html" aria-current="page">sched</a>
+    <a href="testing.html">Testing</a>
+    <a href="lean-bugs.html">Lean bugs</a>
+    <a href="status.html">Status</a>
+    <a href="glossary.html">Glossary</a>
+  </nav>
+</header>
+<main>
+<h1>The sched module</h1>
+<p class="lead"><code>sched</code> (feature <code>sched</code>) is Lean 4.34.0's task manager on one OS thread.
+Tasks are <a href="glossary.html#g-deferred">deferred</a> and run as coroutines.</p>
+
+<div class="note"><p>The scheduler is on branch <code>sched-1</code>; it is not on main yet.
+The task model is a decision of 2026-10-03 (Q5).
+It has deferred tasks, polling yield points and Lean's exit behaviour, and it switches stacks through corosensei.
+Neither translator adopts <code>sched</code> before <a href="#sched-io">sched-io</a> lands.</p></div>
+
+<div class="toc"><ul>
+  <li><a href="#model">The model</a></li>
+  <li><a href="#hub">Contexts and the hub</a></li>
+  <li><a href="#states">Task states</a></li>
+  <li><a href="#pure">The pure-task rule</a></li>
+  <li><a href="#yield">Yield points</a></li>
+  <li><a href="#sync">Promises and Std.Sync</a></li>
+  <li><a href="#exit">Exit</a></li>
+  <li><a href="#suspend">The unsafe steps in the glue</a></li>
+  <li><a href="#limits">Limits of one thread</a></li>
+  <li><a href="#plans">Plans</a></li>
+</ul></div>
+
+<h2 id="model">The model</h2>
+<p>Native Lean runs tasks on a pool of worker threads.
+A worker may start a task at any time after it is made.
+It must finish the task before the task's value is needed.
+<code>sched</code> runs one of the schedules that such a pool can produce, on one thread.</p>
+<p>A task runs at the first of these points:</p>
+<ul>
+  <li><strong>It is needed.</strong> <code>Task.get</code> or <code>IO.wait</code> runs it at once, on the stack of the code that needs it.</li>
+  <li><strong>The running code blocks</strong> (a sleep, a lock, a promise) and a worker is free.
+    The task then starts on a <a href="glossary.html#g-context">context</a> of its own.
+    The number of workers is <code>LEAN_NUM_THREADS</code>, or the number of online processors.</li>
+  <li><strong>An <a href="glossary.html#g-yield-point">effect point</a>.</strong> At an output, a flush, a process spawn or an exit, a task queued 5 ms ago or more goes first.
+    Natively, a worker would have run it by then.</li>
+  <li><strong>Polling.</strong> The program asks for the task's state again after a sleep, or 1000 times without one.</li>
+  <li><strong><code>main</code> returns.</strong> <code>finish</code> runs the rest, as <code>lean_finalize_task_manager</code> does.</li>
+</ul>
+<p>A pure task that the program drops before it starts never runs: Lean deletes it.</p>
+
+<h2 id="hub">Contexts and the hub</h2>
+<ul>
+  <li><code>main</code>'s context runs on the thread's own stack.</li>
+  <li>Every other context is a corosensei coroutine.
+    Its stack has the size of a native worker's stack: 1 GiB, or <code>LEAN_STACK_SIZE_KB</code> plus 128 KiB.</li>
+  <li>corosensei's coroutines are asymmetric: a coroutine suspends to the code that resumed it.
+    So every switch goes through <code>main</code>'s stack.</li>
+  <li>When <code>main</code>'s context blocks, it runs the <a href="glossary.html#g-hub">hub</a>.
+    The hub resumes the contexts that can go on, one at a time.</li>
+</ul>
+<p>The hub picks, in this order:</p>
+<ol>
+  <li>a context that can go on, in the order the contexts became able to;</li>
+  <li>a queued task, on a new context, if a worker is free;</li>
+  <li>a pure task that is marked started, when nothing else will happen;</li>
+  <li>else, it waits for the earliest sleeper, or forever (a deadlocked native program also waits forever).</li>
+</ol>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 520" role="img" aria-labelledby="sc1-t sc1-d">
+  <title id="sc1-t">Every switch goes through the hub on main's stack</title>
+  <desc id="sc1-d">Main sleeps and runs the hub. The hub starts IO task 1 on context A. Task 1 sleeps, and A suspends to the hub. The hub starts IO task 2 on context B. Task 2 finishes and B returns to the hub. Nothing can go on, so the hub waits for the earliest sleeper, then resumes A. Task 1 finishes and A returns to the hub. The hub waits for main's sleep to end and returns to main.</desc>
+  <defs>
+    <marker id="sc1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="grp" x="20" y="8" width="420" height="72" rx="8"/>
+  <text class="ts" x="30" y="24">main's thread stack</text>
+  <rect class="k-tr" x="40" y="32" width="160" height="40" rx="6"/>
+  <text class="tb" x="120" y="57" text-anchor="middle">main's code</text>
+  <rect class="k-rt" x="250" y="32" width="160" height="40" rx="6"/>
+  <text class="tb" x="330" y="57" text-anchor="middle">hub</text>
+  <rect class="k-rt" x="490" y="32" width="150" height="40" rx="6"/>
+  <text class="tb" x="565" y="51" text-anchor="middle">context A</text>
+  <text class="ts" x="565" y="66" text-anchor="middle">its own stack</text>
+  <rect class="k-rt" x="680" y="32" width="150" height="40" rx="6"/>
+  <text class="tb" x="755" y="51" text-anchor="middle">context B</text>
+  <text class="ts" x="755" y="66" text-anchor="middle">its own stack</text>
+  <line class="life" x1="120" y1="72" x2="120" y2="505"/>
+  <line class="life" x1="330" y1="72" x2="330" y2="505"/>
+  <line class="life" x1="565" y1="72" x2="565" y2="505"/>
+  <line class="life" x1="755" y1="72" x2="755" y2="505"/>
+
+  <text class="ts" x="128" y="94">IO.sleep 50: blocks</text>
+  <line class="ar" x1="120" y1="124" x2="326" y2="124" marker-end="url(#sc1-a)"/>
+  <text class="ts" x="223" y="118" text-anchor="middle">runs the hub (a call)</text>
+
+  <line class="ar" x1="330" y1="146" x2="561" y2="146" marker-end="url(#sc1-a)"/>
+  <text x="446" y="140" text-anchor="middle">switch: start IO task 1</text>
+  <text class="ts" x="573" y="174">task 1: IO.sleep 10, blocks</text>
+  <line class="ar" x1="565" y1="190" x2="334" y2="190" marker-end="url(#sc1-a)"/>
+  <text x="446" y="184" text-anchor="middle">switch: suspend</text>
+
+  <line class="ar" x1="330" y1="226" x2="751" y2="226" marker-end="url(#sc1-a)"/>
+  <text x="560" y="220" text-anchor="middle">switch: start IO task 2</text>
+  <text class="ts" x="763" y="254">task 2 finishes</text>
+  <line class="ar" x1="755" y1="270" x2="334" y2="270" marker-end="url(#sc1-a)"/>
+  <text x="560" y="264" text-anchor="middle">switch: return</text>
+
+  <text class="ts" x="338" y="300">nothing can go on: wait for</text>
+  <text class="ts" x="338" y="316">the earliest sleeper (A)</text>
+  <line class="ar" x1="330" y1="344" x2="561" y2="344" marker-end="url(#sc1-a)"/>
+  <text x="446" y="338" text-anchor="middle">switch: resume A</text>
+  <text class="ts" x="573" y="372">task 1 finishes</text>
+  <line class="ar" x1="565" y1="388" x2="334" y2="388" marker-end="url(#sc1-a)"/>
+  <text x="446" y="382" text-anchor="middle">switch: return</text>
+
+  <text class="ts" x="338" y="418">wait for main's sleep to end</text>
+  <line class="ar" x1="330" y1="446" x2="124" y2="446" marker-end="url(#sc1-a)"/>
+  <text class="ts" x="223" y="440" text-anchor="middle">the hub returns</text>
+  <text class="ts" x="128" y="476">IO.sleep returns; main goes on</text>
+</svg>
+<figcaption>Figure 1. The hub runs on <code>main</code>'s stack.
+A handover from one context to another is two switches: to the hub, then from the hub.
+lean2rr's own runtime switches directly, with hand-written assembly; lean-runtime uses corosensei instead (decisions Q5 and O2).
+The example needs two workers or more: task 1 keeps its worker while it sleeps.</figcaption>
+</figure>
+<p><strong>Dependents.</strong> When a task finishes, its dependents are walked from the newest, as Lean's <code>handle_finished</code> walks them.
+A <code>sync</code> dependent runs at once, on the finishing context.
+The others are queued at their priority.</p>
+
+<h2 id="states">Task states</h2>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 410" role="img" aria-labelledby="sc2-t sc2-d">
+  <title id="sc2-t">The states of a task</title>
+  <desc id="sc2-d">Task.spawn or IO.asTask makes a queued task. Task.map, Task.bind, IO.mapTask or IO.bindTask makes a task that waits for its source; it is queued when the source finishes. A queued pure task without IO need can be marked started; it runs later. A queued task runs. A running task can block and be woken. A running task finishes. A pure task dropped before it starts is deleted and never runs.</desc>
+  <defs>
+    <marker id="sc2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <text class="ts" x="216" y="52" text-anchor="end">Task.map, Task.bind,</text>
+  <text class="ts" x="216" y="67" text-anchor="end">IO.mapTask, IO.bindTask</text>
+  <circle cx="230" cy="55" r="6" fill="#50555b"/>
+  <line class="ar" x1="236" y1="55" x2="258" y2="55" marker-end="url(#sc2-a)"/>
+  <rect class="k-rt" x="260" y="30" width="150" height="50" rx="10"/>
+  <text class="tb" x="335" y="52" text-anchor="middle">waiting</text>
+  <text class="ts" x="335" y="70" text-anchor="middle">for its source task</text>
+
+  <text class="ts" x="216" y="209" text-anchor="end">Task.spawn, IO.asTask</text>
+  <circle cx="230" cy="205" r="6" fill="#50555b"/>
+  <line class="ar" x1="236" y1="205" x2="258" y2="205" marker-end="url(#sc2-a)"/>
+  <rect class="k-rt" x="260" y="180" width="150" height="50" rx="10"/>
+  <text class="tb" x="335" y="202" text-anchor="middle">queued</text>
+  <text class="ts" x="335" y="220" text-anchor="middle">in its priority's queue</text>
+
+  <line class="ar" x1="335" y1="80" x2="335" y2="178" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="342" y="122">the source</text>
+  <text class="ts" x="342" y="137">finishes</text>
+
+  <rect class="k-rt" x="470" y="30" width="190" height="56" rx="10"/>
+  <text class="tb" x="565" y="53" text-anchor="middle">started, not run yet</text>
+  <text class="ts" x="565" y="72" text-anchor="middle">a pure task, no IO need</text>
+  <line class="ar" x1="400" y1="180" x2="490" y2="88" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="466" y="140">a worker would</text>
+  <text class="ts" x="466" y="155">start it</text>
+
+  <rect class="k-rt" x="520" y="180" width="150" height="50" rx="10"/>
+  <text class="tb" x="595" y="202" text-anchor="middle">running</text>
+  <text class="ts" x="595" y="220" text-anchor="middle">on a context, or inline</text>
+  <line class="ar" x1="410" y1="205" x2="518" y2="205" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="464" y="199" text-anchor="middle">runs</text>
+  <line class="ar" x1="600" y1="86" x2="600" y2="178" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="607" y="128">runs later</text>
+
+  <rect class="k-rt" x="720" y="180" width="125" height="50" rx="10"/>
+  <text class="tb" x="782" y="202" text-anchor="middle">finished</text>
+  <text class="ts" x="782" y="220" text-anchor="middle">value stored</text>
+  <line class="ar" x1="670" y1="205" x2="718" y2="205" marker-end="url(#sc2-a)"/>
+
+  <rect class="k-rt" x="520" y="300" width="150" height="50" rx="10"/>
+  <text class="tb" x="595" y="322" text-anchor="middle">blocked</text>
+  <text class="ts" x="595" y="340" text-anchor="middle">its context suspended</text>
+  <line class="ar" x1="575" y1="230" x2="575" y2="298" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="568" y="268" text-anchor="end">sleep, lock,</text>
+  <text class="ts" x="568" y="283" text-anchor="end">promise, wait</text>
+  <line class="ar" x1="615" y1="298" x2="615" y2="232" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="622" y="268">the hub</text>
+  <text class="ts" x="622" y="283">resumes it</text>
+
+  <rect class="k-none" x="260" y="300" width="150" height="50" rx="10"/>
+  <text class="tb" x="335" y="322" text-anchor="middle">deleted</text>
+  <text class="ts" x="335" y="340" text-anchor="middle">never runs</text>
+  <line class="ar" x1="335" y1="230" x2="335" y2="298" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="342" y="262">pure, dropped</text>
+  <text class="ts" x="342" y="277">before it starts</text>
+
+  <text class="ts" x="20" y="384">IO.getTaskState reports: waiting = queued or waiting; running = started, running or blocked; finished = finished.</text>
+</svg>
+<figcaption>Figure 2. The states of a task.
+A dependent that is <code>sync</code> runs at once when its source finishes, without the queue.
+A pure task that the program drops before it starts is deleted, also while it waits for its source.</figcaption>
+</figure>
+
+<h2 id="pure">The pure-task rule</h2>
+<p>A pure task (<code>Task.spawn</code>, <code>Task.map</code>, <code>Task.bind</code>) has no effects.
+So it may run later, as on a slow worker.</p>
+<ul>
+  <li><strong>The rule.</strong> Where a worker would start a pure task that no IO task waits for, the task is only marked started.</li>
+  <li>From then on, it cannot be deleted, and <code>IO.getTaskState</code> reports it running.</li>
+  <li>It runs at the first of these points:
+    <ul>
+      <li>it is needed, or it is polled;</li>
+      <li>an IO task comes to wait for it, also through other pure tasks;</li>
+      <li>nothing else can go on;</li>
+      <li><code>main</code> returns.</li>
+    </ul></li>
+  <li><strong>Why.</strong> If a runaway pure task ran at once on a context, it could take the only thread.
+    <code>main</code>, which natively goes on in parallel, would then wait.</li>
+  <li><strong>Evidence.</strong> Three program cases with pure tasks each gave the recorded outcome in 20 of 20 native runs.
+    lean2rr's own runtime fails one of them (<code>runaway_pure_task_started</code>); this rule passes it.</li>
+  <li><strong>IO need.</strong> A pure task that an IO task waits for, directly or through other pure tasks, starts as an IO task does.</li>
+</ul>
+
+<h2 id="yield">Yield points</h2>
+<p>A <a href="glossary.html#g-yield-point">yield point</a> lets other contexts go first, so that work that natively runs in parallel makes progress.
+The glue calls them from its externs:</p>
+<ul>
+  <li><code>effect()</code> before an output, a flush, a process spawn and <code>IO.Process.exit</code>;</li>
+  <li><code>poll()</code> at clock reads;</li>
+  <li><code>ref_read()</code> at <code>ST.Ref</code> reads, only in programs that create tasks (each translator knows this when it translates).
+    Every 1000th read polls; the others cost a countdown;</li>
+  <li><code>sleep_ms()</code> for <code>IO.sleep</code> and <code>dbgSleep</code>.</li>
+</ul>
+<p><code>IO.getTaskState</code> and <code>IO.checkCanceled</code> poll by themselves.
+So <code>while !(← IO.hasFinished t) do pure ()</code> ends, as it does natively.</p>
+
+<h2 id="sync">Promises and Std.Sync</h2>
+<ul>
+  <li><code>IO.Promise.new</code>, <code>resolve</code> and the drop of an unresolved promise follow Lean.
+    Only the first resolution stores a value.</li>
+  <li><code>sched::sync</code> has Lean's <code>BaseMutex</code>, <code>Condvar</code>, <code>BaseRecursiveMutex</code> and <code>BaseSharedMutex</code>.</li>
+  <li><code>Std.Channel</code>, <code>Barrier</code>, <code>Semaphore</code> and the rest of <code>Std.Sync</code> are Lean code over these and promises.
+    They need nothing more.</li>
+</ul>
+
+<h2 id="exit">Exit</h2>
+<ol>
+  <li><code>main</code> returns.</li>
+  <li><code>finish</code> sets Lean's shutdown flag, runs the remaining tasks, and waits for every other context.</li>
+  <li>The glue flushes the streams (<a href="io.html#exit">io's exit order</a>) and exits.</li>
+</ol>
+<p>So a runaway task keeps the process alive, as natively.
+A task enqueued after <code>main</code> returns also runs; natively it can be lost (<a href="lean-bugs.html#lb-13">LB-13</a>).</p>
+
+<h2 id="suspend">The unsafe steps in the glue</h2>
+<p>lean-runtime stays <code>forbid(unsafe_code)</code>.
+Two steps remain that safe code cannot do, so each translator's glue does them.
+The first is to suspend the running coroutine from deep inside a call.
+corosensei gives the coroutine's <code>Yielder</code> only to its top function, and nothing safe gives it to deeper code.
+So each translator's glue does one raw-pointer dereference, in <code>Glue::suspend</code> only:</p>
+<pre><code>fn suspend(&amp;self, s: Suspend&lt;'_&gt;) {
+    // SAFETY: lean-runtime docs/sched.md, "Why Glue::suspend is sound".
+    unsafe { (*s.yielder()).suspend(()) }
+}</code></pre>
+<ul>
+  <li><strong>The proof.</strong> <code>docs/sched.md</code> (branch <code>sched-1</code>) states it in full, with seven invariants (S1 to S7).
+    Each invariant names the code that keeps it.</li>
+  <li><strong>The checks.</strong> Miri cannot run corosensei's stack switch.
+    So the argument rests on review, runtime assertions, the driver's integration tests, and AddressSanitizer runs by hand.</li>
+  <li><strong>The glue's duties.</strong> The dereference stays in <code>suspend</code>; the pointer is not kept; scheduler functions run only on stacks that the scheduler knows.</li>
+  <li><strong>Approval.</strong> The owner approved this design (2026-10-03): "rare justified unsafe is fine, but need to be documented well".</li>
+  <li><strong>Alternatives</strong> were ruled out:
+    <ul>
+      <li>other coroutine crates: unsound APIs, <code>unsafe</code> constructors, or 2 MiB stacks;</li>
+      <li>OS threads that pass a baton: the jobs are not <code>Send</code>;</li>
+      <li>a scoped thread-local: coroutines do not nest as its scopes assume.</li>
+    </ul></li>
+</ul>
+<p><strong>The second step: stack overflow.</strong> Lean prints <code>Stack overflow detected. Aborting.</code> from a SIGSEGV handler.
+Installing a handler is <code>unsafe</code>, so it also stays in the glue.
+The scheduler publishes the running context's stack bounds for that handler.</p>
+
+<h2 id="limits">Limits of one thread</h2>
+<ul>
+  <li>A context that computes without a block or a yield point delays the others.</li>
+  <li><code>IO.waitAny</code> does not pick the fastest of several running tasks.</li>
+  <li>A blocking read on a pipe blocks the one thread, so every context waits.
+    <a href="#sched-io">sched-io</a> addresses this.</li>
+</ul>
+
+<h2 id="plans">Plans</h2>
+<h3 id="sched-io">sched-io: cooperative blocking IO</h3>
+<p>Agreed by both projects (2026-10-03).
+It is its own batch, after sched-1 merges.
+Neither translator adopts <code>sched</code> before it lands.</p>
+<ul>
+  <li>When tasks exist, reads and writes on pipes, FIFOs and child stdio are tried without blocking.
+    So is <code>child.wait</code>, through a pidfd.</li>
+  <li>On <code>EAGAIN</code>, the context registers its descriptor and yields.</li>
+  <li><code>Glue::idle</code> polls every registered descriptor and timer.</li>
+  <li>This is native's behaviour, where these calls block only their own thread.
+    It also fixes a known deadlock: an <code>IO.Process.output</code> child that writes more than 64 KiB to stdout.</li>
+</ul>
+<h3 id="threads">Toward real threads</h3>
+<p>Decision (2026-10-03): "parallelism will be supported, not the focus now".
+The model stays single-threaded, but avoids choices that block real threads.</p>
+<ul>
+  <li><strong>Already per thread:</strong> the scheduler's state, the published stack bounds, and the soundness argument.
+    Worker thread numbers are unique across the process.</li>
+  <li><strong>What a worker pool needs:</strong>
+    <ul>
+      <li>one task table and queue, shared by the workers;</li>
+      <li>jobs that are <code>Send</code>, so atomic reference counts in both translators;</li>
+      <li>real locks for <code>Std.Sync</code>.</li>
+    </ul></li>
+  <li><strong>What stays:</strong> Lean's task-manager rules (exit order, deletion of dropped pure tasks, the walk of dependents).
+    The yield points then become unnecessary, and are harmless if kept.
+    A started pure task can simply run.</li>
+</ul>
+<h3>Costs to measure (O12)</h3>
+<p>Nothing in <code>sched</code> is timed yet.
+The timing session will measure:</p>
+<ul>
+  <li>the polling and effect points;</li>
+  <li>the two switches per handover;</li>
+  <li>the cost per task;</li>
+  <li>the memory that pooled stacks keep.</li>
+</ul>
+
+<p class="more">Detail: <code>docs/sched.md</code> and <code>src/sched/</code> on branch <code>sched-1</code> (not on main yet); the program cases in <a href="../tests/cases/README.md">tests/cases/</a> <code>tasks/</code>.</p>
+</main>
+<footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
+Written about 80% to ASD-STE100 (Simplified Technical English).
+The markdown docs and the module docs are the authority; this site summarizes them.</footer>
+</body>
+</html>

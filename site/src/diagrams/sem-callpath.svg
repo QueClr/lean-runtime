@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-labelledby="se1-t se1-d">
+  <title id="se1-t">The call path of String.Pos.Raw.get</title>
+  <desc id="se1-d">Lean code calls String.Pos.Raw.get s p. The generated code calls the extern lean_string_utf8_get. The glue turns its string object into a byte slice and the position into a u64, and calls semantics::string::utf8_get. Inside, an ASCII byte is returned inline, a lead byte is decoded in a cold function, and a position past the end or in the middle of a character gives 'A'. The glue receives a u32 and makes its own Char.</desc>
+  <defs>
+    <marker id="se1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-lean" x="20" y="30" width="170" height="70" rx="6"/>
+  <text class="tb" x="105" y="54" text-anchor="middle">Lean code</text>
+  <text class="tc" x="105" y="76" text-anchor="middle">String.Pos.Raw.get s p</text>
+  <line class="ar" x1="190" y1="65" x2="223" y2="65" marker-end="url(#se1-a)"/>
+
+  <rect class="k-tr" x="225" y="30" width="185" height="70" rx="6"/>
+  <text class="tb" x="317" y="54" text-anchor="middle">generated code</text>
+  <text class="ts" x="317" y="72" text-anchor="middle">calls the extern</text>
+  <text class="tc" x="317" y="90" text-anchor="middle">lean_string_utf8_get</text>
+  <line class="ar" x1="410" y1="65" x2="443" y2="65" marker-end="url(#se1-a)"/>
+
+  <rect class="k-glue" x="445" y="30" width="190" height="70" rx="6"/>
+  <text class="tb" x="540" y="54" text-anchor="middle">glue</text>
+  <text class="ts" x="540" y="72" text-anchor="middle">string object to &amp;[u8]</text>
+  <text class="ts" x="540" y="89" text-anchor="middle">position Nat to u64</text>
+  <line class="ar" x1="635" y1="65" x2="668" y2="65" marker-end="url(#se1-a)"/>
+
+  <rect class="k-rt" x="670" y="30" width="170" height="70" rx="6"/>
+  <text class="tb" x="755" y="54" text-anchor="middle">semantics::string</text>
+  <text class="tc" x="755" y="78" text-anchor="middle">utf8_get(s, pos)</text>
+
+  <rect class="grp" x="530" y="126" width="320" height="190" rx="8"/>
+  <text class="ts" x="545" y="144">inside utf8_get</text>
+  <line class="ar" x1="755" y1="100" x2="755" y2="150" marker-end="url(#se1-a)"/>
+  <rect class="k-rt" x="545" y="152" width="290" height="44" rx="5"/>
+  <text x="560" y="171">byte below 0x80: that byte</text>
+  <text class="ts" x="560" y="188">inline, in the caller's code</text>
+  <rect class="k-rt" x="545" y="204" width="290" height="44" rx="5"/>
+  <text x="560" y="223">lead byte: decode 2 to 4 bytes</text>
+  <text class="ts" x="560" y="240">get_core_cold: #[cold], #[inline(never)]</text>
+  <rect class="k-rt" x="545" y="256" width="290" height="44" rx="5"/>
+  <text x="560" y="275">past the end, or mid-character</text>
+  <text class="ts" x="560" y="292">'A', Lean's default character</text>
+
+  <line class="ar" x1="530" y1="226" x2="417" y2="226" marker-end="url(#se1-a)"/>
+  <text class="tc" x="472" y="216" text-anchor="middle">u32</text>
+  <rect class="k-glue" x="225" y="196" width="190" height="60" rx="6"/>
+  <text class="tb" x="320" y="220" text-anchor="middle">glue</text>
+  <text class="ts" x="320" y="240" text-anchor="middle">makes its own Char</text>
+  <line class="ar" x1="225" y1="226" x2="107" y2="226" marker-end="url(#se1-a)"/>
+  <rect class="k-lean" x="20" y="196" width="85" height="60" rx="6"/>
+  <text x="62" y="231" text-anchor="middle">result</text>
+</svg>

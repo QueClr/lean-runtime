@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 260" role="img" aria-labelledby="ov2-t ov2-d">
+  <title id="ov2-t">The native build and the translated build give the same results</title>
+  <desc id="ov2-d">Top row: a Lean program, the Lean compiler and C code, Lean's C runtime, then stdout, stderr and exit code. Bottom row: the same Lean program, lean2rr or leanrs, glue and lean-runtime, then stdout, stderr and exit code. The two outputs must be equal.</desc>
+  <defs>
+    <marker id="ov2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <text class="tb" x="20" y="22">Native build (the reference)</text>
+  <rect class="k-lean" x="20" y="34" width="170" height="52" rx="6"/>
+  <text x="105" y="65" text-anchor="middle">Lean program</text>
+  <line class="ar" x1="190" y1="60" x2="228" y2="60" marker-end="url(#ov2-a)"/>
+  <rect class="k-lean" x="230" y="34" width="170" height="52" rx="6"/>
+  <text x="315" y="56" text-anchor="middle">Lean compiler</text>
+  <text class="ts" x="315" y="74" text-anchor="middle">C code</text>
+  <line class="ar" x1="400" y1="60" x2="438" y2="60" marker-end="url(#ov2-a)"/>
+  <rect class="k-lean" x="440" y="34" width="170" height="52" rx="6"/>
+  <text x="525" y="56" text-anchor="middle">Lean's C runtime</text>
+  <text class="ts" x="525" y="74" text-anchor="middle">libuv, GMP, glibc</text>
+  <line class="ar" x1="610" y1="60" x2="648" y2="60" marker-end="url(#ov2-a)"/>
+  <rect class="k-none" x="650" y="34" width="190" height="52" rx="6"/>
+  <text x="745" y="56" text-anchor="middle">stdout, stderr,</text>
+  <text x="745" y="74" text-anchor="middle">exit code</text>
+
+  <line class="ar" x1="745" y1="90" x2="745" y2="166" marker-start="url(#ov2-a)" marker-end="url(#ov2-a)"/>
+  <text class="tb" x="735" y="122" text-anchor="end">must be equal</text>
+  <text class="ts" x="735" y="140" text-anchor="end">or an allowed alternative</text>
+
+  <text class="tb" x="20" y="160">Translated build</text>
+  <rect class="k-lean" x="20" y="172" width="170" height="52" rx="6"/>
+  <text x="105" y="203" text-anchor="middle">same Lean program</text>
+  <line class="ar" x1="190" y1="198" x2="228" y2="198" marker-end="url(#ov2-a)"/>
+  <rect class="k-tr" x="230" y="172" width="170" height="52" rx="6"/>
+  <text x="315" y="194" text-anchor="middle">lean2rr or leanrs</text>
+  <text class="ts" x="315" y="212" text-anchor="middle">Reussir or Rust code</text>
+  <line class="ar" x1="400" y1="198" x2="438" y2="198" marker-end="url(#ov2-a)"/>
+  <rect class="k-rt" x="440" y="172" width="170" height="52" rx="6"/>
+  <text x="525" y="194" text-anchor="middle">glue + lean-runtime</text>
+  <text class="ts" x="525" y="212" text-anchor="middle">rustix, nix, glibc</text>
+  <line class="ar" x1="610" y1="198" x2="648" y2="198" marker-end="url(#ov2-a)"/>
+  <rect class="k-none" x="650" y="172" width="190" height="52" rx="6"/>
+  <text x="745" y="194" text-anchor="middle">stdout, stderr,</text>
+  <text x="745" y="212" text-anchor="middle">exit code</text>
+</svg>

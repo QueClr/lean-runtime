@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status · lean-runtime</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><a href="index.html">lean-runtime</a><span>Lean 4.34.0's runtime in safe Rust</span></div>
+  <nav class="main" aria-label="Pages">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="semantics.html">semantics</a>
+    <a href="io.html">io</a>
+    <a href="sched.html">sched</a>
+    <a href="testing.html">Testing</a>
+    <a href="lean-bugs.html">Lean bugs</a>
+    <a href="status.html" aria-current="page">Status</a>
+    <a href="glossary.html">Glossary</a>
+  </nav>
+</header>
+<main>
+<h1>Status</h1>
+<p class="lead">State of 2026-10-04.
+main is at commit 39a8d66.
+It holds <code>semantics</code> and the first <code>io</code> batch.</p>
+
+<h2 id="merged">Merged on main</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Batch</th><th>What it added</th></tr></thead>
+<tbody>
+<tr><td><code>semantics-1</code></td><td>Hashing; <code>Float</code> and <code>Float32</code> formatting and conversions; the libm functions; the fixed-width integers; the <code>String</code> position functions.</td></tr>
+<tr><td><code>semantics-2</code></td><td>The <code>Nat</code> and <code>Int</code> rules over the big-number traits; the array edge rules; the panic texts and exit statuses; the text of leaf values.</td></tr>
+<tr><td><code>io-1</code></td><td>The <code>IO.Error</code> mirror and its decoding; the <code>FILE</code> model; handles and the standard streams; the exit sequence.
+The file system, the environment, the clock, the debug primitives and the startup descriptors.</td></tr>
+<tr><td><code>cases-tasks-1</code></td><td>Program cases for tasks and for two io findings, recorded natively; <code>scripts/cases.py</code> runs every case under a memory cap.</td></tr>
+</tbody></table></div>
+<p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
+No timing session has run yet.</p>
+
+<h2 id="progress">In progress</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Work</th><th>What</th><th>State</th></tr></thead>
+<tbody>
+<tr><td><code>io-2</code></td><td>Child processes, the <code>environ</code> copy, stream redirection, temporary files, <code>timeit</code> and <code>Std.Time</code>'s clock, the <code>UV.System</code> queries.</td><td>Branch, not merged; in review (2026-10-04).</td></tr>
+<tr><td><code>sched-1</code></td><td>The scheduler, <code>Std.Sync</code>, the driver with every task case, <code>docs/sched.md</code>.</td><td>Branch, not merged. Review round 1: approve with fixes (2026-10-03); the fixes are on the branch, except the LB-13 citation and its cases.</td></tr>
+<tr><td><code>sched-io</code></td><td>Cooperative blocking IO for pipes and child processes (<a href="sched.html#sched-io">details</a>).</td><td>Agreed (2026-10-03). Its own batch, after sched-1 merges. A gate: neither translator adopts <code>sched</code> before it lands.</td></tr>
+<tr><td>libm portability</td><td>Ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> beyond aarch64 Linux with glibc.</td><td>In progress.</td></tr>
+<tr><td><code>cases-xt</code></td><td>Program cases from lean2rr's cross-test of leanrs's fixtures, cases for LB-01, LB-02 and LB-03, and cases for two decisions (DV5, DV10).</td><td>Branch, not merged.</td></tr>
+<tr><td>Event loop and network</td><td>The event loop and timers, signals, and the network: TCP, UDP, DNS, interface addresses.</td><td>Planned for later.</td></tr>
+</tbody></table></div>
+
+<h2 id="coverage">Coverage</h2>
+<p>The coverage count takes the 717 C symbols of the <code>@[extern]</code> declarations in Lean 4.34.0's <code>Init</code> and <code>Std</code>.
+264 of them need no shared code: they are inline operations, glue, or Lean code (<a href="architecture.html#split">Architecture</a>).
+The other 453 need shared code.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>As of</th><th>main at</th><th class="num">Done on main</th><th class="num">With the branches' items</th></tr></thead>
+<tbody>
+<tr><td>2026-10-03</td><td>8823ad0 (semantics-1)</td><td class="num">227 of 453 (50%)</td><td class="num">364 of 453 (80%)</td></tr>
+<tr><td>2026-10-04</td><td>39a8d66 (with semantics-2 and io-1)</td><td class="num">313 of 453 (69%)</td><td class="num">364 of 453 (80%)</td></tr>
+</tbody></table></div>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 616" role="img" aria-labelledby="st1-t st1-d">
+  <title id="st1-t">Coverage of Lean 4.34.0's extern symbols, per area</title>
+  <desc id="st1-d">For each area, a bar of the symbols that need shared code: done on main, in progress on a branch, and planned. Nat: 18 done, 0 in progress, 0 planned, of 18; Int: 16 done, 0 in progress, 0 planned, of 16; UIntN/IntN: 110 done, 0 in progress, 0 planned, of 110; Float: 48 done, 0 in progress, 0 planned, of 48; Float32: 48 done, 0 in progress, 0 planned, of 48; String: 16 done, 0 in progress, 2 planned, of 18; Substring/Slice: 2 done, 0 in progress, 0 planned, of 2; Array: 7 done, 0 in progress, 0 planned, of 7; ByteArray: 4 done, 0 in progress, 0 planned, of 4; FloatArray: 3 done, 0 in progress, 0 planned, of 3; hashing: 4 done, 0 in progress, 0 planned, of 4; Task/Promise: 0 done, 18 in progress, 0 planned, of 18; IO files and handles: 22 done, 2 in progress, 0 planned, of 24; streams: 0 done, 6 in progress, 0 planned, of 6; env/clock/random: 9 done, 1 in progress, 1 planned, of 11; processes: 2 done, 6 in progress, 0 planned, of 8; Std.Sync: 0 done, 19 in progress, 0 planned, of 19; event loop/UV: 0 done, 28 in progress, 49 planned, of 77; time: 0 done, 3 in progress, 0 planned, of 3; panics/misc: 4 done, 1 in progress, 4 planned, of 9.</desc>
+  <rect class="cov-done" x="200" y="12" width="14" height="14" rx="3"/><text class="ts" x="220" y="24">done on main</text>
+  <rect class="cov-prog" x="323.2" y="12" width="14" height="14" rx="3"/><text class="ts" x="343.2" y="24">in progress on a branch</text>
+  <rect class="cov-plan" x="519.0" y="12" width="14" height="14" rx="3"/><text class="ts" x="539.0" y="24">planned</text>
+  <line class="grid" x1="200.0" y1="48" x2="200.0" y2="572"/>
+  <text class="ts" x="200.0" y="588" text-anchor="middle">0</text>
+  <line class="grid" x1="310.0" y1="48" x2="310.0" y2="572"/>
+  <text class="ts" x="310.0" y="588" text-anchor="middle">25</text>
+  <line class="grid" x1="420.0" y1="48" x2="420.0" y2="572"/>
+  <text class="ts" x="420.0" y="588" text-anchor="middle">50</text>
+  <line class="grid" x1="530.0" y1="48" x2="530.0" y2="572"/>
+  <text class="ts" x="530.0" y="588" text-anchor="middle">75</text>
+  <line class="grid" x1="640.0" y1="48" x2="640.0" y2="572"/>
+  <text class="ts" x="640.0" y="588" text-anchor="middle">100</text>
+  <text class="ts" x="200" y="606">symbols that need shared code</text>
+  <g>
+    <text x="190" y="69" text-anchor="end">Nat</text>
+    <path class="cov-done" d="M200.0,56 h75.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-75.2 z"><title>Nat: 18 done of 18</title></path>
+    <text class="ts" x="287.2" y="69">18 / 18 done</text>
+  </g>
+  <g>
+    <text x="190" y="95" text-anchor="end">Int</text>
+    <path class="cov-done" d="M200.0,82 h66.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-66.4 z"><title>Int: 16 done of 16</title></path>
+    <text class="ts" x="278.4" y="95">16 / 16 done</text>
+  </g>
+  <g>
+    <text x="190" y="121" text-anchor="end">UIntN/IntN</text>
+    <path class="cov-done" d="M200.0,108 h480.0 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-480.0 z"><title>UIntN/IntN: 110 done of 110</title></path>
+    <text class="ts" x="692.0" y="121">110 / 110 done</text>
+  </g>
+  <g>
+    <text x="190" y="147" text-anchor="end">Float</text>
+    <path class="cov-done" d="M200.0,134 h207.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-207.2 z"><title>Float: 48 done of 48</title></path>
+    <text class="ts" x="419.2" y="147">48 / 48 done</text>
+  </g>
+  <g>
+    <text x="190" y="173" text-anchor="end">Float32</text>
+    <path class="cov-done" d="M200.0,160 h207.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-207.2 z"><title>Float32: 48 done of 48</title></path>
+    <text class="ts" x="419.2" y="173">48 / 48 done</text>
+  </g>
+  <g>
+    <text x="190" y="199" text-anchor="end">String</text>
+    <rect class="cov-done" x="200.0" y="186" width="68.4" height="18"><title>String: 16 done of 18</title></rect>
+    <path class="cov-plan" d="M270.4,186 h4.8 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-4.8 z"><title>String: 2 planned of 18</title></path>
+    <text class="ts" x="287.2" y="199">16 / 18 done</text>
+  </g>
+  <g>
+    <text x="190" y="225" text-anchor="end">Substring/Slice</text>
+    <path class="cov-done" d="M200.0,212 h4.8 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-4.8 z"><title>Substring/Slice: 2 done of 2</title></path>
+    <text class="ts" x="216.8" y="225">2 / 2 done</text>
+  </g>
+  <g>
+    <text x="190" y="251" text-anchor="end">Array</text>
+    <path class="cov-done" d="M200.0,238 h26.8 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-26.8 z"><title>Array: 7 done of 7</title></path>
+    <text class="ts" x="238.8" y="251">7 / 7 done</text>
+  </g>
+  <g>
+    <text x="190" y="277" text-anchor="end">ByteArray</text>
+    <path class="cov-done" d="M200.0,264 h13.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-13.6 z"><title>ByteArray: 4 done of 4</title></path>
+    <text class="ts" x="225.6" y="277">4 / 4 done</text>
+  </g>
+  <g>
+    <text x="190" y="303" text-anchor="end">FloatArray</text>
+    <path class="cov-done" d="M200.0,290 h9.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-9.2 z"><title>FloatArray: 3 done of 3</title></path>
+    <text class="ts" x="221.2" y="303">3 / 3 done</text>
+  </g>
+  <g>
+    <text x="190" y="329" text-anchor="end">hashing</text>
+    <path class="cov-done" d="M200.0,316 h13.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-13.6 z"><title>hashing: 4 done of 4</title></path>
+    <text class="ts" x="225.6" y="329">4 / 4 done</text>
+  </g>
+  <g>
+    <text x="190" y="355" text-anchor="end">Task/Promise</text>
+    <path class="cov-prog" d="M200.0,342 h75.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-75.2 z"><title>Task/Promise: 18 in progress of 18</title></path>
+    <text class="ts" x="287.2" y="355">0 / 18 done</text>
+  </g>
+  <g>
+    <text x="190" y="381" text-anchor="end">IO files and handles</text>
+    <rect class="cov-done" x="200.0" y="368" width="94.8" height="18"><title>IO files and handles: 22 done of 24</title></rect>
+    <path class="cov-prog" d="M296.8,368 h4.8 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-4.8 z"><title>IO files and handles: 2 in progress of 24</title></path>
+    <text class="ts" x="313.6" y="381">22 / 24 done</text>
+  </g>
+  <g>
+    <text x="190" y="407" text-anchor="end">streams</text>
+    <path class="cov-prog" d="M200.0,394 h22.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-22.4 z"><title>streams: 6 in progress of 6</title></path>
+    <text class="ts" x="234.4" y="407">0 / 6 done</text>
+  </g>
+  <g>
+    <text x="190" y="433" text-anchor="end">env/clock/random</text>
+    <rect class="cov-done" x="200.0" y="420" width="37.6" height="18"><title>env/clock/random: 9 done of 11</title></rect>
+    <rect class="cov-prog" x="239.6" y="420" width="2.4" height="18"><title>env/clock/random: 1 in progress of 11</title></rect>
+    <path class="cov-plan" d="M244.0,420 h0.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-0.4 z"><title>env/clock/random: 1 planned of 11</title></path>
+    <text class="ts" x="256.4" y="433">9 / 11 done</text>
+  </g>
+  <g>
+    <text x="190" y="459" text-anchor="end">processes</text>
+    <rect class="cov-done" x="200.0" y="446" width="6.8" height="18"><title>processes: 2 done of 8</title></rect>
+    <path class="cov-prog" d="M208.8,446 h22.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-22.4 z"><title>processes: 6 in progress of 8</title></path>
+    <text class="ts" x="243.2" y="459">2 / 8 done</text>
+  </g>
+  <g>
+    <text x="190" y="485" text-anchor="end">Std.Sync</text>
+    <path class="cov-prog" d="M200.0,472 h79.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-79.6 z"><title>Std.Sync: 19 in progress of 19</title></path>
+    <text class="ts" x="291.6" y="485">0 / 19 done</text>
+  </g>
+  <g>
+    <text x="190" y="511" text-anchor="end">event loop/UV</text>
+    <rect class="cov-prog" x="200.0" y="498" width="121.2" height="18"><title>event loop/UV: 28 in progress of 77</title></rect>
+    <path class="cov-plan" d="M323.2,498 h211.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-211.6 z"><title>event loop/UV: 49 planned of 77</title></path>
+    <text class="ts" x="546.8" y="511">0 / 77 done</text>
+  </g>
+  <g>
+    <text x="190" y="537" text-anchor="end">time</text>
+    <path class="cov-prog" d="M200.0,524 h9.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-9.2 z"><title>time: 3 in progress of 3</title></path>
+    <text class="ts" x="221.2" y="537">0 / 3 done</text>
+  </g>
+  <g>
+    <text x="190" y="563" text-anchor="end">panics/misc</text>
+    <rect class="cov-done" x="200.0" y="550" width="15.6" height="18"><title>panics/misc: 4 done of 9</title></rect>
+    <rect class="cov-prog" x="217.6" y="550" width="2.4" height="18"><title>panics/misc: 1 in progress of 9</title></rect>
+    <path class="cov-plan" d="M222.0,550 h13.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-13.6 z"><title>panics/misc: 4 planned of 9</title></path>
+    <text class="ts" x="247.6" y="563">4 / 9 done</text>
+  </g>
+</svg>
+<figcaption>Figure 1. Coverage per area, as of 2026-10-04 (main at 39a8d66).
+The longest bar is 110 symbols.
+"In progress" includes 33 symbols that are in a branch's scope but have no item yet.
+Point at a bar to see its numbers.</figcaption>
+</figure>
+<details>
+<summary>The numbers as a table</summary>
+<div class="tblwrap">
+<table>
+<thead><tr><th>Area</th><th class="num">Done on main</th><th class="num">In progress</th><th class="num">Planned</th><th class="num">Need shared code</th></tr></thead>
+<tbody>
+<tr><td>Nat</td><td class="num">18</td><td class="num">0</td><td class="num">0</td><td class="num">18</td></tr>
+<tr><td>Int</td><td class="num">16</td><td class="num">0</td><td class="num">0</td><td class="num">16</td></tr>
+<tr><td>UIntN/IntN</td><td class="num">110</td><td class="num">0</td><td class="num">0</td><td class="num">110</td></tr>
+<tr><td>Float</td><td class="num">48</td><td class="num">0</td><td class="num">0</td><td class="num">48</td></tr>
+<tr><td>Float32</td><td class="num">48</td><td class="num">0</td><td class="num">0</td><td class="num">48</td></tr>
+<tr><td>String</td><td class="num">16</td><td class="num">0</td><td class="num">2</td><td class="num">18</td></tr>
+<tr><td>Substring/Slice</td><td class="num">2</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr>
+<tr><td>Array</td><td class="num">7</td><td class="num">0</td><td class="num">0</td><td class="num">7</td></tr>
+<tr><td>ByteArray</td><td class="num">4</td><td class="num">0</td><td class="num">0</td><td class="num">4</td></tr>
+<tr><td>FloatArray</td><td class="num">3</td><td class="num">0</td><td class="num">0</td><td class="num">3</td></tr>
+<tr><td>hashing</td><td class="num">4</td><td class="num">0</td><td class="num">0</td><td class="num">4</td></tr>
+<tr><td>Task/Promise</td><td class="num">0</td><td class="num">18</td><td class="num">0</td><td class="num">18</td></tr>
+<tr><td>IO files and handles</td><td class="num">22</td><td class="num">2</td><td class="num">0</td><td class="num">24</td></tr>
+<tr><td>streams</td><td class="num">0</td><td class="num">6</td><td class="num">0</td><td class="num">6</td></tr>
+<tr><td>env/clock/random</td><td class="num">9</td><td class="num">1</td><td class="num">1</td><td class="num">11</td></tr>
+<tr><td>processes</td><td class="num">2</td><td class="num">6</td><td class="num">0</td><td class="num">8</td></tr>
+<tr><td>Std.Sync</td><td class="num">0</td><td class="num">19</td><td class="num">0</td><td class="num">19</td></tr>
+<tr><td>event loop/UV</td><td class="num">0</td><td class="num">28</td><td class="num">49</td><td class="num">77</td></tr>
+<tr><td>time</td><td class="num">0</td><td class="num">3</td><td class="num">0</td><td class="num">3</td></tr>
+<tr><td>panics/misc</td><td class="num">4</td><td class="num">1</td><td class="num">4</td><td class="num">9</td></tr>
+<tr><th>all</th><th class="num">313</th><th class="num">84</th><th class="num">56</th><th class="num">453</th></tr>
+</tbody></table>
+</div>
+</details>
+<p>The coverage script lives in the projects' coordination notes, outside this repository.
+Run it again after each merge.</p>
+
+<p class="more">Detail: <a href="../README.md">README.md</a> ("Status"), <a href="../src/io/mod.rs">src/io/mod.rs</a>, and the branches <code>io-2</code> and <code>sched-1</code>.</p>
+</main>
+<footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
+Written about 80% to ASD-STE100 (Simplified Technical English).
+The markdown docs and the module docs are the authority; this site summarizes them.</footer>
+</body>
+</html>

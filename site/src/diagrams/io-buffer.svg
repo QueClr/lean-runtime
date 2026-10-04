@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-labelledby="io2-t io2-d">
+  <title id="io2-t">The states of a FILE buffer</title>
+  <desc id="io2-d">In get mode the buffer holds bytes already read, then read-ahead between rp and re, then unused space. In put mode it holds pending output between wb and wp, then free space up to we. A write switches from get mode to put mode; a read switches back after the pending output is written. Below: a read of a whole buffer or more with output pending. glibc drops the pending output; lean-runtime writes it first.</desc>
+  <defs>
+    <marker id="io2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <text class="tb" x="20" y="52">Get mode</text>
+  <text class="ts" x="20" y="70">after a read</text>
+  <rect class="k-os" x="200" y="36" width="130" height="34"/>
+  <rect class="k-lean" x="330" y="36" width="230" height="34"/>
+  <rect class="k-none" x="560" y="36" width="160" height="34"/>
+  <text class="ts" x="265" y="58" text-anchor="middle">already read</text>
+  <text x="445" y="58" text-anchor="middle">read-ahead</text>
+  <text class="ts" x="640" y="58" text-anchor="middle">unused</text>
+  <text class="tc" x="200" y="88" text-anchor="middle">rb</text>
+  <text class="tc" x="330" y="88" text-anchor="middle">rp</text>
+  <text class="tc" x="560" y="88" text-anchor="middle">re</text>
+  <text class="ts" x="560" y="104" text-anchor="middle">file offset is here</text>
+
+  <text class="tb" x="20" y="162">Put mode</text>
+  <text class="ts" x="20" y="180">after a write</text>
+  <rect class="k-none" x="200" y="146" width="130" height="34"/>
+  <rect class="k-glue" x="330" y="146" width="170" height="34"/>
+  <rect class="k-none" x="500" y="146" width="220" height="34"/>
+  <text x="415" y="168" text-anchor="middle">pending output</text>
+  <text class="ts" x="610" y="168" text-anchor="middle">free</text>
+  <text class="tc" x="330" y="198" text-anchor="middle">wb</text>
+  <text class="tc" x="500" y="198" text-anchor="middle">wp</text>
+  <text class="tc" x="720" y="198" text-anchor="middle">we</text>
+
+  <path class="ar" d="M722,62 H755 V154 H724" marker-end="url(#io2-a)"/>
+  <text class="ts" x="762" y="112">a write</text>
+  <path class="ar" d="M722,172 H812 V44 H724" marker-end="url(#io2-a)"/>
+  <text class="ts" x="818" y="112">a read</text>
+
+  <text class="tb" x="20" y="252">A read of a</text>
+  <text class="tb" x="20" y="270">whole buffer,</text>
+  <text class="tb" x="20" y="288">output pending</text>
+  <rect class="k-bad" x="200" y="236" width="250" height="60" rx="6"/>
+  <text x="325" y="260" text-anchor="middle">glibc 2.39: the pending</text>
+  <text x="325" y="280" text-anchor="middle">output is dropped (LB-02)</text>
+  <rect class="k-rt" x="470" y="236" width="250" height="60" rx="6"/>
+  <text x="595" y="260" text-anchor="middle">lean-runtime: writes it</text>
+  <text x="595" y="280" text-anchor="middle">first, then reads</text>
+</svg>

@@ -6,6 +6,8 @@ translators of compiled Lean programs:
 - **lean2rr** ([reussir-lang/lean-to-reussir](https://github.com/reussir-lang/lean-to-reussir)) translates to Reussir;
 - **leanrs** translates to safe Rust.
 
+For a readable overview with diagrams, open [site/index.html](site/index.html). (The repository is named lean-runtime-rs, as a Rust reimplementation; the crate is `lean-runtime`.)
+
 Both must produce programs that behave exactly like Lean's own build:
 the same stdout, stderr and exit code. Both therefore reimplement what
 Lean's C runtime (`src/runtime/*.cpp`, `lean.h`) does. This crate holds the

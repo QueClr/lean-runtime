@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 520" role="img" aria-labelledby="sc1-t sc1-d">
+  <title id="sc1-t">Every switch goes through the hub on main's stack</title>
+  <desc id="sc1-d">Main sleeps and runs the hub. The hub starts IO task 1 on context A. Task 1 sleeps, and A suspends to the hub. The hub starts IO task 2 on context B. Task 2 finishes and B returns to the hub. Nothing can go on, so the hub waits for the earliest sleeper, then resumes A. Task 1 finishes and A returns to the hub. The hub waits for main's sleep to end and returns to main.</desc>
+  <defs>
+    <marker id="sc1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="grp" x="20" y="8" width="420" height="72" rx="8"/>
+  <text class="ts" x="30" y="24">main's thread stack</text>
+  <rect class="k-tr" x="40" y="32" width="160" height="40" rx="6"/>
+  <text class="tb" x="120" y="57" text-anchor="middle">main's code</text>
+  <rect class="k-rt" x="250" y="32" width="160" height="40" rx="6"/>
+  <text class="tb" x="330" y="57" text-anchor="middle">hub</text>
+  <rect class="k-rt" x="490" y="32" width="150" height="40" rx="6"/>
+  <text class="tb" x="565" y="51" text-anchor="middle">context A</text>
+  <text class="ts" x="565" y="66" text-anchor="middle">its own stack</text>
+  <rect class="k-rt" x="680" y="32" width="150" height="40" rx="6"/>
+  <text class="tb" x="755" y="51" text-anchor="middle">context B</text>
+  <text class="ts" x="755" y="66" text-anchor="middle">its own stack</text>
+  <line class="life" x1="120" y1="72" x2="120" y2="505"/>
+  <line class="life" x1="330" y1="72" x2="330" y2="505"/>
+  <line class="life" x1="565" y1="72" x2="565" y2="505"/>
+  <line class="life" x1="755" y1="72" x2="755" y2="505"/>
+
+  <text class="ts" x="128" y="94">IO.sleep 50: blocks</text>
+  <line class="ar" x1="120" y1="124" x2="326" y2="124" marker-end="url(#sc1-a)"/>
+  <text class="ts" x="223" y="118" text-anchor="middle">runs the hub (a call)</text>
+
+  <line class="ar" x1="330" y1="146" x2="561" y2="146" marker-end="url(#sc1-a)"/>
+  <text x="446" y="140" text-anchor="middle">switch: start IO task 1</text>
+  <text class="ts" x="573" y="174">task 1: IO.sleep 10, blocks</text>
+  <line class="ar" x1="565" y1="190" x2="334" y2="190" marker-end="url(#sc1-a)"/>
+  <text x="446" y="184" text-anchor="middle">switch: suspend</text>
+
+  <line class="ar" x1="330" y1="226" x2="751" y2="226" marker-end="url(#sc1-a)"/>
+  <text x="560" y="220" text-anchor="middle">switch: start IO task 2</text>
+  <text class="ts" x="763" y="254">task 2 finishes</text>
+  <line class="ar" x1="755" y1="270" x2="334" y2="270" marker-end="url(#sc1-a)"/>
+  <text x="560" y="264" text-anchor="middle">switch: return</text>
+
+  <text class="ts" x="338" y="300">nothing can go on: wait for</text>
+  <text class="ts" x="338" y="316">the earliest sleeper (A)</text>
+  <line class="ar" x1="330" y1="344" x2="561" y2="344" marker-end="url(#sc1-a)"/>
+  <text x="446" y="338" text-anchor="middle">switch: resume A</text>
+  <text class="ts" x="573" y="372">task 1 finishes</text>
+  <line class="ar" x1="565" y1="388" x2="334" y2="388" marker-end="url(#sc1-a)"/>
+  <text x="446" y="382" text-anchor="middle">switch: return</text>
+
+  <text class="ts" x="338" y="418">wait for main's sleep to end</text>
+  <line class="ar" x1="330" y1="446" x2="124" y2="446" marker-end="url(#sc1-a)"/>
+  <text class="ts" x="223" y="440" text-anchor="middle">the hub returns</text>
+  <text class="ts" x="128" y="476">IO.sleep returns; main goes on</text>
+</svg>

@@ -1,0 +1,139 @@
+<h1>Testing</h1>
+<p class="lead">Every expected value comes from a native build with Lean 4.34.0.
+The same expected values check the crate and both translators.</p>
+
+<div class="toc"><ul>
+  <li><a href="#flow">The test flow</a></li>
+  <li><a href="#rows">Rows</a></li>
+  <li><a href="#cases">Program cases</a></li>
+  <li><a href="#twins">Rust twins</a></li>
+  <li><a href="#glibc">The glibc differential test</a></li>
+  <li><a href="#check">The check before each commit</a></li>
+  <li><a href="#cross">Both translators</a></li>
+  <li><a href="#review">Reviews</a></li>
+  <li><a href="#benches">Benchmark pairs</a></li>
+</ul></div>
+
+<h2 id="flow">The test flow</h2>
+<figure class="fig">
+{{svg:test-flow}}
+<figcaption>Figure 1. Native Lean records; the crate, its Rust twins and both translators are checked against the same files.</figcaption>
+</figure>
+
+<h2 id="rows">Rows</h2>
+<p>A <a href="glossary.html#g-row">row</a> is one function call with its expected result.
+Rows are <code>[[row]]</code> tables in <code>tests/cases/&lt;area&gt;/&lt;area&gt;.rows.toml</code>.</p>
+<ul>
+  <li><code>fn</code> and <code>args</code> (Lean terms) name the call; <code>expected</code> is Lean's <code>repr</code> of the result.</li>
+  <li>A float row also has the exact bits, because <code>repr</code> loses NaN payloads and <code>-0.0</code>.</li>
+  <li>A panic row has the message, the default value and the stderr text.
+    A row that ends the process has its stderr and exit status.</li>
+  <li>A row for a <a href="lean-bugs.html#limits">lifted limit</a> (LB-04, LB-06, LB-11, LB-12) expects the definition's result and records native's outcome beside it.</li>
+  <li><code>scripts/gen_rows.py</code> writes the expected values.
+    It runs <code>scripts/oracle</code>, a Lean program built natively with Lean 4.34.0.</li>
+  <li><code>tests/rows.rs</code> and <code>tests/rows2.rs</code> run every row against the crate.
+    Each <code>Nat</code> and <code>Int</code> row runs under four representations, so every word path and every slow path meets every value.</li>
+  <li>There are {{v:rows}} rows in {{v:row_areas}} areas.</li>
+</ul>
+<div class="rule">
+<p><strong>Inputs come from argv or stdin.</strong>
+Both translators evaluate closed terms (<a href="glossary.html#g-caf">CAFs</a>, literals) when they translate.
+A test whose values are all literals never reaches the runtime.
+So the oracle reads its inputs at run time.</p>
+</div>
+
+<h2 id="cases">Program cases</h2>
+<p>A <a href="glossary.html#g-case">program case</a> is a whole Lean program with a <code>main</code>.</p>
+<ul>
+  <li>Files: <code>&lt;id&gt;.lean</code>, and optional arguments, stdin, environment, a shell line (for closed descriptors, <code>ulimit</code>, pipes) and a starting directory tree.</li>
+  <li><code>scripts/cases.py expect</code> builds the case natively and runs it 5 times.
+    The results must be identical.
+    It writes <code>&lt;id&gt;.out</code>, <code>.err</code> and <code>.code</code>.</li>
+  <li>A <a href="glossary.html#g-schedule-dependent">schedule-dependent</a> case records every outcome seen; each one is allowed.</li>
+  <li>A case that natively never ends records the output before its timeout.</li>
+  <li><code>scripts/cases.py check --exe-dir DIR</code> runs a translator's build of each case and compares it with the recorded files.</li>
+  <li>Each run starts in a fresh directory, with an empty environment, pipes for the three streams, a memory cap and a CPU-time limit.</li>
+  <li>There are {{v:cases}} program cases: {{v:case_areas}}.</li>
+</ul>
+<p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
+Usually its expected output stays native's, and the deviation's outcome is also allowed.
+When native's outcome is a <a href="lean-bugs.html">Lean bug</a> and is nondeterministic, the case expects the correct outcome instead.</p>
+
+<h2 id="twins">Rust twins</h2>
+<p>A <a href="glossary.html#g-twin">twin</a> is a Rust program that makes the same calls through lean-runtime as the case's Lean program makes through Lean's runtime.
+It adds only what a translator's glue adds.</p>
+<ul>
+  <li><code>tests/io_cases.rs</code> has a twin for each io case.
+    It runs <code>cases.py check</code> on them, the same checker that the translators use.</li>
+  <li>Branch <code>io-2</code> adds <code>tests/io2_cases.rs</code>.
+    Branch <code>sched-1</code> adds <code>tests/sched-driver</code>: every <code>tasks/</code> and <code>sync/</code> case over <code>sched</code>, with a complete example of the glue.</li>
+  <li>So the crate is checked against native output before either translator adopts it.</li>
+</ul>
+
+<h2 id="glibc">The glibc differential test</h2>
+<ul>
+  <li><code>tests/cfile_glibc.rs</code> runs random sequences of Lean's handle operations.
+    It runs each sequence on a real glibc <code>FILE</code> and on the model, each on its own copy of a file or pipe.</li>
+  <li>After every step, these must agree: the results (with the <code>errno</code> of an error), the end-of-file indicator, and the bytes on disk.</li>
+  <li>The oracle is glibc with one change: it flushes before a large read, as the model does (<a href="lean-bugs.html#confirmed">LB-02</a>).</li>
+  <li>The test calls glibc through <code>extern "C"</code>, which needs <code>unsafe</code>.
+    That is test code only (<a href="repo:UNSAFE.md">UNSAFE.md</a>).</li>
+</ul>
+<p>Two more tests:</p>
+<ul>
+  <li><code>tests/libm_folding.rs</code> needs no native recording.
+    Each libm function must give the same bits on constant and on run-time operands, in an optimized build (<a href="semantics.html#floats">semantics</a>).</li>
+  <li><code>tests/io_rows.rs</code> compares io scenarios with the output of a Lean probe built natively (<code>tests/data/io_probe</code>).</li>
+</ul>
+
+<h2 id="check">The check before each commit</h2>
+<p><code>scripts/check.sh</code> runs before every commit:</p>
+<ul>
+  <li>build, tests and clippy on the Rust toolchains of both translators, in every feature configuration;</li>
+  <li>formatting;</li>
+  <li>Miri on the <code>unsafe-fast</code> configurations;</li>
+  <li>the plain-rustc builds that one translator uses, with its driver's cfg flags;</li>
+  <li>the libm folding test in a release build.</li>
+</ul>
+<p>Heavy steps run under a memory cap, and every test run has a deadline, because the host is shared.</p>
+
+<h2 id="cross">Both translators</h2>
+<ul>
+  <li>A change to the crate is gated by both projects' tests (decision O5).</li>
+  <li>Each translator checks its own builds of the cases with <code>cases.py check</code>.</li>
+  <li>Each translator pins the crate by commit.
+    It moves the pin only after its own suite passes.</li>
+  <li>The work starts with a cross-test of the two translators' runtimes.
+    Each disagreement is fixed in whichever runtime is wrong.</li>
+  <li>Each side runs the other's tests (decision Q9).
+    The cases from the cross-test of leanrs's fixtures are on branch <code>cases-xt</code>.</li>
+</ul>
+
+<h2 id="review">Reviews</h2>
+<ul>
+  <li>Each batch gets a review from each project before it merges.</li>
+  <li>Each finding is judged before it is fixed.</li>
+  <li>A fix comes with a test that fails on the old code.</li>
+  <li><strong>Every bug or disagreement becomes a test</strong> (decision O8).
+    This is also true when the fix lands in a translator, if it concerns runtime behaviour.</li>
+  <li>A suspected bug in Lean's own runtime goes to a judge first (<a href="lean-bugs.html#rule">the rule</a>).</li>
+</ul>
+
+<h2 id="benches">Benchmark pairs</h2>
+<p>The speed floor (<a href="glossary.html#g-o12">O12</a>) needs measurements.
+The pairs exist; nothing is timed yet.</p>
+<ul>
+  <li><strong>A pair</strong> is two programs that print the same checksum.
+    One calls the crate's function as a translator calls it.
+    The other does the same operation through Lean's own API, built natively.</li>
+  <li><strong>The same work on both sides.</strong> The Rust side also does the glue's work, for example boxed <code>Nat</code> words and new string objects.</li>
+  <li><strong>No folding.</strong> Only N, the number of iterations, comes from argv.
+    The operands come from a fixed-seed generator and pass through an opaque sink (<code>black_box</code>, <code>Bench.pin</code>).</li>
+  <li><strong>Counts:</strong> {{v:bench_pairs}} pairs for <code>semantics</code> ({{v:bench_not_comparable}} of them not comparable) and {{v:io_bench_pairs}} for <code>io</code>.</li>
+  <li><code>scripts/check_benches.sh</code> builds both sides and compares the checksums.
+    It times nothing.</li>
+  <li><strong>Timing</strong> follows a fixed protocol: a host lock, one quiet core, nine alternating pairs, the median, and the peak memory beside it.
+    A timing session runs only with the owner's approval.</li>
+</ul>
+
+<p class="more">Detail: <a href="repo:tests/cases/README.md">tests/cases/README.md</a> (the case format), <a href="repo:benches/README.md">benches/README.md</a>, <a href="repo:benches/io/README.md">benches/io/README.md</a>, <a href="repo:CONTRIBUTING.md">CONTRIBUTING.md</a> ("Tests", "Performance"), <a href="repo:scripts/check.sh">scripts/check.sh</a>, <a href="repo:scripts/cases.py">scripts/cases.py</a>.</p>

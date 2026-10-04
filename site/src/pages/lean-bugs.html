@@ -1,0 +1,65 @@
+<h1>Lean bugs we do not copy</h1>
+<p class="lead">lean-runtime copies Lean 4.34.0's C runtime, with one exception.
+Where Lean's runtime is wrong, lean-runtime and both translators do the right thing.</p>
+
+<h2 id="rule">The rule</h2>
+<p>A behaviour is a bug only after a judge gives a verdict.
+The verdict needs three things:</p>
+<ol>
+  <li>the C source lines that cause it;</li>
+  <li>why it is wrong: the C standard, POSIX, Lean's own documentation or evident intent, or lost data or a crash;</li>
+  <li>a minimal native repro that shows a wrong value, not only an odd symptom.</li>
+</ol>
+<p>Anything that is not confirmed is followed exactly as native does it.</p>
+<figure class="fig">
+{{svg:lb-verdict}}
+<figcaption>Figure 1. Three outcomes of a verdict.
+Each confirmed bug gets an entry and a <a href="glossary.html#g-case">case</a>.
+Its expected output is native's, or the correct output when native's is nondeterministic.
+Its <a href="glossary.html#g-deviation">deviation</a> names the entry.</figcaption>
+</figure>
+<p>Decision (2026-10-03): these bugs are not reported upstream.
+They are recorded in <a href="repo:docs/lean-bugs.md">docs/lean-bugs.md</a> only.
+Each translator also lists them among its intended differences.
+The cases of LB-01, LB-02 and LB-03 are on branch <code>cases-xt</code>, not on main yet.</p>
+
+<h2 id="confirmed">Confirmed bugs</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Id</th><th>What native Lean does</th><th>What lean-runtime and the translators do</th></tr></thead>
+<tbody>
+<tr id="lb-01"><td>LB-01</td><td>A multi-threaded <code>IO.Ref.get</code> can undo a concurrent <code>set</code>, so the ref goes back to its old value.</td><td>Both translators' ref cells (glue) make every operation atomic: a completed <code>set</code> is seen by every later <code>get</code>. (Upstream fixed it in Lean 4.35.0-rc1.)</td></tr>
+<tr id="lb-02"><td>LB-02</td><td>After output on a handle, a read of a whole buffer or more makes glibc drop the pending output.</td><td>It writes the pending bytes first, then reads.</td></tr>
+<tr id="lb-03"><td>LB-03</td><td>An error without a file name (<code>getCurrentDir</code> after its directory was removed) crashes with SIGSEGV instead of raising an <code>IO.Error</code>.</td><td>It raises the <code>IO.Error</code>, with the file name <code>""</code>.</td></tr>
+<tr id="lb-13"><td>LB-13</td><td>After <code>main</code> returns, a pool task enqueued when no pool worker is left never runs.
+Its effects are lost, and a wait on it hangs.</td><td>The task runs, and a wait on it returns (<code>sched</code>, branch <code>sched-1</code>). Both judges confirmed it on 2026-10-03; its entry and its case are not in the repository yet.</td></tr>
+</tbody></table></div>
+
+<h2 id="limits">Lifted limits</h2>
+<p>A limit is a place where Lean's definition has a value but the native runtime stops.
+A limit is not a bug.
+Decision (2026-10-03): "if we can lift the restrictions, then we can lift them".
+So the shared rules impose no cap: they compute the definition's result as far as the backend can (<a href="semantics.html#numbers">MAX_BITS</a>).</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Id</th><th>Where native Lean stops</th><th>What lean-runtime does</th></tr></thead>
+<tbody>
+<tr id="lb-04"><td>LB-04</td><td><code>Nat.shiftRight</code> by 2<sup>32</sup> or more, of an operand with that many bits: <code>INTERNAL PANIC</code>.</td><td>Computes the result.</td></tr>
+<tr id="lb-05"><td>LB-05</td><td>A <code>Nat</code> beyond GMP's limb count: GMP raises SIGFPE (status 136), with no message.</td><td>Above the backend's <code>MAX_BITS</code>, both translators end with <code>INTERNAL PANIC: out of memory</code>, exit 1.</td></tr>
+<tr id="lb-06"><td>LB-06</td><td><code>ByteArray.copySlice</code> with an offset or length of 2<sup>64</sup> or more: <code>INTERNAL PANIC: out of memory</code>.</td><td>Returns the definition's clamped copy.</td></tr>
+<tr id="lb-11"><td>LB-11</td><td><code>Nat.pow</code> with an exponent of 2<sup>32</sup> or more: <code>INTERNAL PANIC</code>, also for the bases 0 and 1.</td><td>Computes the result for the bases 0 and 1, and for other bases while it fits <code>MAX_BITS</code>.</td></tr>
+<tr id="lb-12"><td>LB-12</td><td><code>Nat.shiftLeft</code> of a nonzero value by 2<sup>32</sup> or more: <code>INTERNAL PANIC</code>.</td><td>Computes the result while it fits <code>MAX_BITS</code>.</td></tr>
+</tbody></table></div>
+<p>Above <code>MAX_BITS</code>, these rules print native's own message for an exponent or shift of 2<sup>32</sup> or more.</p>
+
+<h2 id="not-bugs">Not bugs: followed as native</h2>
+<p>These candidates failed the rule.
+They are recorded so that nobody raises them again.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Id</th><th>Behaviour</th><th>Why it is not a bug</th></tr></thead>
+<tbody>
+<tr id="lb-07"><td>LB-07</td><td>With <code>LEAN_ABORT_ON_PANIC</code> set, an internal panic aborts without a flush of stdout.</td><td>C leaves a flush at <code>abort</code> to the implementation, and the variable exists to abort.</td></tr>
+<tr id="lb-08"><td>LB-08</td><td>A thunk forced inside its own computation spins forever.</td><td>That <code>Thunk.get</code> diverges by definition, and building such a thunk needs <code>unsafe</code>.</td></tr>
+<tr id="lb-09"><td>LB-09</td><td>A second <code>Handle.rewind</code> can serve glibc's buffered bytes.</td><td>C and POSIX do not require <code>fseek</code> to refresh the buffer; Lean's docs promise a cursor, not fresh data.</td></tr>
+<tr id="lb-10"><td>LB-10</td><td>With descriptor 0, 1 or 2 closed at start, stream operations fail with <code>invalid argument (22)</code>.</td><td>POSIX calls such a start non-conforming; native fails with an error that the program can catch, with no crash or lost data.</td></tr>
+</tbody></table></div>
+
+<p class="more">Detail: <a href="repo:docs/lean-bugs.md">docs/lean-bugs.md</a> gives each entry in full: the source lines, the reason, the native repro, the case id, each translator's entry and the verdict.</p>

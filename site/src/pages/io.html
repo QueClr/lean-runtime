@@ -1,0 +1,189 @@
+<h1>The io module</h1>
+<p class="lead"><code>io</code> (feature <code>io</code>) does what Lean 4.34.0's <code>io.cpp</code> and <code>process.cpp</code> do.
+It is safe Rust over std, rustix and nix.
+It copies the behaviour of glibc where a Lean program can see it.</p>
+
+<div class="toc"><ul>
+  <li><a href="#parts">The parts</a></li>
+  <li><a href="#layers">The layers of a handle call</a></li>
+  <li><a href="#file">The FILE model</a></li>
+  <li><a href="#handles">Handles</a></li>
+  <li><a href="#errors">Errors</a></li>
+  <li><a href="#fs">Files, directories, environment</a></li>
+  <li><a href="#processes">Processes (io-2)</a></li>
+  <li><a href="#streams">Stream redirection (io-2)</a></li>
+  <li><a href="#startup">Startup descriptors</a></li>
+  <li><a href="#exit">Exit</a></li>
+</ul></div>
+
+<h2 id="parts">The parts</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Module</th><th>What</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td><code>cfile</code></td><td>A model of glibc's <code>FILE</code>: buffering, read-ahead, positions, the sticky indicators.</td><td>main</td></tr>
+<tr><td><code>handle</code></td><td><code>IO.FS.Handle</code>: open modes, the standard streams, the handle primitives, the list of open handles.</td><td>main</td></tr>
+<tr><td><code>error</code></td><td><code>IO.Error</code> as plain data, its decoding from <code>errno</code>, the model of C's <code>errno</code>.</td><td>main</td></tr>
+<tr><td><code>fs</code></td><td>Directories, metadata, <code>realPath</code>, removal, renaming, links, permissions, the working directory.</td><td>main</td></tr>
+<tr><td><code>env</code>, <code>debug</code></td><td><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, random bytes, the monotonic clock, <code>IO.sleep</code>; <code>dbgTrace</code>, <code>dbgSleep</code>.</td><td>main</td></tr>
+<tr><td><code>startup</code></td><td>The descriptors native Lean has open before <code>main</code>.</td><td>main</td></tr>
+<tr><td><code>exit</code></td><td>What the exit does with the streams; <code>IO.Process.exit</code>, <code>forceExit</code>, the uncaught-error message.</td><td>main</td></tr>
+<tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>io-2</td></tr>
+<tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>io-2</td></tr>
+<tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>io-2</td></tr>
+</tbody></table></div>
+
+<h2 id="layers">The layers of a handle call</h2>
+<figure class="fig">
+{{svg:io-layers}}
+<figcaption>Figure 1. A write goes from the glue through the <code>FILE</code> model.
+Small writes collect in the buffer; a write larger than the buffer goes out directly, in whole blocks.</figcaption>
+</figure>
+<div class="rule">
+<p><strong>No bulk copies in the glue.</strong></p>
+<ul>
+  <li>Writes take views (<code>&amp;[u8]</code>).</li>
+  <li><code>read_uninit</code> fills the caller's own uninitialized storage, with no zero pass.
+    <code>read</code> fills initialized bytes; <code>read_vec</code> grows a <code>Vec</code> as the bytes come.</li>
+  <li>An unbounded result (a line, a path, an environment value) is appended to the caller's <a href="glossary.html#g-bytesink">ByteSink</a>.</li>
+</ul>
+</div>
+
+<h2 id="file">The FILE model</h2>
+<p>Native Lean uses glibc's <code>FILE</code> for the standard streams and for every <code>IO.FS.Handle</code>.
+A Lean program can see that buffering:</p>
+<ul>
+  <li>in what reaches a descriptor, and when (another reader of the file, <code>2&gt;&amp;1</code> order, pipes);</li>
+  <li>in file positions (<code>rewind</code>, <code>truncate</code>, the stdin a program leaves to the next process);</li>
+  <li>in the sticky end-of-file and error indicators.</li>
+</ul>
+<p>So <code>CFile</code> follows glibc 2.39's libio closely.
+It makes the same system calls in the same order, so it gets the same <code>errno</code> values.
+The documented exception is <code>read_vec</code>, which can split one <code>read(2)</code> of glibc's.
+From a regular file it makes two or three calls; from a device it reads in 64 KiB windows.
+The bytes and the position stay glibc's.
+It is safe Rust: the buffer is a <code>Vec&lt;u8&gt;</code>, and the buffer "pointers" are indices.</p>
+<figure class="fig">
+{{svg:io-buffer}}
+<figcaption>Figure 2. One buffer serves reading and writing.
+The descriptor's offset is at the end of the read-ahead, not at the position Lean sees.</figcaption>
+</figure>
+<ul>
+  <li><strong>Get mode.</strong> A refill reads ahead from the descriptor.
+    Lean reads from <code>rp</code>; the bytes up to <code>re</code> are read-ahead.</li>
+  <li><strong>Put mode.</strong> The first write after a read starts the put area at the read position.
+    Pending output waits in the buffer.
+    It reaches the descriptor at a flush, when the buffer is full, before a read, or at exit.</li>
+  <li><strong>Writing after reading.</strong> Before pending output goes out, the model seeks back over the read-ahead.
+    So the bytes land at the position that Lean sees.</li>
+  <li><strong>Buffer size.</strong> The descriptor's <code>st_blksize</code> when it is between 1 and 8191; otherwise 8192.
+    A terminal is line-buffered.
+    stderr is unbuffered.</li>
+  <li><strong><a href="lean-bugs.html#confirmed">LB-02</a>.</strong> glibc drops pending output before a read of at least one buffer.
+    lean-runtime writes the pending bytes first.
+    Everything else on that path is glibc's.</li>
+</ul>
+<p>A differential test runs random sequences of handle operations on real glibc and on the model, and compares them after every step (<a href="testing.html#glibc">Testing</a>).</p>
+
+<h2 id="handles">Handles</h2>
+<ul>
+  <li>A <code>Handle</code> is a <code>CFile</code> behind a <code>std::sync::Mutex</code>, as glibc locks each <code>FILE</code>.</li>
+  <li>The three standard streams are static and never close.</li>
+  <li>A file that the crate opened closes (<code>fclose</code>) when the last clone of its <code>Handle</code> goes away.
+    A translator keeps the <code>Handle</code> inside its own object and drops it when it frees that object.</li>
+  <li>The crate keeps a list of open handles in glibc's order, for the exit.</li>
+  <li><code>lock</code>, <code>tryLock</code> and <code>unlock</code> wait in <code>flock</code> without the stream's lock, as native does.</li>
+</ul>
+
+<h2 id="errors">Errors</h2>
+<ul>
+  <li><code>IoError</code> mirrors Lean's <code>IO.Error</code>: its 19 constructors in Lean's order, with plain fields.
+    Each translator converts it to its own value.</li>
+  <li><code>decode_io_error</code> maps an <code>errno</code> to libuv's code, picks the error class and libuv's message, and keeps the <code>errno</code> as the OS code.
+    This is Lean 4.34's decoding in <code>io.cpp</code>.</li>
+  <li><code>decode_uv_error</code> does the same for the operations that Lean implements with libuv.</li>
+  <li><strong>The <code>errno</code> model.</strong> rustix does not touch libc's <code>errno</code>.
+    So the crate keeps its own copy per thread, and sets it as the C call would.
+    A program can see it: a later <code>getLine</code> on a stream with its error indicator set reports that <code>errno</code>.</li>
+  <li><strong><a href="lean-bugs.html#confirmed">LB-03</a>.</strong> Some errors have no file name.
+    When the error's class takes a file name (no such file, interrupted call), native Lean then crashes (SIGSEGV).
+    lean-runtime gives the error with the file name <code>""</code>.</li>
+</ul>
+
+<h2 id="fs">Files, directories, environment</h2>
+<ul>
+  <li>Every file-system function first refuses a path that holds a NUL byte, as Lean does.
+    The exception is <code>setCurrentDir</code>, which uses the part before the NUL, as Lean's C string does.</li>
+  <li>Paths are views: the bytes of a Lean string.
+    Results of unbounded size (a path, a directory entry's name) go to the caller's <code>ByteSink</code> or callback, as bytes.</li>
+  <li><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, <code>IO.getRandomBytes</code>, <code>IO.sleep</code> and the monotonic clock (Lean's absolute <code>CLOCK_MONOTONIC</code>) are in <code>env</code>.</li>
+  <li><code>dbgTrace</code> prints its message to stderr and continues; <code>dbgSleep</code> sleeps (decision DV5).
+    With io-2's <code>streams</code>, the message goes to the current stderr stream, as natively.</li>
+</ul>
+
+<h2 id="processes">Processes (io-2)</h2>
+<p>Native Lean forks, and the child calls <code>execvp</code>.
+Safe Rust cannot fork, so <code>io::process</code> spawns with <code>posix_spawn</code> (nix's safe wrapper).
+It then does what the forked child does before <code>execvp</code>:</p>
+<ul>
+  <li>sets up piped, inherited or null standard streams; a piped parent end becomes a <code>Handle</code>;</li>
+  <li>finds the program as glibc 2.39's <code>execvp</code> finds it;</li>
+  <li>builds the child's environment from the parent's <code>environ</code>, with Lean's changes applied in order;</li>
+  <li>enters the working directory in a spawner thread, so the parent's own directory does not change.
+    Where the kernel refuses that, it changes the directory under a lock, then changes it back;</li>
+  <li>for a child that cannot start, builds the child that Lean's fork makes: its message on the child's stderr, exit status 255.</li>
+</ul>
+<p><code>wait</code>, <code>tryWait</code> and <code>kill</code> follow <code>process.cpp</code>.
+<code>IO.Process.output</code> reads both pipes with <code>poll</code>.</p>
+
+<h2 id="streams">Stream redirection (io-2)</h2>
+<ul>
+  <li>Natively, every thread has its own current standard streams.
+    <code>IO.setStdout</code> replaces the calling thread's stream and returns the old one.</li>
+  <li><code>io::streams</code> keeps these slots per thread.
+    The slots are type-erased, because each translator has its own <code>IO.FS.Stream</code> value.</li>
+  <li>A task that runs as a coroutine has its own slots.
+    The scheduler's glue swaps them at each switch.</li>
+  <li>The runtime's own stderr lines (panic messages, <code>dbgTrace</code>, <code>timeit</code>) go to the current stderr stream, as natively.</li>
+</ul>
+
+<h2 id="startup">Startup descriptors</h2>
+<p>Before <code>main</code>, Lean's runtime starts libuv's loop.
+libuv 1.48.0 opens up to eight descriptors, close-on-exec, at the lowest free numbers.
+A program can see them: they decide which <code>open</code> fails first under a descriptor limit, and what a closed standard descriptor becomes.
+lean-runtime opens the same descriptors, with the same numbers, in the same order.
+Two epoll descriptors stand in for the io_uring rings (A821, option C).</p>
+<figure class="fig">
+{{svg:io-startup}}
+<figcaption>Figure 3. The startup descriptors.
+"lock" is the pipe that locks signal handling (one byte is written into it).
+"signal" is the loop's non-blocking signal pipe.</figcaption>
+</figure>
+<ul>
+  <li>libuv decides whether to make the two io_uring rings.
+    The crate predicts that decision as libuv 1.48.0 makes it, and also reads <code>kernel.io_uring_disabled</code>.</li>
+  <li>No safe API makes a ring without a new crate.
+    So two more epoll descriptors stand in for the rings.
+    Reads and writes on both kinds fail alike, with <code>EINVAL</code>.</li>
+  <li>Two things differ: the metadata of <code>/proc/self/fd/N</code>, and the ring's kernel thread in <code>/proc/self/task</code>.</li>
+  <li>Known gaps: a seccomp filter that refuses io_uring, and <code>io_uring_disabled = 1</code> in a user namespace.</li>
+  <li><strong>Glue duty.</strong> The descriptors must open before Rust's runtime starts, because Rust puts <code>/dev/null</code> on closed standard descriptors.
+    So each translator's glue calls <code>open_native_descriptors</code> from an ELF constructor.
+    That needs <code>#[link_section]</code>, which <code>forbid(unsafe_code)</code> refuses in the crate.</li>
+  <li>Native Lean ignores <code>SIGPIPE</code> before <code>main</code>, so a write to a pipe without a reader fails with <code>EPIPE</code>.
+    Rust's own entry does the same for a Rust <code>main</code>.
+    A glue whose entry is not Rust's (lean2rr's) ignores <code>SIGPIPE</code> itself.</li>
+</ul>
+
+<h2 id="exit">Exit</h2>
+<p>A native program ends through C's <code>exit</code>, which flushes the streams in a fixed order.
+The order is visible: a handle on <code>/dev/stdout</code> prints after <code>main</code>'s own buffered output.
+The crate cannot register an <code>atexit</code> handler without <code>unsafe</code>, so the glue calls <code>exit_flush</code> (or <code>exit</code>) on every normal path.</p>
+<figure class="fig">
+{{svg:io-exit}}
+<figcaption>Figure 4. The exit order.
+Tasks join before the streams flush.
+So a runaway task keeps the process alive, and <code>main</code>'s buffered output never appears.</figcaption>
+</figure>
+
+<p class="more">Detail: <a href="repo:src/io/mod.rs">src/io/mod.rs</a> (the layout, "no bulk copies", concurrency), <a href="repo:src/io/cfile.rs">cfile.rs</a>, <a href="repo:src/io/debug.rs">debug.rs</a>, <a href="repo:src/io/env.rs">env.rs</a>, <a href="repo:src/io/error.rs">error.rs</a>, <a href="repo:src/io/exit.rs">exit.rs</a>, <a href="repo:src/io/fs.rs">fs.rs</a>, <a href="repo:src/io/handle.rs">handle.rs</a>, <a href="repo:src/io/startup.rs">startup.rs</a>.
+The io-2 modules are on branch <code>io-2</code> (<code>src/io/process.rs</code>, <code>streams.rs</code> and others).</p>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 410" role="img" aria-labelledby="sc2-t sc2-d">
+  <title id="sc2-t">The states of a task</title>
+  <desc id="sc2-d">Task.spawn or IO.asTask makes a queued task. Task.map, Task.bind, IO.mapTask or IO.bindTask makes a task that waits for its source; it is queued when the source finishes. A queued pure task without IO need can be marked started; it runs later. A queued task runs. A running task can block and be woken. A running task finishes. A pure task dropped before it starts is deleted and never runs.</desc>
+  <defs>
+    <marker id="sc2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <text class="ts" x="216" y="52" text-anchor="end">Task.map, Task.bind,</text>
+  <text class="ts" x="216" y="67" text-anchor="end">IO.mapTask, IO.bindTask</text>
+  <circle cx="230" cy="55" r="6" fill="#50555b"/>
+  <line class="ar" x1="236" y1="55" x2="258" y2="55" marker-end="url(#sc2-a)"/>
+  <rect class="k-rt" x="260" y="30" width="150" height="50" rx="10"/>
+  <text class="tb" x="335" y="52" text-anchor="middle">waiting</text>
+  <text class="ts" x="335" y="70" text-anchor="middle">for its source task</text>
+
+  <text class="ts" x="216" y="209" text-anchor="end">Task.spawn, IO.asTask</text>
+  <circle cx="230" cy="205" r="6" fill="#50555b"/>
+  <line class="ar" x1="236" y1="205" x2="258" y2="205" marker-end="url(#sc2-a)"/>
+  <rect class="k-rt" x="260" y="180" width="150" height="50" rx="10"/>
+  <text class="tb" x="335" y="202" text-anchor="middle">queued</text>
+  <text class="ts" x="335" y="220" text-anchor="middle">in its priority's queue</text>
+
+  <line class="ar" x1="335" y1="80" x2="335" y2="178" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="342" y="122">the source</text>
+  <text class="ts" x="342" y="137">finishes</text>
+
+  <rect class="k-rt" x="470" y="30" width="190" height="56" rx="10"/>
+  <text class="tb" x="565" y="53" text-anchor="middle">started, not run yet</text>
+  <text class="ts" x="565" y="72" text-anchor="middle">a pure task, no IO need</text>
+  <line class="ar" x1="400" y1="180" x2="490" y2="88" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="466" y="140">a worker would</text>
+  <text class="ts" x="466" y="155">start it</text>
+
+  <rect class="k-rt" x="520" y="180" width="150" height="50" rx="10"/>
+  <text class="tb" x="595" y="202" text-anchor="middle">running</text>
+  <text class="ts" x="595" y="220" text-anchor="middle">on a context, or inline</text>
+  <line class="ar" x1="410" y1="205" x2="518" y2="205" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="464" y="199" text-anchor="middle">runs</text>
+  <line class="ar" x1="600" y1="86" x2="600" y2="178" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="607" y="128">runs later</text>
+
+  <rect class="k-rt" x="720" y="180" width="125" height="50" rx="10"/>
+  <text class="tb" x="782" y="202" text-anchor="middle">finished</text>
+  <text class="ts" x="782" y="220" text-anchor="middle">value stored</text>
+  <line class="ar" x1="670" y1="205" x2="718" y2="205" marker-end="url(#sc2-a)"/>
+
+  <rect class="k-rt" x="520" y="300" width="150" height="50" rx="10"/>
+  <text class="tb" x="595" y="322" text-anchor="middle">blocked</text>
+  <text class="ts" x="595" y="340" text-anchor="middle">its context suspended</text>
+  <line class="ar" x1="575" y1="230" x2="575" y2="298" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="568" y="268" text-anchor="end">sleep, lock,</text>
+  <text class="ts" x="568" y="283" text-anchor="end">promise, wait</text>
+  <line class="ar" x1="615" y1="298" x2="615" y2="232" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="622" y="268">the hub</text>
+  <text class="ts" x="622" y="283">resumes it</text>
+
+  <rect class="k-none" x="260" y="300" width="150" height="50" rx="10"/>
+  <text class="tb" x="335" y="322" text-anchor="middle">deleted</text>
+  <text class="ts" x="335" y="340" text-anchor="middle">never runs</text>
+  <line class="ar" x1="335" y1="230" x2="335" y2="298" marker-end="url(#sc2-a)"/>
+  <text class="ts" x="342" y="262">pure, dropped</text>
+  <text class="ts" x="342" y="277">before it starts</text>
+
+  <text class="ts" x="20" y="384">IO.getTaskState reports: waiting = queued or waiting; running = started, running or blocked; finished = finished.</text>
+</svg>

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 240" role="img" aria-labelledby="lb1-t lb1-d">
+  <title id="lb1-t">How a suspected Lean bug is decided</title>
+  <desc id="lb1-d">A suspected bug goes to a judge, who needs the C source lines, the reason it is wrong, and a native repro. There are three outcomes. A confirmed bug: lean-runtime does the right thing, with an LB entry and a case. A limit: lifted where the result can be computed. Not a bug: followed exactly as native, and recorded so that it is not raised again.</desc>
+  <defs>
+    <marker id="lb1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-lean" x="20" y="88" width="170" height="64" rx="6"/>
+  <text class="tb" x="105" y="114" text-anchor="middle">suspected bug</text>
+  <text class="ts" x="105" y="134" text-anchor="middle">in Lean's runtime</text>
+  <line class="ar" x1="190" y1="120" x2="228" y2="120" marker-end="url(#lb1-a)"/>
+  <rect class="k-test" x="230" y="70" width="200" height="100" rx="6"/>
+  <text class="tb" x="330" y="94" text-anchor="middle">judge</text>
+  <text class="ts" x="246" y="116">1. the C source lines</text>
+  <text class="ts" x="246" y="135">2. why it is wrong</text>
+  <text class="ts" x="246" y="154">3. a native repro</text>
+  <line class="ar" x1="430" y1="100" x2="478" y2="44" marker-end="url(#lb1-a)"/>
+  <line class="ar" x1="430" y1="120" x2="478" y2="120" marker-end="url(#lb1-a)"/>
+  <line class="ar" x1="430" y1="140" x2="478" y2="196" marker-end="url(#lb1-a)"/>
+  <rect class="k-bad" x="480" y="14" width="360" height="60" rx="6"/>
+  <text class="tb" x="496" y="38">confirmed bug</text>
+  <text class="ts" x="496" y="58">do the right thing; an LB entry and a case</text>
+  <rect class="k-rt" x="480" y="90" width="360" height="60" rx="6"/>
+  <text class="tb" x="496" y="114">limit</text>
+  <text class="ts" x="496" y="134">lift it where the result can be computed</text>
+  <rect class="k-none" x="480" y="166" width="360" height="60" rx="6"/>
+  <text class="tb" x="496" y="190">not a bug</text>
+  <text class="ts" x="496" y="210">follow native exactly; record it, so it is not raised again</text>
+</svg>

@@ -1,0 +1,112 @@
+<h1>Architecture</h1>
+<p class="lead">lean-runtime has three modules.
+Cargo features select them.
+Each translator's glue connects its own values to the crate.</p>
+
+<div class="toc"><ul>
+  <li><a href="#modules">The three modules</a></li>
+  <li><a href="#features">Features and dependencies</a></li>
+  <li><a href="#split">Shared code and glue</a></li>
+  <li><a href="#views">Views in, data out</a></li>
+  <li><a href="#scope">Scope: Lean's own library</a></li>
+  <li><a href="#builds">Builds and platform</a></li>
+</ul></div>
+
+<h2 id="modules">The three modules</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Module</th><th>What it holds</th><th>Feature</th><th>Page</th></tr></thead>
+<tbody>
+<tr><td><code>semantics</code></td><td>Pure rules: numbers, floats, strings, hashing, arrays, panic texts, the text of leaf values.</td><td>always built</td><td><a href="semantics.html">semantics</a></td></tr>
+<tr><td><code>io</code></td><td>OS-level IO: glibc's <code>FILE</code> model, handles, <code>IO.Error</code>, files, environment, clock, startup descriptors, exit.</td><td><code>io</code></td><td><a href="io.html">io</a></td></tr>
+<tr><td><code>sched</code></td><td>The task scheduler: deferred tasks as coroutines, yield points, promises, <code>Std.Sync</code>, Lean's exit behaviour.</td><td><code>sched</code></td><td><a href="sched.html">sched</a></td></tr>
+</tbody></table></div>
+
+<h2 id="features">Features and dependencies</h2>
+<figure class="fig">
+{{svg:arch-features}}
+<figcaption>Figure 1. The default build has no dependencies.
+Each feature adds one module and the crates it needs.
+The owner approved nix, rustix and corosensei.</figcaption>
+</figure>
+<ul>
+  <li><strong>Default.</strong> <code>semantics</code> only.
+    No dependencies, so a plain <code>rustc --crate-type rlib</code> build works (one translator does not use cargo).</li>
+  <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix.
+    These crates hold the <code>unsafe</code> code, so lean-runtime itself stays free of it.</li>
+  <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
+    Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
+  <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
+    It may enable a faster <code>unsafe</code> version of a function.
+    That version must have the same behaviour as the safe one, a written proof in <a href="repo:UNSAFE.md">UNSAFE.md</a>, and Miri checks.
+    The safe version always stays.</li>
+</ul>
+
+<h2 id="split">Shared code and glue</h2>
+<p>The rule (decision 2026-10-03): lean-runtime holds every runtime function.
+A translator keeps only what its own value representation needs.</p>
+<figure class="fig">
+{{svg:arch-split}}
+<figcaption>Figure 2. The split between glue and crate.
+The glue is thin: it converts and calls.
+The crate holds the behaviour.</figcaption>
+</figure>
+<p>Some <code>extern</code> functions need no shared code.
+The coverage count of 2026-10-04 sorts Lean's 717 <code>Init</code> and <code>Std</code> extern symbols this way:</p>
+<ul>
+  <li>171 are one machine operation that each translator emits inline (wrapping <code>+</code>, bitwise operations, casts).</li>
+  <li>66 belong to the glue, because they depend on the translator's own objects or memory protocol.
+    Examples: append, push, size, thunk and ref cells, sharing tests, heartbeats.</li>
+  <li>27 are Lean code already (<code>@[export]</code> definitions).</li>
+  <li>The other 453 need shared code. The <a href="status.html#coverage">status page</a> shows how many are done.</li>
+</ul>
+
+<h2 id="views">Views in, data out</h2>
+<p>No function in lean-runtime owns, allocates or frees a Lean value of either translator.
+So neither glue converts or copies bulk data.</p>
+<figure class="fig">
+{{svg:arch-views}}
+<figcaption>Figure 3. The glue lends views and receives plain data.
+Text and unbounded bytes go straight into the glue's own storage.</figcaption>
+</figure>
+<ul>
+  <li><strong>Views in.</strong> Functions take <code>&amp;[u8]</code>, <code>&amp;str</code>, <code>u64</code> and <code>f64</code>.
+    A path is the bytes of a Lean string.</li>
+  <li><strong>Plain data out.</strong> A character is a <code>u32</code>, a position a <code>u64</code>, a substring a byte <code>Range</code>.</li>
+  <li><strong>Text</strong> goes into a <code>fmt::Write</code> that the caller supplies (for example <code>Float.toString</code>).</li>
+  <li><strong>Reads</strong> go into the caller's storage.
+    <code>read_uninit</code> fills the bytes the caller allocated, with no zero pass.
+    An unbounded result (a line, a path) is appended to a <a href="glossary.html#g-bytesink">ByteSink</a> that the caller implements on its own object.</li>
+  <li><strong>Only the cold error path owns data:</strong> an <code>IoError</code> holds its file name and details as <code>String</code>s.</li>
+</ul>
+
+<h2 id="scope">Scope: Lean's own library</h2>
+<p>Decision (2026-10-03): the translators target Lean code only, with the runtime library as the one exception.</p>
+<ul>
+  <li>Only the externs of Lean's own library (<code>Init</code>, <code>Std</code>) are native code.
+    lean-runtime supplies them.</li>
+  <li>Any other <code>@[extern]</code> runs its Lean definition by default.
+    Its C code is never built or linked.</li>
+  <li>An extern without a Lean definition is refused when the program is translated.</li>
+  <li>A program extern that names a runtime-library symbol, with a matching signature, gets that runtime function, as native linking gives it.</li>
+  <li>So lean-runtime needs no boundary for user C code.</li>
+</ul>
+
+<h2 id="builds">Builds and platform</h2>
+<ul>
+  <li>Builds are offline and use no nightly features.
+    The crate builds on the Rust toolchains of both translators.</li>
+  <li>Cargo.lock is committed.
+    <code>io</code> builds with <code>cargo build --offline --locked --features io</code>, from cargo's local registry cache.
+    Nothing is vendored.</li>
+  <li>A new dependency needs a check against leanrs's offline registry.
+    A new crate that wraps <code>unsafe</code> needs the owner's decision.</li>
+  <li>Each translator pins lean-runtime by commit.
+    It moves the pin only after its own test suite passes.</li>
+  <li>The crate assumes a 64-bit platform.
+    The expected values come from aarch64 Linux with glibc 2.39.</li>
+  <li><code>io</code> compiles only on Linux, aarch64 and x86-64, because it models glibc.</li>
+  <li>The libm ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> exist only on aarch64 Linux with glibc.
+    Elsewhere, code that calls them does not compile until a port for that platform exists.</li>
+</ul>
+
+<p class="more">Detail: <a href="repo:README.md">README.md</a>, <a href="repo:CONTRIBUTING.md">CONTRIBUTING.md</a> ("Code", "Builds", "Dependencies"), <a href="repo:Cargo.toml">Cargo.toml</a>, <a href="repo:src/lib.rs">src/lib.rs</a>, <a href="repo:src/io/mod.rs">src/io/mod.rs</a> ("no bulk copies").</p>

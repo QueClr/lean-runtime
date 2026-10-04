@@ -1,0 +1,92 @@
+<h1>lean-runtime</h1>
+<p class="lead">lean-runtime is one Rust crate.
+It holds the behaviour of Lean 4.34.0's runtime.
+Its repository is named lean-runtime-rs to mark it as a Rust reimplementation, not Lean's own runtime.
+It is built to be shared by two Lean <a href="glossary.html#g-translator">translators</a>: lean2rr and leanrs.</p>
+
+<h2 id="what">What it is</h2>
+<ul>
+  <li>A Lean program uses runtime functions: numbers, strings, files, tasks and more.</li>
+  <li><a href="glossary.html#g-native">Native Lean</a> gets these functions from its C runtime (<code>lean.h</code> and <code>src/runtime/*.cpp</code>).</li>
+  <li><strong>lean2rr</strong> translates compiled Lean code to Reussir.
+    <strong>leanrs</strong> translates compiled Lean code to Rust.
+    Neither uses Lean's C runtime.</li>
+  <li>lean-runtime gives both translators these functions in Rust.
+    It holds the part that does not depend on how a translator stores Lean values.</li>
+</ul>
+
+<h2 id="why">Why one shared crate</h2>
+<p>Decision (2026-10-03): one runtime for both translators.</p>
+<ul>
+  <li>Every runtime function is in lean-runtime, written once, in safe Rust.</li>
+  <li>Each translator keeps only thin <a href="glossary.html#g-glue">glue</a> for its own value layout.</li>
+  <li>No translator keeps its own copy of a function.
+    There is no fallback per function.</li>
+  <li>A fix in lean-runtime fixes both translators.
+    A test in lean-runtime checks both.</li>
+  <li>The code comes from both projects.
+    Each module, and in <code>semantics</code> each function, names the code it came from: lean2rr's runtime, leanrs's runtime, or new code.</li>
+</ul>
+
+<h2 id="goals">Goals</h2>
+<div class="cards">
+  <div class="card">
+    <h3>Same results</h3>
+    <p>A translated program gives the same stdout, stderr and exit code as the native build with Lean 4.34.0.</p>
+  </div>
+  <div class="card">
+    <h3>Safe Rust</h3>
+    <p>The default build has no <code>unsafe</code> code: <code>#![forbid(unsafe_code)]</code>.
+    System calls go through vetted crates.</p>
+  </div>
+  <div class="card">
+    <h3>Speed floor (<a href="glossary.html#g-o12">O12</a>)</h3>
+    <p>The default build of each function must be at least as fast as Lean's native runtime.</p>
+  </div>
+  <div class="card">
+    <h3>No copied Lean bugs</h3>
+    <p>Where Lean's runtime is wrong, lean-runtime does the right thing.
+    A judge confirms each bug first.</p>
+  </div>
+</div>
+<ul>
+  <li><strong>Same results.</strong> The expected values of every test come from native Lean 4.34.0 on aarch64 Linux with glibc 2.39.
+    Both translators run on that host.</li>
+  <li><strong>Safe Rust.</strong> The opt-in feature <a href="glossary.html#g-unsafe-fast"><code>unsafe-fast</code></a> can add faster <code>unsafe</code> code later.
+    Each such part needs a written proof in <a href="repo:UNSAFE.md">UNSAFE.md</a>.
+    There are no entries yet.</li>
+  <li><strong>Speed floor.</strong> A safe function that is slower than native is not merged as the default.
+    The <a href="testing.html#benches">benchmark pairs</a> exist, but nothing is timed yet.
+    Timing runs only in sessions that the owner approves.</li>
+  <li><strong>No copied Lean bugs.</strong> See <a href="lean-bugs.html">Lean bugs</a>.</li>
+</ul>
+
+<h2 id="stack">Where lean-runtime sits</h2>
+<figure class="fig">
+{{svg:overview-stack}}
+<figcaption>Figure 1. Each translator keeps its own value layout in its glue.
+Both glues call the same crate.
+The colours mean the same thing on every page of this site.</figcaption>
+</figure>
+
+<h2 id="same">Same results as native</h2>
+<figure class="fig">
+{{svg:overview-same}}
+<figcaption>Figure 2. The native build is the reference.
+An allowed alternative exists only for a documented <a href="glossary.html#g-deviation">deviation</a>, for example a <a href="lean-bugs.html">Lean bug</a> that lean-runtime does not copy.</figcaption>
+</figure>
+
+<h2 id="pages">The pages</h2>
+<ul>
+  <li><a href="architecture.html">Architecture</a>: the three modules, the features, what stays in each translator's glue.</li>
+  <li><a href="semantics.html">semantics</a>: numbers, floats, strings, hashing, arrays, panics, text.</li>
+  <li><a href="io.html">io</a>: the model of glibc's <code>FILE</code>, handles, errors, files, processes, startup and exit.</li>
+  <li><a href="sched.html">sched</a>: tasks on one thread, coroutines, the hub, yield points.</li>
+  <li><a href="testing.html">Testing</a>: rows, program cases, twins, reviews, benchmarks.</li>
+  <li><a href="lean-bugs.html">Lean bugs</a>: the bugs in Lean's runtime that lean-runtime does not copy.</li>
+  <li><a href="status.html">Status</a>: what is merged and what is in progress.</li>
+  <li><a href="glossary.html">Glossary</a>: every term this site uses.</li>
+</ul>
+
+<p class="more">Detail for implementors: <a href="repo:README.md">README.md</a>, <a href="repo:CONTRIBUTING.md">CONTRIBUTING.md</a>, <a href="repo:UNSAFE.md">UNSAFE.md</a>, and the module docs in <a href="repo:src/lib.rs">src/</a>.
+The source repository is <a href="https://github.com/QueClr/lean-runtime-rs">github.com/QueClr/lean-runtime-rs</a>.</p>

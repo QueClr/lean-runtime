@@ -1,0 +1,81 @@
+<h1>Status</h1>
+<p class="lead">State of 2026-10-04.
+main is at commit 39a8d66.
+It holds <code>semantics</code> and the first <code>io</code> batch.</p>
+
+<h2 id="merged">Merged on main</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Batch</th><th>What it added</th></tr></thead>
+<tbody>
+<tr><td><code>semantics-1</code></td><td>Hashing; <code>Float</code> and <code>Float32</code> formatting and conversions; the libm functions; the fixed-width integers; the <code>String</code> position functions.</td></tr>
+<tr><td><code>semantics-2</code></td><td>The <code>Nat</code> and <code>Int</code> rules over the big-number traits; the array edge rules; the panic texts and exit statuses; the text of leaf values.</td></tr>
+<tr><td><code>io-1</code></td><td>The <code>IO.Error</code> mirror and its decoding; the <code>FILE</code> model; handles and the standard streams; the exit sequence.
+The file system, the environment, the clock, the debug primitives and the startup descriptors.</td></tr>
+<tr><td><code>cases-tasks-1</code></td><td>Program cases for tasks and for two io findings, recorded natively; <code>scripts/cases.py</code> runs every case under a memory cap.</td></tr>
+</tbody></table></div>
+<p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
+No timing session has run yet.</p>
+
+<h2 id="progress">In progress</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Work</th><th>What</th><th>State</th></tr></thead>
+<tbody>
+<tr><td><code>io-2</code></td><td>Child processes, the <code>environ</code> copy, stream redirection, temporary files, <code>timeit</code> and <code>Std.Time</code>'s clock, the <code>UV.System</code> queries.</td><td>Branch, not merged; in review (2026-10-04).</td></tr>
+<tr><td><code>sched-1</code></td><td>The scheduler, <code>Std.Sync</code>, the driver with every task case, <code>docs/sched.md</code>.</td><td>Branch, not merged. Review round 1: approve with fixes (2026-10-03); the fixes are on the branch, except the LB-13 citation and its cases.</td></tr>
+<tr><td><code>sched-io</code></td><td>Cooperative blocking IO for pipes and child processes (<a href="sched.html#sched-io">details</a>).</td><td>Agreed (2026-10-03). Its own batch, after sched-1 merges. A gate: neither translator adopts <code>sched</code> before it lands.</td></tr>
+<tr><td>libm portability</td><td>Ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> beyond aarch64 Linux with glibc.</td><td>In progress.</td></tr>
+<tr><td><code>cases-xt</code></td><td>Program cases from lean2rr's cross-test of leanrs's fixtures, cases for LB-01, LB-02 and LB-03, and cases for two decisions (DV5, DV10).</td><td>Branch, not merged.</td></tr>
+<tr><td>Event loop and network</td><td>The event loop and timers, signals, and the network: TCP, UDP, DNS, interface addresses.</td><td>Planned for later.</td></tr>
+</tbody></table></div>
+
+<h2 id="coverage">Coverage</h2>
+<p>The coverage count takes the 717 C symbols of the <code>@[extern]</code> declarations in Lean 4.34.0's <code>Init</code> and <code>Std</code>.
+264 of them need no shared code: they are inline operations, glue, or Lean code (<a href="architecture.html#split">Architecture</a>).
+The other 453 need shared code.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>As of</th><th>main at</th><th class="num">Done on main</th><th class="num">With the branches' items</th></tr></thead>
+<tbody>
+<tr><td>2026-10-03</td><td>8823ad0 (semantics-1)</td><td class="num">227 of 453 (50%)</td><td class="num">364 of 453 (80%)</td></tr>
+<tr><td>2026-10-04</td><td>39a8d66 (with semantics-2 and io-1)</td><td class="num">313 of 453 (69%)</td><td class="num">364 of 453 (80%)</td></tr>
+</tbody></table></div>
+<figure class="fig">
+{{svg:status-coverage}}
+<figcaption>Figure 1. Coverage per area, as of 2026-10-04 (main at 39a8d66).
+The longest bar is 110 symbols.
+"In progress" includes 33 symbols that are in a branch's scope but have no item yet.
+Point at a bar to see its numbers.</figcaption>
+</figure>
+<details>
+<summary>The numbers as a table</summary>
+<div class="tblwrap">
+<table>
+<thead><tr><th>Area</th><th class="num">Done on main</th><th class="num">In progress</th><th class="num">Planned</th><th class="num">Need shared code</th></tr></thead>
+<tbody>
+<tr><td>Nat</td><td class="num">18</td><td class="num">0</td><td class="num">0</td><td class="num">18</td></tr>
+<tr><td>Int</td><td class="num">16</td><td class="num">0</td><td class="num">0</td><td class="num">16</td></tr>
+<tr><td>UIntN/IntN</td><td class="num">110</td><td class="num">0</td><td class="num">0</td><td class="num">110</td></tr>
+<tr><td>Float</td><td class="num">48</td><td class="num">0</td><td class="num">0</td><td class="num">48</td></tr>
+<tr><td>Float32</td><td class="num">48</td><td class="num">0</td><td class="num">0</td><td class="num">48</td></tr>
+<tr><td>String</td><td class="num">16</td><td class="num">0</td><td class="num">2</td><td class="num">18</td></tr>
+<tr><td>Substring/Slice</td><td class="num">2</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr>
+<tr><td>Array</td><td class="num">7</td><td class="num">0</td><td class="num">0</td><td class="num">7</td></tr>
+<tr><td>ByteArray</td><td class="num">4</td><td class="num">0</td><td class="num">0</td><td class="num">4</td></tr>
+<tr><td>FloatArray</td><td class="num">3</td><td class="num">0</td><td class="num">0</td><td class="num">3</td></tr>
+<tr><td>hashing</td><td class="num">4</td><td class="num">0</td><td class="num">0</td><td class="num">4</td></tr>
+<tr><td>Task/Promise</td><td class="num">0</td><td class="num">18</td><td class="num">0</td><td class="num">18</td></tr>
+<tr><td>IO files and handles</td><td class="num">22</td><td class="num">2</td><td class="num">0</td><td class="num">24</td></tr>
+<tr><td>streams</td><td class="num">0</td><td class="num">6</td><td class="num">0</td><td class="num">6</td></tr>
+<tr><td>env/clock/random</td><td class="num">9</td><td class="num">1</td><td class="num">1</td><td class="num">11</td></tr>
+<tr><td>processes</td><td class="num">2</td><td class="num">6</td><td class="num">0</td><td class="num">8</td></tr>
+<tr><td>Std.Sync</td><td class="num">0</td><td class="num">19</td><td class="num">0</td><td class="num">19</td></tr>
+<tr><td>event loop/UV</td><td class="num">0</td><td class="num">28</td><td class="num">49</td><td class="num">77</td></tr>
+<tr><td>time</td><td class="num">0</td><td class="num">3</td><td class="num">0</td><td class="num">3</td></tr>
+<tr><td>panics/misc</td><td class="num">4</td><td class="num">1</td><td class="num">4</td><td class="num">9</td></tr>
+<tr><th>all</th><th class="num">313</th><th class="num">84</th><th class="num">56</th><th class="num">453</th></tr>
+</tbody></table>
+</div>
+</details>
+<p>The coverage script lives in the projects' coordination notes, outside this repository.
+Run it again after each merge.</p>
+
+<p class="more">Detail: <a href="repo:README.md">README.md</a> ("Status"), <a href="repo:src/io/mod.rs">src/io/mod.rs</a>, and the branches <code>io-2</code> and <code>sched-1</code>.</p>

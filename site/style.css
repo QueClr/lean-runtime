@@ -1,0 +1,181 @@
+/* lean-runtime architecture site. Plain CSS, light mode, no external fonts,
+   images or scripts: the pages open from disk (file://). */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #1d1f21;
+  --muted: #55595e;
+  --line: #d6d8da;
+  --panel: #f3f4f5;
+  --link: #1a5fb4;
+  --code-bg: #eef0f2;
+
+  /* Diagram colours: one fill and one stroke per kind of thing.
+     The same kind has the same colour on every page (see the overview's key). */
+  --f-lean: #dbe8f8;  --s-lean: #4f7fb8;   /* Lean, native Lean */
+  --f-tr: #dcefdc;    --s-tr: #4f9150;     /* translators and their code */
+  --f-glue: #fbe3cf;  --s-glue: #c27434;   /* each translator's glue */
+  --f-rt: #e9e1f5;    --s-rt: #7a5cad;     /* lean-runtime */
+  --f-os: #ececec;    --s-os: #7b7f84;     /* OS, libraries, crates */
+  --f-test: #dff0f2;  --s-test: #3f8792;   /* tests */
+  --f-bad: #f8dcdc;   --s-bad: #b54848;    /* a Lean bug, lost data */
+  --arrow: #50555b;
+
+  /* Coverage chart: one hue, light to dark (ordinal). */
+  --cov-done: #1c5cab;
+  --cov-prog: #3987e5;
+  --cov-plan: #86b6ef;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans", "DejaVu Sans", sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+a { color: var(--link); }
+a:hover { text-decoration: none; }
+
+code, pre {
+  font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+code { background: var(--code-bg); padding: 0.05em 0.3em; border-radius: 3px; }
+pre {
+  background: var(--code-bg);
+  padding: 0.7em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.4;
+}
+pre code { background: none; padding: 0; }
+
+/* Top bar */
+header.top {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.6em 1.2em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3em 1.6em;
+}
+.brand a { font-weight: 700; font-size: 1.15em; color: var(--fg); text-decoration: none; }
+.brand span { color: var(--muted); margin-left: 0.5em; font-size: 0.92em; }
+nav.main { display: flex; flex-wrap: wrap; gap: 0.2em 1.1em; font-size: 0.95em; }
+nav.main a { text-decoration: none; }
+nav.main a:hover { text-decoration: underline; }
+nav.main a[aria-current="page"] { font-weight: 700; color: var(--fg); border-bottom: 2px solid var(--link); }
+
+/* Page body */
+main {
+  max-width: 58em;
+  margin: 0 auto;
+  padding: 1.2em 1.4em 3em;
+}
+main h1 { font-size: 1.9em; margin: 0.3em 0 0.4em; line-height: 1.2; }
+main h2 { font-size: 1.4em; margin-top: 1.9em; padding-bottom: 0.2em; border-bottom: 1px solid var(--line); }
+main h3 { font-size: 1.12em; margin-top: 1.5em; }
+main p, main li, main dd { max-width: 46em; }
+.lead { font-size: 1.08em; color: var(--muted); }
+
+.toc {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5em 1em;
+  font-size: 0.93em;
+  margin: 1em 0;
+}
+.toc ul { margin: 0.2em 0; padding-left: 1.2em; columns: 2; column-gap: 2em; }
+
+.note, .rule {
+  border-left: 4px solid var(--link);
+  background: var(--panel);
+  padding: 0.5em 1em;
+  margin: 1em 0;
+  border-radius: 0 6px 6px 0;
+}
+.rule { border-left-color: var(--s-tr); }
+.note > :first-child, .rule > :first-child { margin-top: 0.2em; }
+.note > :last-child, .rule > :last-child { margin-bottom: 0.2em; }
+
+.more { font-size: 0.93em; color: var(--muted); }
+
+/* Tables */
+.tblwrap { overflow-x: auto; margin: 1em 0; }
+table { border-collapse: collapse; font-size: 0.92em; width: 100%; }
+th, td { border: 1px solid var(--line); padding: 0.35em 0.6em; vertical-align: top; text-align: left; }
+th { background: var(--panel); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td:first-child code { white-space: nowrap; }
+
+/* Glossary */
+dl.gloss dt { font-weight: 700; margin-top: 1em; }
+dl.gloss dd { margin-left: 1.4em; }
+dl.gloss dt:target { background: #fff6cc; }
+
+/* Cards on the overview */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(12em, 1fr)); gap: 0.8em; margin: 1em 0; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 0.6em 0.9em; background: var(--panel); }
+.card h3 { margin: 0.1em 0 0.3em; font-size: 1.02em; }
+.card p { margin: 0.2em 0; font-size: 0.93em; }
+
+/* Diagrams (inline SVG) */
+figure.fig { margin: 1.5em 0; }
+figure.fig svg { max-width: 100%; height: auto; display: block; }
+figure.fig figcaption { font-size: 0.9em; color: var(--muted); margin-top: 0.4em; max-width: 50em; }
+
+svg text {
+  fill: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans", "DejaVu Sans", sans-serif;
+  font-size: 13px;
+}
+svg .tb { font-size: 14px; font-weight: 700; }
+svg .ts { font-size: 11.5px; fill: var(--muted); }
+svg .tc { font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 12px; }
+svg .tw { fill: #ffffff; font-weight: 700; }
+svg rect, svg circle, svg ellipse { stroke-width: 1.3; }
+svg .k-lean { fill: var(--f-lean); stroke: var(--s-lean); }
+svg .k-tr   { fill: var(--f-tr);   stroke: var(--s-tr); }
+svg .k-glue { fill: var(--f-glue); stroke: var(--s-glue); }
+svg .k-rt   { fill: var(--f-rt);   stroke: var(--s-rt); }
+svg .k-os   { fill: var(--f-os);   stroke: var(--s-os); }
+svg .k-test { fill: var(--f-test); stroke: var(--s-test); }
+svg .k-bad  { fill: var(--f-bad);  stroke: var(--s-bad); }
+svg .k-none { fill: #ffffff; stroke: var(--s-os); }
+svg .plan { stroke-dasharray: 6 4; }
+svg .ar  { stroke: var(--arrow); stroke-width: 1.4; fill: none; }
+svg .ard { stroke: var(--arrow); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+svg .ln  { stroke: var(--line); stroke-width: 1; fill: none; }
+svg .life { stroke: var(--s-os); stroke-width: 1; stroke-dasharray: 4 4; fill: none; }
+svg .grp { fill: none; stroke: var(--s-rt); stroke-width: 1.3; stroke-dasharray: 6 4; }
+svg .cov-done { fill: var(--cov-done); }
+svg .cov-prog { fill: var(--cov-prog); }
+svg .cov-plan { fill: var(--cov-plan); }
+svg .grid { stroke: #e1e0d9; stroke-width: 1; }
+
+footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85em;
+  padding: 1em 1.4em 2em;
+  max-width: 58em;
+  margin: 0 auto;
+}
+
+@media (max-width: 700px) {
+  .toc ul { columns: 1; }
+  main { padding: 1em 0.9em 2em; }
+}
+
+@media print {
+  header.top nav { display: none; }
+  a { color: inherit; }
+}

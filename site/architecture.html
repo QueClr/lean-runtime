@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture · lean-runtime</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><a href="index.html">lean-runtime</a><span>Lean 4.34.0's runtime in safe Rust</span></div>
+  <nav class="main" aria-label="Pages">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html" aria-current="page">Architecture</a>
+    <a href="semantics.html">semantics</a>
+    <a href="io.html">io</a>
+    <a href="sched.html">sched</a>
+    <a href="testing.html">Testing</a>
+    <a href="lean-bugs.html">Lean bugs</a>
+    <a href="status.html">Status</a>
+    <a href="glossary.html">Glossary</a>
+  </nav>
+</header>
+<main>
+<h1>Architecture</h1>
+<p class="lead">lean-runtime has three modules.
+Cargo features select them.
+Each translator's glue connects its own values to the crate.</p>
+
+<div class="toc"><ul>
+  <li><a href="#modules">The three modules</a></li>
+  <li><a href="#features">Features and dependencies</a></li>
+  <li><a href="#split">Shared code and glue</a></li>
+  <li><a href="#views">Views in, data out</a></li>
+  <li><a href="#scope">Scope: Lean's own library</a></li>
+  <li><a href="#builds">Builds and platform</a></li>
+</ul></div>
+
+<h2 id="modules">The three modules</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Module</th><th>What it holds</th><th>Feature</th><th>Page</th></tr></thead>
+<tbody>
+<tr><td><code>semantics</code></td><td>Pure rules: numbers, floats, strings, hashing, arrays, panic texts, the text of leaf values.</td><td>always built</td><td><a href="semantics.html">semantics</a></td></tr>
+<tr><td><code>io</code></td><td>OS-level IO: glibc's <code>FILE</code> model, handles, <code>IO.Error</code>, files, environment, clock, startup descriptors, exit.</td><td><code>io</code></td><td><a href="io.html">io</a></td></tr>
+<tr><td><code>sched</code></td><td>The task scheduler: deferred tasks as coroutines, yield points, promises, <code>Std.Sync</code>, Lean's exit behaviour.</td><td><code>sched</code></td><td><a href="sched.html">sched</a></td></tr>
+</tbody></table></div>
+
+<h2 id="features">Features and dependencies</h2>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-labelledby="ar1-t ar1-d">
+  <title id="ar1-t">Modules, features and their dependencies</title>
+  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei on branch sched-1. Feature unsafe-fast is opt-in and has no entries yet.</desc>
+  <defs>
+    <marker id="ar1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-rt" x="20" y="20" width="820" height="170" rx="8"/>
+  <text class="tb" x="40" y="44">lean-runtime</text>
+  <text class="ts" x="160" y="44">#![forbid(unsafe_code)] unless unsafe-fast is on</text>
+
+  <rect class="k-none" x="40" y="60" width="230" height="110" rx="6"/>
+  <text class="tb" x="155" y="86" text-anchor="middle">semantics</text>
+  <text x="155" y="108" text-anchor="middle">default build</text>
+  <text class="ts" x="155" y="128" text-anchor="middle">no dependencies</text>
+  <text class="ts" x="155" y="146" text-anchor="middle">builds with plain rustc too</text>
+
+  <rect class="k-none" x="310" y="60" width="230" height="110" rx="6"/>
+  <text class="tb" x="425" y="86" text-anchor="middle">io</text>
+  <text x="425" y="108" text-anchor="middle">feature io</text>
+  <text class="ts" x="425" y="128" text-anchor="middle">built with cargo, offline,</text>
+  <text class="ts" x="425" y="146" text-anchor="middle">from the committed Cargo.lock</text>
+
+  <rect class="k-none" x="580" y="60" width="240" height="110" rx="6"/>
+  <text class="tb" x="700" y="86" text-anchor="middle">sched</text>
+  <text x="700" y="108" text-anchor="middle">feature sched</text>
+  <text class="ts" x="700" y="128" text-anchor="middle">empty on main;</text>
+  <text class="ts" x="700" y="146" text-anchor="middle">the scheduler is on branch sched-1</text>
+
+  <line class="ar" x1="425" y1="170" x2="340" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ar" x1="425" y1="170" x2="510" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ard" x1="700" y1="170" x2="700" y2="226" marker-end="url(#ar1-a)"/>
+
+  <rect class="k-os" x="250" y="228" width="170" height="44" rx="6"/>
+  <text x="335" y="248" text-anchor="middle">rustix 1.1</text>
+  <text class="ts" x="335" y="264" text-anchor="middle">descriptor calls, clock</text>
+  <rect class="k-os" x="430" y="228" width="170" height="44" rx="6"/>
+  <text x="515" y="248" text-anchor="middle">nix 0.31</text>
+  <text class="ts" x="515" y="264" text-anchor="middle">process-level calls</text>
+  <rect class="k-os plan" x="615" y="228" width="170" height="44" rx="6"/>
+  <text x="700" y="248" text-anchor="middle">corosensei 0.3.4</text>
+  <text class="ts" x="700" y="264" text-anchor="middle">stack switch (sched-1)</text>
+
+  <rect class="k-none plan" x="40" y="228" width="190" height="44" rx="6"/>
+  <text x="135" y="248" text-anchor="middle">unsafe-fast (opt-in)</text>
+  <text class="ts" x="135" y="264" text-anchor="middle">no entries yet</text>
+
+  <rect class="k-os" x="20" y="300" width="16" height="14" rx="2"/><text class="ts" x="42" y="312">vetted crate</text>
+  <rect class="k-none plan" x="140" y="300" width="16" height="14" rx="2"/><text class="ts" x="162" y="312">not on main yet, or empty</text>
+</svg>
+<figcaption>Figure 1. The default build has no dependencies.
+Each feature adds one module and the crates it needs.
+The owner approved nix, rustix and corosensei.</figcaption>
+</figure>
+<ul>
+  <li><strong>Default.</strong> <code>semantics</code> only.
+    No dependencies, so a plain <code>rustc --crate-type rlib</code> build works (one translator does not use cargo).</li>
+  <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix.
+    These crates hold the <code>unsafe</code> code, so lean-runtime itself stays free of it.</li>
+  <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
+    Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
+  <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
+    It may enable a faster <code>unsafe</code> version of a function.
+    That version must have the same behaviour as the safe one, a written proof in <a href="../UNSAFE.md">UNSAFE.md</a>, and Miri checks.
+    The safe version always stays.</li>
+</ul>
+
+<h2 id="split">Shared code and glue</h2>
+<p>The rule (decision 2026-10-03): lean-runtime holds every runtime function.
+A translator keeps only what its own value representation needs.</p>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 400" role="img" aria-labelledby="ar2-t ar2-d">
+  <title id="ar2-t">What stays in each translator's glue and what is shared</title>
+  <desc id="ar2-d">Left column, each translator's glue: value representation, memory protocol, hot paths on its own types, conversion to views, and the steps that safe Rust in the crate cannot do. Right column, lean-runtime: the semantics rules, the io model and the scheduler.</desc>
+  <rect class="k-glue" x="20" y="20" width="400" height="364" rx="8"/>
+  <text class="tb" x="40" y="46">In each translator's glue</text>
+  <rect class="k-none" x="40" y="60" width="360" height="46" rx="5"/>
+  <text x="56" y="80">Value representation</text>
+  <text class="ts" x="56" y="97">Nat words, strings, arrays, user types</text>
+  <rect class="k-none" x="40" y="114" width="360" height="46" rx="5"/>
+  <text x="56" y="134">Memory protocol</text>
+  <text class="ts" x="56" y="151">reference counts, ownership, freeing</text>
+  <rect class="k-none" x="40" y="168" width="360" height="46" rx="5"/>
+  <text x="56" y="188">Hot paths on its own types</text>
+  <text class="ts" x="56" y="205">the Nat fast path, in-place string and array updates</text>
+  <rect class="k-none" x="40" y="222" width="360" height="46" rx="5"/>
+  <text x="56" y="242">Thin wrappers</text>
+  <text class="ts" x="56" y="259">its objects to views, plain data back to its objects</text>
+  <rect class="k-none" x="40" y="276" width="360" height="94" rx="5"/>
+  <text x="56" y="296">Steps the crate's safe code cannot do</text>
+  <text class="ts" x="56" y="314">the one dereference in Glue::suspend (sched)</text>
+  <text class="ts" x="56" y="330">an ELF constructor that opens the startup descriptors</text>
+  <text class="ts" x="56" y="346">a SIGSEGV handler for stack overflow (sched)</text>
+  <text class="ts" x="56" y="362">call exit_flush at exit (no atexit without unsafe)</text>
+
+  <rect class="k-rt" x="440" y="20" width="400" height="364" rx="8"/>
+  <text class="tb" x="460" y="46">In lean-runtime (shared)</text>
+  <rect class="k-none" x="460" y="60" width="360" height="94" rx="5"/>
+  <text x="476" y="80">semantics</text>
+  <text class="ts" x="476" y="98">Nat and Int rules over a big-number trait</text>
+  <text class="ts" x="476" y="114">integer, float and libm rows; string positions</text>
+  <text class="ts" x="476" y="130">hashes, array edge rules, panic texts, leaf text</text>
+  <rect class="k-none" x="460" y="162" width="360" height="94" rx="5"/>
+  <text x="476" y="182">io</text>
+  <text class="ts" x="476" y="200">glibc's FILE model, handles, IO.Error</text>
+  <text class="ts" x="476" y="216">file system, environment, clock</text>
+  <text class="ts" x="476" y="232">startup descriptors, the exit sequence</text>
+  <text class="ts" x="476" y="248">processes and streams (io-2)</text>
+  <rect class="k-none" x="460" y="264" width="360" height="106" rx="5"/>
+  <text x="476" y="284">sched (sched-1)</text>
+  <text class="ts" x="476" y="302">task queues, contexts, the hub</text>
+  <text class="ts" x="476" y="318">yield points, promises, cancellation</text>
+  <text class="ts" x="476" y="334">Std.Sync mutexes and condition variable</text>
+  <text class="ts" x="476" y="350">the exit order: tasks first, then flush</text>
+</svg>
+<figcaption>Figure 2. The split between glue and crate.
+The glue is thin: it converts and calls.
+The crate holds the behaviour.</figcaption>
+</figure>
+<p>Some <code>extern</code> functions need no shared code.
+The coverage count of 2026-10-04 sorts Lean's 717 <code>Init</code> and <code>Std</code> extern symbols this way:</p>
+<ul>
+  <li>171 are one machine operation that each translator emits inline (wrapping <code>+</code>, bitwise operations, casts).</li>
+  <li>66 belong to the glue, because they depend on the translator's own objects or memory protocol.
+    Examples: append, push, size, thunk and ref cells, sharing tests, heartbeats.</li>
+  <li>27 are Lean code already (<code>@[export]</code> definitions).</li>
+  <li>The other 453 need shared code. The <a href="status.html#coverage">status page</a> shows how many are done.</li>
+</ul>
+
+<h2 id="views">Views in, data out</h2>
+<p>No function in lean-runtime owns, allocates or frees a Lean value of either translator.
+So neither glue converts or copies bulk data.</p>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 270" role="img" aria-labelledby="ar3-t ar3-d">
+  <title id="ar3-t">Views in, data out</title>
+  <desc id="ar3-d">The glue passes views of its objects to a lean-runtime function: byte slices, string slices, u64 and f64. The function returns plain data, or writes into storage the glue owns: a fmt::Write, a ByteSink, or a byte slice.</desc>
+  <defs>
+    <marker id="ar3-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-glue" x="20" y="20" width="250" height="230" rx="8"/>
+  <text class="tb" x="145" y="44" text-anchor="middle">translator's glue</text>
+  <rect class="k-none" x="40" y="62" width="210" height="60" rx="5"/>
+  <text x="145" y="86" text-anchor="middle">its own objects</text>
+  <text class="ts" x="145" y="104" text-anchor="middle">String, ByteArray, Nat, Float</text>
+  <rect class="k-none" x="40" y="170" width="210" height="60" rx="5"/>
+  <text x="145" y="194" text-anchor="middle">its own storage</text>
+  <text class="ts" x="145" y="212" text-anchor="middle">a text buffer, a byte array</text>
+
+  <rect class="k-rt" x="590" y="20" width="250" height="230" rx="8"/>
+  <text class="tb" x="715" y="44" text-anchor="middle">lean-runtime function</text>
+  <text class="ts" x="715" y="120" text-anchor="middle">owns no Lean value,</text>
+  <text class="ts" x="715" y="136" text-anchor="middle">allocates none, frees none</text>
+
+  <line class="ar" x1="250" y1="80" x2="588" y2="80" marker-end="url(#ar3-a)"/>
+  <text x="420" y="70" text-anchor="middle">views in</text>
+  <text class="tc" x="420" y="98" text-anchor="middle">&amp;[u8]  &amp;str  u64  f64</text>
+
+  <line class="ar" x1="588" y1="140" x2="272" y2="140" marker-end="url(#ar3-a)"/>
+  <text x="430" y="130" text-anchor="middle">plain data out</text>
+  <text class="tc" x="430" y="158" text-anchor="middle">u32  u64  bool  Range  Result</text>
+
+  <line class="ar" x1="588" y1="200" x2="252" y2="200" marker-end="url(#ar3-a)"/>
+  <text x="420" y="190" text-anchor="middle">writes into caller storage</text>
+  <text class="tc" x="420" y="218" text-anchor="middle">fmt::Write  ByteSink  &amp;mut [u8]</text>
+</svg>
+<figcaption>Figure 3. The glue lends views and receives plain data.
+Text and unbounded bytes go straight into the glue's own storage.</figcaption>
+</figure>
+<ul>
+  <li><strong>Views in.</strong> Functions take <code>&amp;[u8]</code>, <code>&amp;str</code>, <code>u64</code> and <code>f64</code>.
+    A path is the bytes of a Lean string.</li>
+  <li><strong>Plain data out.</strong> A character is a <code>u32</code>, a position a <code>u64</code>, a substring a byte <code>Range</code>.</li>
+  <li><strong>Text</strong> goes into a <code>fmt::Write</code> that the caller supplies (for example <code>Float.toString</code>).</li>
+  <li><strong>Reads</strong> go into the caller's storage.
+    <code>read_uninit</code> fills the bytes the caller allocated, with no zero pass.
+    An unbounded result (a line, a path) is appended to a <a href="glossary.html#g-bytesink">ByteSink</a> that the caller implements on its own object.</li>
+  <li><strong>Only the cold error path owns data:</strong> an <code>IoError</code> holds its file name and details as <code>String</code>s.</li>
+</ul>
+
+<h2 id="scope">Scope: Lean's own library</h2>
+<p>Decision (2026-10-03): the translators target Lean code only, with the runtime library as the one exception.</p>
+<ul>
+  <li>Only the externs of Lean's own library (<code>Init</code>, <code>Std</code>) are native code.
+    lean-runtime supplies them.</li>
+  <li>Any other <code>@[extern]</code> runs its Lean definition by default.
+    Its C code is never built or linked.</li>
+  <li>An extern without a Lean definition is refused when the program is translated.</li>
+  <li>A program extern that names a runtime-library symbol, with a matching signature, gets that runtime function, as native linking gives it.</li>
+  <li>So lean-runtime needs no boundary for user C code.</li>
+</ul>
+
+<h2 id="builds">Builds and platform</h2>
+<ul>
+  <li>Builds are offline and use no nightly features.
+    The crate builds on the Rust toolchains of both translators.</li>
+  <li>Cargo.lock is committed.
+    <code>io</code> builds with <code>cargo build --offline --locked --features io</code>, from cargo's local registry cache.
+    Nothing is vendored.</li>
+  <li>A new dependency needs a check against leanrs's offline registry.
+    A new crate that wraps <code>unsafe</code> needs the owner's decision.</li>
+  <li>Each translator pins lean-runtime by commit.
+    It moves the pin only after its own test suite passes.</li>
+  <li>The crate assumes a 64-bit platform.
+    The expected values come from aarch64 Linux with glibc 2.39.</li>
+  <li><code>io</code> compiles only on Linux, aarch64 and x86-64, because it models glibc.</li>
+  <li>The libm ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> exist only on aarch64 Linux with glibc.
+    Elsewhere, code that calls them does not compile until a port for that platform exists.</li>
+</ul>
+
+<p class="more">Detail: <a href="../README.md">README.md</a>, <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a> ("Code", "Builds", "Dependencies"), <a href="../Cargo.toml">Cargo.toml</a>, <a href="../src/lib.rs">src/lib.rs</a>, <a href="../src/io/mod.rs">src/io/mod.rs</a> ("no bulk copies").</p>
+</main>
+<footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
+Written about 80% to ASD-STE100 (Simplified Technical English).
+The markdown docs and the module docs are the authority; this site summarizes them.</footer>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 352" role="img" aria-labelledby="io4-t io4-d">
+  <title id="io4-t">The exit order</title>
+  <desc id="io4-d">Step 1, main returns. Step 2, the pending tasks run and join. Step 3, stdout is flushed, as libc++'s ios_base::Init does. Step 4, every FILE's pending output is written, newest first: the open handles, then stderr, stdout and stdin. Step 5, read-ahead is given back. Step 6, the process exits. IO.Process.exit runs steps 3 to 6. forceExit runs only step 6.</desc>
+  <defs>
+    <marker id="io4-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-tr" x="20" y="14" width="420" height="38" rx="6"/>
+  <text x="36" y="38"><tspan class="tb">1</tspan>  main returns</text>
+  <line class="ar" x1="230" y1="52" x2="230" y2="62" marker-end="url(#io4-a)"/>
+  <rect class="k-rt" x="20" y="64" width="420" height="38" rx="6"/>
+  <text x="36" y="88"><tspan class="tb">2</tspan>  pending tasks run and join (sched)</text>
+  <line class="ar" x1="230" y1="102" x2="230" y2="112" marker-end="url(#io4-a)"/>
+  <rect class="k-rt" x="20" y="114" width="420" height="38" rx="6"/>
+  <text x="36" y="138"><tspan class="tb">3</tspan>  flush stdout (libc++'s ios_base::Init)</text>
+  <line class="ar" x1="230" y1="152" x2="230" y2="162" marker-end="url(#io4-a)"/>
+  <rect class="k-rt" x="20" y="164" width="420" height="52" rx="6"/>
+  <text x="36" y="186"><tspan class="tb">4</tspan>  write all pending output, newest first:</text>
+  <text class="ts" x="52" y="205">open handles, then stderr, stdout, stdin (_IO_flush_all)</text>
+  <line class="ar" x1="230" y1="216" x2="230" y2="226" marker-end="url(#io4-a)"/>
+  <rect class="k-rt" x="20" y="228" width="420" height="52" rx="6"/>
+  <text x="36" y="250"><tspan class="tb">5</tspan>  give read-ahead back (_IO_unbuffer_all)</text>
+  <text class="ts" x="52" y="269">stdin stays where the program stopped reading</text>
+  <line class="ar" x1="230" y1="280" x2="230" y2="290" marker-end="url(#io4-a)"/>
+  <rect class="k-os" x="20" y="292" width="420" height="34" rx="6"/>
+  <text x="36" y="314"><tspan class="tb">6</tspan>  the process exits</text>
+
+  <path class="ar" d="M452,116 H462 V278 H452"/>
+  <text class="tb" x="476" y="190">exit_flush: steps 3 to 5</text>
+  <text class="ts" x="476" y="210">The glue calls it after sched's finish.</text>
+  <text class="tb" x="476" y="304">IO.Process.exit: steps 3 to 6</text>
+  <text class="tb" x="476" y="326">IO.Process.forceExit: step 6 only</text>
+  <text class="ts" x="476" y="344">pending output is lost</text>
+  <text class="tb" x="476" y="40">Uncaught error</text>
+  <text class="ts" x="476" y="60">flush stdout, print "uncaught exception: msg"</text>
+  <text class="ts" x="476" y="78">to stderr, then exit with status 1</text>
+</svg>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 270" role="img" aria-labelledby="ar3-t ar3-d">
+  <title id="ar3-t">Views in, data out</title>
+  <desc id="ar3-d">The glue passes views of its objects to a lean-runtime function: byte slices, string slices, u64 and f64. The function returns plain data, or writes into storage the glue owns: a fmt::Write, a ByteSink, or a byte slice.</desc>
+  <defs>
+    <marker id="ar3-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-glue" x="20" y="20" width="250" height="230" rx="8"/>
+  <text class="tb" x="145" y="44" text-anchor="middle">translator's glue</text>
+  <rect class="k-none" x="40" y="62" width="210" height="60" rx="5"/>
+  <text x="145" y="86" text-anchor="middle">its own objects</text>
+  <text class="ts" x="145" y="104" text-anchor="middle">String, ByteArray, Nat, Float</text>
+  <rect class="k-none" x="40" y="170" width="210" height="60" rx="5"/>
+  <text x="145" y="194" text-anchor="middle">its own storage</text>
+  <text class="ts" x="145" y="212" text-anchor="middle">a text buffer, a byte array</text>
+
+  <rect class="k-rt" x="590" y="20" width="250" height="230" rx="8"/>
+  <text class="tb" x="715" y="44" text-anchor="middle">lean-runtime function</text>
+  <text class="ts" x="715" y="120" text-anchor="middle">owns no Lean value,</text>
+  <text class="ts" x="715" y="136" text-anchor="middle">allocates none, frees none</text>
+
+  <line class="ar" x1="250" y1="80" x2="588" y2="80" marker-end="url(#ar3-a)"/>
+  <text x="420" y="70" text-anchor="middle">views in</text>
+  <text class="tc" x="420" y="98" text-anchor="middle">&amp;[u8]  &amp;str  u64  f64</text>
+
+  <line class="ar" x1="588" y1="140" x2="272" y2="140" marker-end="url(#ar3-a)"/>
+  <text x="430" y="130" text-anchor="middle">plain data out</text>
+  <text class="tc" x="430" y="158" text-anchor="middle">u32  u64  bool  Range  Result</text>
+
+  <line class="ar" x1="588" y1="200" x2="252" y2="200" marker-end="url(#ar3-a)"/>
+  <text x="420" y="190" text-anchor="middle">writes into caller storage</text>
+  <text class="tc" x="420" y="218" text-anchor="middle">fmt::Write  ByteSink  &amp;mut [u8]</text>
+</svg>

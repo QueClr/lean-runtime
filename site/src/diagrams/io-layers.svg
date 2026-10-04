@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 140" role="img" aria-labelledby="io1-t io1-d">
+  <title id="io1-t">The layers of a handle call</title>
+  <desc id="io1-d">Generated code calls the glue for Handle.putStr. The glue passes a byte view to Handle, which locks a mutex around a CFile. CFile copies glibc's buffering and calls sys, which makes rustix system calls and sets the modelled errno. rustix calls the Linux kernel.</desc>
+  <defs>
+    <marker id="io1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-tr" x="10" y="30" width="140" height="64" rx="6"/>
+  <text class="tb" x="80" y="56" text-anchor="middle">generated code</text>
+  <text class="tc" x="80" y="78" text-anchor="middle">h.putStr s</text>
+  <line class="ar" x1="150" y1="62" x2="173" y2="62" marker-end="url(#io1-a)"/>
+  <rect class="k-glue" x="175" y="30" width="130" height="64" rx="6"/>
+  <text class="tb" x="240" y="56" text-anchor="middle">glue</text>
+  <text class="ts" x="240" y="78" text-anchor="middle">string to &amp;[u8]</text>
+  <line class="ar" x1="305" y1="62" x2="328" y2="62" marker-end="url(#io1-a)"/>
+  <rect class="k-rt" x="330" y="30" width="150" height="64" rx="6"/>
+  <text class="tb" x="405" y="56" text-anchor="middle">Handle</text>
+  <text class="ts" x="405" y="78" text-anchor="middle">a Mutex around a CFile</text>
+  <line class="ar" x1="480" y1="62" x2="503" y2="62" marker-end="url(#io1-a)"/>
+  <rect class="k-rt" x="505" y="30" width="150" height="64" rx="6"/>
+  <text class="tb" x="580" y="56" text-anchor="middle">CFile</text>
+  <text class="ts" x="580" y="78" text-anchor="middle">glibc's buffering</text>
+  <line class="ar" x1="655" y1="62" x2="678" y2="62" marker-end="url(#io1-a)"/>
+  <rect class="k-rt" x="680" y="30" width="80" height="64" rx="6"/>
+  <text class="tb" x="720" y="56" text-anchor="middle">sys</text>
+  <text class="ts" x="720" y="78" text-anchor="middle">errno</text>
+  <line class="ar" x1="760" y1="62" x2="773" y2="62" marker-end="url(#io1-a)"/>
+  <rect class="k-os" x="775" y="30" width="75" height="64" rx="6"/>
+  <text class="tb" x="812" y="56" text-anchor="middle">rustix</text>
+  <text class="ts" x="812" y="78" text-anchor="middle">kernel</text>
+  <text class="ts" x="330" y="124">Handle, CFile and sys are in lean-runtime; sys is internal to the crate.</text>
+</svg>

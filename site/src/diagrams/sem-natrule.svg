@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 290" role="img" aria-labelledby="se2-t se2-d">
+  <title id="se2-t">How a Nat rule runs: Nat.add</title>
+  <desc id="se2-d">nat::add checks whether both operands are words. If yes, add_small computes inline. If no, the cold add_slow checks the result size against MAX_BITS. Above MAX_BITS the rule returns the error OutOfMemory, and the glue ends the process with INTERNAL PANIC: out of memory. Otherwise the translator's BigNat backend computes. The glue normalizes the result.</desc>
+  <defs>
+    <marker id="se2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-rt" x="20" y="30" width="170" height="52" rx="6"/>
+  <text class="tc" x="105" y="54" text-anchor="middle">nat::add(a, b)</text>
+  <text class="ts" x="105" y="72" text-anchor="middle">a rule on Nat&lt;B&gt;</text>
+  <line class="ar" x1="190" y1="56" x2="228" y2="56" marker-end="url(#se2-a)"/>
+  <rect class="k-rt" x="230" y="30" width="170" height="52" rx="6"/>
+  <text x="315" y="61" text-anchor="middle">both words?</text>
+  <line class="ar" x1="400" y1="56" x2="438" y2="56" marker-end="url(#se2-a)"/>
+  <text class="ts" x="419" y="48" text-anchor="middle">yes</text>
+  <rect class="k-rt" x="440" y="30" width="200" height="52" rx="6"/>
+  <text class="tc" x="540" y="52" text-anchor="middle">add_small</text>
+  <text class="ts" x="540" y="71" text-anchor="middle">inline, exact on two u64</text>
+  <line class="ar" x1="640" y1="56" x2="678" y2="56" marker-end="url(#se2-a)"/>
+  <rect class="k-glue" x="680" y="30" width="160" height="52" rx="6"/>
+  <text x="760" y="52" text-anchor="middle">result</text>
+  <text class="ts" x="760" y="71" text-anchor="middle">glue normalizes it</text>
+
+  <line class="ar" x1="315" y1="82" x2="315" y2="122" marker-end="url(#se2-a)"/>
+  <text class="ts" x="325" y="106">no</text>
+  <rect class="k-rt" x="230" y="124" width="170" height="56" rx="6"/>
+  <text class="tc" x="315" y="146" text-anchor="middle">add_slow</text>
+  <text class="ts" x="315" y="166" text-anchor="middle">#[cold], #[inline(never)]</text>
+  <line class="ar" x1="400" y1="152" x2="438" y2="152" marker-end="url(#se2-a)"/>
+  <rect class="k-rt" x="440" y="124" width="200" height="56" rx="6"/>
+  <text class="tc" x="540" y="146" text-anchor="middle">check_result_bits</text>
+  <text class="ts" x="540" y="166" text-anchor="middle">size bound at most MAX_BITS?</text>
+  <line class="ar" x1="640" y1="152" x2="678" y2="152" marker-end="url(#se2-a)"/>
+  <text class="ts" x="659" y="144" text-anchor="middle">yes</text>
+  <rect class="k-glue" x="680" y="124" width="160" height="56" rx="6"/>
+  <text x="760" y="146" text-anchor="middle">BigNat backend</text>
+  <text class="ts" x="760" y="166" text-anchor="middle">GMP or malachite</text>
+  <line class="ar" x1="760" y1="124" x2="760" y2="84" marker-end="url(#se2-a)"/>
+
+  <line class="ar" x1="540" y1="180" x2="540" y2="218" marker-end="url(#se2-a)"/>
+  <text class="ts" x="550" y="203">no</text>
+  <rect class="k-bad" x="440" y="220" width="200" height="52" rx="6"/>
+  <text class="tc" x="540" y="242" text-anchor="middle">Err(OutOfMemory)</text>
+  <text class="ts" x="540" y="261" text-anchor="middle">glue: INTERNAL PANIC, exit 1</text>
+</svg>

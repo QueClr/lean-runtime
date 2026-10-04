@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary · lean-runtime</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><a href="index.html">lean-runtime</a><span>Lean 4.34.0's runtime in safe Rust</span></div>
+  <nav class="main" aria-label="Pages">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="semantics.html">semantics</a>
+    <a href="io.html">io</a>
+    <a href="sched.html">sched</a>
+    <a href="testing.html">Testing</a>
+    <a href="lean-bugs.html">Lean bugs</a>
+    <a href="status.html">Status</a>
+    <a href="glossary.html" aria-current="page">Glossary</a>
+  </nav>
+</header>
+<main>
+<h1>Glossary</h1>
+<p class="lead">Each term has one meaning on every page of this site.</p>
+
+<dl class="gloss">
+<dt id="g-a821">A821</dt>
+<dd>The id of the finding about the descriptors that native Lean opens before <code>main</code>.
+Option C is the chosen design: the same descriptors through rustix, with epoll descriptors in place of the io_uring rings.
+See <a href="io.html#startup">io</a>.</dd>
+
+<dt id="g-batch">Batch</dt>
+<dd>One unit of work on lean-runtime, on its own branch, that merges as a whole.
+Examples: <code>semantics-1</code>, <code>io-2</code>, <code>sched-1</code>.</dd>
+
+<dt id="g-bignat">BigNat, BigInt</dt>
+<dd>The big-number traits of <code>semantics</code>.
+Each translator implements them with its own library: lean2rr with GMP, leanrs with malachite.
+The <code>Nat</code> and <code>Int</code> rules are generic over them.</dd>
+
+<dt id="g-bytesink">ByteSink</dt>
+<dd>A trait that a translator implements on its own object.
+lean-runtime appends a result of unbounded size (a line, a path, an environment value) to it.
+So the glue copies nothing.</dd>
+
+<dt id="g-caf">CAF (constant applicative form)</dt>
+<dd>A top-level constant with no parameters.
+Native Lean computes it once, at start or at first use.
+A translator can compute such a closed term when it translates.
+So a test whose values are all CAFs or literals never reaches the runtime; tests read their inputs from argv or stdin.</dd>
+
+<dt id="g-case">Case (program case)</dt>
+<dd>A whole Lean program in <code>tests/cases/</code>, with its stdout, stderr and exit code from a native build.
+See <a href="testing.html#cases">Testing</a>.</dd>
+
+<dt id="g-context">Context</dt>
+<dd>A stack on which code runs, in <code>sched</code>.
+<code>main</code>'s context is the thread's own stack.
+Every other context is a corosensei coroutine with a stack of its own.</dd>
+
+<dt id="g-corosensei">corosensei</dt>
+<dd>The vetted Rust crate that switches stacks for <code>sched</code> (version 0.3.4).</dd>
+
+<dt id="g-coroutine">Coroutine</dt>
+<dd>A function with a stack of its own that can stop in the middle (suspend) and go on later (resume).
+<code>sched</code> runs every task context except <code>main</code>'s as a corosensei coroutine.</dd>
+
+<dt id="g-coverage">Coverage</dt>
+<dd>The count of the extern symbols of Lean 4.34.0's <code>Init</code> and <code>Std</code> that lean-runtime implements.
+See <a href="status.html#coverage">Status</a>.</dd>
+
+<dt id="g-decision">Decision (O1 to O12, Q1 to Q10)</dt>
+<dd>A decided design point, recorded with its date in the projects' coordination notes.
+O-numbers are the owner's decisions.
+Q-numbers are the agreed answers to the open questions of the shared-runtime proposal.</dd>
+
+<dt id="g-deferred">Deferred task</dt>
+<dd>A task that does not run when it is made.
+It runs later, at the first of a few fixed points, for example when its value is needed.
+See <a href="sched.html#model">sched</a>.</dd>
+
+<dt id="g-deviation">Deviation</dt>
+<dd>A documented, intended difference from native Lean.
+A case lists it in its <code>deviations</code> field.
+Usually the expected output stays native's, and the deviation's outcome is also allowed.
+When native's outcome is a Lean bug and is nondeterministic, the case expects the correct outcome instead.
+A row for a lifted limit expects the definition's result and keeps native's outcome beside it.
+leanrs names its deviations DV<i>n</i>; lean2rr lists them in section 10 of its translation plan.</dd>
+
+<dt id="g-dv">DV<i>n</i></dt>
+<dd>leanrs's id for a deviation.
+Some ids also name the decision on that deviation, for example DV5 (debug primitives) and DV10 (the clock's origin).</dd>
+
+<dt id="g-effect-point">Effect point</dt>
+<dd>A <a href="#g-yield-point">yield point</a> before an output, a flush, a process spawn or an exit.
+There, a task that was queued 5 ms ago or more runs first.</dd>
+
+<dt id="g-elf-constructor">ELF constructor</dt>
+<dd>A function that the program loader runs before <code>main</code> and before Rust's runtime starts.
+The glue registers one to open the <a href="#g-startup">startup descriptors</a> early enough.</dd>
+
+<dt id="g-errno">errno model</dt>
+<dd>lean-runtime's own copy of C's <code>errno</code>, one per thread.
+rustix does not set libc's <code>errno</code>, so the crate sets its copy as the C call would.</dd>
+
+<dt id="g-extern">Extern</dt>
+<dd>A Lean declaration marked <code>@[extern]</code>.
+Native Lean implements it with a C function.</dd>
+
+<dt id="g-file">FILE</dt>
+<dd>glibc's buffered stream.
+Native Lean uses it for every handle.
+<code>io::cfile</code> is a model of it in safe Rust.</dd>
+
+<dt id="g-get-put">Get area, put area, read-ahead</dt>
+<dd>Parts of a <code>FILE</code> buffer.
+The get area holds bytes read from the descriptor; the bytes that Lean has not read yet are the read-ahead.
+The put area holds pending output that has not reached the descriptor yet.</dd>
+
+<dt id="g-glibc">glibc</dt>
+<dd>The GNU C library.
+The reference host has glibc 2.39.</dd>
+
+<dt id="g-glue">Glue</dt>
+<dd>The thin code in each translator between its own values and lean-runtime.
+It converts its objects to views, calls the crate, and turns plain data back into its objects.
+It also does the few steps that the crate's safe code cannot do.
+See <a href="architecture.html#split">Architecture</a>.</dd>
+
+<dt id="g-gmp">GMP, malachite</dt>
+<dd>Big-number libraries.
+Native Lean and lean2rr use GMP (C); leanrs uses malachite (Rust).</dd>
+
+<dt id="g-hub">Hub</dt>
+<dd>The scheduler's loop on <code>main</code>'s stack.
+It resumes the contexts one at a time.
+Every switch between contexts goes through it.</dd>
+
+<dt id="g-internal-panic">INTERNAL PANIC</dt>
+<dd>Lean's message for a failure of the runtime itself, for example <code>INTERNAL PANIC: out of memory</code>.
+The process then ends, with status 1 (or an abort under <code>LEAN_ABORT_ON_PANIC</code>).
+A Lean <code>panic!</code> is different: it prints a message and the program goes on.</dd>
+
+<dt id="g-io-need">IO need</dt>
+<dd>The mark of a pure task that an IO task waits for, directly or through other pure tasks.
+A pure task with IO need starts as an IO task does.</dd>
+
+<dt id="g-io-task">IO task, pure task</dt>
+<dd>An IO task comes from <code>IO.asTask</code>, <code>IO.mapTask</code> or <code>IO.bindTask</code>, and always runs.
+A pure task comes from <code>Task.spawn</code>, <code>Task.map</code> or <code>Task.bind</code>.
+If the program drops a pure task before it starts, Lean deletes it.</dd>
+
+<dt id="g-judge">Judge</dt>
+<dd>A reviewer who decides whether a suspected Lean bug is real, by <a href="lean-bugs.html#rule">the rule</a>.</dd>
+
+<dt id="g-lb">LB-<i>nn</i></dt>
+<dd>The id of an entry in <code>docs/lean-bugs.md</code>: a confirmed Lean bug, a lifted limit, or a "not a bug".
+See <a href="lean-bugs.html">Lean bugs</a>.</dd>
+
+<dt id="g-lean2rr">lean2rr, leanrs</dt>
+<dd>The two translators for which lean-runtime is built.
+lean2rr translates compiled Lean code to Reussir; leanrs translates it to Rust.</dd>
+
+<dt id="g-libm">libm</dt>
+<dd>The C math library (<code>sin</code>, <code>pow</code>, <code>cbrtf</code> and the others).
+Native Lean calls glibc's libm for the <code>Float</code> and <code>Float32</code> functions.</dd>
+
+<dt id="g-libuv">libuv</dt>
+<dd>The event-loop library that Lean 4.34.0's runtime links (version 1.48.0).</dd>
+
+<dt id="g-line-buffered">Line-buffered</dt>
+<dd>A stream that writes its buffer out at each newline.
+glibc makes a stream line-buffered when its descriptor is a terminal.</dd>
+
+<dt id="g-max-bits">MAX_BITS</dt>
+<dd><code>BigNat::MAX_BITS</code>: the size, in bits, of the largest result a big-number backend accepts.
+A rule tests the result size against it before it calls the backend.
+leanrs's value is 2<sup>39</sup>.</dd>
+
+<dt id="g-miri">Miri</dt>
+<dd>Rust's interpreter that finds undefined behaviour.
+<code>scripts/check.sh</code> runs it on the <code>unsafe-fast</code> configurations.</dd>
+
+<dt id="g-native">Native Lean</dt>
+<dd>Lean's own build: the Lean compiler emits C, which links with Lean's C runtime.
+A native build with Lean 4.34.0 gives every expected value.</dd>
+
+<dt id="g-o12">O12 (speed floor)</dt>
+<dd>The decision of 2026-10-03: the default, safe build of every shared function must be at least as fast as Lean 4.34.0's native runtime.
+<code>unsafe-fast</code> is for going further, not for reaching the floor.</dd>
+
+<dt id="g-oracle">Oracle</dt>
+<dd>The source of expected values.
+For rows it is <code>scripts/oracle</code>, a Lean program built natively; for program cases, the native build of the case.
+In the glibc differential test, glibc itself is the oracle.</dd>
+
+<dt id="g-pin">Pin</dt>
+<dd>The lean-runtime commit that a translator uses.
+A translator moves its pin only after its own test suite passes.</dd>
+
+<dt id="g-polling">Polling point</dt>
+<dd>A yield point at a clock read, a task-state query, <code>IO.checkCanceled</code>, or (in a program with tasks) every 1000th <code>ST.Ref</code> read.</dd>
+
+<dt id="g-priority">Priority</dt>
+<dd>The order in which queued tasks start: Lean's priorities 0 to 8, and dedicated tasks, which natively get a thread of their own.</dd>
+
+<dt id="g-promise">Promise</dt>
+<dd>A task without a computation: <code>IO.Promise</code>.
+Its first resolution stores the value.</dd>
+
+<dt id="g-reussir">Reussir</dt>
+<dd>The language that lean2rr translates to.</dd>
+
+<dt id="g-row">Row</dt>
+<dd>One function call with its expected result, recorded from native Lean 4.34.0.
+Rows are in <code>tests/cases/&lt;area&gt;/&lt;area&gt;.rows.toml</code>.
+See <a href="testing.html#rows">Testing</a>.</dd>
+
+<dt id="g-rustix">rustix, nix</dt>
+<dd>Vetted Rust crates for system calls.
+They hold the <code>unsafe</code> code, so <code>io</code> stays free of it.</dd>
+
+<dt id="g-sched-io">sched-io</dt>
+<dd>The planned batch of cooperative blocking IO.
+When tasks exist, reads, writes and waits on pipes and child processes yield instead of blocking the one thread.
+See <a href="sched.html#sched-io">sched</a>.</dd>
+
+<dt id="g-schedule-dependent">Schedule-dependent</dt>
+<dd>A case whose native outcome depends on thread timing.
+The case records every outcome seen; each one is allowed.</dd>
+
+<dt id="g-started">Started (pure task)</dt>
+<dd>A pure task that a worker would have started, but that has not run yet.
+It cannot be deleted any more.
+See <a href="sched.html#pure">the pure-task rule</a>.</dd>
+
+<dt id="g-startup">Startup descriptors</dt>
+<dd>The descriptors that libuv opens before <code>main</code> in native Lean: epoll, two io_uring rings (when libuv uses io_uring), two pipes and an eventfd.</dd>
+
+<dt id="g-std-sync">Std.Sync</dt>
+<dd>Lean's synchronization library: mutexes, condition variables, channels, barriers, semaphores.
+<code>sched</code> implements its four base primitives; the rest is Lean code.</dd>
+
+<dt id="g-sticky">Sticky indicators</dt>
+<dd>The end-of-file and error flags of a <code>FILE</code>.
+Lean's <code>read</code> and <code>getLine</code> clear both flags when they reach the end of the file.
+An error flag otherwise stays set, so a later call still reports its <code>errno</code>.</dd>
+
+<dt id="g-sync-dependent">Sync dependent</dt>
+<dd>A dependent task (from <code>map</code> or <code>bind</code>) made with <code>sync := true</code>, or at priority <code>LEAN_SYNC_PRIO</code>.
+It runs at once on the context that finishes its source, without the queue.</dd>
+
+<dt id="g-translator">Translator</dt>
+<dd>A compiler that takes compiled Lean code and emits code in another language.
+lean2rr and leanrs are translators.</dd>
+
+<dt id="g-twin">Twin</dt>
+<dd>Two programs that do the same work.
+A Rust twin of a case makes the same calls through lean-runtime as the case's Lean program.
+In a benchmark pair, each side is the other's twin.</dd>
+
+<dt id="g-unsafe-fast">unsafe-fast</dt>
+<dd>An opt-in Cargo feature for faster <code>unsafe</code> versions of functions.
+Each needs the same behaviour as its safe twin, a proof in <code>UNSAFE.md</code>, and Miri checks.
+There are none yet.</dd>
+
+<dt id="g-view">View</dt>
+<dd>A borrowed look at data that the caller owns: <code>&amp;[u8]</code> or <code>&amp;str</code>.
+Small plain values (<code>u64</code>, <code>f64</code>) pass by value.</dd>
+
+<dt id="g-word">Word, word helper</dt>
+<dd>A word is a number that fits a machine word (<code>Small</code>).
+A word helper (<code>*_small</code>) is a rule on words only, for a translator's own fast path.</dd>
+
+<dt id="g-worker">Worker, pool task</dt>
+<dd>Native Lean runs tasks on a pool of worker threads.
+A pool task runs on one of them, not on a dedicated thread.
+<code>sched</code> keeps the number of workers (<code>LEAN_NUM_THREADS</code>, or the number of processors) as a limit on running contexts.</dd>
+
+<dt id="g-yield-point">Yield point</dt>
+<dd>A call where the running context lets other contexts go first.
+The kinds: effect points (before an output, a flush, a process spawn, an exit), polling points, and sleeps.</dd>
+
+<dt id="g-yielder">Yielder</dt>
+<dd>corosensei's handle through which a coroutine suspends itself.
+The glue's <code>Glue::suspend</code> reaches it through a raw pointer, the one dereference in the glue.</dd>
+</dl>
+</main>
+<footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
+Written about 80% to ASD-STE100 (Simplified Technical English).
+The markdown docs and the module docs are the authority; this site summarizes them.</footer>
+</body>
+</html>

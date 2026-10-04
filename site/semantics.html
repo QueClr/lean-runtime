@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semantics · lean-runtime</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><a href="index.html">lean-runtime</a><span>Lean 4.34.0's runtime in safe Rust</span></div>
+  <nav class="main" aria-label="Pages">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="semantics.html" aria-current="page">semantics</a>
+    <a href="io.html">io</a>
+    <a href="sched.html">sched</a>
+    <a href="testing.html">Testing</a>
+    <a href="lean-bugs.html">Lean bugs</a>
+    <a href="status.html">Status</a>
+    <a href="glossary.html">Glossary</a>
+  </nav>
+</header>
+<main>
+<h1>The semantics module</h1>
+<p class="lead"><code>semantics</code> holds Lean's runtime rules as pure functions.
+They work on <a href="glossary.html#g-view">views</a> and plain data.
+Nothing here owns or allocates a Lean value.</p>
+
+<div class="toc"><ul>
+  <li><a href="#callpath">A call, from Lean to the crate</a></li>
+  <li><a href="#numbers">Nat and Int</a></li>
+  <li><a href="#fixed">Fixed-width integers</a></li>
+  <li><a href="#floats">Float, Float32 and libm</a></li>
+  <li><a href="#strings">Strings and UTF-8 positions</a></li>
+  <li><a href="#hash">Hashing</a></li>
+  <li><a href="#arrays">Arrays</a></li>
+  <li><a href="#panics">Panics</a></li>
+  <li><a href="#text">Text output</a></li>
+</ul></div>
+
+<p>Every public function names two things in its doc comment:</p>
+<ul>
+  <li>the Lean 4.34.0 C function (or Lean definition) that it mirrors;</li>
+  <li>the code it came from: leanrs's runtime, lean2rr's runtime, or new code.</li>
+</ul>
+<p><a href="glossary.html#g-row">Rows</a> recorded from native Lean 4.34.0 check every function (<a href="testing.html#rows">Testing</a>).</p>
+
+<h2 id="callpath">A call, from Lean to the crate</h2>
+<p>Example: <code>String.Pos.Raw.get</code>, the character at a byte position.</p>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-labelledby="se1-t se1-d">
+  <title id="se1-t">The call path of String.Pos.Raw.get</title>
+  <desc id="se1-d">Lean code calls String.Pos.Raw.get s p. The generated code calls the extern lean_string_utf8_get. The glue turns its string object into a byte slice and the position into a u64, and calls semantics::string::utf8_get. Inside, an ASCII byte is returned inline, a lead byte is decoded in a cold function, and a position past the end or in the middle of a character gives 'A'. The glue receives a u32 and makes its own Char.</desc>
+  <defs>
+    <marker id="se1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-lean" x="20" y="30" width="170" height="70" rx="6"/>
+  <text class="tb" x="105" y="54" text-anchor="middle">Lean code</text>
+  <text class="tc" x="105" y="76" text-anchor="middle">String.Pos.Raw.get s p</text>
+  <line class="ar" x1="190" y1="65" x2="223" y2="65" marker-end="url(#se1-a)"/>
+
+  <rect class="k-tr" x="225" y="30" width="185" height="70" rx="6"/>
+  <text class="tb" x="317" y="54" text-anchor="middle">generated code</text>
+  <text class="ts" x="317" y="72" text-anchor="middle">calls the extern</text>
+  <text class="tc" x="317" y="90" text-anchor="middle">lean_string_utf8_get</text>
+  <line class="ar" x1="410" y1="65" x2="443" y2="65" marker-end="url(#se1-a)"/>
+
+  <rect class="k-glue" x="445" y="30" width="190" height="70" rx="6"/>
+  <text class="tb" x="540" y="54" text-anchor="middle">glue</text>
+  <text class="ts" x="540" y="72" text-anchor="middle">string object to &amp;[u8]</text>
+  <text class="ts" x="540" y="89" text-anchor="middle">position Nat to u64</text>
+  <line class="ar" x1="635" y1="65" x2="668" y2="65" marker-end="url(#se1-a)"/>
+
+  <rect class="k-rt" x="670" y="30" width="170" height="70" rx="6"/>
+  <text class="tb" x="755" y="54" text-anchor="middle">semantics::string</text>
+  <text class="tc" x="755" y="78" text-anchor="middle">utf8_get(s, pos)</text>
+
+  <rect class="grp" x="530" y="126" width="320" height="190" rx="8"/>
+  <text class="ts" x="545" y="144">inside utf8_get</text>
+  <line class="ar" x1="755" y1="100" x2="755" y2="150" marker-end="url(#se1-a)"/>
+  <rect class="k-rt" x="545" y="152" width="290" height="44" rx="5"/>
+  <text x="560" y="171">byte below 0x80: that byte</text>
+  <text class="ts" x="560" y="188">inline, in the caller's code</text>
+  <rect class="k-rt" x="545" y="204" width="290" height="44" rx="5"/>
+  <text x="560" y="223">lead byte: decode 2 to 4 bytes</text>
+  <text class="ts" x="560" y="240">get_core_cold: #[cold], #[inline(never)]</text>
+  <rect class="k-rt" x="545" y="256" width="290" height="44" rx="5"/>
+  <text x="560" y="275">past the end, or mid-character</text>
+  <text class="ts" x="560" y="292">'A', Lean's default character</text>
+
+  <line class="ar" x1="530" y1="226" x2="417" y2="226" marker-end="url(#se1-a)"/>
+  <text class="tc" x="472" y="216" text-anchor="middle">u32</text>
+  <rect class="k-glue" x="225" y="196" width="190" height="60" rx="6"/>
+  <text class="tb" x="320" y="220" text-anchor="middle">glue</text>
+  <text class="ts" x="320" y="240" text-anchor="middle">makes its own Char</text>
+  <line class="ar" x1="225" y1="226" x2="107" y2="226" marker-end="url(#se1-a)"/>
+  <rect class="k-lean" x="20" y="196" width="85" height="60" rx="6"/>
+  <text x="62" y="231" text-anchor="middle">result</text>
+</svg>
+<figcaption>Figure 1. The glue lends the string's bytes (without C's terminating NUL) and receives a <code>u32</code>.
+The ASCII test is inline; the decoder is a separate cold function.</figcaption>
+</figure>
+<p>The <code>Nat</code>, <code>Int</code> and <code>String</code> rules and <code>Float.scaleB</code> follow one pattern.
+The short common case is inline.
+The rare case is in a function marked <code>#[cold]</code> and <code>#[inline(never)]</code>.
+So a translator can call the function for every value, and the code it inlines stays small.</p>
+
+<h2 id="numbers">Nat and Int</h2>
+<p>Lean's C runtime splits big-number work in two parts.
+<code>lean.h</code> and <code>object.cpp</code> decide the rules; GMP only computes.
+lean-runtime keeps that split (decision Q4).</p>
+<ul>
+  <li><strong>Rules</strong> are generic functions in lean-runtime.
+    They decide what happens with a zero divisor, a truncating subtraction, an exponent or a shift amount.</li>
+  <li><strong>Big-number arithmetic</strong> is a trait, <code>BigNat</code> (and <code>BigInt</code>).
+    Each translator implements it with its own library: lean2rr with GMP, leanrs with malachite.</li>
+  <li><strong>Two layers.</strong> Word helpers (<code>*_small</code>) take <code>u64</code> or <code>i64</code> values and give the exact result, for a translator's own fast path.
+    Rules take <code>Nat&lt;B&gt;</code>: a word (<code>Small</code>) or a big number (<code>Big</code>) of the backend <code>B</code>.</li>
+  <li><strong>Normalization.</strong> Each translator normalizes results with its own boundary.
+    Both keep a <code>Nat</code> below 2<sup>63</sup> in a word.</li>
+</ul>
+<figure class="fig">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 290" role="img" aria-labelledby="se2-t se2-d">
+  <title id="se2-t">How a Nat rule runs: Nat.add</title>
+  <desc id="se2-d">nat::add checks whether both operands are words. If yes, add_small computes inline. If no, the cold add_slow checks the result size against MAX_BITS. Above MAX_BITS the rule returns the error OutOfMemory, and the glue ends the process with INTERNAL PANIC: out of memory. Otherwise the translator's BigNat backend computes. The glue normalizes the result.</desc>
+  <defs>
+    <marker id="se2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-rt" x="20" y="30" width="170" height="52" rx="6"/>
+  <text class="tc" x="105" y="54" text-anchor="middle">nat::add(a, b)</text>
+  <text class="ts" x="105" y="72" text-anchor="middle">a rule on Nat&lt;B&gt;</text>
+  <line class="ar" x1="190" y1="56" x2="228" y2="56" marker-end="url(#se2-a)"/>
+  <rect class="k-rt" x="230" y="30" width="170" height="52" rx="6"/>
+  <text x="315" y="61" text-anchor="middle">both words?</text>
+  <line class="ar" x1="400" y1="56" x2="438" y2="56" marker-end="url(#se2-a)"/>
+  <text class="ts" x="419" y="48" text-anchor="middle">yes</text>
+  <rect class="k-rt" x="440" y="30" width="200" height="52" rx="6"/>
+  <text class="tc" x="540" y="52" text-anchor="middle">add_small</text>
+  <text class="ts" x="540" y="71" text-anchor="middle">inline, exact on two u64</text>
+  <line class="ar" x1="640" y1="56" x2="678" y2="56" marker-end="url(#se2-a)"/>
+  <rect class="k-glue" x="680" y="30" width="160" height="52" rx="6"/>
+  <text x="760" y="52" text-anchor="middle">result</text>
+  <text class="ts" x="760" y="71" text-anchor="middle">glue normalizes it</text>
+
+  <line class="ar" x1="315" y1="82" x2="315" y2="122" marker-end="url(#se2-a)"/>
+  <text class="ts" x="325" y="106">no</text>
+  <rect class="k-rt" x="230" y="124" width="170" height="56" rx="6"/>
+  <text class="tc" x="315" y="146" text-anchor="middle">add_slow</text>
+  <text class="ts" x="315" y="166" text-anchor="middle">#[cold], #[inline(never)]</text>
+  <line class="ar" x1="400" y1="152" x2="438" y2="152" marker-end="url(#se2-a)"/>
+  <rect class="k-rt" x="440" y="124" width="200" height="56" rx="6"/>
+  <text class="tc" x="540" y="146" text-anchor="middle">check_result_bits</text>
+  <text class="ts" x="540" y="166" text-anchor="middle">size bound at most MAX_BITS?</text>
+  <line class="ar" x1="640" y1="152" x2="678" y2="152" marker-end="url(#se2-a)"/>
+  <text class="ts" x="659" y="144" text-anchor="middle">yes</text>
+  <rect class="k-glue" x="680" y="124" width="160" height="56" rx="6"/>
+  <text x="760" y="146" text-anchor="middle">BigNat backend</text>
+  <text class="ts" x="760" y="166" text-anchor="middle">GMP or malachite</text>
+  <line class="ar" x1="760" y1="124" x2="760" y2="84" marker-end="url(#se2-a)"/>
+
+  <line class="ar" x1="540" y1="180" x2="540" y2="218" marker-end="url(#se2-a)"/>
+  <text class="ts" x="550" y="203">no</text>
+  <rect class="k-bad" x="440" y="220" width="200" height="52" rx="6"/>
+  <text class="tc" x="540" y="242" text-anchor="middle">Err(OutOfMemory)</text>
+  <text class="ts" x="540" y="261" text-anchor="middle">glue: INTERNAL PANIC, exit 1</text>
+</svg>
+<figcaption>Figure 2. The size test runs before the backend is called.
+Above <code>MAX_BITS</code> the rule returns an error; the glue then prints the internal panic and ends the process.
+So no backend gets a request above its limit, and both translators end the same way.</figcaption>
+</figure>
+<ul>
+  <li><strong><a href="glossary.html#g-max-bits">MAX_BITS</a></strong> is the backend's largest result, in bits.
+    leanrs's is 2<sup>39</sup> bits.
+    lean2rr's is about GMP's limit; it is set when lean2rr adopts the crate.</li>
+  <li><strong>The size test.</strong> <code>add</code>, <code>succ</code>, <code>mul</code>, <code>pow</code> and <code>shiftLeft</code> know a bound on the result size before they compute.
+    Above <code>MAX_BITS</code> they stop with <code>INTERNAL PANIC: out of memory</code>.
+    When the exponent or shift is 2<sup>32</sup> or more, they print native's exponent message instead.</li>
+  <li><strong>Lifted limits.</strong> Native Lean stops where the definition still has a value: <code>Nat.pow</code> or <code>Nat.shiftLeft</code> by 2<sup>32</sup> or more, for example.
+    lean-runtime computes the definition's result there (<a href="lean-bugs.html#limits">LB-04, LB-11, LB-12</a>).</li>
+  <li><strong>Int division.</strong> <code>Int.tdiv</code> and <code>Int.tmod</code> round toward zero.
+    <code>Int.ediv</code> and <code>Int.emod</code> keep the remainder in [0, |d|).
+    A zero divisor gives the quotient 0 and the remainder the dividend.</li>
+  <li>The other <code>Nat</code> and <code>Int</code> functions (<code>Nat.sqrt</code>, <code>Int.fdiv</code>, the <code>Int</code> bitwise operations) are Lean code.
+    The translators compile them.</li>
+</ul>
+
+<h2 id="fixed">Fixed-width integers</h2>
+<ul>
+  <li>Most <code>UIntN</code> and <code>IntN</code> operations are one machine operation.
+    Each translator emits them inline (wrapping <code>+ - *</code>, bitwise operations, comparisons, casts).</li>
+  <li>lean-runtime holds the rest:
+    <ul>
+      <li>division and remainder by zero;</li>
+      <li>the signed comparisons and <code>abs</code> of <code>IntN</code>;</li>
+      <li>shifts, where the amount is taken modulo the width;</li>
+      <li><code>log2</code>;</li>
+      <li>the conversions to and from <code>Nat</code> and <code>Int</code>, and to <code>Float</code> and <code>Float32</code>.</li>
+    </ul></li>
+  <li>A signed value travels as its two's-complement bits in the unsigned type of its width, as in <code>lean.h</code>.
+    A <code>Nat</code> argument travels as its value modulo 2<sup>64</sup>.</li>
+</ul>
+
+<h2 id="floats">Float, Float32 and libm</h2>
+<ul>
+  <li><code>float</code> and <code>float32</code> hold what is not one Rust operator: <code>toString</code>, the saturating conversions to integers, <code>ofBits</code>/<code>toBits</code>, <code>frExp</code>, <code>scaleB</code> and the classification functions.</li>
+  <li><code>Float.toString</code> is C's <code>%f</code>: six decimals, every integer digit, <code>NaN</code>, <code>inf</code>.
+    It writes into a <code>fmt::Write</code> and allocates nothing.</li>
+  <li><code>libm</code> has one function per C function (<code>sin</code>, <code>pow</code>, <code>cbrtf</code> and so on).
+    Native Lean calls glibc's libm.
+    Rust's <code>f64</code> and <code>f32</code> methods call the same libm, with the exceptions below.</li>
+</ul>
+<h3>The exceptions</h3>
+<ul>
+  <li><strong>Ports.</strong> Rust's <code>cbrt</code> and <code>atanh</code> (and their <code>f32</code> forms) are not glibc's algorithms.
+    lean-runtime has ports of glibc 2.39's aarch64 code for them.
+    The ports exist only on aarch64 Linux with glibc.</li>
+  <li><strong>Constant folding (why <code>black_box</code>).</strong> LLVM computes a libm call with constant operands at compile time.
+    Its result can differ from glibc's in the last bit.
+    For example, LLVM folds <code>exp2(x)</code> as <code>pow(2, x)</code>, and it rewrites <code>pow(x, 2.0)</code> as <code>x * x</code>.
+    Native Lean always passes run-time values to the C call.
+    So <code>exp2</code>, <code>pow</code>, <code>powf</code> and every inexact <code>f32</code> function pass their operands through <code>core::hint::black_box</code>.
+    The call then stays a call, also after inlining.</li>
+  <li><strong>Exact functions</strong> (<code>fabsf</code>, <code>ceilf</code>, <code>floorf</code>, <code>roundf</code>, <code>sqrtf</code>) fold to glibc's result and need no barrier.</li>
+  <li><strong>The check.</strong> <code>tests/libm_folding.rs</code> calls every function on literal operands and on the same operands through <code>black_box</code>, in an optimized build.
+    The two results must be equal, bit for bit.</li>
+</ul>
+<p>The cost of <code>black_box</code> is on the list for the first timing session (<a href="glossary.html#g-o12">O12</a>).</p>
+
+<h2 id="strings">Strings and UTF-8 positions</h2>
+<ul>
+  <li>A <code>String.Pos.Raw</code> is a byte offset.
+    The functions take the string's UTF-8 bytes and a <code>u64</code> position.</li>
+  <li>Lean's C treats a position of 2<sup>63</sup> or more as a big number, which is always past the end.
+    The caller passes such a position as <code>u64::MAX</code> (or as itself, if it fits).</li>
+  <li>Results are plain data: a <code>u32</code> character, a <code>u64</code> position, a byte <code>Range</code>.
+    The caller builds its own string from a range.</li>
+  <li>The functions: <code>get</code>, <code>next</code>, <code>prev</code>, <code>atEnd</code>, <code>isValid</code>, <code>extract</code>, the byte-order comparisons, and others.</li>
+  <li><code>Substring.Raw</code>'s externs are Lean code, so they are not here.</li>
+</ul>
+
+<h2 id="hash">Hashing</h2>
+<ul>
+  <li><code>mixHash</code> and MurmurHash64A, bit for bit as Lean's <code>hash.cpp</code>.</li>
+  <li>They are behind <code>String.hash</code>, <code>ByteArray.hash</code> and <code>String.Slice.hash</code>.</li>
+  <li>They decide the iteration order of <code>Std.HashMap</code>, and a program can print that order.
+    So a different hash would change the output.</li>
+</ul>
+
+<h2 id="arrays">Arrays</h2>
+<p>The array functions take lengths and indices and return a decision.
+The translator carries out the decision on its own array.</p>
+<ul>
+  <li><code>xs[i]!</code> and <code>Array.set!</code> out of bounds print <code>Error: index out of bounds</code> as a panic.
+    Then they return the default value, or the array unchanged.</li>
+  <li><code>ByteArray.get!</code>, <code>FloatArray.get!</code> and their <code>set!</code> out of bounds are silent: 0, 0.0, or the array unchanged.</li>
+  <li><code>Array.pop</code> of an empty array gives the empty array.</li>
+  <li>The allocators stop with <code>INTERNAL PANIC</code> when a size overflows or is not a machine word.</li>
+  <li><code>ByteArray.copySlice</code> follows its Lean definition, also for offsets of 2<sup>64</sup> or more (<a href="lean-bugs.html#limits">LB-06</a>).</li>
+</ul>
+
+<h2 id="panics">Panics</h2>
+<p>The panic module gives each panic as data: the text, where it goes, and how the process goes on.
+Each translator prints with its own streams and ends its own process.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Path</th><th>Used for</th><th>Normal behaviour</th><th>With <code>LEAN_ABORT_ON_PANIC</code></th></tr></thead>
+<tbody>
+<tr><td><code>lean_panic_fn</code></td><td><code>panic!</code>, <code>get!</code> out of bounds</td><td>The message goes to Lean's current stderr stream, then <code>backtrace:</code> (unless <code>LEAN_BACKTRACE=0</code>). The call returns the default value.</td><td>The lines go to the process's stderr, then the process aborts (status 134).</td></tr>
+<tr><td><code>lean_internal_panic</code></td><td>The runtime's own limits (out of memory, overflow)</td><td><code>INTERNAL PANIC: &lt;msg&gt;</code> on C's stderr, then <code>exit(1)</code>, which flushes stdout.</td><td>Abort (status 134) with no flush (<a href="lean-bugs.html#not-bugs">LB-07</a>).</td></tr>
+</tbody></table></div>
+
+<h2 id="text">Text output</h2>
+<ul>
+  <li>Some <code>Repr</code> and <code>ToString</code> definitions are Lean code that both translators replace with runtime code.
+    lean-runtime holds that code once.</li>
+  <li>The texts: decimal digits for <code>Nat.repr</code> and <code>Int.repr</code>, <code>USize.repr</code>, <code>Char.quote</code>, <code>String.quote</code>, the test of <code>Repr.addAppParen</code>, and the <code>Bool</code> and <code>Unit</code> texts.</li>
+  <li>Text goes into a <code>fmt::Write</code> that the caller supplies.</li>
+  <li>The rest of <code>Repr</code> and <code>ToString</code> (structures, lists, <code>Format</code>) stays Lean code that the translators compile.</li>
+</ul>
+
+<p class="more">Detail: the module docs in <a href="../src/semantics/mod.rs">src/semantics/</a>: <a href="../src/semantics/array.rs">array.rs</a>, <a href="../src/semantics/bignum.rs">bignum.rs</a>, <a href="../src/semantics/float.rs">float.rs</a>, <a href="../src/semantics/float32.rs">float32.rs</a>, <a href="../src/semantics/hash.rs">hash.rs</a>, <a href="../src/semantics/int.rs">int.rs</a>, <a href="../src/semantics/libm.rs">libm.rs</a>, <a href="../src/semantics/nat.rs">nat.rs</a>, <a href="../src/semantics/panic.rs">panic.rs</a>, <a href="../src/semantics/repr.rs">repr.rs</a>, <a href="../src/semantics/sint.rs">sint.rs</a>, <a href="../src/semantics/string.rs">string.rs</a>, <a href="../src/semantics/uint.rs">uint.rs</a>.</p>
+</main>
+<footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
+Written about 80% to ASD-STE100 (Simplified Technical English).
+The markdown docs and the module docs are the authority; this site summarizes them.</footer>
+</body>
+</html>
