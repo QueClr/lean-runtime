@@ -9,9 +9,15 @@ output, and check a translator's executables against it.
       and <id>.code next to the case (a non-terminating case records the
       output seen before its timeout and the code "timeout").
 
-  scripts/cases.py check --exe-dir DIR [CASE...]
+  scripts/cases.py check --exe-dir DIR [--translator NAME] [CASE...]
       Run DIR/<id> (a translator's build of each case; DIR may be relative)
-      and compare with the recorded expected files.
+      and compare with the recorded expected files. With --translator NAME
+      (a key of `deviations`: lean2rr, leanrs), a case whose `deviations`
+      give NAME a documented deviation that names no Lean bug (a DVnn, for
+      example) reports a missing executable or a different outcome as
+      DEVIATION instead of MISSING or FAIL, and does not count it as a
+      failure; a Lean bug (LB-nn) never excuses a difference, since the
+      expected files hold the correct outcome.
 
 A requested CASE that no case has is reported as `NO CASE <id>` and fails
 the command.
@@ -122,6 +128,19 @@ def native_expected(case, m):
 
 NATIVE_EXPECTED = ("NATIVE EXPECTED {}: `native` (native's outcome, a Lean bug) equals the expected files "
                    "or an alternative; they must hold the correct outcome")
+
+def own_deviation(m, translator):
+    """The parts of the case's `deviations` entry for `translator` that name
+    no Lean bug (e.g. "DV2" of "LB-03; DV2"), joined, or None. A Lean bug
+    alone excuses nothing: the expected files are the correct outcome."""
+    if not translator:
+        return None
+    v = m.get("deviations", {}).get(translator)
+    if v is None:
+        return None
+    parts = [x.strip() for x in re.split(r"[;,]", str(v)) if x.strip()]
+    own = [x for x in parts if not re.match(r"LB-\d+\b", x)]
+    return "; ".join(own) or None
 
 def build_native(case, outdir):
     c_file = outdir / (case.stem + ".c")
@@ -258,17 +277,23 @@ def cmd_expect(ns):
 
 def cmd_check(ns):
     failed = 0
+    excused = 0
     for name in unknown_cases(ns.cases):
         print(f"NO CASE {name}")
         failed += 1
     for case in find_cases(ns.cases):
+        m = meta(case)
+        dv = own_deviation(m, ns.translator)
         # absolute: each run's working directory is a fresh temporary one
         exe = pathlib.Path(ns.exe_dir).resolve() / case.stem
         if not exe.exists():
-            print(f"MISSING {case.stem}")
-            failed += 1
+            if dv:
+                print(f"DEVIATION {case.stem} ({dv}): no executable")
+                excused += 1
+            else:
+                print(f"MISSING {case.stem}")
+                failed += 1
             continue
-        m = meta(case)
         if old_form(m):
             print(OLD_FORM.format(case.stem))
             failed += 1
@@ -285,20 +310,27 @@ def cmd_check(ns):
         out, err, code = run(exe, case)
         want = allowed[0]
         if (out, err, code) in allowed:
-            print(f"PASS {case.stem}")
+            print(f"PASS {case.stem}" + (f" (despite deviation {dv})" if dv else ""))
         else:
             diffs = [name for name, got, exp in (("stdout", out, want[0]), ("stderr", err, want[1]),
                                                   ("code", code, want[2])) if got != exp]
-            print(f"FAIL {case.stem}: {', '.join(diffs)} differ (code {code}, expected {want[2]})")
-            failed += 1
-    print(f"{failed} failed")
+            what = f"{', '.join(diffs)} differ (code {code}, expected {want[2]})"
+            if dv:
+                print(f"DEVIATION {case.stem} ({dv}): {what}")
+                excused += 1
+            else:
+                print(f"FAIL {case.stem}: {what}")
+                failed += 1
+    print(f"{failed} failed" + (f", {excused} deviations of {ns.translator}" if ns.translator else ""))
     return 1 if failed else 0
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("expect"); e.add_argument("--runs", type=int, default=5); e.add_argument("cases", nargs="*")
-    c = sub.add_parser("check"); c.add_argument("--exe-dir", required=True); c.add_argument("cases", nargs="*")
+    c = sub.add_parser("check"); c.add_argument("--exe-dir", required=True)
+    c.add_argument("--translator", help="a key of `deviations` (lean2rr, leanrs): its documented non-Lean-bug deviations report DEVIATION, not FAIL")
+    c.add_argument("cases", nargs="*")
     ns = ap.parse_args()
     sys.exit(cmd_expect(ns) if ns.cmd == "expect" else cmd_check(ns))
 

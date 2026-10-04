@@ -22,7 +22,10 @@ translators must reproduce it.
   them allowed);
 - a translator checks its own builds with
   `scripts/cases.py check --exe-dir DIR`, where `DIR/<id>` is its executable
-  for each case.
+  for each case. With `--translator NAME` (`lean2rr`, `leanrs`), a case whose
+  `deviations` give NAME a deviation that names no Lean bug (a `DVnn`)
+  reports a missing executable or a different outcome as `DEVIATION`, not
+  counted as a failure; a Lean bug (`LB-nn`) excuses nothing.
 
 A program case whose behaviour is a confirmed Lean bug (`docs/lean-bugs.md`)
 expects the correct outcome in `<id>.out/.err/.code`, written by hand, and
