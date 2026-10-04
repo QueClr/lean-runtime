@@ -1,1 +1,1 @@
-(sleep 0.5; echo line) | $BIN $ARGS
+(sleep 2; echo line) | $BIN $ARGS

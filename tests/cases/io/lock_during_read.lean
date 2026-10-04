@@ -1,8 +1,8 @@
 -- `Handle.lock` (`flock(fileno(fp))`) takes no `FILE` lock natively, so it
 -- does not wait for a task blocked in a read on the same handle: `main` locks
--- while the task waits in `getLine` for a line that .pipe sends half a
--- second later (review RIO1-01, the blocked-read variant). The path comes
--- from argv.
+-- while the task waits in `getLine` for a line that .pipe sends two seconds
+-- later, a wide margin over `main`'s 100 ms wait on a loaded host (review
+-- RIO1-01, the blocked-read variant; RIO1-12). The path comes from argv.
 
 def main (args : List String) : IO Unit := do
   let h ← IO.FS.Handle.mk args[0]! .read
