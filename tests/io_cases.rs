@@ -10,8 +10,9 @@
 //! The test runs `scripts/cases.py check` (the checker translators use) on
 //! wrappers that start this binary as each case's twin, so every twin's
 //! stdout, stderr and exit code must equal native Lean 4.34.0's recorded
-//! outcome, or a documented alternative (LB-02, LB-03). A twin whose case is
-//! not in the tree is skipped by the checker.
+//! outcome, or a documented alternative (LB-02, LB-03). The twins whose cases
+//! live in another branch until it merges are listed in `PENDING` and
+//! reported as pending; a missing case of any other twin fails the run.
 //!
 //! The binary runs without libtest (`harness = false`): as a twin it writes
 //! only what the program writes. It is each case's twin when started under
@@ -559,6 +560,12 @@ const TWINS: &[(&str, Twin)] = &[
     ("lock_exit", lock_exit),
 ];
 
+/// Twins whose cases are in another branch (cases-xt) until it merges: they
+/// are checked when their case is in the tree, and listed as pending (not
+/// requested) otherwise. Every other twin's case must exist: `cases.py
+/// check` fails with `NO CASE <id>`.
+const PENDING: &[&str] = &["read_after_write", "error_without_file_name"];
+
 /// The twin named by `argv[0]`'s file name, if any.
 fn twin_name(argv0: &[u8]) -> Option<&'static str> {
     let base = argv0.rsplit(|&b| b == b'/').next().unwrap_or(argv0);
@@ -606,11 +613,21 @@ fn main() {
     for (id, _) in TWINS {
         std::os::unix::fs::symlink(&exe, dir.join(id)).unwrap();
     }
+    let has_case =
+        |id: &str| std::path::Path::new(&format!("{root}/tests/cases/io/{id}.lean")).exists();
+    let mut requested = Vec::new();
+    for (id, _) in TWINS {
+        if PENDING.contains(id) && !has_case(id) {
+            println!("PENDING {id}: its case is not in the tree yet");
+        } else {
+            requested.push(*id);
+        }
+    }
     let status = std::process::Command::new("python3")
         .arg(format!("{root}/scripts/cases.py"))
         .args(["check", "--exe-dir"])
         .arg(&dir)
-        .args(TWINS.iter().map(|(id, _)| *id))
+        .args(&requested)
         .env("LEAN_RUNTIME_NO_CAP", "1")
         .status()
         .expect("python3 scripts/cases.py");

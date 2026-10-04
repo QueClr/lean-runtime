@@ -13,6 +13,9 @@ output, and check a translator's executables against it.
       Run DIR/<id> (a translator's build of each case) and compare with the
       recorded expected files.
 
+A requested CASE that no case has is reported as `NO CASE <id>` and fails
+the command.
+
 Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
 ("separate" or "merged": stderr into stdout) and optionally
@@ -53,6 +56,11 @@ def find_cases(names):
     if not names:
         return all_cases
     return [c for c in all_cases if c.stem in names]
+
+def unknown_cases(names):
+    """The requested names that no case has (none is skipped silently)."""
+    known = {c.stem for c in CASES.glob("**/*.lean")}
+    return [n for n in names if n not in known]
 
 def meta(case):
     t = case.with_suffix(".toml")
@@ -121,6 +129,9 @@ def run(exe, case):
 
 def cmd_expect(ns):
     ok = True
+    for name in unknown_cases(ns.cases):
+        print(f"NO CASE {name}")
+        ok = False
     with tempfile.TemporaryDirectory() as d:
         for case in find_cases(ns.cases):
             exe = build_native(case, pathlib.Path(d))
@@ -146,6 +157,9 @@ def cmd_expect(ns):
 
 def cmd_check(ns):
     failed = 0
+    for name in unknown_cases(ns.cases):
+        print(f"NO CASE {name}")
+        failed += 1
     for case in find_cases(ns.cases):
         exe = pathlib.Path(ns.exe_dir) / case.stem
         if not exe.exists():
