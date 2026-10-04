@@ -1,5 +1,8 @@
 /target
+/vendor
+# Only the crate's own lock file is committed (it pins io's dependencies).
 Cargo.lock
+!/Cargo.lock
 __pycache__/
 benches/rust/target/
 benches/native/.lake/

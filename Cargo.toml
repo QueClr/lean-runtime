@@ -9,14 +9,23 @@ publish = false
 name = "lean_runtime"
 path = "src/lib.rs"
 
-# No dependencies yet. The io/ layer will use vetted crates (nix or rustix),
-# vendored under vendor/ so that both projects build offline.
+# The default build has no dependencies. The `io` layer makes its system calls
+# through vetted crates, so that the crate itself stays free of `unsafe`:
+# rustix (the FILE model's descriptor calls, the clock) and nix (process-level
+# libc calls). The requirements are carets compatible with leanrs's offline
+# registry (nix 0.31.3, rustix 1.1.4), with only the features io/ uses; leanrs
+# resolves them in its own workspace. lean-runtime's own builds and lean2rr's
+# use Cargo.lock and cargo's local registry cache, offline (`cargo build
+# --offline --locked --features io`; `cargo fetch --locked` once fills the
+# cache).
 [dependencies]
+rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "fs", "stdio", "termios", "time"] }
+nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "process"] }
 
 [features]
 default = []
 # OS-level IO mirroring Lean's C runtime (files, handles, standard streams).
-io = []
+io = ["dep:rustix", "dep:nix"]
 # The deferred task scheduler, promises and Std.Sync.
 sched = []
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and

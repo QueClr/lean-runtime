@@ -27,6 +27,14 @@ capped() {
   fi
 }
 
+# `io`'s dependencies (Cargo.lock) come from cargo's local registry cache:
+# every build here is offline.
+if ! cargo +"${TOOLCHAINS[0]}" fetch --offline --locked >/dev/null 2>&1; then
+  echo "error: a crate in Cargo.lock is missing from cargo's local registry cache;" \
+    "run \`cargo fetch --locked\` once (with network access)" >&2
+  exit 1
+fi
+
 for tc in "${TOOLCHAINS[@]}"; do
   for f in "${FEATURE_SETS[@]}"; do
     echo "== $tc test features=[${f}]"
@@ -37,15 +45,20 @@ for tc in "${TOOLCHAINS[@]}"; do
   # Constant folding of libm calls happens only in optimized builds.
   echo "== $tc release test libm_folding"
   capped cargo +"$tc" test --release --offline --quiet --test libm_folding
-  for with_features in no yes; do
+  # A driver without cargo builds the dependency-free configurations with
+  # plain rustc; `io` needs its dependencies' build scripts, so it is built
+  # with cargo, offline and from Cargo.lock.
+  for f in "" sched; do
     cfgs=()
-    [[ $with_features == yes ]] && cfgs=(--cfg 'feature="io"' --cfg 'feature="sched"')
+    [[ -n $f ]] && cfgs=(--cfg "feature=\"$f\"")
     echo "== $tc plain rustc ${cfgs[*]:-}"
     out=$(mktemp -d)
     rustc +"$tc" --edition 2021 --crate-type rlib --crate-name lean_runtime \
       --out-dir "$out" "${cfgs[@]}" src/lib.rs
     rm -rf "$out"
   done
+  echo "== $tc cargo build --offline --locked --features io"
+  capped cargo +"$tc" build --offline --locked --quiet --features io
 done
 
 last="${TOOLCHAINS[${#TOOLCHAINS[@]}-1]}"
