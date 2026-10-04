@@ -8,16 +8,17 @@
 //! message and the default, an array plan carried out on a `Vec`, and the
 //! result rendered as Lean's `repr`.
 //!
-//! Every `Nat`/`Int` row runs under three representations: the translators'
+//! Every `Nat`/`Int` row runs under four representations: the translators'
 //! (`Small` below 2^63 for `Nat`; `Small` in the `int32` range for `Int`, as
-//! lean2rr and Lean's C), leanrs's `Int` (`Small` in the `i64` range), and
-//! every argument `Big`, so that each rule's word path and each slow path
-//! meets every value.
+//! lean2rr and Lean's C), leanrs's `Int` (`Small` in the `i64` range),
+//! every argument `Big`, and every value below 2^64 `Small` (so words of
+//! 2^63 and more, and mixed word and big pairs), so that each rule's word
+//! path and each slow path meets every value.
 //!
 //! `tests/rows.rs` runs the other areas; the two share the row reader in
 //! `common/`. This runner takes arguments of any size (`refbig`), runs rows
 //! that end the process as data (the internal panic or abort they print),
-//! and runs each `Nat`/`Int` row under three representations.
+//! and runs each `Nat`/`Int` row under four representations.
 
 mod common;
 mod refbig;
@@ -351,9 +352,13 @@ enum Repr {
     Leanrs,
     /// Every argument a big number.
     AllBig,
+    /// Every value that fits a `u64` a word, 2^63..2^64 included (`Int`: the
+    /// `i64` range), so a word above Lean's small range meets the rules,
+    /// alone and against big operands (review RS2-05).
+    Words,
 }
 
-const REPRS: [Repr; 3] = [Repr::Lean, Repr::Leanrs, Repr::AllBig];
+const REPRS: [Repr; 4] = [Repr::Lean, Repr::Leanrs, Repr::AllBig, Repr::Words];
 
 fn nat_value(a: &Arg) -> RNat {
     match a {
@@ -374,6 +379,7 @@ fn nat(a: &Arg, r: Repr) -> Nat<RNat> {
     let n = nat_value(a);
     match (r, n.to_u64()) {
         (Repr::Lean | Repr::Leanrs, Some(v)) if v >> 63 == 0 => Nat::Small(v),
+        (Repr::Words, Some(v)) => Nat::Small(v),
         _ => Nat::Big(n),
     }
 }
@@ -382,7 +388,7 @@ fn int(a: &Arg, r: Repr) -> Int<RInt> {
     let i = int_value(a);
     match (r, i.to_i64()) {
         (Repr::Lean, Some(v)) if i32::try_from(v).is_ok() => Int::Small(v),
-        (Repr::Leanrs, Some(v)) => Int::Small(v),
+        (Repr::Leanrs | Repr::Words, Some(v)) => Int::Small(v),
         _ => Int::Big(i),
     }
 }
