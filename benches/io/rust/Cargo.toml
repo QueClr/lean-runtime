@@ -1,0 +1,27 @@
+# lean-runtime's io micro-benchmarks (benches/io/README.md): one binary per hot path, each with a
+# native-Lean twin of the same name in benches/io/native/. A package of its own, so the crate's
+# `cargo test` does not build it.
+[package]
+name = "lean-runtime-io-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "lean_runtime_io_bench"
+path = "src/lib.rs"
+
+[dependencies]
+lean-runtime = { path = "../../..", features = ["io"] }
+# The allocator of Lean's runtime and of both translators, as in the semantics benchmarks
+# (benches/README.md).
+mimalloc = { version = "=0.1.52", default-features = false }
+
+# The release profile of leanrs's measurement protocol (its chapter 07, M1).
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = false
+panic = "abort"
+
+[workspace]

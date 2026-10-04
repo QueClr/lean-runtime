@@ -1,0 +1,19 @@
+# The io benchmark pairs (benches/io/README.md).
+
+[[bench]]
+name = "io_put_str"
+function = "io::Handle::put_str"
+comparable = true
+note = "native pays an IO result allocation per call (Lean's calling convention)"
+
+[[bench]]
+name = "io_read"
+function = "io::Handle::read"
+comparable = true
+note = "both sides allocate the k-byte array; native also an IO result"
+
+[[bench]]
+name = "io_get_line"
+function = "io::Handle::get_line"
+comparable = true
+note = "both sides make a new string (validated, characters counted); native reads byte by byte with getc"

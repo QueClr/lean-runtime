@@ -34,10 +34,18 @@ statuses, and the text of leaf values (batch 2), checked by the rows in
 `tests/cases/*/*.rows.toml`
 (expected values from native Lean 4.34.0, `scripts/gen_rows.py`), with one
 micro-benchmark per public function and its native-Lean twin in `benches/`
-(`scripts/gen_benches.py`; not timed yet). The two projects are finishing a
-cross-test of their runtimes, then moving to Lean 4.34.0, then extracting
-the rest of `semantics`, `io` and `sched` in that order. See
-`CONTRIBUTING.md`.
+(`scripts/gen_benches.py`; not timed yet).
+
+`io` has its first batch (feature `io`): the `IO.Error` mirror and its
+decoding from `errno`, glibc's `FILE` model, handles and the standard
+streams, the exit sequence, the file system, the environment, the clock and
+the debug primitives, with bench pairs for its hot paths in `benches/io/`
+(not timed yet); processes, `Std.Time`, temporary files, the `UV.System`
+queries and stream redirection come next. See `src/io/mod.rs`.
+
+The two projects are finishing a cross-test of their runtimes, then moving
+to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
+that order. See `CONTRIBUTING.md`.
 
 ## Rules in short
 
@@ -54,7 +62,9 @@ the rest of `semantics`, `io` and `sched` in that order. See
 - Each translator pins this crate by commit and upgrades only after its own
   test suite passes.
 - The crate builds offline, with no nightly features, on the Rust
-  toolchains both translators use.
+  toolchains both translators use. The default build has no dependencies;
+  `io` uses rustix and nix, pinned by `Cargo.lock` and built offline from
+  cargo's local registry cache.
 
 Bugs in Lean's own runtime that both translators deliberately do not reproduce, each verified first, are listed in `docs/lean-bugs.md`.
 

@@ -7,3 +7,6 @@ __pycache__/
 benches/rust/target/
 benches/native/.lake/
 benches/native/lake-manifest.json
+benches/io/rust/target/
+benches/io/native/.lake/
+benches/io/native/lake-manifest.json

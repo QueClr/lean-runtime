@@ -26,9 +26,25 @@ once.
   The tests run both configurations.
 - **Signatures on views and plain data.** No function here owns, allocates
   or frees a Lean value of either translator.
-- **Builds.** Offline, no nightly features, and a plain `rustc --crate-type
-  rlib` build must work (one translator does not use cargo). Dependencies
-  are vendored under `vendor/`.
+- **Builds.** Offline and with no nightly features. The default build and
+  `sched` have no dependencies, and a plain `rustc --crate-type rlib` build of
+  them must work (one translator does not use cargo for them). `io` depends on
+  rustix and nix, whose build scripts plain rustc cannot run, so it is built
+  with cargo: `cargo build --offline --locked --features io` works from a
+  clean checkout, the versions pinned by the committed `Cargo.lock` and the
+  crates taken from cargo's local registry cache (`cargo fetch --locked` fills
+  it once; `scripts/check.sh` says so when a crate is missing). Nothing is
+  vendored in the repository.
+- **Dependencies.** Requirements are carets compatible with leanrs's offline
+  registry, which leanrs resolves in its own workspace (it ignores
+  `Cargo.lock`), with only the features the crate uses. Before adding a
+  dependency, or a feature that pulls in more crates, ask leanrs to check it
+  against their registry; a new crate that wraps `unsafe` needs the owner's
+  decision (nix, rustix and corosensei are approved).
+- **IO without bulk copies.** An io function writes its result into the
+  caller's storage (a `&mut [u8]` the caller allocated, or a `ByteSink` it
+  implements on its own object) and takes views (`&[u8]`) for data and paths,
+  so neither translator's glue copies bulk data (`src/io/mod.rs`).
 - **Comments.** Each function names the Lean C function or Lean definition
   it mirrors.
 
