@@ -79,12 +79,22 @@ The case `uvsys/title_cmdline` records this natively,
 
 With the feature `proc-title`:
 - **The constructor.** On glibc, `argv_title.rs` has an ELF constructor
-  (`#[link_section = ".init_array"]`, cfg `target_os = "linux"` and
+  (`#[link_section = ".init_array.00100"]`, cfg `target_os = "linux"` and
   `target_env = "gnu"`). glibc calls it, as every `.init_array` function,
   with the process's `argc`, `argv` and `envp`: before `main` when it is
   in the program's executable, when the library is loaded when it is in a
   shared library (by `dlopen`, also after `main`). It calls `setup_args`,
   so no translator's glue takes part and none writes `unsafe`.
+- **Its place among the constructors** (AR-20, lean2rr's review RST3-01).
+  Natively the generated `main` calls `lean_setup_args` before libuv opens
+  its startup descriptors. Here the translators open them from constructors
+  of their own, in plain `.init_array`. The priority 100 puts the crate's
+  constructor before those, and after the toolchain's own (G4). So under
+  `ulimit -n 12`, where libuv's eight descriptors leave one free, the checks
+  below still find the two descriptors they need, and the title is written,
+  as natively (case `uvsys/title_fd_limit`). In plain `.init_array` it ran
+  after them (link order), kept nothing, and `/proc/self/cmdline` kept the
+  arguments.
 - **A library.** First, `setup_args` checks that the constructor is in the
   program's own executable: its address lies inside the kernel's record of
   the program's code, `start_code` to `end_code` (`/proc/self/stat`,
@@ -117,10 +127,12 @@ With the feature `proc-title`:
     task other than this one that is not an io_uring kernel thread
     (`PF_IO_WORKER` in its `stat` flags, on Linux 5.12 or later, where
     such threads and the flag exist; before 5.5 the same bit meant
-    `PF_VCPU`, so on an older kernel any other task counts). An earlier
-    constructor may have started a thread; the io_uring thread is the
-    polling ring's, when the startup descriptors are open first;
-  - `/proc/self/stat` cannot be read: no `/proc`, or no free descriptor;
+    `PF_VCPU`, so on an older kernel any other task counts). Code that ran
+    earlier (G4) may have started a thread; the io_uring thread is the
+    polling ring's, when that code opened the startup descriptors;
+  - `/proc/self/stat` or `/proc/self/task` cannot be read: no `/proc`, or
+    too few free descriptors (the checks need two at once:
+    `/proc/self/task` and a task's `stat`);
   - the memory from `argv[0]` to the NUL ending `argv[argc - 1]` is not
     inside the kernel's span of the arguments, `arg_start` to `arg_end`
     (`/proc/self/stat`, fields 48 and 49). That happens when an earlier
@@ -179,7 +191,8 @@ So a program that only reads the title behaves as natively, and one that
 sets it gets `ENOBUFS` where native writes it: a difference of the
 translator that leaves the feature off (leanrs refuses `setProcessTitle` at
 translation, DV2). The cases that set a title expect native's outcome, so
-`tests/io2_cases.rs` checks their twins only with `proc-title`;
+`tests/io2_cases.rs` and `tests/io_cases.rs` (`title_fd_limit`) check their
+twins only with `proc-title`;
 `uvsys/title_via_loader` passes in both builds, since its alternative
 (LQ1-01) is that `ENOBUFS`.
 
@@ -195,7 +208,7 @@ All are in `src/io/argv_title.rs`:
   `copy_nonoverlapping(image.as_ptr(), start, cap)`.
 - **U4.** `copy_and_repoint` writes each entry of the table:
   `argv[i] = copy`.
-- The constructor itself: a `#[used] #[link_section = ".init_array"]`
+- The constructor itself: a `#[used] #[link_section = ".init_array.00100"]`
   static, and its call of `setup_args`.
 
 The unit tests in the same file make `Region`s over blocks of their own,
@@ -232,10 +245,46 @@ and repoint a table of their own, under the same contracts.
   same way: in a program's executable, where alone the crate writes, the
   generated `main` hands `argv` to `uv_setup_args`, which trusts it
   entirely.
+- **G4. The order of the constructors** (AR-20). The constructor's section
+  is `.init_array.00100`. The linkers put the input sections
+  `.init_array.N` first, by increasing priority N, then the plain
+  `.init_array` sections, in link order: GNU ld's default script
+  (`KEEP (*(SORT_BY_INIT_PRIORITY(.init_array.*) ...))`, then
+  `KEEP (*(.init_array ...))`), gold and lld alike. glibc calls the
+  executable's entries in that order (`call_init` in `csu/libc-start.c`).
+  So in the executable the constructor runs:
+  - after the entries with a lower priority, the toolchain's own: on
+    aarch64, compiler-rt's detection of the CPU's features,
+    `init_have_lse_atomics` and `__init_cpu_features` (90, in std's
+    compiler-builtins; libgcc has the same at 90), libstdc++'s streams
+    (90, when linked), and std's record of `argc` and `argv` (99). GCC
+    reserves the priorities 0 to 100 for the implementation; the toolchain
+    uses 90 and 99 of them, and the crate, the runtime of the program, 100;
+  - before the entries with a priority above 100 and the plain ones: every
+    translator's startup constructor (lean2rr's and the test glue's in
+    `tests/io_cases.rs` are plain), C and C++ constructors without a
+    priority, and crtbegin's `frame_dummy` (which std's 99 precedes too; on
+    Linux the unwinder finds the frames through `PT_GNU_EH_FRAME`, not
+    through it).
+
+  The limits. Some code still runs before it: the executable's
+  `.preinit_array`; the constructors of every shared library, preloaded
+  (`LD_PRELOAD`) or a dependency (`_dl_init` runs them before
+  `__libc_start_main` calls the executable's); and an entry of the
+  executable with a priority below 100, or of 100 placed before it by link
+  order. Such code may start a thread or take descriptors, which the checks
+  see (the crate then keeps nothing); the proof does not depend on the
+  order. A process that starts with fewer than two free descriptors keeps
+  nothing either, where native writes the title. The constructor allocates
+  (the copies, the `/proc` reads), so the program's global allocator must
+  work before the program's other constructors run, as glibc's `malloc` and
+  mimalloc do.
 
 The checks make the rest hold: the program's executable before `main`,
 one thread while the table is read and written, and a write that stays
-inside the kernel's span.
+inside the kernel's span. G4 decides only whether the title is written
+when other startup code takes descriptors; no invariant below depends on
+it.
 
 ### The invariants the crate maintains
 
@@ -339,12 +388,25 @@ memory belongs to the process, not to a thread.
   `rustc` rlibs linked by `rustc` (lean2rr's leanrt is a plain-rustc rlib
   over the cargo-built crate); and a static library linked into a C `main`
   by `cc`. With the reference removed, these builds kept the constructor
-  too; the reference makes it a guarantee. In a `cdylib` that a C host
+  too; the reference makes it a guarantee. Rechecked for AR-20
+  (2026-10-04), each with a startup constructor of its own (plain
+  `.init_array`, or a C constructor without a priority) that opens eight
+  descriptors: the binaries' `.init_array` lists the toolchain's entries,
+  std's `argv` record, the crate's constructor, `frame_dummy`, then the
+  startup constructor, and under `ulimit -n 12` each writes the title. With
+  GNU ld 2.42 for the four builds, and with gold 1.16 and LLD 23.1 (rust-lld)
+  for the plain-`rustc` one. In a `cdylib` that a C host
   loads with `dlopen`, the title functions fail with `ENOBUFS`, and the
   host's `/proc/self/cmdline` and `argv` stay unchanged. Started through
   the dynamic loader, a program keeps no arguments' memory (LQ1-01). leanrs
   also checked a fat-LTO, one-codegen-unit, `panic=abort`,
   `--gc-sections` build.
+- The case `uvsys/title_fd_limit` (AR-20: `ulimit -n 12`, native writes the
+  title) through its twin in `tests/io_cases.rs`, whose startup
+  constructor opens native's startup descriptors in plain `.init_array`, as
+  a translator's does; checked with `proc-title` only. With the crate's
+  constructor in plain `.init_array` (before AR-20), the twin fails:
+  `/proc/self/cmdline` keeps the arguments.
 - The unit tests in `argv_title.rs`: `cap`, the copy, the NUL fill and the
   cut on a block laid out as the kernel lays out the arguments; a table
   that skips a string (libuv's rule; such a table comes from a launch

@@ -33,7 +33,7 @@
 //! rustix (`super::sys`), the modelled `errno` instead of C's, reads into the
 //! caller's `&mut [u8]`.
 
-use super::error::{errno, set_errno, EAGAIN, EBADF, EINVAL, EPIPE, ESPIPE};
+use super::error::{errno, set_errno, EAGAIN, EBADF, EINVAL, ENOMEM, EPIPE, ESPIPE};
 use super::handle::FsMode;
 use super::sys::{Fd, ReadDest, VecDest};
 use super::ByteSink;
@@ -1000,6 +1000,18 @@ impl CFile {
     /// an error), each byte appended to `out`; then an error indicator (set
     /// now or by any earlier failure) is `Err(errno)`, and the caller drops the
     /// bytes appended (Lean loses the line); otherwise end of file is cleared.
+    ///
+    /// **A sink that stops** ([`ByteSink::stopped`]; AR-19): `get_line` asks
+    /// the sink before each read of the descriptor and once the line is
+    /// complete. Once the sink has stopped, `get_line` reads no further and
+    /// returns `Err(ENOMEM)`; the bytes it took from the stream stay consumed
+    /// (the sink dropped them), and the indicators and the modelled `errno`
+    /// are left as they were. The glue, whose sink stopped, then ends the
+    /// process with its out-of-memory report. Natively
+    /// `std::string::push_back` throws `std::bad_alloc`, which nothing
+    /// catches: libc++ prints `terminating due to uncaught exception of type
+    /// std::bad_alloc` and aborts (status 134). With a sink that never stops
+    /// (the default), the bytes and the system calls are those of before.
     pub fn get_line<S: ByteSink + ?Sized>(&mut self, out: &mut S) -> Result<(), i32> {
         loop {
             // The bytes in the get area, up to a newline, in one copy.
@@ -1017,6 +1029,11 @@ impl CFile {
                     }
                 }
             }
+            // A line without end (stdin from `/dev/zero`) is not read on
+            // into a sink that drops it.
+            if out.stopped() {
+                return Err(ENOMEM);
+            }
             let c = self.uflow();
             if c == EOF {
                 break;
@@ -1025,6 +1042,10 @@ impl CFile {
             if c == b'\n' as i32 {
                 break;
             }
+        }
+        // the sink may have dropped the line's last bytes
+        if out.stopped() {
+            return Err(ENOMEM);
         }
         if self.flags & ERR_SEEN != 0 {
             return Err(errno());

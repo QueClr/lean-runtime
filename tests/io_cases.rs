@@ -23,8 +23,16 @@
 //! and then, as a translator's ELF constructor does, opens native Lean's
 //! startup descriptors (`io::startup`) before Rust's runtime starts, so that
 //! closed standard descriptors are taken as natively.
+//!
+//! With the feature `proc-title`, the crate's own constructor
+//! (`io::argv_title`, priority 100) runs before that one (plain
+//! `.init_array`), as `lean_setup_args` runs before libuv opens its
+//! descriptors natively: the twin of `uvsys/title_fd_limit` (AR-20) writes
+//! the title when the startup descriptors leave one descriptor free. Without
+//! the feature, `setProcessTitle` fails with `ENOBUFS`, so that twin
+//! ([`NEED_PROC_TITLE`]) is not checked.
 
-use lean_runtime::io::{debug, env, exit, fs as lfs, startup, FsMode, Handle, IoError};
+use lean_runtime::io::{debug, env, exit, fs as lfs, startup, uvsys, FsMode, Handle, IoError};
 
 // ---- the glue a translator adds ----
 
@@ -780,6 +788,33 @@ fn startup_rings(args: &[String]) -> R<()> {
     println(&format!("args: {}", args.len()))
 }
 
+/// The case `uvsys/title_fd_limit` (AR-20): under `ulimit -n 12`, this
+/// binary's startup constructor leaves one descriptor free, and the title is
+/// still written, since the crate's constructor ran before it and found
+/// descriptors for its checks.
+fn title_fd_limit(args: &[String]) -> R<()> {
+    let mut fds: Vec<u64> = Vec::new();
+    lfs::read_dir(b"/proc/self/fd", |n| {
+        if let Some(v) = std::str::from_utf8(n).ok().and_then(|t| t.parse().ok()) {
+            fds.push(v)
+        }
+    })?;
+    fds.sort();
+    let list: Vec<String> = fds.iter().map(|n| n.to_string()).collect();
+    println(&format!("open at startup: #[{}]", list.join(", ")))?;
+    let title = args.first().map_or("none", |a| a.as_str());
+    uvsys::set_process_title(title.as_bytes())?;
+    let mut now = Vec::new();
+    uvsys::get_process_title(&mut now)?;
+    println(&format!("title: {}", String::from_utf8_lossy(&now)))?;
+    let c = read_file("/proc/self/cmdline")?;
+    println(&format!(
+        "cmdline starts with the title: {}",
+        c.starts_with(title)
+    ))?;
+    println(&format!("args: [{}]", args.join(", ")))
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -811,7 +846,13 @@ const TWINS: &[(&str, Twin)] = &[
     ("allocprof", allocprof),
     ("startup_rings", startup_rings),
     ("random_open_first", random_open_first),
+    ("title_fd_limit", title_fd_limit),
 ];
+
+/// The twins of the cases that set the process title and expect native's
+/// outcome, where the title is written: checked only with the feature
+/// `proc-title` (without it, `setProcessTitle` fails with `ENOBUFS`).
+const NEED_PROC_TITLE: &[&str] = &["title_fd_limit"];
 
 /// The twin named by `argv[0]`'s file name, if any.
 fn twin_name(argv0: &[u8]) -> Option<&'static str> {
@@ -863,17 +904,28 @@ fn main() {
         return;
     }
     let root = env!("CARGO_MANIFEST_DIR");
+    let ids: Vec<&str> = TWINS
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| cfg!(feature = "proc-title") || !NEED_PROC_TITLE.contains(id))
+        .collect();
+    if !cfg!(feature = "proc-title") {
+        println!(
+            "io_cases: without the feature proc-title, not checked: {}",
+            NEED_PROC_TITLE.join(", ")
+        );
+    }
     let exe = std::env::current_exe().expect("test binary path");
     let dir = std::env::temp_dir().join(format!("lean-runtime-twins-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for (id, _) in TWINS {
+    for id in &ids {
         std::os::unix::fs::symlink(&exe, dir.join(id)).unwrap();
     }
     let status = std::process::Command::new("python3")
         .arg(format!("{root}/scripts/cases.py"))
         .args(["check", "--exe-dir"])
         .arg(&dir)
-        .args(TWINS.iter().map(|(id, _)| *id))
+        .args(&ids)
         .env("LEAN_RUNTIME_NO_CAP", "1")
         .status()
         .expect("python3 scripts/cases.py");

@@ -505,7 +505,11 @@ impl Handle {
     /// `Handle.getLine` (`lean_io_prim_handle_get_line`): the bytes up to and
     /// including the first `\n` (or to end of file) appended to `out`. On
     /// `Err` the caller drops what was appended, as Lean loses the line. The
-    /// caller decodes the bytes as Lean's `mk_string` does (lossily).
+    /// caller decodes the bytes as Lean's `mk_string` does (lossily). Once
+    /// `out` has stopped ([`ByteSink::stopped`]), it reads no further and
+    /// returns `ENOMEM`'s error (`resource exhausted`), which the glue does
+    /// not use: it ends the process with its out-of-memory report
+    /// ([`super::cfile::CFile::get_line`]; AR-19).
     #[inline]
     pub fn get_line<S: ByteSink + ?Sized>(&self, out: &mut S) -> Result<(), IoError> {
         self.file().get_line(out).map_err(os)

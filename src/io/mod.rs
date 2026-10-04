@@ -179,15 +179,22 @@ pub trait ByteSink {
 
     /// Whether the sink has stopped taking bytes (its storage could not
     /// grow): it drops the bytes of every later `extend_from_slice`, and the
-    /// glue ends the process with Lean's `INTERNAL PANIC: out of memory` once
-    /// the call returns. False by default.
+    /// glue ends the process with its out-of-memory report once the call
+    /// returns. False by default.
     ///
-    /// Read by [`process::output`], which reads another process without
-    /// bound: it then stops reading and returns at once, as native's process
-    /// ends in the failed allocation (AR-5). The other functions that append
-    /// to a sink ignore it: their results are bounded (a path, a name, an
-    /// environment value), or the sink is infallible in both translators
-    /// (`getLine`'s).
+    /// The two functions that append without bound read it, and once it is
+    /// true they read no further and return at once with `ENOMEM`'s error
+    /// (`resource exhausted`), which the glue does not use:
+    /// - [`process::output`], which reads another process's pipes to their
+    ///   end (AR-5). Natively the growing `ByteArray`'s allocation fails, and
+    ///   Lean ends the process with `INTERNAL PANIC: out of memory`.
+    /// - [`Handle::get_line`], whose line may never end (stdin from
+    ///   `/dev/zero`; AR-19). Natively the `std::string` it grows throws
+    ///   `std::bad_alloc`, which nothing catches: an abort.
+    ///
+    /// The other functions append one bounded result (a path, a name, an
+    /// environment value, the title) and return; the glue looks at the sink
+    /// once they have returned, as after every call.
     #[inline]
     fn stopped(&self) -> bool {
         false

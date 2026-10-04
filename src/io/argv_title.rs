@@ -45,6 +45,22 @@
 //! memory. Each `setProcessTitle` then writes that memory exactly as libuv's
 //! `memcpy` and `memset` leave it ([`write`]).
 //!
+//! **When it runs** (AR-20). The generated `main` calls `lean_setup_args`
+//! before the rest of Lean's startup, so before libuv's startup descriptors
+//! open. The constructor is in the section `.init_array.00100`, not in plain
+//! `.init_array`: the linkers put the entries with a priority first, by
+//! increasing priority, then the plain ones, and glibc calls the
+//! executable's entries in that order. So it runs after the toolchain's own
+//! (priority 90: the detection of the aarch64 CPU's features, by compiler-rt
+//! or libgcc, and libstdc++'s streams; 99: std's record of `argc` and
+//! `argv`), and before the executable's other constructors, with a priority
+//! above 100 or none. Among those are the translators' startup
+//! constructors, which open libuv's eight startup descriptors: under
+//! `ulimit -n 12` one descriptor is left after them, and the checks below
+//! need two (`/proc/self/task` and a task's `stat` are open together).
+//! Shared libraries' constructors and `.preinit_array` still run before it
+//! (`docs/native-quirks.md`, G4).
+//!
 //! In a shared library (also one loaded by `dlopen` after `main`) the
 //! constructor reads nothing and keeps "no arguments", so the title functions
 //! fail with `ENOBUFS`, as natively, where only a program's generated `main`
@@ -370,6 +386,12 @@ unsafe fn setup_args(argc: c_int, argv: *mut *mut c_char, code: usize) {
 /// `argc`, `argv` and `envp` (`call_init` in `csu/libc-start.c` for the
 /// program, `_dl_init` for a library); musl calls them with none, hence
 /// glibc only. Not under Miri, which has no process arguments' memory.
+///
+/// Its section `.init_array.00100` makes it the executable's first
+/// constructor after the toolchain's own (priorities 90 and 99), before
+/// every constructor with a higher priority or none, such as the
+/// translators' startup descriptors (AR-20; the module comment, "When it
+/// runs").
 #[cfg(all(target_os = "linux", target_env = "gnu", not(miri)))]
 mod constructor {
     use std::ffi::{c_char, c_int};
@@ -385,9 +407,11 @@ mod constructor {
         unsafe { super::setup_args(argc, argv, (hand_in_arguments as *const ()).addr()) }
     }
 
-    /// Referred to by [`super::keep_constructor`].
+    /// Referred to by [`super::keep_constructor`]. Priority 100: after the
+    /// toolchain's constructors (std's own `argv` record is 99), before the
+    /// program's (AR-20).
     #[used]
-    #[link_section = ".init_array"]
+    #[link_section = ".init_array.00100"]
     pub(super) static HAND_IN_ARGUMENTS: extern "C" fn(c_int, *mut *mut c_char, *mut *mut c_char) =
         hand_in_arguments;
 }

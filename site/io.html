@@ -103,6 +103,8 @@ Small writes collect in the buffer; a write larger than the buffer goes out dire
   <li><code>read_uninit</code> fills the caller's own uninitialized storage, with no zero pass.
     <code>read</code> fills initialized bytes; <code>read_vec</code> grows a <code>Vec</code> as the bytes come.</li>
   <li>An unbounded result (a line, a path, an environment value) is appended to the caller's <a href="glossary.html#g-bytesink">ByteSink</a>.</li>
+  <li>A sink can stop when its storage cannot grow.
+    Then <code>getLine</code> and <code>IO.Process.output</code> read no more and return, and the glue ends the process (AR-5, AR-19).</li>
 </ul>
 </div>
 
@@ -366,6 +368,9 @@ Without it, the crate has no <code>unsafe</code> code, and the title functions d
 <ul>
   <li>The file has its own ELF constructor, so no glue takes part.
     glibc calls it with <code>main</code>'s <code>argc</code> and <code>argv</code>, before <code>main</code> (glibc only: musl passes no arguments).</li>
+  <li>The constructor has the priority 100 (<code>.init_array.00100</code>).
+    So it runs before the translators' startup constructors, which open libuv's descriptors (AR-20).
+    Natively, <code>lean_setup_args</code> also runs before libuv opens them.</li>
   <li>The constructor checks what it would write.
     In a shared library it writes nothing, and the title functions fail with <code>ENOBUFS</code>, as natively.
     A program started through the dynamic loader (<code>ld.so ./prog</code>) also writes nothing: a judged deviation (LQ1-01), since natively the title is written.

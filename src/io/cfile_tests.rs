@@ -352,3 +352,103 @@ fn rsio12_partial_nowait_flush_then_close_keeps_every_byte() {
         15 * 4096 + 8000 - got
     );
 }
+
+/// A sink that stops once it would hold more than `cap` bytes, as a glue's
+/// fallible sink whose reservation failed (lean2rr's and leanrs's); it
+/// counts every byte offered to it, kept or dropped.
+struct StopsAfter {
+    v: Vec<u8>,
+    cap: usize,
+    stopped: bool,
+    offered: usize,
+}
+
+impl StopsAfter {
+    fn new(cap: usize) -> Self {
+        StopsAfter {
+            v: Vec::new(),
+            cap,
+            stopped: false,
+            offered: 0,
+        }
+    }
+}
+
+impl ByteSink for StopsAfter {
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        self.offered += bytes.len();
+        if self.stopped {
+            return;
+        }
+        if self.v.len() + bytes.len() > self.cap {
+            self.stopped = true;
+            self.v = Vec::new();
+            return;
+        }
+        self.v.extend_from_slice(bytes);
+    }
+
+    fn stopped(&self) -> bool {
+        self.stopped
+    }
+}
+
+/// AR-19: a line that never ends (stdin from `/dev/zero`), read into a sink
+/// that stops after `cap` bytes. `getLine` reads no further once the sink
+/// has stopped, at most one buffer after the stop, and returns `ENOMEM`'s
+/// error; before AR-19 it read and dropped zero bytes for good. The call runs
+/// on a thread, so that a regression fails the test instead of hanging it.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn get_line_stops_with_its_sink() {
+    const CAP: usize = 100_000;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let zero: OwnedFd = std::fs::File::open("/dev/zero").unwrap().into();
+        let h = Handle::fdopen(zero, FsMode::Read);
+        let mut sink = StopsAfter::new(CAP);
+        let r = h.get_line(&mut sink);
+        let _ = tx.send((r, sink.stopped, sink.offered, sink.v.len()));
+    });
+    let (r, stopped, offered, kept) = rx
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("getLine returns once its sink has stopped");
+    assert_eq!(
+        r,
+        Err(IoError::ResourceExhausted(
+            None,
+            12,
+            "not enough memory".to_owned()
+        ))
+    );
+    assert!(stopped);
+    assert_eq!(kept, 0);
+    assert!(
+        offered > CAP && offered <= CAP + BUFSIZ,
+        "{offered} bytes offered"
+    );
+}
+
+/// AR-19: a sink that stops on the bytes that end the line still makes
+/// `get_line` fail with `ENOMEM`, the modelled `errno` untouched; the bytes
+/// it took stay consumed, and the next line reads as usual. A sink that
+/// does not stop gets the line it got before.
+#[test]
+fn get_line_stop_on_the_line_end() {
+    let (r, w) = pipe();
+    rustix::io::write(&w, b"abcdef\nnext\nlast\n").unwrap();
+    drop(w);
+    let mut f = CFile::fdopen(r, FsMode::Read);
+    set_errno(0);
+    let mut sink = StopsAfter::new(3);
+    assert_eq!(f.get_line(&mut sink), Err(ENOMEM));
+    // `a` from the refill, then `bcdef\n` from the buffer
+    assert_eq!((sink.stopped, sink.offered), (true, 7));
+    assert_eq!(errno(), 0);
+    let mut line = Vec::new();
+    f.get_line(&mut line).unwrap();
+    assert_eq!(line, b"next\n");
+    let mut sink = StopsAfter::new(5);
+    f.get_line(&mut sink).unwrap();
+    assert_eq!((sink.stopped, &sink.v[..]), (false, &b"last\n"[..]));
+}

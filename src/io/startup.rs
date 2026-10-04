@@ -28,7 +28,12 @@
 //!   Rust `main`; an entry that is not `lang_start` (lean2rr's) must do it
 //!   itself;
 //! - run an ELF constructor (`#[link_section = ".init_array"]`) that calls
-//!   [`open_native_descriptors`], and on `Err` [`fail_as_native`];
+//!   [`open_native_descriptors`], and on `Err` [`fail_as_native`]; in plain
+//!   `.init_array` or with a priority above 100, so that with the feature
+//!   `proc-title` the crate's own constructor (`.init_array.00100`) runs
+//!   first, as `lean_setup_args` runs before libuv's descriptors open (AR-20;
+//!   with a priority of 100 or less it may not, and under `ulimit -n 12` the
+//!   title's checks then find too few free descriptors);
 //! - call [`mark_end_initialization`] once the module initializers have run,
 //!   before `main`, as the generated `main` calls
 //!   `lean_io_mark_end_initialization` (also when an initializer failed).

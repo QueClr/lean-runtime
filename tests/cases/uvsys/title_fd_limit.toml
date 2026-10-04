@@ -1,0 +1,11 @@
+id = "title_fd_limit"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean2rr runtime switch step 3 review RST3-01 (AR-20): the shared runtime's title constructor ran after a translator's startup constructor and found too few free descriptors; libuv 1.48 uv_setup_args, called by lean_setup_args before the loop opens its descriptors"
+streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
+# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
+# outcome is what `check` accepts (DV2 names no Lean bug).
+# Host-dependent: recorded where libuv 1.48 makes its two io_uring rings (Linux 5.13 or later,
+# io_uring allowed); elsewhere native has two descriptors fewer at startup.
