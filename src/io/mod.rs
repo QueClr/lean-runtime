@@ -61,6 +61,7 @@ pub mod handle;
 mod sys;
 
 pub use error::IoError;
+pub use handle::{FsMode, Handle};
 
 /// A growable byte buffer a translator implements on its own object, so that
 /// an unbounded result is written straight into it (see the module comment).

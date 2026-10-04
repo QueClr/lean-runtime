@@ -1,3 +1,333 @@
-//! `IO.FS.Handle`: open modes, the standard streams, Lean's handle primitives, the open-handle list.
+//! `IO.FS.Handle`: open modes, the three standard streams, Lean's handle
+//! primitives (`lean_io_prim_handle_*` in Lean 4.34.0's `io.cpp`) and the
+//! list of open handles that the exit sequence walks.
 //!
-//! Filled in by the rest of the io-1 batch.
+//! A [`Handle`] is a glibc `FILE` ([`CFile`]): one of the standard streams
+//! (static, never closed, as Lean's persistent `stdin`, `stdout` and `stderr`
+//! handles), or a file this crate opened, closed (`fclose`) when the last
+//! clone of its `Handle` goes away, as Lean's handle finalizer closes it. A
+//! translator keeps one `Handle` inside its own external object and drops it
+//! when that object is freed, in its own order.
+//!
+//! Every primitive reports a failure as `decode_io_error(errno, nullptr)`
+//! does, without a file name; the opening reports it with the path. A stream
+//! lock poisoned by a panic is taken anyway (the model's state stays
+//! consistent between its steps).
+//!
+//! Sources: lean2rr's `runtime/leanrt/src/fs.rs` (`open_file`, the handle
+//! primitives, the open list in glibc's order) and `io.rs` (the standard
+//! streams, the courtesy flush of a line-buffered stdout); leanrs's
+//! `rt/leanrs_rt/src/io/handle.rs` (`FsMode`, the `Handle` and slot design,
+//! the tests in `tests/io_rows.rs`).
+
+use super::cfile::CFile;
+use super::error::{IoError, ENOMEM, EWOULDBLOCK};
+use super::{sys, ByteSink};
+use rustix::fd::OwnedFd;
+use rustix::fs::{FlockOperation, OFlags};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+
+/// Lean's `IO.FS.Mode` (`Init/System/IO.lean`), its constructors in Lean's
+/// order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FsMode {
+    Read,
+    Write,
+    WriteNew,
+    ReadWrite,
+    Append,
+}
+
+impl FsMode {
+    /// The mode of Lean's constructor index (0 to 4).
+    pub fn from_index(i: u8) -> Option<FsMode> {
+        Some(match i {
+            0 => FsMode::Read,
+            1 => FsMode::Write,
+            2 => FsMode::WriteNew,
+            3 => FsMode::ReadWrite,
+            4 => FsMode::Append,
+            _ => return None,
+        })
+    }
+
+    /// The `open` flags of `lean_io_prim_handle_mk`, `O_CLOEXEC` included.
+    fn open_flags(self) -> OFlags {
+        OFlags::CLOEXEC
+            | match self {
+                FsMode::Read => OFlags::RDONLY,
+                FsMode::Write => OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC,
+                FsMode::WriteNew => OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC | OFlags::EXCL,
+                FsMode::ReadWrite => OFlags::RDWR,
+                FsMode::Append => OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND,
+            }
+    }
+}
+
+/// glibc's `stdin`, `stdout` and `stderr`.
+pub(crate) static STDIN: Mutex<CFile> = Mutex::new(CFile::std(0));
+pub(crate) static STDOUT: Mutex<CFile> = Mutex::new(CFile::std(1));
+pub(crate) static STDERR: Mutex<CFile> = Mutex::new(CFile::std(2));
+
+/// A stream's lock, taken even if a panic poisoned it.
+#[inline]
+pub(crate) fn lock(m: &Mutex<CFile>) -> MutexGuard<'_, CFile> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// An open file: its `FILE`, unregistered and closed when the last `Handle`
+/// goes away.
+#[derive(Debug)]
+pub(crate) struct FileStream {
+    pub(crate) file: Mutex<CFile>,
+}
+
+/// The open files, oldest first: glibc's `_IO_list_all`, reversed (new
+/// streams are linked at its head, and the exit walks it from there).
+pub(crate) static OPEN: Mutex<Vec<Weak<FileStream>>> = Mutex::new(Vec::new());
+
+impl Drop for FileStream {
+    fn drop(&mut self) {
+        let me: *const FileStream = self;
+        {
+            let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(i) = open.iter().rposition(|w| std::ptr::eq(w.as_ptr(), me)) {
+                open.remove(i);
+            }
+        }
+        self.file
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .close();
+    }
+}
+
+/// The open files, newest first (the order of `_IO_flush_all` and
+/// `_IO_unbuffer_all`).
+pub(crate) fn open_files_newest_first() -> Vec<Arc<FileStream>> {
+    let open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+    open.iter().rev().filter_map(Weak::upgrade).collect()
+}
+
+/// `IO.FS.Handle`: a standard stream or an open file (see the module
+/// comment). Clones name the same stream.
+#[derive(Clone, Debug)]
+pub struct Handle(Repr);
+
+#[derive(Clone, Debug)]
+enum Repr {
+    Std(&'static Mutex<CFile>),
+    File(Arc<FileStream>),
+}
+
+/// `lean_alloc_sarray_would_overflow(1, n)`: a byte array of `n` bytes does
+/// not fit in memory with Lean's 24-byte header.
+#[inline]
+pub fn sarray_would_overflow(n: usize) -> bool {
+    n > usize::MAX - 24
+}
+
+/// `lean_io_prim_handle_read`'s first check, before the array is allocated:
+/// `n` bytes whose array would overflow is `ENOMEM` (`resourceExhausted`).
+/// A translator calls it, allocates `n` bytes in its own `ByteArray`, then
+/// calls [`Handle::read`] on them.
+pub fn check_read_size(n: usize) -> Result<(), IoError> {
+    if sarray_would_overflow(n) {
+        Err(IoError::decode_io_error(ENOMEM, None))
+    } else {
+        Ok(())
+    }
+}
+
+/// `decode_io_error(errno, nullptr)` of a primitive's failure.
+fn os(e: i32) -> IoError {
+    IoError::decode_io_error(e, None)
+}
+
+/// `_IO_new_file_underflow`'s courtesy flush: reading a line-buffered or
+/// unbuffered stream first writes a line-buffered stdout's pending output.
+/// (Never called with `STDOUT` locked: stdout cannot read.)
+pub(crate) fn flush_line_buffered_stdout() {
+    let mut out = lock(&STDOUT);
+    if out.is_line_buffered() {
+        let _ = out.flush_pending();
+    }
+}
+
+impl Handle {
+    /// glibc's `stdin` as a handle (`IO.getStdin`'s default stream).
+    pub fn stdin() -> Handle {
+        Handle(Repr::Std(&STDIN))
+    }
+
+    /// glibc's `stdout` as a handle.
+    pub fn stdout() -> Handle {
+        Handle(Repr::Std(&STDOUT))
+    }
+
+    /// glibc's `stderr` as a handle (unbuffered).
+    pub fn stderr() -> Handle {
+        Handle(Repr::Std(&STDERR))
+    }
+
+    /// `IO.FS.Handle.mk` (`lean_io_prim_handle_mk`): a path holding a NUL byte
+    /// is `mk_embedded_nul_error`; then `open` with the mode's flags,
+    /// `O_CLOEXEC` and permissions `0666`, whose failure is decoded with the
+    /// path, and `fdopen` with `"r"`, `"w"`, `"w"`, `"r+"` or `"a"`.
+    pub fn open(path: &[u8], mode: FsMode) -> Result<Handle, IoError> {
+        if path.contains(&0) {
+            return Err(IoError::embedded_nul(path));
+        }
+        match sys::open(path, mode.open_flags()) {
+            Ok(fd) => Ok(Handle::fdopen(fd, mode)),
+            Err(e) => Err(IoError::decode_io_error(e, Some(path))),
+        }
+    }
+
+    /// `fdopen(fd, mode)` and Lean's `io_wrap_handle`: a handle over a
+    /// descriptor opened elsewhere (a temporary file, a child's pipe), which
+    /// it owns and closes. It joins the open list, newest, as `fdopen` links
+    /// the new `FILE` into glibc's list.
+    pub fn fdopen(fd: OwnedFd, mode: FsMode) -> Handle {
+        Handle::register(CFile::fdopen(fd, mode))
+    }
+
+    /// A write-only handle over the non-blocking write end of a pipe whose
+    /// reader never reads, for the standard input of a child process that
+    /// could not start: a write into the full pipe fails with `EPIPE`
+    /// ([`CFile::fdopen_bounded_pipe`]). The caller sets `O_NONBLOCK` on `fd`.
+    pub fn fdopen_bounded_pipe(fd: OwnedFd) -> Handle {
+        Handle::register(CFile::fdopen_bounded_pipe(fd))
+    }
+
+    fn register(file: CFile) -> Handle {
+        let f = Arc::new(FileStream {
+            file: Mutex::new(file),
+        });
+        OPEN.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Arc::downgrade(&f));
+        Handle(Repr::File(f))
+    }
+
+    /// The handle's `FILE`, locked (`flockfile`).
+    #[inline]
+    pub fn file(&self) -> MutexGuard<'_, CFile> {
+        match &self.0 {
+            Repr::Std(m) => lock(m),
+            Repr::File(f) => lock(&f.file),
+        }
+    }
+
+    /// The open file behind the handle (`None` for a standard stream).
+    #[cfg(test)]
+    pub(crate) fn file_stream(&self) -> Option<&Arc<FileStream>> {
+        match &self.0 {
+            Repr::Std(_) => None,
+            Repr::File(f) => Some(f),
+        }
+    }
+
+    /// Whether two handles are the same stream.
+    pub fn ptr_eq(&self, other: &Handle) -> bool {
+        match (&self.0, &other.0) {
+            (Repr::Std(a), Repr::Std(b)) => std::ptr::eq(*a, *b),
+            (Repr::File(a), Repr::File(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// `Handle.putStr` (`lean_io_prim_handle_put_str`): `fwrite` of the
+    /// string's bytes.
+    #[inline]
+    pub fn put_str(&self, s: &[u8]) -> Result<(), IoError> {
+        self.file().put(s).map_err(os)
+    }
+
+    /// `Handle.write` (`lean_io_prim_handle_write`): `fwrite` of the bytes.
+    #[inline]
+    pub fn write(&self, b: &[u8]) -> Result<(), IoError> {
+        self.file().put(b).map_err(os)
+    }
+
+    /// `Handle.flush` (`lean_io_prim_handle_flush`): `fflush`.
+    pub fn flush(&self) -> Result<(), IoError> {
+        self.file().flush().map_err(os)
+    }
+
+    /// `Handle.read` (`lean_io_prim_handle_read`) into `out`, the `n` bytes
+    /// the caller allocated after [`check_read_size`]: `fread`, the count
+    /// read (0 at end of file, after `clearerr`). `n = 0` reads nothing.
+    /// LB-02: output pending on the handle is written first.
+    #[inline]
+    pub fn read(&self, out: &mut [u8]) -> Result<usize, IoError> {
+        if out.is_empty() {
+            return Ok(0);
+        }
+        self.file().read(out).map_err(os)
+    }
+
+    /// `Handle.getLine` (`lean_io_prim_handle_get_line`): the bytes up to and
+    /// including the first `\n` (or to end of file) appended to `out`. On
+    /// `Err` the caller drops what was appended, as Lean loses the line. The
+    /// caller decodes the bytes as Lean's `mk_string` does (lossily).
+    #[inline]
+    pub fn get_line<S: ByteSink + ?Sized>(&self, out: &mut S) -> Result<(), IoError> {
+        self.file().get_line(out).map_err(os)
+    }
+
+    /// `Handle.isEof` (`lean_io_prim_handle_is_eof`, `feof`).
+    pub fn is_eof(&self) -> bool {
+        self.file().is_eof()
+    }
+
+    /// `Handle.isTty` (`lean_io_prim_handle_is_tty`, `isatty`, errors
+    /// ignored).
+    pub fn is_tty(&self) -> bool {
+        self.file().is_tty()
+    }
+
+    /// `Handle.rewind` (`lean_io_prim_handle_rewind`, `fseek(fp, 0,
+    /// SEEK_SET)`). LB-09: a target inside the buffer is served from it.
+    pub fn rewind(&self) -> Result<(), IoError> {
+        self.file().rewind().map_err(os)
+    }
+
+    /// `Handle.truncate` (`lean_io_prim_handle_truncate`,
+    /// `ftruncate(fileno(fp), ftello(fp))`, without flushing).
+    pub fn truncate(&self) -> Result<(), IoError> {
+        self.file().truncate().map_err(os)
+    }
+
+    /// `Handle.lock` (`lean_io_prim_handle_lock`, `flock` with `LOCK_EX` or
+    /// `LOCK_SH`).
+    pub fn lock(&self, exclusive: bool) -> Result<(), IoError> {
+        let op = if exclusive {
+            FlockOperation::LockExclusive
+        } else {
+            FlockOperation::LockShared
+        };
+        self.file().flock(op).map_err(os)
+    }
+
+    /// `Handle.tryLock` (`lean_io_prim_handle_try_lock`, `flock` with
+    /// `LOCK_NB`): `false` when the lock is held elsewhere (`EWOULDBLOCK`).
+    pub fn try_lock(&self, exclusive: bool) -> Result<bool, IoError> {
+        let op = if exclusive {
+            FlockOperation::NonBlockingLockExclusive
+        } else {
+            FlockOperation::NonBlockingLockShared
+        };
+        match self.file().flock(op) {
+            Ok(()) => Ok(true),
+            Err(EWOULDBLOCK) => Ok(false),
+            Err(e) => Err(os(e)),
+        }
+    }
+
+    /// `Handle.unlock` (`lean_io_prim_handle_unlock`, `flock` with
+    /// `LOCK_UN`).
+    pub fn unlock(&self) -> Result<(), IoError> {
+        self.file().flock(FlockOperation::Unlock).map_err(os)
+    }
+}

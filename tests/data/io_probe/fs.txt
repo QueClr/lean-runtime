@@ -1,0 +1,73 @@
+mk nul: err InvalidArgument(Some("a\x00b"), 22, "string contains NUL bytes")
+mk missing: err NoFileOrDirectory("/nonexistent/x", 2, "no such file or directory")
+mk proc write: err PermissionDenied(Some("/proc/version"), 13, "permission denied")
+createDir tmp: err AlreadyExists(Some("/tmp"), 17, "file already exists")
+createDir missing parent: err NoFileOrDirectory("/nonexistent/x/y", 2, "no such file or directory")
+createDir nul: err InvalidArgument(Some("a\x00b"), 22, "string contains NUL bytes")
+removeFile missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+removeDir missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+removeDir full: err UnsatisfiedConstraints(39, "directory not empty")
+removeFile dir: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full"), 21, "illegal operation on a directory")
+rename missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing and/or /tmp/lean-runtime-io-probe/other", 2, "no such file or directory")
+rename nul: err InvalidArgument(Some("a\x00b"), 22, "string contains NUL bytes")
+rename nul2: err InvalidArgument(Some("a\x00b"), 22, "string contains NUL bytes")
+rename dir onto file: err InvalidArgument(Some("/tmp/lean-runtime-io-probe/full and/or /tmp/lean-runtime-io-probe/full/f"), 22, "invalid argument")
+hardLink missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+hardLink exists: err AlreadyExists(Some("/tmp/lean-runtime-io-probe/full/f"), 17, "file already exists")
+realPath missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "")
+realPath ok: ok /tmp/lean-runtime-io-probe/full/f
+realPath nul: err InvalidArgument(Some("a\x00b"), 22, "string contains NUL bytes")
+metadata missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+symlinkMetadata missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+metadata notdir: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full/f/g"), 20, "not a directory")
+metadata nul: err InvalidArgument(Some("a\x00b"), 22, "string contains NUL bytes")
+metadata file: ok size=1 type=IO.FS.FileType.file nsec<1e9=true
+metadata dir: ok type=IO.FS.FileType.dir
+readDir missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+readDir file: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full/f"), 20, "not a directory")
+readDir ok: ok [(/tmp/lean-runtime-io-probe/full, f)]
+chmod missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+setCurrentDir missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/missing", 2, "no such file or directory")
+setCurrentDir file: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full/f"), 20, "not a directory")
+dir read: err InappropriateType(None, 21, "illegal operation on a directory")
+dir readbytes: err InappropriateType(None, 21, "illegal operation on a directory")
+dir write: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full"), 21, "illegal operation on a directory")
+writeNew exists: err AlreadyExists(Some("/tmp/lean-runtime-io-probe/full/f"), 17, "file already exists")
+readWrite missing: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/rwmissing", 2, "no such file or directory")
+getLine seq: ok ["line1\n", "line2\n", "last", "", ""]
+read seq: ok [0, 3, 13, 0]
+write on read: err InvalidArgument(None, 9, "bad file descriptor")
+write on read flush: err InvalidArgument(None, 9, "bad file descriptor")
+read on write: err InvalidArgument(None, 9, "bad file descriptor")
+getLine on write: err InvalidArgument(None, 9, "bad file descriptor")
+getLine on append: err InvalidArgument(None, 9, "bad file descriptor")
+rw interleave: ok "2|ef\n|abXYef\n|Zhij\n"
+rw file: ok "abXYef\nZhij\n"
+truncate: ok "456789|0123"
+truncate write: ok "hello!"
+append: ok "abcdef"
+lock: ok [false, false, true, true, true]
+lock released at last use: ok true
+isTty file: ok false
+random 0: ok 0
+random 33: ok 33
+read overflow: err ResourceExhausted(None, 12, "not enough memory")
+stdout read: err InvalidArgument(None, 9, "bad file descriptor")
+stdin write: err InvalidArgument(None, 9, "bad file descriptor")
+stdout getLine: err InvalidArgument(None, 9, "bad file descriptor")
+stdout flush: ok ()
+removeDir notdir: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full/f"), 20, "not a directory")
+createDir file parent: err InappropriateType(Some("/tmp/lean-runtime-io-probe/full/f/x"), 20, "not a directory")
+realPath notdir: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/full/f/g", 2, "")
+hardLink ok: ok links=2 size=1
+symlinkMetadata link: ok type=IO.FS.FileType.symlink
+metadata link: ok type=IO.FS.FileType.file
+symlinkMetadata dangling: ok type=IO.FS.FileType.symlink
+metadata dangling: err NoFileOrDirectory("/tmp/lean-runtime-io-probe/dangling", 2, "no such file or directory")
+metadata other: ok type=IO.FS.FileType.other
+readDir lossy: ok [fffd len=1 bytes=3, 61 fffd 62 len=3 bytes=5]
+getLine lossy: ok [6f 6b a len=3 bytes=3, fffd 78 a len=3 bytes=5, fffd len=1 bytes=3]
+removeDir file: err InappropriateType(Some("/tmp/lean-runtime-io-probe/bytes.txt"), 20, "not a directory")
+rename ok: ok "moved"
+createDir ok: ok type=IO.FS.FileType.dir
+readBinFile: ok [111, 107, 10, 192, 128, 120, 10, 226, 130]

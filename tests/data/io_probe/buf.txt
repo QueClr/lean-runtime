@@ -1,0 +1,17 @@
+w3000: pipe=0 file=0 handle=0
+w4096: pipe=4096 file=4096 handle=4096
+w5000: pipe=4096 file=4096 handle=4096
+w10000: pipe=8192 file=8192 handle=8192
+w8192: pipe=8192 file=8192 handle=8192
+w8193: pipe=8192 file=8192 handle=8192
+w100 f w4096: pipe=100 file=100 handle=100
+w100 f w4097: pipe=4196 file=4196 handle=4196
+w100 f w8192: pipe=8292 file=8292 handle=8292
+w100 w4000: pipe=4096 file=4096 handle=4096
+w100 w3996: pipe=0 file=0 handle=0
+w100 w3997: pipe=4096 file=4096 handle=4096
+w4095 w1: pipe=0 file=0 handle=0
+w4095 w2: pipe=4096 file=4096 handle=4096
+w1 w8191: pipe=8192 file=8192 handle=8192
+w1 w8192: pipe=8192 file=8192 handle=8192
+w1 w12288: pipe=12288 file=12288 handle=12288
