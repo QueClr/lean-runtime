@@ -20,7 +20,7 @@
 //! startup descriptors (`io::startup`) before Rust's runtime starts, so that
 //! closed standard descriptors are taken as natively.
 
-use lean_runtime::io::{exit, fs as lfs, FsMode, Handle, IoError};
+use lean_runtime::io::{env, exit, fs as lfs, FsMode, Handle, IoError};
 
 // ---- the glue a translator adds ----
 
@@ -491,6 +491,49 @@ fn startup_closed_stdio(args: &[String]) -> R<()> {
     )
 }
 
+/// `IO.asTask (prio := .dedicated)`: a thread of its own.
+fn dedicated_task(body: impl FnOnce() -> R<()> + Send + 'static) -> std::thread::JoinHandle<R<()>> {
+    std::thread::spawn(body)
+}
+
+fn lock_blocked(args: &[String]) -> R<()> {
+    let f = args[0].clone();
+    write_file(&f, "")?;
+    let a = open(&f, FsMode::ReadWrite)?;
+    let b = open(&f, FsMode::ReadWrite)?;
+    a.lock(true)?;
+    let tb = b.clone();
+    let t = dedicated_task(move || {
+        tb.lock(true)?;
+        println("task: b locked")
+    });
+    env::sleep(nat(&args[1]) as u32);
+    b.put_str(b"x")?;
+    b.flush()?;
+    println("main: wrote through b while the task waits in b.lock")?;
+    a.unlock()?;
+    let _ = t.join().unwrap();
+    println(&format!("done; file {}", quote(&read_file(&f)?)))
+}
+
+fn lock_exit(args: &[String]) -> R<()> {
+    let f = args[0].clone();
+    write_file(&f, "")?;
+    let a = open(&f, FsMode::ReadWrite)?;
+    let b = open(&f, FsMode::ReadWrite)?;
+    a.lock(true)?;
+    let tb = b.clone();
+    let _t = dedicated_task(move || {
+        tb.lock(true)?;
+        println("task: b locked")
+    });
+    env::sleep(nat(&args[1]) as u32);
+    b.put_str(b"y")?;
+    println("main: exiting with the task still in b.lock")?;
+    let _held = (&a, &b);
+    exit::exit(0)
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -512,6 +555,8 @@ const TWINS: &[(&str, Twin)] = &[
     ("error_without_file_name", error_without_file_name),
     ("startup_fd_limit", startup_fd_limit),
     ("startup_closed_stdio", startup_closed_stdio),
+    ("lock_blocked", lock_blocked),
+    ("lock_exit", lock_exit),
 ];
 
 /// The twin named by `argv[0]`'s file name, if any.

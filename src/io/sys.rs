@@ -9,13 +9,18 @@
 use super::error::{set_errno, EINVAL};
 use rustix::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::mem::MaybeUninit;
+use std::sync::Arc;
 
 /// A stream's file descriptor: one of the standard ones (never closed by the
-/// crate), one a handle owns (closed with it), or none (after `fclose`).
-#[derive(Debug)]
+/// crate), one a handle owns (closed with it), or none (after `fclose`). An
+/// owned descriptor is shared (`Arc`), so that a call that may block, such as
+/// `flock`, runs on a clone taken under the stream's lock and released before
+/// the call (`fileno(fp)` takes no `FILE` lock natively); the descriptor
+/// closes when the last clone goes away.
+#[derive(Clone, Debug)]
 pub(crate) enum Fd {
     Std(u8),
-    Owned(OwnedFd),
+    Owned(Arc<OwnedFd>),
     Closed,
 }
 

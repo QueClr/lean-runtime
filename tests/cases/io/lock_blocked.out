@@ -1,0 +1,3 @@
+main: wrote through b while the task waits in b.lock
+task: b locked
+done; file "x"

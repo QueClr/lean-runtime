@@ -143,7 +143,7 @@ impl CFile {
     /// `"w"`, `"r+"`, `"a"`); the stream owns `fd` and closes it in
     /// [`CFile::close`].
     pub fn fdopen(fd: OwnedFd, mode: FsMode) -> CFile {
-        CFile::with(Fd::Owned(fd), mode_flags(mode))
+        CFile::with(Fd::Owned(std::sync::Arc::new(fd)), mode_flags(mode))
     }
 
     /// A write-only stream (mode `write`) over the non-blocking write end of a
@@ -894,9 +894,18 @@ impl CFile {
         self.fd.isatty()
     }
 
-    /// `flock(fileno(fp), op)` (`Handle.lock`, `tryLock`, `unlock`).
+    /// `flock(fileno(fp), op)`. It may block, and the caller holds the
+    /// stream meanwhile; `Handle::lock` & co. wait on [`CFile::descriptor`]'s
+    /// clone with the stream unlocked instead, as native takes no `FILE` lock.
     pub fn flock(&self, op: rustix::fs::FlockOperation) -> Result<(), i32> {
         self.fd.flock(op)
+    }
+
+    /// The descriptor, for a call that may block and needs no stream state
+    /// (`flock(fileno(fp), op)`): it stays open while the clone lives, and
+    /// the caller drops the stream's lock before the call.
+    pub(crate) fn descriptor(&self) -> Fd {
+        self.fd.clone()
     }
 
     /// `fclose`: write pending output, close the descriptor (errors ignored,

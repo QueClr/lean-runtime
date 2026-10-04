@@ -324,15 +324,24 @@ impl Handle {
         self.file().truncate().map_err(os)
     }
 
+    /// `flock(fileno(fp), op)`: natively it takes no `FILE` lock, so the
+    /// stream's lock is dropped before `flock`, which may block: other
+    /// operations on the handle, from other tasks, and the exit go on while a
+    /// task waits for the lock (review RIO1-01).
+    fn flock(&self, op: FlockOperation) -> Result<(), i32> {
+        let fd = self.file().descriptor();
+        fd.flock(op)
+    }
+
     /// `Handle.lock` (`lean_io_prim_handle_lock`, `flock` with `LOCK_EX` or
-    /// `LOCK_SH`).
+    /// `LOCK_SH`), waiting without holding the stream.
     pub fn lock(&self, exclusive: bool) -> Result<(), IoError> {
         let op = if exclusive {
             FlockOperation::LockExclusive
         } else {
             FlockOperation::LockShared
         };
-        self.file().flock(op).map_err(os)
+        self.flock(op).map_err(os)
     }
 
     /// `Handle.tryLock` (`lean_io_prim_handle_try_lock`, `flock` with
@@ -343,7 +352,7 @@ impl Handle {
         } else {
             FlockOperation::NonBlockingLockShared
         };
-        match self.file().flock(op) {
+        match self.flock(op) {
             Ok(()) => Ok(true),
             Err(EWOULDBLOCK) => Ok(false),
             Err(e) => Err(os(e)),
@@ -353,6 +362,6 @@ impl Handle {
     /// `Handle.unlock` (`lean_io_prim_handle_unlock`, `flock` with
     /// `LOCK_UN`).
     pub fn unlock(&self) -> Result<(), IoError> {
-        self.file().flock(FlockOperation::Unlock).map_err(os)
+        self.flock(FlockOperation::Unlock).map_err(os)
     }
 }

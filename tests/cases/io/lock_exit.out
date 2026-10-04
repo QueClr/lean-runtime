@@ -1,0 +1,3 @@
+main: exiting with the task still in b.lock
+exit 0
+y
