@@ -923,7 +923,7 @@ fn run(file: &str, text: &str, deviations: usize) {
     ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
 )]
 fn nat_rows() {
-    run("nat", include_str!("cases/nat/nat.rows.toml"), 11);
+    run("nat", include_str!("cases/nat/nat.rows.toml"), 15);
 }
 
 #[test]

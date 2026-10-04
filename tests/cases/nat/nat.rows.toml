@@ -11465,6 +11465,54 @@ lean_version = "4.34.0"
 source = "LB-11 and review RS2-01, RS2-03: an exponent of 2^32 or more whose result cannot be computed (bit_len(a) * e above the backend's MAX_BITS; here 2^64 bits or more, above every backend's) ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
+id = "nat/pow.2^62.2^32-1"
+area = "nat"
+fn = "Nat.pow"
+args = ["4611686018427387904", "4294967295"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "LB-05 (docs/lean-bugs.md): with an exponent below 2^32, a result above the backend's MAX_BITS (here above 2^37 bits, GMP's INT_MAX-limb cap) ends with INTERNAL PANIC: out of memory, exit 1, at once (semantics::nat::check_result_bits), where native's GMP raises SIGFPE, status 136; a backend whose MAX_BITS is larger ends the same way when the allocation fails"
+deviations = { lean2rr = "LB-05", leanrs = "LB-05" }
+native = { expected = "ends", stderr = "", code = 136 }
+
+[[row]]
+id = "nat/pow.2^64+1.2^32-1"
+area = "nat"
+fn = "Nat.pow"
+args = ["18446744073709551617", "4294967295"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "LB-05 (docs/lean-bugs.md): with an exponent below 2^32, a result above the backend's MAX_BITS (here above 2^37 bits, GMP's INT_MAX-limb cap) ends with INTERNAL PANIC: out of memory, exit 1, at once (semantics::nat::check_result_bits), where native's GMP raises SIGFPE, status 136; a backend whose MAX_BITS is larger ends the same way when the allocation fails"
+deviations = { lean2rr = "LB-05", leanrs = "LB-05" }
+native = { expected = "ends", stderr = "", code = 136 }
+
+[[row]]
+id = "nat/pow.2^200.2^32-1"
+area = "nat"
+fn = "Nat.pow"
+args = ["1606938044258990275541962092341162602522202993782792835301376", "4294967295"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "LB-05 (docs/lean-bugs.md): with an exponent below 2^32, a result above the backend's MAX_BITS (here above 2^37 bits, GMP's INT_MAX-limb cap) ends with INTERNAL PANIC: out of memory, exit 1, at once (semantics::nat::check_result_bits), where native's GMP raises SIGFPE, status 136; a backend whose MAX_BITS is larger ends the same way when the allocation fails"
+deviations = { lean2rr = "LB-05", leanrs = "LB-05" }
+native = { expected = "ends", stderr = "", code = 136 }
+
+[[row]]
+id = "nat/powlog2.2^64.2^32-1"
+area = "nat"
+fn = "fun a e => Nat.log2 (a ^ e)"
+args = ["18446744073709551616", "4294967295"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "LB-05 (docs/lean-bugs.md): with an exponent below 2^32, a result above the backend's MAX_BITS (here above 2^37 bits, GMP's INT_MAX-limb cap) ends with INTERNAL PANIC: out of memory, exit 1, at once (semantics::nat::check_result_bits), where native's GMP raises SIGFPE, status 136; a backend whose MAX_BITS is larger ends the same way when the allocation fails"
+deviations = { lean2rr = "LB-05", leanrs = "LB-05" }
+native = { expected = "ends", stderr = "", code = 136 }
+
+[[row]]
 id = "nat/log2.0"
 area = "nat"
 fn = "Nat.log2"
