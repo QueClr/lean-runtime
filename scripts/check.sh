@@ -19,10 +19,10 @@ TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
 FEATURE_SETS=("" "io,sched" "unsafe-fast" "io,sched,unsafe-fast")
 
 # Every test run has a deadline (LEAN_RUNTIME_TEST_TIMEOUT seconds, default
-# 3600), so a test that blocks fails the check instead of hanging it.
-timed() {
-  timeout "${LEAN_RUNTIME_TEST_TIMEOUT:-3600}" "$@"
-}
+# 3600), so a test that blocks fails the check instead of hanging it. It is
+# a program (`timeout`), not a shell function, since `capped` may exec its
+# command through systemd-run.
+TEST_TIMEOUT=(timeout "${LEAN_RUNTIME_TEST_TIMEOUT:-3600}")
 
 capped() {
   if [[ "${LEAN_RUNTIME_NO_CAP:-}" == 1 ]] || ! command -v systemd-run >/dev/null; then
@@ -44,13 +44,13 @@ fi
 for tc in "${TOOLCHAINS[@]}"; do
   for f in "${FEATURE_SETS[@]}"; do
     echo "== $tc test features=[${f}]"
-    capped timed cargo +"$tc" test --offline --quiet ${f:+--features "$f"}
+    capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --offline --quiet ${f:+--features "$f"}
     echo "== $tc clippy features=[${f}]"
     cargo +"$tc" clippy --offline --quiet --all-targets ${f:+--features "$f"} -- -D warnings
   done
   # Constant folding of libm calls happens only in optimized builds.
   echo "== $tc release test libm_folding"
-  capped timed cargo +"$tc" test --release --offline --quiet --test libm_folding
+  capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --release --offline --quiet --test libm_folding
   # A driver without cargo builds the dependency-free configurations with
   # plain rustc; `io` needs its dependencies' build scripts, so it is built
   # with cargo, offline and from Cargo.lock.
@@ -75,7 +75,7 @@ cargo +"$last" fmt --check
 if cargo +"$last" miri --version >/dev/null 2>&1; then
   for f in "" "unsafe-fast" "io,sched,unsafe-fast"; do
     echo "== miri features=[${f}]"
-    capped timed cargo +"$last" miri test --offline --quiet ${f:+--features "$f"}
+    capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet ${f:+--features "$f"}
   done
 else
   echo "warning: Miri is not installed for $last; skipped" >&2
