@@ -1402,7 +1402,10 @@ fn io_mono_clock() {
     assert!(b >= a + 5_000_000);
     assert!(b - a <= elapsed + 1_000_000_000);
     assert!(env::mono_ms_now() >= ms + 5);
-    // CLOCK_MONOTONIC counts from boot (DV10: Lean's origin), as /proc/uptime does
+    // CLOCK_MONOTONIC counts from boot (DV10: Lean's origin) without the time
+    // spent suspended, which /proc/uptime (CLOCK_BOOTTIME) counts, so it
+    // never exceeds the uptime read after it (review RIO1-07)
+    let mono = env::mono_nanos_now() as f64 / 1e9;
     let up: f64 = fs::read_to_string("/proc/uptime")
         .unwrap()
         .split_whitespace()
@@ -1410,7 +1413,44 @@ fn io_mono_clock() {
         .unwrap()
         .parse()
         .unwrap();
-    assert!((env::mono_nanos_now() as f64 / 1e9 - up).abs() < 5.0);
+    assert!(
+        mono > 0.0 && mono <= up + 0.5,
+        "monotonic {mono} s, uptime {up} s"
+    );
+}
+
+/// `fail_as_native` ends the process as native Lean's startup does: SIGSEGV
+/// (139) after a failed loop, though Rust's std has a SIGSEGV handler that
+/// returns from the first raise (review RIO1-08); SIGABRT (134) at the signal
+/// lock. In children, without core dumps.
+#[test]
+fn io_startup_fail_as_native() {
+    use lean_runtime::io::startup::{fail_as_native, StartupFailure};
+    use std::os::unix::process::ExitStatusExt;
+    match child_case().as_deref() {
+        Some("loop") => fail_as_native(StartupFailure::LoopInit),
+        Some("lock") => fail_as_native(StartupFailure::SignalLock),
+        _ => {}
+    }
+    for (case, signal) in [("loop", 11), ("lock", 6)] {
+        let exe = std::env::current_exe().expect("test binary path");
+        let out = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "ulimit -c 0; exec \"$0\" io_startup_fail_as_native --exact --nocapture",
+            ])
+            .arg(&exe)
+            .env(CHILD_VAR, case)
+            .stdin(Stdio::null())
+            .output()
+            .expect("child");
+        assert_eq!(
+            out.status.signal(),
+            Some(signal),
+            "{case}: {:?}",
+            out.status
+        );
+    }
 }
 
 fn random(n: usize) -> Result<Vec<u8>, IoError> {

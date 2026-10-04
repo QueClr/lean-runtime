@@ -746,6 +746,10 @@ impl CFile {
             }
             if !unflushed {
                 adj -= self.re as i64 - self.rp as i64;
+            } else if self.flags & IS_APPENDING != 0 {
+                // glibc: in append mode the end of the read area is not the
+                // file offset; the write base is (review RIO1-09)
+                adj += self.wp as i64 - self.wb as i64;
             } else {
                 adj += self.wp as i64 - self.re as i64;
             }

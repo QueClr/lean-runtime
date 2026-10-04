@@ -141,11 +141,16 @@ fn open_all() -> Result<Descriptors, StartupFailure> {
 }
 
 /// End the process as native Lean's startup does on `failure`: `abort()`
-/// (SIGABRT) for the signal lock, a crash by SIGSEGV for a failed loop
-/// (raised here; if a handler returns from it, `abort()`).
+/// (SIGABRT) for the signal lock, a crash by SIGSEGV for a failed loop.
+/// SIGSEGV is raised twice: Rust's std installs a SIGSEGV handler (its stack
+/// overflow report) that, for a fault outside a guard page, restores the
+/// default action and returns, so the second raise kills the process (review
+/// RIO1-08); `abort()` only if a handler returns from both.
 pub fn fail_as_native(failure: StartupFailure) -> ! {
     if failure == StartupFailure::LoopInit {
-        let _ = nix::sys::signal::raise(nix::sys::signal::Signal::SIGSEGV);
+        for _ in 0..2 {
+            let _ = nix::sys::signal::raise(nix::sys::signal::Signal::SIGSEGV);
+        }
     }
     std::process::abort()
 }
