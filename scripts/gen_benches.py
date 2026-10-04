@@ -483,16 +483,26 @@ def int_out(e):
     return f"int_unbox(int_res({e})) as u64"
 
 
+def nat_call(f, args):
+    call = f"nat::{f}({args})"
+    return f"nat_ok({call})" if f in ("add", "mul", "succ") else call
+
+
+def int_call(f, args):
+    call = f"int::{f}({args})"
+    return f"int_ok({call})" if f in ("add", "sub", "mul", "neg_succ_of_nat") else call
+
+
 for f, lean, args in [("add", "{0} + {1}", ("a30", "b30")), ("sub", "{0} - {1}", ("a30", "b30")),
                       ("mul", "{0} * {1}", ("a30", "b30")), ("div", "{0} / {1}", ("a62", "b8")),
                       ("rem", "{0} % {1}", ("a62", "b8")), ("gcd", "Nat.gcd {0} {1}", ("a30", "b30")),
                       ("land", "{0} &&& {1}", ("a62", "b62")), ("lor", "{0} ||| {1}", ("a62", "b62")),
                       ("lxor", "{0} ^^^ {1}", ("a62", "b62")),
                       ("shiftr", "{0} >>> {1}", ("a62", "s127"))]:
-    add(f"nat_{f}", f"nat::{f}", NONE, nat_out(f"nat::{f}({rn(args[0])}, {rn(args[1])})"),
+    add(f"nat_{f}", f"nat::{f}", NONE, nat_out(nat_call(f, f"{rn(args[0])}, {rn(args[1])}")),
         "(" + lean.format(ln_(args[0]), ln_(args[1])) + ").toUInt64", note=NAT_NOTE)
 for f, lean, a in [("succ", "Nat.succ {0}", "a62"), ("pred", "Nat.pred {0}", "a62")]:
-    add(f"nat_{f}", f"nat::{f}", NONE, nat_out(f"nat::{f}({rn(a)})"),
+    add(f"nat_{f}", f"nat::{f}", NONE, nat_out(nat_call(f, rn(a))),
         "(" + lean.format(ln_(a)) + ").toUInt64", note=NAT_NOTE)
 add("nat_log2", "nat::log2", NONE, f"nat::log2(&{rn('a63')})", f"(Nat.log2 {ln_('a63')}).toUInt64",
     note=NAT_NOTE)
@@ -504,7 +514,7 @@ for f, lean, args in [("pow", "{0} ^ {1}", ("p4", "e4")), ("shiftl", "{0} <<< {1
         note=NAT_NOTE + "; native tests its exponent limit (2^32) first, which the crate lifts "
              "(LB-11, LB-12): its word path is the word helper")
 add("nat_div_exact", "nat::div_exact, nat::mul, nat::rem", NONE,
-    f"{{ let b = {NW['b8'][0]}; let a = nat_res(nat::mul({rn('a30')}, nat_arg(b))); "
+    f"{{ let b = {NW['b8'][0]}; let a = nat_res(nat_ok(nat::mul({rn('a30')}, nat_arg(b)))); "
     f"if nat::rem(nat_arg(a), nat_arg(b)).is_zero() "
     f"{{ nat_unbox(nat_res(nat::div_exact(nat_arg(a), nat_arg(b)))) }} else {{ 0 }} }}",
     f"(let b := {ln_('b8')}; let a := {ln_('a30')} * b; "
@@ -549,8 +559,9 @@ for f, lean, args in [("pow_small", "{0} ^ {1}", ("p4", "e4")),
 add("nat_log2_small", "nat::log2_small", NONE, f"nat::log2_small(nat_unbox({NW['a63'][0]}))",
     f"(Nat.log2 {ln_('a63')}).toUInt64", note=NAT_NOTE)
 add("nat_check_result_bits", "nat::check_result_bits", NONE,
-    "match nat::check_result_bits(u128::from(x >> 1) + 64) { Ok(b) => b, Err(p) => end(p) }",
-    "((x >>> 1) + 64)", comparable=False,
+    "match nat::check_result_bits::<ColdBig>(u128::from(x >> 28) + 64) { Ok(b) => b, "
+    "Err(p) => end(p) }",
+    "((x >>> 28) + 64)", comparable=False,
     reason="the size test of nat::pow and nat::shiftl on a big result; native has no "
            "counterpart (it refuses exponents and shifts of 2^32 or more instead, LB-11 and LB-12)",
     o12="by inspection: one comparison, made on the slow path of a big result only")
@@ -560,12 +571,12 @@ for f, lean, args in [("add", "{0} + {1}", ("a29", "b29")), ("sub", "{0} - {1}",
                       ("tdiv", "Int.tdiv {0} {1}", ("a29", "d8")),
                       ("tmod", "Int.tmod {0} {1}", ("a29", "d8")),
                       ("ediv", "{0} / {1}", ("a29", "d8")), ("emod", "{0} % {1}", ("a29", "d8"))]:
-    add(f"int_{f}", f"int::{f}", NONE, int_out(f"int::{f}({ri(args[0])}, {ri(args[1])})"),
+    add(f"int_{f}", f"int::{f}", NONE, int_out(int_call(f, f"{ri(args[0])}, {ri(args[1])}")),
         "(" + lean.format(li(args[0]), li(args[1])) + ").toInt64.toUInt64", note=INT_NOTE)
 add("int_neg", "int::neg", NONE, int_out(f"int::neg({ri('a29')})"),
     f"(-{li('a29')}).toInt64.toUInt64", note=INT_NOTE)
 add("int_div_exact", "int::div_exact, int::mul, int::emod", NONE,
-    f"{{ let b = {IW['d8'][0]}; let a = int_res(int::mul({ri('a15')}, int_arg(b))); "
+    f"{{ let b = {IW['d8'][0]}; let a = int_res(int_ok(int::mul({ri('a15')}, int_arg(b)))); "
     f"if int::emod(int_arg(a), int_arg(b)).is_zero() "
     f"{{ int_unbox(int_res(int::div_exact(int_arg(a), int_arg(b)))) as u64 }} else {{ 0 }} }}",
     f"(let b := {li('d8')}; let a := {li('a15')} * b; "
@@ -585,7 +596,7 @@ add("int_dec_nonneg", "int::dec_nonneg", NONE, f"int::dec_nonneg(&{ri('a29')}) a
 add("int_of_nat", "int::of_nat", NONE, int_out(f"int::of_nat::<ColdBig>({rn('n31')})"),
     f"(Int.ofNat {ln_('n31')}).toInt64.toUInt64", note="Nat words below 2^31, so the Int is a word")
 add("int_neg_succ_of_nat", "int::neg_succ_of_nat", NONE,
-    int_out(f"int::neg_succ_of_nat::<ColdBig>({rn('a30')})"),
+    int_out(f"int_ok(int::neg_succ_of_nat::<ColdBig>({rn('a30')}))"),
     f"(Int.negSucc {ln_('a30')}).toInt64.toUInt64", note="Nat words below 2^30, so the Int is a word")
 add("int_nat_abs", "int::nat_abs", NONE, nat_out(f"int::nat_abs({ri('a29')})"),
     f"(Int.natAbs {li('a29')}).toUInt64", note=INT_NOTE)

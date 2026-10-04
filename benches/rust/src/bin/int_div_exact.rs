@@ -22,10 +22,10 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(acc, {
             let b = int_box((((x >> 4) & 0xFF) as i64) - 128);
-            let a = int_res(int::mul(
+            let a = int_res(int_ok(int::mul(
                 int_arg(int_box(((x >> 48) as i64) - (1 << 15))),
                 int_arg(b),
-            ));
+            )));
             if int::emod(int_arg(a), int_arg(b)).is_zero() {
                 int_unbox(int_res(int::div_exact(int_arg(a), int_arg(b)))) as u64
             } else {

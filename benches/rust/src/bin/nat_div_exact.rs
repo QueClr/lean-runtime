@@ -22,7 +22,7 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(acc, {
             let b = nat_box((x >> 4) & 0xFF);
-            let a = nat_res(nat::mul(nat_arg(nat_box(x >> 34)), nat_arg(b)));
+            let a = nat_res(nat_ok(nat::mul(nat_arg(nat_box(x >> 34)), nat_arg(b))));
             if nat::rem(nat_arg(a), nat_arg(b)).is_zero() {
                 nat_unbox(nat_res(nat::div_exact(nat_arg(a), nat_arg(b))))
             } else {

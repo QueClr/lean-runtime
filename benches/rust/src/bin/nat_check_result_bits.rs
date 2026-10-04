@@ -22,7 +22,7 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(
             acc,
-            match nat::check_result_bits(u128::from(x >> 1) + 64) {
+            match nat::check_result_bits::<ColdBig>(u128::from(x >> 28) + 64) {
                 Ok(b) => b,
                 Err(p) => end(p),
             },

@@ -19,7 +19,10 @@ fn kernel(inp: &(), n: u64) -> u64 {
     let (mut x, mut acc) = (SEED, 0u64);
     for _ in 0..n {
         x = step(x);
-        acc = mix(acc, nat_unbox(nat_res(nat::succ(nat_arg(nat_box(x >> 2))))));
+        acc = mix(
+            acc,
+            nat_unbox(nat_res(nat_ok(nat::succ(nat_arg(nat_box(x >> 2)))))),
+        );
     }
     acc
 }

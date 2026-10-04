@@ -1,10 +1,10 @@
 # Row cases of area `nat` (format: tests/cases/README.md). Expected values
 # from native Lean 4.34.0 through scripts/oracle; rebuild them with
 # `scripts/gen_rows.py tests/cases/nat/nat.rows.toml`.
-# The LB-04, LB-11 and LB-12 rows (`deviations`) expect the definition's result, or
-# INTERNAL PANIC: out of memory for a result of 2^64 bits or more; `native` records
-# native's INTERNAL PANIC. The `(2 ^ K)` arguments are built by the oracle with shifts;
-# the `fun` rows show a result too big to print through its log2.
+# The LB-04, LB-11 and LB-12 rows (`deviations`) expect the definition's result;
+# `native` records native's INTERNAL PANIC. An uncomputable result ends as natively.
+# The `(2 ^ K)` arguments are built by the oracle with shifts; the `fun` rows show a
+# result too big to print through its log2.
 
 [[row]]
 id = "nat/add.0.0"
@@ -11420,11 +11420,9 @@ area = "nat"
 fn = "Nat.pow"
 args = ["2", "18446744073709551616"]
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
 lean_version = "4.34.0"
-source = "LB-11: a result of 2^64 bits or more is INTERNAL PANIC: out of memory at once (semantics::nat::check_result_bits): an exponent that is not a word, or a lower bound (bit_len(a) - 1) * e + 1 of 2^64 or more"
-deviations = { lean2rr = "LB-11", leanrs = "LB-11" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
+source = "LB-11 and review RS2-01, RS2-03: an exponent of 2^32 or more whose result cannot be computed (bit_len(a) * e above the backend's MAX_BITS; here 2^64 bits or more, above every backend's) ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
 id = "nat/pow.5.2^100"
@@ -11432,11 +11430,9 @@ area = "nat"
 fn = "Nat.pow"
 args = ["5", "1267650600228229401496703205376"]
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
 lean_version = "4.34.0"
-source = "LB-11: a result of 2^64 bits or more is INTERNAL PANIC: out of memory at once (semantics::nat::check_result_bits): an exponent that is not a word, or a lower bound (bit_len(a) - 1) * e + 1 of 2^64 or more"
-deviations = { lean2rr = "LB-11", leanrs = "LB-11" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
+source = "LB-11 and review RS2-01, RS2-03: an exponent of 2^32 or more whose result cannot be computed (bit_len(a) * e above the backend's MAX_BITS; here 2^64 bits or more, above every backend's) ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
 id = "nat/pow.2^8.2^63"
@@ -11444,11 +11440,9 @@ area = "nat"
 fn = "Nat.pow"
 args = ["256", "9223372036854775808"]
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
 lean_version = "4.34.0"
-source = "LB-11: a result of 2^64 bits or more is INTERNAL PANIC: out of memory at once (semantics::nat::check_result_bits): an exponent that is not a word, or a lower bound (bit_len(a) - 1) * e + 1 of 2^64 or more"
-deviations = { lean2rr = "LB-11", leanrs = "LB-11" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
+source = "LB-11 and review RS2-01, RS2-03: an exponent of 2^32 or more whose result cannot be computed (bit_len(a) * e above the backend's MAX_BITS; here 2^64 bits or more, above every backend's) ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
 id = "nat/pow.3.2^64-1"
@@ -11456,11 +11450,19 @@ area = "nat"
 fn = "Nat.pow"
 args = ["3", "18446744073709551615"]
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
 lean_version = "4.34.0"
-source = "LB-11: a result of 2^64 bits or more is INTERNAL PANIC: out of memory at once (semantics::nat::check_result_bits): an exponent that is not a word, or a lower bound (bit_len(a) - 1) * e + 1 of 2^64 or more"
-deviations = { lean2rr = "LB-11", leanrs = "LB-11" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
+source = "LB-11 and review RS2-01, RS2-03: an exponent of 2^32 or more whose result cannot be computed (bit_len(a) * e above the backend's MAX_BITS; here 2^64 bits or more, above every backend's) ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
+
+[[row]]
+id = "nat/powlog2.3.2^63"
+area = "nat"
+fn = "fun a e => Nat.log2 (a ^ e)"
+args = ["3", "9223372036854775808"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 1 }
+lean_version = "4.34.0"
+source = "LB-11 and review RS2-01, RS2-03: an exponent of 2^32 or more whose result cannot be computed (bit_len(a) * e above the backend's MAX_BITS; here 2^64 bits or more, above every backend's) ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
 id = "nat/log2.0"
@@ -11778,11 +11780,9 @@ area = "nat"
 fn = "Nat.shiftLeft"
 args = ["1", "18446744073709551616"]
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+ends = { stderr = "INTERNAL PANIC: Nat.shiftl exponent is too big\n", code = 1 }
 lean_version = "4.34.0"
-source = "LB-12: a result of 2^64 bits or more is INTERNAL PANIC: out of memory at once (semantics::nat::check_result_bits)"
-deviations = { lean2rr = "LB-12", leanrs = "LB-12" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.shiftl exponent is too big\n", code = 1 }
+source = "LB-12 and review RS2-03: a shift of 2^32 or more whose result cannot be computed ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
 id = "nat/shiftl.7.2^100"
@@ -11790,11 +11790,9 @@ area = "nat"
 fn = "Nat.shiftLeft"
 args = ["7", "1267650600228229401496703205376"]
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+ends = { stderr = "INTERNAL PANIC: Nat.shiftl exponent is too big\n", code = 1 }
 lean_version = "4.34.0"
-source = "LB-12: a result of 2^64 bits or more is INTERNAL PANIC: out of memory at once (semantics::nat::check_result_bits)"
-deviations = { lean2rr = "LB-12", leanrs = "LB-12" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.shiftl exponent is too big\n", code = 1 }
+source = "LB-12 and review RS2-03: a shift of 2^32 or more whose result cannot be computed ends with native's own INTERNAL PANIC, at once (semantics::nat::check_result_bits)"
 
 [[row]]
 id = "nat/shiftr.7.0"

@@ -22,10 +22,14 @@
 //! - `Nat.shiftRight` of an operand of 2^32 bits or more by 2^32 or more
 //!   (LB-04).
 //!
-//! A result that cannot exist in memory fails at once, before any
-//! computation: `pow` and `shiftl` give `INTERNAL PANIC: out of memory` when
-//! the result has 2^64 bits or more (`check_result_bits`). A smaller result
-//! that the machine cannot hold fails where the backend allocates it.
+//! Every rule whose result size is known before computing it (`add`,
+//! `succ`, `mul`, `pow`, `shiftl`) refuses a result larger than the
+//! backend's `BigNat::MAX_BITS` at once, before calling the backend
+//! (`check_result_bits`): `INTERNAL PANIC: Nat.pow exponent is too big` or
+//! `Nat.shiftl exponent is too big` when the exponent or shift is 2^32 or
+//! more (native's own end there), `INTERNAL PANIC: out of memory` otherwise.
+//! So every backend ends the same way at its own limit, and none is asked
+//! for a result it cannot hold.
 //!
 //! The `Nat` externs of 4.34.0 are `lean_nat_add`, `_sub`, `_mul`, `_div`,
 //! `_div_exact`, `_mod`, `_pow`, `_gcd`, `_log2`, `_land`, `_lor`, `_lxor`,
@@ -232,49 +236,57 @@ pub fn shiftr_small(a: u64, s: u64) -> u64 {
 
 // ------------------------------------------------------------------ the size of a big result
 
-/// The size check of `pow` and `shiftl`, which can ask for a result of any
-/// size: `bits` is the result's bit length (a lower bound of it, for
-/// `pow`), as a `u128` since it may exceed 64 bits. A result of 2^64 bits or
-/// more is `OutOfMemory` at once, as a size that is not a word is for the
-/// array allocators (`semantics::array::replicate_len`); otherwise the bit
-/// length as a `u64`, which the backend's `pow` and `shl` take (and fail on,
-/// as any allocation fails, if the machine cannot hold the result).
+/// The size check of the rules that can ask for a big result (`add`,
+/// `succ`, `mul`, `pow`, `shiftl`; `semantics::int` for `Int`): `bits` is
+/// the result's bit length or an upper bound of it, as a `u128` since it may
+/// exceed 64 bits. Above the backend's `MAX_BITS` it is `OutOfMemory` at
+/// once (the caller of `pow` and `shiftl` turns it into native's exponent
+/// message when the exponent is 2^32 or more); otherwise the bit length as a
+/// `u64`, which the backend computes.
 ///
-/// Source: new (LB-11 and LB-12 lifted, owner 2026-10-03).
+/// Source: new (review RS2-01, RS2-02; LB-11 and LB-12 lifted, owner
+/// 2026-10-03).
 #[inline]
-pub fn check_result_bits(bits: u128) -> Result<u64, InternalPanic> {
-    u64::try_from(bits).map_err(|_| InternalPanic::OutOfMemory)
+pub fn check_result_bits<B: BigNat>(bits: u128) -> Result<u64, InternalPanic> {
+    match u64::try_from(bits) {
+        Ok(b) if b <= B::MAX_BITS => Ok(b),
+        _ => Err(InternalPanic::OutOfMemory),
+    }
 }
 
 // ------------------------------------------------------------------ the rules
 
-/// `Nat.add` (`lean_nat_add`).
+/// `Nat.add` (`lean_nat_add`). A sum may need one bit more than its larger
+/// operand: above `MAX_BITS` it is `check_result_bits`' `OutOfMemory`.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`add_ref`, `add_slow`) and lean2rr leanrt
 /// `src/nat.rs` (`nat_add`), merged.
 #[inline]
-pub fn add<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
+pub fn add<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Result<Nat<B>, InternalPanic> {
     match (a, b) {
-        (Small(x), Small(y)) => of_u128(add_small(x, y)),
+        (Small(x), Small(y)) => Ok(of_u128(add_small(x, y))),
         (a, b) => add_slow(a, b),
     }
 }
 
 #[cold]
 #[inline(never)]
-fn add_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
-    match (a, b) {
+fn add_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Result<Nat<B>, InternalPanic> {
+    check_result_bits::<B>(u128::from(bit_len(&a).max(bit_len(&b))) + 1)?;
+    Ok(match (a, b) {
         (Small(x), Small(y)) => of_u128(add_small(x, y)),
         (Small(x), Big(y)) | (Big(y), Small(x)) => Big(y.add_u64(x)),
         (Big(x), Big(y)) => Big(x.add(y)),
-    }
+    })
 }
 
-/// `Nat.succ` (`lean_nat_succ`, which compiled code uses for `n + 1`).
+/// `Nat.succ` (`lean_nat_succ`, `lean.h`). Compiled code writes `n + 1` as
+/// `Nat.add n 1` (`add`); `lean_nat_succ` serves `Nat.succ` itself and the
+/// runtime's own callers (`lean_int_neg_succ_of_nat`).
 ///
 /// Source: lean2rr's `runtime/prelude.rr` (`lean_nat_succ`: `add` of 1).
 #[inline]
-pub fn succ<B: BigNat>(a: Nat<B>) -> Nat<B> {
+pub fn succ<B: BigNat>(a: Nat<B>) -> Result<Nat<B>, InternalPanic> {
     add(a, Small(1))
 }
 
@@ -321,28 +333,33 @@ pub fn pred<B: BigNat>(a: Nat<B>) -> Nat<B> {
     sub(a, Small(1))
 }
 
-/// `Nat.mul` (`lean_nat_mul`).
+/// `Nat.mul` (`lean_nat_mul`). A product has at most the sum of its
+/// operands' bit lengths: above `MAX_BITS` it is `check_result_bits`'
+/// `OutOfMemory`.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`mul_ref`, `mul_slow`) and lean2rr leanrt
 /// `src/nat.rs` (`nat_mul`: a zero word times a big number is zero without a
 /// big product), merged.
 #[inline]
-pub fn mul<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
+pub fn mul<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Result<Nat<B>, InternalPanic> {
     match (a, b) {
-        (Small(x), Small(y)) => of_u128(mul_small(x, y)),
+        (Small(x), Small(y)) => Ok(of_u128(mul_small(x, y))),
         (a, b) => mul_slow(a, b),
     }
 }
 
 #[cold]
 #[inline(never)]
-fn mul_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
-    match (a, b) {
+fn mul_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Result<Nat<B>, InternalPanic> {
+    if a.is_zero() || b.is_zero() {
+        return Ok(Small(0));
+    }
+    check_result_bits::<B>(u128::from(bit_len(&a)) + u128::from(bit_len(&b)))?;
+    Ok(match (a, b) {
         (Small(x), Small(y)) => of_u128(mul_small(x, y)),
-        (Small(0), Big(_)) | (Big(_), Small(0)) => Small(0),
         (Small(x), Big(y)) | (Big(y), Small(x)) => Big(y.mul_u64(x)),
         (Big(x), Big(y)) => Big(x.mul(y)),
-    }
+    })
 }
 
 /// `Nat.div` (`lean_nat_div`): `a / 0 = 0`.
@@ -411,11 +428,12 @@ fn rem_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
 /// (LB-11 lifted: native ends with `INTERNAL PANIC: Nat.pow exponent is too
 /// big` from 2^32 on, whatever the base). `0 ^ e = 0` for `e >= 1` and
 /// `1 ^ e = 1`, also for an exponent of 2^64 or more. For a base of 2 or
-/// more, a result of 2^64 bits or more is `check_result_bits`'
-/// `OutOfMemory`, returned for the caller to end the process with; the
-/// test uses the lower bound `(bit_len(a) - 1) * e + 1` of the result's bit
-/// length, so no computable result is refused. A word base that is a power
-/// of two is shifted (`shl`) instead of multiplied.
+/// more the result's size is tested first (`check_result_bits`) against
+/// `bit_len(a) * e`, the size every backend allocates for it (exactly
+/// `j * e + 1` bits for a word base `2^j`, which is shifted instead of
+/// multiplied): above `MAX_BITS` the rule returns, for the caller to end
+/// the process with, native's `NatPowExponent` when `e >= 2^32` and
+/// `OutOfMemory` otherwise.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`Nat::pow`, `pow_slow`) and lean2rr leanrt
 /// `src/nat.rs` (`nat_pow`, the power-of-two case), merged; without native's
@@ -444,19 +462,30 @@ fn pow_slow<B: BigNat>(a: Nat<B>, e: Nat<B>) -> Result<Nat<B>, InternalPanic> {
         }
         _ => {}
     }
-    // a >= 2, e >= 1: a ^ e >= 2 ^ ((bit_len(a) - 1) * e)
-    let Some(e) = e.to_u64() else {
-        return Err(InternalPanic::OutOfMemory);
-    };
-    let factor_bits = u128::from(bit_len(&a) - 1);
-    check_result_bits(factor_bits * u128::from(e) + 1)?;
-    if let Some(x) = a.to_u64() {
-        if x.is_power_of_two() {
-            // (2^j)^e = 2^(j e), j e < 2^64 by the check
-            return Ok(Big(B::from_u64(1).shl(u64::from(x.trailing_zeros()) * e)));
+    // a >= 2, e >= 1
+    let too_big = |e_wide: bool| {
+        if e_wide {
+            InternalPanic::NatPowExponent
+        } else {
+            InternalPanic::OutOfMemory
         }
-    }
-    Ok(Big(a.into_big().pow(e)))
+    };
+    let Some(e) = e.to_u64() else {
+        return Err(InternalPanic::NatPowExponent);
+    };
+    let e_wide = e > u64::from(u32::MAX);
+    let pow2 = a.to_u64().filter(|x| x.is_power_of_two());
+    let bits = match pow2 {
+        // (2^j)^e = 2^(j e): exactly j e + 1 bits
+        Some(x) => u128::from(x.trailing_zeros()) * u128::from(e) + 1,
+        // bit_len(a) * e bounds the result's bit length; backends size by it
+        None => u128::from(bit_len(&a)) * u128::from(e),
+    };
+    check_result_bits::<B>(bits).map_err(|_| too_big(e_wide))?;
+    Ok(Big(match pow2 {
+        Some(x) => B::from_u64(1).shl(u64::from(x.trailing_zeros()) * e),
+        None => a.into_big().pow(e),
+    }))
 }
 
 /// The bit length: 0 for zero, `log2 a + 1` otherwise.
@@ -569,8 +598,9 @@ fn lxor_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
 /// `Nat.shiftLeft` (`lean_nat_shiftl`): `a * 2^s`, for any shift (LB-12
 /// lifted: native ends with `INTERNAL PANIC: Nat.shiftl exponent is too big`
 /// for a nonzero value shifted by 2^32 or more). Zero stays zero for any
-/// `s`; a result of 2^64 bits or more is `check_result_bits`' `OutOfMemory`,
-/// returned for the caller to end the process with.
+/// `s`. A result of more than `MAX_BITS` bits (`check_result_bits`) is
+/// returned, for the caller to end the process with, as native's
+/// `NatShiftlExponent` when `s >= 2^32` and `OutOfMemory` otherwise.
 ///
 /// Source: lean2rr leanrt `src/nat.rs` (`nat_shiftl`) and leanrs_rt
 /// `src/nat.rs` (`Nat::shl`, `shl_slow`), merged; without native's shift
@@ -592,9 +622,15 @@ fn shiftl_slow<B: BigNat>(a: Nat<B>, s: Nat<B>) -> Result<Nat<B>, InternalPanic>
         return Ok(Small(0));
     }
     let Some(s) = s.to_u64() else {
-        return Err(InternalPanic::OutOfMemory);
+        return Err(InternalPanic::NatShiftlExponent);
     };
-    check_result_bits(u128::from(bit_len(&a)) + u128::from(s))?;
+    check_result_bits::<B>(u128::from(bit_len(&a)) + u128::from(s)).map_err(|_| {
+        if s > u64::from(u32::MAX) {
+            InternalPanic::NatShiftlExponent
+        } else {
+            InternalPanic::OutOfMemory
+        }
+    })?;
     if let Small(x) = a {
         if let Some(v) = shiftl_small(x, s) {
             return Ok(Small(v));
@@ -731,7 +767,62 @@ mod tests {
             (shiftr_small(u64::MAX, 63), shiftr_small(u64::MAX, 64)),
             (1, 0)
         );
-        assert_eq!(check_result_bits(u128::from(u64::MAX)), Ok(u64::MAX));
-        assert_eq!(check_result_bits(1 << 64), Err(InternalPanic::OutOfMemory));
+        // the result-size tests, against a backend of 2^40 bits
+        use crate::semantics::bignum::test_backend::N40;
+        const M: u64 = N40::MAX_BITS;
+        assert_eq!(check_result_bits::<N40>(M.into()), Ok(M));
+        assert_eq!(
+            check_result_bits::<N40>(u128::from(M) + 1),
+            Err(InternalPanic::OutOfMemory)
+        );
+        assert_eq!(
+            check_result_bits::<N40>(1 << 64),
+            Err(InternalPanic::OutOfMemory)
+        );
+        let e = |x: Result<Nat<N40>, InternalPanic>| x.err();
+        let big = |bits: u64| Big(N40(bits));
+        // 3^(2^63): bit_len * e = 2^64 (review RS2-01), refused with native's message
+        assert_eq!(
+            e(pow(Small(3), Small(1 << 63))),
+            Some(InternalPanic::NatPowExponent)
+        );
+        assert_eq!(e(pow(Small(3), Small(M / 2))), None);
+        assert_eq!(
+            e(pow(Small(3), Small(M / 2 + 1))),
+            Some(InternalPanic::NatPowExponent)
+        );
+        assert_eq!(e(pow(Small(3), Small(1 << 31))), None);
+        assert_eq!(e(pow(big(1 << 20), Small(1 << 20))), None);
+        assert_eq!(
+            e(pow(big(1 << 20), Small((1 << 20) + 1))),
+            Some(InternalPanic::OutOfMemory)
+        );
+        assert_eq!(e(pow(Small(2), Small(M - 1))), None);
+        assert_eq!(
+            e(pow(Small(2), Small(M))),
+            Some(InternalPanic::NatPowExponent)
+        );
+        assert_eq!(e(pow(Small(1 << 8), Small(1 << 32))), None);
+        assert!(matches!(pow(Small(1), Big(N40(100))), Ok(Small(1))));
+        assert_eq!(e(shiftl(Small(1), Small(M - 1))), None);
+        assert_eq!(
+            e(shiftl(Small(1), Small(M))),
+            Some(InternalPanic::NatShiftlExponent)
+        );
+        assert_eq!(
+            e(shiftl(big(M), Small(1))),
+            Some(InternalPanic::OutOfMemory)
+        );
+        assert_eq!(e(shiftl(big(M - 1), Small(1))), None);
+        assert_eq!(e(add(big(M - 1), Small(1))), None);
+        assert_eq!(e(add(big(M), Small(1))), Some(InternalPanic::OutOfMemory));
+        assert_eq!(e(succ(big(M))), Some(InternalPanic::OutOfMemory));
+        assert_eq!(e(mul(big(M / 2), big(M / 2))), None);
+        assert_eq!(
+            e(mul(big(M / 2), big(M / 2 + 1))),
+            Some(InternalPanic::OutOfMemory)
+        );
+        assert_eq!(e(mul(big(M), Small(0))), None);
+        assert_eq!(e(mul(Small(u64::MAX), Small(u64::MAX))), None);
     }
 }

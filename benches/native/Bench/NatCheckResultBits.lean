@@ -13,7 +13,7 @@ namespace Bench.NatCheckResultBits
 partial def loop (inp : Unit) (n i x acc : UInt64) : UInt64 :=
   if i < n then
     let x := step x
-    loop inp n (i + 1) x (mix acc (((x >>> 1) + 64)))
+    loop inp n (i + 1) x (mix acc (((x >>> 28) + 64)))
   else acc
 
 def kernel (inp : Unit) (n : UInt64) : UInt64 :=

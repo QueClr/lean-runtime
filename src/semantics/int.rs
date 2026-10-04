@@ -33,7 +33,8 @@ use core::cmp::Ordering;
 use core::fmt;
 
 use super::bignum::{BigInt, BigNat};
-use super::nat::Nat;
+use super::nat::{check_result_bits, Nat};
+use super::panic::InternalPanic;
 
 /// An `Int` as the rules see it: a word, or a big number of the backend `B`.
 /// Either form may hold any value (see the module comment of
@@ -233,57 +234,74 @@ fn neg_slow<B: BigInt>(b: B) -> Int<B> {
     Big(b.neg())
 }
 
+/// The bit length of the magnitude: 0 for zero.
+#[inline]
+fn bit_len<B: BigInt>(a: &Int<B>) -> u64 {
+    match a {
+        Small(x) => u64::from(u64::BITS - x.unsigned_abs().leading_zeros()),
+        Big(b) => b.bit_len(),
+    }
+}
+
 macro_rules! ring_op {
-    ($(#[$doc:meta])* $name:ident, $slow:ident, $small:ident, $method:ident) => {
+    ($(#[$doc:meta])* $name:ident, $slow:ident, $small:ident, $method:ident, $bits:expr) => {
         $(#[$doc])*
         #[inline]
-        pub fn $name<B: BigInt>(a: Int<B>, b: Int<B>) -> Int<B> {
+        pub fn $name<B: BigInt>(a: Int<B>, b: Int<B>) -> Result<Int<B>, InternalPanic> {
             match (a, b) {
-                (Small(x), Small(y)) => of_i128($small(x, y)),
+                (Small(x), Small(y)) => Ok(of_i128($small(x, y))),
                 (a, b) => $slow(a, b),
             }
         }
 
         #[cold]
         #[inline(never)]
-        fn $slow<B: BigInt>(a: Int<B>, b: Int<B>) -> Int<B> {
-            match (a, b) {
-                (Small(x), Small(y)) => of_i128($small(x, y)),
-                (a, b) => Big(a.into_big().$method(b.into_big())),
+        fn $slow<B: BigInt>(a: Int<B>, b: Int<B>) -> Result<Int<B>, InternalPanic> {
+            if let (Small(x), Small(y)) = (&a, &b) {
+                return Ok(of_i128($small(*x, *y)));
             }
+            let bits: fn(u64, u64) -> u128 = $bits;
+            check_result_bits::<B::Nat>(bits(bit_len(&a), bit_len(&b)))?;
+            Ok(Big(a.into_big().$method(b.into_big())))
         }
     };
 }
 
 ring_op!(
-    /// `Int.add` (`lean_int_add`).
+    /// `Int.add` (`lean_int_add`). A sum may need one bit more than its
+    /// larger operand: above the backend's `MAX_BITS` it is `OutOfMemory`
+    /// (`nat::check_result_bits`).
     ///
     /// Source: lean2rr leanrt `src/nat.rs` (`int_add`) and leanrs_rt
     /// `src/int.rs` (`add_ref`, `add_slow`), merged.
     add,
     add_slow,
     add_small,
-    add
+    add,
+    |x, y| u128::from(x.max(y)) + 1
 );
 ring_op!(
-    /// `Int.sub` (`lean_int_sub`).
+    /// `Int.sub` (`lean_int_sub`), with `add`'s size test.
     ///
     /// Source: lean2rr leanrt `src/nat.rs` (`int_sub`) and leanrs_rt
     /// `src/int.rs` (`sub_ref`, `sub_slow`), merged.
     sub,
     sub_slow,
     sub_small,
-    sub
+    sub,
+    |x, y| u128::from(x.max(y)) + 1
 );
 ring_op!(
-    /// `Int.mul` (`lean_int_mul`).
+    /// `Int.mul` (`lean_int_mul`). A product has at most the sum of its
+    /// operands' bit lengths: above `MAX_BITS` it is `OutOfMemory`.
     ///
     /// Source: lean2rr leanrt `src/nat.rs` (`int_mul`) and leanrs_rt
     /// `src/int.rs` (`mul_ref`, `mul_slow`), merged.
     mul,
     mul_slow,
     mul_small,
-    mul
+    mul,
+    |x, y| u128::from(x) + u128::from(y)
 );
 
 /// Which division a slow path computes.
@@ -476,22 +494,24 @@ fn of_nat_slow<B: BigInt>(n: Nat<B::Nat>) -> Int<B> {
     }
 }
 
-/// `Int.negSucc n`, that is `-(n + 1)` (`lean_int_neg_succ_of_nat`).
+/// `Int.negSucc n`, that is `-(n + 1)` (`lean_int_neg_succ_of_nat`), with
+/// `nat::add`'s size test on `n + 1`.
 ///
 /// Source: leanrs_rt `src/int.rs` (`Int::neg_succ`) and lean2rr leanrt
 /// `src/nat.rs` (`nat_neg_succ`), merged.
 #[inline]
-pub fn neg_succ_of_nat<B: BigInt>(n: Nat<B::Nat>) -> Int<B> {
+pub fn neg_succ_of_nat<B: BigInt>(n: Nat<B::Nat>) -> Result<Int<B>, InternalPanic> {
     match n {
-        Nat::Small(x) => of_i128(-(x as i128) - 1),
+        Nat::Small(x) => Ok(of_i128(-(x as i128) - 1)),
         Nat::Big(n) => neg_succ_slow(n),
     }
 }
 
 #[cold]
 #[inline(never)]
-fn neg_succ_slow<B: BigInt>(n: B::Nat) -> Int<B> {
-    Big(B::from_nat(n.add_u64(1)).neg())
+fn neg_succ_slow<B: BigInt>(n: B::Nat) -> Result<Int<B>, InternalPanic> {
+    check_result_bits::<B::Nat>(u128::from(n.bit_len()) + 1)?;
+    Ok(Big(B::from_nat(n.add_u64(1)).neg()))
 }
 
 /// `Int.natAbs` (`lean_nat_abs`): `|a|` as a `Nat`; `natAbs i64::MIN` is 2^63.
@@ -554,5 +574,25 @@ mod tests {
         assert_eq!(ediv_small(-1, min), 1);
         assert_eq!(neg_small(min), 1 << 63);
         assert_eq!(mul_small(min, min), 1 << 126);
+    }
+
+    /// The size tests of `add`, `sub`, `mul` and `neg_succ_of_nat`, against a
+    /// backend of 2^40 bits.
+    #[test]
+    fn result_sizes() {
+        use crate::semantics::bignum::test_backend::{I40, N40};
+        const M: u64 = <N40 as BigNat>::MAX_BITS;
+        let e = |x: Result<Int<I40>, InternalPanic>| x.err();
+        let big = |bits: u64| Big(I40(bits));
+        let oom = Some(InternalPanic::OutOfMemory);
+        assert_eq!(e(add(big(M - 1), Small(-1))), None);
+        assert_eq!(e(add(big(M), Small(-1))), oom);
+        assert_eq!(e(sub(Small(i64::MIN), big(M))), oom);
+        assert_eq!(e(sub(big(M - 1), big(M - 1))), None);
+        assert_eq!(e(mul(big(M / 2), big(M / 2))), None);
+        assert_eq!(e(mul(big(M / 2), big(M / 2 + 1))), oom);
+        assert_eq!(e(mul(Small(i64::MIN), Small(i64::MIN))), None);
+        assert_eq!(e(neg_succ_of_nat(Nat::Big(N40(M - 1)))), None);
+        assert_eq!(e(neg_succ_of_nat(Nat::Big(N40(M)))), oom);
     }
 }

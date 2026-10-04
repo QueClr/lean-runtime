@@ -21,8 +21,8 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(
             acc,
-            int_unbox(int_res(int::neg_succ_of_nat::<ColdBig>(nat_arg(nat_box(
-                x >> 34,
+            int_unbox(int_res(int_ok(int::neg_succ_of_nat::<ColdBig>(nat_arg(
+                nat_box(x >> 34),
             ))))) as u64,
         );
     }

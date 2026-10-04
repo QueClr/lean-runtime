@@ -552,8 +552,16 @@ fn nat_fns(r: &mut Registry) {
             $( r.add($lean, |a, rp, _| nat_text(&$f(nat(&a[0], rp), nat(&a[1], rp)))); )*
         };
     }
+    macro_rules! sized {
+        ($($lean:literal => $f:path;)*) => {
+            $( r.add($lean, |a, rp, env| {
+                ending($f(nat(&a[0], rp), nat(&a[1], rp)).map(|v| nat_text(&v)), env)
+            }); )*
+        };
+    }
+    sized! { "Nat.add" => nat::add; "Nat.mul" => nat::mul; }
     binary! {
-        "Nat.add" => nat::add; "Nat.sub" => nat::sub; "Nat.mul" => nat::mul;
+        "Nat.sub" => nat::sub;
         "Nat.div" => nat::div; "Nat.mod" => nat::rem; "Nat.divExact" => nat::div_exact;
         "Nat.gcd" => nat::gcd; "Nat.land" => nat::land; "Nat.lor" => nat::lor;
         "Nat.xor" => nat::lxor; "Nat.shiftRight" => nat::shiftr;
@@ -596,7 +604,9 @@ fn nat_fns(r: &mut Registry) {
         )
     });
     r.add("Nat.pred", |a, rp, _| nat_text(&nat::pred(nat(&a[0], rp))));
-    r.add("Nat.succ", |a, rp, _| nat_text(&nat::succ(nat(&a[0], rp))));
+    r.add("Nat.succ", |a, rp, env| {
+        ending(nat::succ(nat(&a[0], rp)).map(|v| nat_text(&v)), env)
+    });
 }
 
 fn int_fns(r: &mut Registry) {
@@ -605,8 +615,15 @@ fn int_fns(r: &mut Registry) {
             $( r.add($lean, |a, rp, _| int_text(&$f(int(&a[0], rp), int(&a[1], rp)))); )*
         };
     }
+    macro_rules! sized {
+        ($($lean:literal => $f:path;)*) => {
+            $( r.add($lean, |a, rp, env| {
+                ending($f(int(&a[0], rp), int(&a[1], rp)).map(|v| int_text(&v)), env)
+            }); )*
+        };
+    }
+    sized! { "Int.add" => int::add; "Int.sub" => int::sub; "Int.mul" => int::mul; }
     binary! {
-        "Int.add" => int::add; "Int.sub" => int::sub; "Int.mul" => int::mul;
         "Int.tdiv" => int::tdiv; "Int.tmod" => int::tmod; "Int.ediv" => int::ediv;
         "Int.emod" => int::emod; "Int.divExact" => int::div_exact;
     }
@@ -626,8 +643,11 @@ fn int_fns(r: &mut Registry) {
     r.add("Int.ofNat", |a, rp, _| {
         int_text(&int::of_nat::<RInt>(nat(&a[0], rp)))
     });
-    r.add("Int.negSucc", |a, rp, _| {
-        int_text(&int::neg_succ_of_nat::<RInt>(nat(&a[0], rp)))
+    r.add("Int.negSucc", |a, rp, env| {
+        ending(
+            int::neg_succ_of_nat::<RInt>(nat(&a[0], rp)).map(|v| int_text(&v)),
+            env,
+        )
     });
 }
 
@@ -897,7 +917,7 @@ fn run(file: &str, text: &str, deviations: usize) {
     ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
 )]
 fn nat_rows() {
-    run("nat", include_str!("cases/nat/nat.rows.toml"), 17);
+    run("nat", include_str!("cases/nat/nat.rows.toml"), 11);
 }
 
 #[test]
@@ -933,7 +953,7 @@ fn array_rows() {
     ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
 )]
 fn panic_rows() {
-    run("panic", include_str!("cases/panic/panic.rows.toml"), 1);
+    run("panic", include_str!("cases/panic/panic.rows.toml"), 0);
 }
 
 #[test]

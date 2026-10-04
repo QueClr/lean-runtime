@@ -21,10 +21,10 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(
             acc,
-            int_unbox(int_res(int::add(
+            int_unbox(int_res(int_ok(int::add(
                 int_arg(int_box(((x >> 34) as i64) - (1 << 29))),
                 int_arg(int_box((((x >> 4) & 0x3FFF_FFFF) as i64) - (1 << 29))),
-            ))) as u64,
+            )))) as u64,
         );
     }
     acc

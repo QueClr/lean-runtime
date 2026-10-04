@@ -21,10 +21,10 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(
             acc,
-            nat_unbox(nat_res(nat::add(
+            nat_unbox(nat_res(nat_ok(nat::add(
                 nat_arg(nat_box(x >> 34)),
                 nat_arg(nat_box((x >> 4) & 0x3FFF_FFFF)),
-            ))),
+            )))),
         );
     }
     acc

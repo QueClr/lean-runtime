@@ -370,6 +370,8 @@ fn cold_fmt() -> fmt::Result {
 }
 
 impl BigNat for ColdBig {
+    /// lean2rr's (GMP's limb cap, `i32::MAX` limbs, less one, in bits).
+    const MAX_BITS: u64 = (i32::MAX as u64 - 1) * 64;
     fn from_u64(_: u64) -> ColdBig {
         cold_big()
     }
@@ -470,6 +472,9 @@ impl BigInt for ColdBig {
     fn is_neg(&self) -> bool {
         cold_u64() != 0
     }
+    fn bit_len(&self) -> u64 {
+        cold_u64()
+    }
     fn compare(&self, _: &ColdBig) -> core::cmp::Ordering {
         cold_order()
     }
@@ -509,6 +514,25 @@ pub fn nat_res(n: Nat<ColdBig>) -> u64 {
     match n {
         Nat::Small(v) => nat_box(v),
         Nat::Big(_) => big(),
+    }
+}
+
+/// The value of a rule that tests its result's size (`nat::add`, `mul`, ...):
+/// the size test's failure, never taken here, ends the process.
+#[inline(always)]
+pub fn nat_ok(r: Result<Nat<ColdBig>, InternalPanic>) -> Nat<ColdBig> {
+    match r {
+        Ok(n) => n,
+        Err(p) => end(p),
+    }
+}
+
+/// `nat_ok` for `Int` rules.
+#[inline(always)]
+pub fn int_ok(r: Result<Int<ColdBig>, InternalPanic>) -> Int<ColdBig> {
+    match r {
+        Ok(i) => i,
+        Err(p) => end(p),
     }
 }
 

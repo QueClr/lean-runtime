@@ -236,6 +236,10 @@ impl RNat {
 }
 
 impl BigNat for RNat {
+    /// 2^34 bits (2 GiB): the rows' largest results, 2^32 + 65 bits, are
+    /// shifts, which `shl_mag` builds on untouched zero pages.
+    const MAX_BITS: u64 = 1 << 34;
+
     fn from_u64(v: u64) -> RNat {
         trim(vec![v])
     }
@@ -401,6 +405,9 @@ impl BigInt for RInt {
     }
     fn is_neg(&self) -> bool {
         self.neg
+    }
+    fn bit_len(&self) -> u64 {
+        self.mag.bit_len()
     }
     fn compare(&self, o: &RInt) -> Ordering {
         match (self.neg, o.neg) {

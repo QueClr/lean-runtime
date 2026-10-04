@@ -34,26 +34,30 @@
 //! The rules lift Lean's size caps where a value is computable (owner,
 //! 2026-10-03: LB-04, LB-06, LB-11 and LB-12 compute the definition's
 //! result, and the LB-05 requirement to reproduce GMP's limb cap is
-//! withdrawn). The rules refuse only a result of 2^64 bits or more
-//! (`nat::check_result_bits`, `INTERNAL PANIC: out of memory`). A backend
-//! still stops where its library stops:
+//! withdrawn) up to each backend's `BigNat::MAX_BITS`: above it, every rule
+//! whose result size is known before computing it ends at once
+//! (`nat::check_result_bits`, `INTERNAL PANIC: out of memory` or native's
+//! exponent message), before calling the backend. A backend still stops
+//! where its library stops in the operations whose size the rules do not
+//! test, and where the machine has no memory for a result below
+//! `MAX_BITS`:
 //! - **GMP.** `mpz_t` sizes are `int`s: an `mpz_*` function whose allocation
 //!   request exceeds `INT_MAX` limbs (2^31 - 1 limbs, 16 GiB) calls
 //!   `__gmp_overflow_in_mpz`. In GMP 6.3.0, the version Lean 4.34.0 links
 //!   (`lib/libgmp.a` of the toolchain), that raises `SIGFPE` with no message
 //!   (`errno.c`: `__gmp_exception` raises `SIGFPE`, then `abort`s), so the
-//!   process dies with status 136 (128 + 8); native Lean behaves the same,
-//!   e.g. for `(2^62)^(2^32 - 1)`, whose `mpz_n_pow_ui` asks for about 2^32
-//!   limbs at once. A GMP-backed implementation reaches this limit in the
-//!   operations it routes through `mpz` functions on an `mpz_t`: lean2rr's
-//!   `big.rs` does so for `pow` (`mpz_pow_ui`, except a word base that is a
-//!   power of two, which it shifts), `gcd` (`mpz_gcd`) and the decimal
-//!   conversions (`mpz_get_str`, `mpz_set_str`); its `add`, `sub`,
-//!   `mul`, divisions, shifts and bitwise operations call `mpn` functions
-//!   on its own blocks, whose limit is its own block size (`MAX_LIMBS`,
-//!   `i32::MAX` limbs, then `INTERNAL PANIC: out of memory`).
+//!   process dies with status 136 (128 + 8); native Lean does so for
+//!   `(2^62)^(2^32 - 1)`, whose `mpz_n_pow_ui` asks for about 2^32 limbs at
+//!   once (LB-05). With `MAX_BITS` at most that cap, the rules never ask
+//!   GMP for such a result: lean2rr's `big.rs` routes `pow` (`mpz_pow_ui`),
+//!   `gcd` (`mpz_gcd`, no larger than its operands) and the decimal
+//!   conversions (`mpz_get_str`, `mpz_set_str`) through `mpz`, and the rest
+//!   through `mpn` functions on its own blocks, whose cap is `MAX_LIMBS`
+//!   (`i32::MAX` limbs, then `INTERNAL PANIC: out of memory`).
 //! - **malachite** has no limit below the address space; an allocation
-//!   failure is Rust's allocation-failure abort.
+//!   failure is Rust's allocation-failure abort. Its `pow` sizes the result
+//!   as `bit_len * e` in 64 bits, which the size test keeps from wrapping
+//!   (review RS2-01: `3^(2^63)` gave 1).
 //!
 //! Source: new (decision Q4). The method set is what lean2rr's leanrt
 //! `src/big.rs` and leanrs_rt `src/nat.rs`/`src/int.rs` already compute
@@ -65,6 +69,24 @@ use core::fmt;
 
 /// A natural number of any size: the slow-path arithmetic of `Nat`.
 pub trait BigNat: Sized {
+    /// The largest result, in bits, the backend computes for any operation
+    /// the rules ask of it. Every rule whose result size is known before
+    /// computing it (`nat::add`, `mul`, `pow`, `shiftl`, ...; `int::add`,
+    /// `sub`, `mul`, ...) tests its size against this first
+    /// (`nat::check_result_bits`) and ends with `INTERNAL PANIC: out of
+    /// memory` (or native's exponent message) above it, so no backend is
+    /// asked for a result it cannot hold, and every backend ends the same way
+    /// at its own limit (review RS2-02).
+    ///
+    /// Requirements: at least 2^33, so that the rows of
+    /// `tests/cases/nat` run (their largest result has 2^32 + 65 bits),
+    /// and below 2^64. A backend whose allocations reserve more than the
+    /// result (GMP's `mpz_add` reserves one limb for a carry) states its
+    /// limit minus that margin. lean2rr's GMP backend: its block's limb cap,
+    /// `i32::MAX` limbs (`big.rs` `MAX_LIMBS`, GMP's own `int` sizes), times
+    /// 64, less a limb; leanrs's malachite backend picks its own.
+    const MAX_BITS: u64;
+
     /// The value `v`.
     fn from_u64(v: u64) -> Self;
 
@@ -98,10 +120,10 @@ pub trait BigNat: Sized {
         }
     }
 
-    /// `self + o`.
+    /// `self + o`, where `max(bit_len) + 1 <= MAX_BITS`.
     fn add(self, o: Self) -> Self;
 
-    /// `self + o`.
+    /// `self + o`, as `add`.
     fn add_u64(self, o: u64) -> Self;
 
     /// `self - o`, where `self >= o` (the rule truncates first).
@@ -110,10 +132,10 @@ pub trait BigNat: Sized {
     /// `self - o`, where `self >= o`.
     fn sub_u64(self, o: u64) -> Self;
 
-    /// `self * o`.
+    /// `self * o`, where the sum of the bit lengths is at most `MAX_BITS`.
     fn mul(self, o: Self) -> Self;
 
-    /// `self * o`.
+    /// `self * o`, as `mul`.
     fn mul_u64(self, o: u64) -> Self;
 
     /// `self / o` rounded down, where `o != 0` (`mpz_tdiv_q`).
@@ -149,17 +171,21 @@ pub trait BigNat: Sized {
     /// `self ^ o`.
     fn xor_u64(self, o: u64) -> Self;
 
-    /// `self * 2^s` (`mpz_mul_2exp`), for any `s` whose result has fewer
-    /// than 2^64 bits (`nat::check_result_bits`; LB-12 is lifted).
+    /// `self * 2^s` (`mpz_mul_2exp`), where `bit_len(self) + s <= MAX_BITS`
+    /// (`nat::check_result_bits`; LB-12 is lifted, so `s` may be 2^32 or
+    /// more).
     fn shl(self, s: u64) -> Self;
 
     /// `self / 2^s` rounded down (`mpz_tdiv_q_2exp`), for any `s` (LB-04 is
     /// lifted: the rule passes shift amounts of 2^32 and more).
     fn shr(self, s: u64) -> Self;
 
-    /// `self ^ e` (`mpz_pow_ui`), where `self >= 2` and the result has fewer
-    /// than 2^64 bits (`nat::pow` handles bases 0 and 1 and checks the size;
-    /// LB-11 is lifted, so `e` may be 2^32 or more).
+    /// `self ^ e` (`mpz_pow_ui`), where `self >= 2`, `e >= 1` and
+    /// `bit_len(self) * e <= MAX_BITS < 2^64`: the size every backend
+    /// allocates for the result (GMP's `mpz_n_pow_ui` and malachite compute
+    /// it in 64 bits, where a larger product wraps; review RS2-01).
+    /// `nat::pow` handles bases 0 and 1 and tests the size; LB-11 is lifted,
+    /// so `e` may be 2^32 or more.
     fn pow(self, e: u64) -> Self;
 
     /// The greatest common divisor, with `gcd 0 x = x` (`mpz_gcd`).
@@ -195,6 +221,10 @@ pub trait BigInt: Sized {
 
     /// Whether the value is below zero.
     fn is_neg(&self) -> bool;
+
+    /// The bit length of the magnitude: 0 for zero (the size test of the
+    /// `Int` rules, against `Self::Nat::MAX_BITS`).
+    fn bit_len(&self) -> u64;
 
     /// The order of two values (`mpz_cmp`).
     fn compare(&self, o: &Self) -> Ordering;
@@ -265,4 +295,150 @@ pub trait BigInt: Sized {
     /// The decimal digits with a leading `-` for a negative value
     /// (`mpz_get_str` base 10).
     fn write_decimal<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result;
+}
+
+/// Backends for the rules' size tests: a value is only its bit length, so a
+/// test can hold a number of 2^40 bits; every operation returns a value of
+/// the bit length the rules expect of it. `MAX_BITS` is 2^40.
+#[cfg(test)]
+pub(crate) mod test_backend {
+    use super::{BigInt, BigNat};
+    use core::cmp::Ordering;
+    use core::fmt;
+
+    /// A natural number of `.0` bits.
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct N40(pub u64);
+
+    impl BigNat for N40 {
+        const MAX_BITS: u64 = 1 << 40;
+        fn from_u64(v: u64) -> N40 {
+            N40(u64::from(64 - v.leading_zeros()))
+        }
+        fn to_u64(&self) -> Option<u64> {
+            None
+        }
+        fn low_u64(&self) -> u64 {
+            0
+        }
+        fn bit_len(&self) -> u64 {
+            self.0
+        }
+        fn compare(&self, o: &N40) -> Ordering {
+            self.0.cmp(&o.0)
+        }
+        fn add(self, o: N40) -> N40 {
+            N40(self.0.max(o.0) + 1)
+        }
+        fn add_u64(self, _: u64) -> N40 {
+            N40(self.0 + 1)
+        }
+        fn sub(self, _: N40) -> N40 {
+            self
+        }
+        fn sub_u64(self, _: u64) -> N40 {
+            self
+        }
+        fn mul(self, o: N40) -> N40 {
+            N40(self.0 + o.0)
+        }
+        fn mul_u64(self, o: u64) -> N40 {
+            N40(self.0 + u64::from(64 - o.leading_zeros()))
+        }
+        fn div(self, _: N40) -> N40 {
+            self
+        }
+        fn rem(self, o: N40) -> N40 {
+            o
+        }
+        fn div_u64(self, _: u64) -> N40 {
+            self
+        }
+        fn rem_u64(&self, _: u64) -> u64 {
+            0
+        }
+        fn and(self, o: N40) -> N40 {
+            o
+        }
+        fn or(self, _: N40) -> N40 {
+            self
+        }
+        fn or_u64(self, _: u64) -> N40 {
+            self
+        }
+        fn xor(self, _: N40) -> N40 {
+            self
+        }
+        fn xor_u64(self, _: u64) -> N40 {
+            self
+        }
+        fn shl(self, s: u64) -> N40 {
+            N40(self.0 + s)
+        }
+        fn shr(self, s: u64) -> N40 {
+            N40(self.0.saturating_sub(s))
+        }
+        fn pow(self, e: u64) -> N40 {
+            N40(self.0 * e)
+        }
+        fn gcd(self, o: N40) -> N40 {
+            o
+        }
+        fn write_decimal<W: fmt::Write + ?Sized>(&self, _: &mut W) -> fmt::Result {
+            Ok(())
+        }
+    }
+
+    /// An integer whose magnitude has `.0` bits.
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct I40(pub u64);
+
+    impl BigInt for I40 {
+        type Nat = N40;
+        fn from_i64(v: i64) -> I40 {
+            I40(u64::from(64 - v.unsigned_abs().leading_zeros()))
+        }
+        fn from_i128(v: i128) -> I40 {
+            I40(u64::from(128 - v.unsigned_abs().leading_zeros()))
+        }
+        fn from_nat(n: N40) -> I40 {
+            I40(n.0)
+        }
+        fn nat_abs(self) -> N40 {
+            N40(self.0)
+        }
+        fn to_i64(&self) -> Option<i64> {
+            None
+        }
+        fn low_u64(&self) -> u64 {
+            0
+        }
+        fn is_neg(&self) -> bool {
+            false
+        }
+        fn bit_len(&self) -> u64 {
+            self.0
+        }
+        fn compare(&self, o: &I40) -> Ordering {
+            self.0.cmp(&o.0)
+        }
+        fn neg(self) -> I40 {
+            self
+        }
+        fn add(self, o: I40) -> I40 {
+            I40(self.0.max(o.0) + 1)
+        }
+        fn sub(self, o: I40) -> I40 {
+            I40(self.0.max(o.0) + 1)
+        }
+        fn mul(self, o: I40) -> I40 {
+            I40(self.0 + o.0)
+        }
+        fn tdiv_rem(self, o: &I40) -> (I40, I40) {
+            (self, I40(o.0))
+        }
+        fn write_decimal<W: fmt::Write + ?Sized>(&self, _: &mut W) -> fmt::Result {
+            Ok(())
+        }
+    }
 }

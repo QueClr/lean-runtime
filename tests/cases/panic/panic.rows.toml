@@ -119,8 +119,6 @@ fn = "Nat.pow"
 args = ["2", "18446744073709551616"]
 env = { LEAN_ABORT_ON_PANIC = "1" }
 expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 134 }
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 134 }
 lean_version = "4.34.0"
-source = "LB-11: Nat.pow's out-of-memory end under LEAN_ABORT_ON_PANIC (native: its exponent limit)"
-deviations = { lean2rr = "LB-11", leanrs = "LB-11" }
-native = { expected = "ends", stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 134 }
+source = "lean-runtime batch 2 and review RS2-03: Nat.pow's end for an uncomputable exponent under LEAN_ABORT_ON_PANIC"
