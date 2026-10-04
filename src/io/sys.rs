@@ -16,11 +16,12 @@ use std::sync::Arc;
 /// owned descriptor is shared (`Arc`), so that a call that may block, such as
 /// `flock`, runs on a clone taken under the stream's lock and released before
 /// the call (`fileno(fp)` takes no `FILE` lock natively); the descriptor
-/// closes when the last clone goes away.
+/// closes when the last clone goes away. It is held as a `std::fs::File`
+/// for std's reads into a `Vec`'s spare capacity (`VecDest`).
 #[derive(Clone, Debug)]
 pub(crate) enum Fd {
     Std(u8),
-    Owned(Arc<OwnedFd>),
+    Owned(Arc<std::fs::File>),
     Closed,
 }
 
@@ -69,10 +70,17 @@ impl Fd {
             .map_err(fail)
     }
 
-    /// `read(2)` into `v`'s whole spare capacity, its length extended by the
-    /// count read (rustix's `spare_capacity`).
-    pub(crate) fn read_spare(&self, v: &mut Vec<u8>) -> Result<usize, i32> {
-        rustix::io::read(self.get()?, rustix::buffer::spare_capacity(v)).map_err(fail)
+    /// The descriptor as a `File`, when the stream owns it.
+    pub(crate) fn file(&self) -> Option<&std::fs::File> {
+        match self {
+            Fd::Owned(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// `F_GETPIPE_SZ`: the capacity of a pipe, `None` for another descriptor.
+    pub(crate) fn pipe_capacity(&self) -> Option<usize> {
+        rustix::pipe::fcntl_getpipe_size(self.borrow()?).ok()
     }
 
     /// `write(2)` of `buf`.
@@ -147,7 +155,9 @@ pub(crate) trait ReadDest {
     /// The number of bytes wanted (Lean's `n`).
     fn wanted(&self) -> usize;
     fn put(&mut self, at: usize, src: &[u8]);
-    fn read(&mut self, fd: &Fd, at: usize, count: usize) -> Result<usize, i32>;
+    /// A direct read of `count` bytes at `at` (glibc's `_IO_SYSREAD` into
+    /// the caller's buffer); `regular` tells a regular file.
+    fn read(&mut self, fd: &Fd, regular: bool, at: usize, count: usize) -> Result<usize, i32>;
 }
 
 /// The caller's initialized bytes.
@@ -161,7 +171,7 @@ impl ReadDest for [u8] {
         self[at..at + src.len()].copy_from_slice(src)
     }
     #[inline]
-    fn read(&mut self, fd: &Fd, at: usize, count: usize) -> Result<usize, i32> {
+    fn read(&mut self, fd: &Fd, _regular: bool, at: usize, count: usize) -> Result<usize, i32> {
         fd.read(&mut self[at..at + count])
     }
 }
@@ -177,22 +187,33 @@ impl ReadDest for [MaybeUninit<u8>] {
         self[at..at + src.len()].write_copy_of_slice(src);
     }
     #[inline]
-    fn read(&mut self, fd: &Fd, at: usize, count: usize) -> Result<usize, i32> {
+    fn read(&mut self, fd: &Fd, _regular: bool, at: usize, count: usize) -> Result<usize, i32> {
         fd.read_uninit(&mut self[at..at + count])
     }
 }
 
-/// `n` bytes appended to a `Vec` (which has room for them): copies append;
-/// a direct read goes into the spare capacity when it is exactly the
-/// direct read's size (it then reaches the end of the `n` bytes), and
-/// otherwise into zeroed bytes, since safe Rust can extend a `Vec` over
-/// bytes a read initialized only through rustix's `spare_capacity`, which
-/// reads into all of the spare capacity.
+/// Up to `n` bytes appended to a `Vec`, which grows as needed (it is not
+/// reserved for `n` up front: a huge `n` on a small file touches only the
+/// bytes read). Copies out of the stream's buffer append. A direct read of a
+/// regular file the stream owns goes through std, `(&file).take(count)
+/// .read_to_end(v)`, which reads into the spare capacity without zeroing it
+/// and stops at `count` bytes or end of file: the same bytes and position as
+/// glibc's single `read(2)` of `count`, in two or three `read(2)` calls once
+/// the `Vec` has room for what the file still holds (leanrs review F4; from
+/// leanrs_rt's `read_into`). Any other descriptor (a pipe,
+/// a standard descriptor, a device) is read with exact `read(2)` calls into a
+/// zeroed window: a pipe's capacity (`F_GETPIPE_SZ`), which no single
+/// `read(2)` of a pipe exceeds, so the call returns what glibc's would, or 64
+/// KiB.
 pub(crate) struct VecDest<'a> {
     pub(crate) v: &'a mut Vec<u8>,
     pub(crate) start: usize,
     pub(crate) n: usize,
 }
+
+/// The window of a direct read into a `Vec` from a descriptor that is not a
+/// regular file the stream owns, when it is no pipe.
+const WINDOW: usize = 64 * 1024;
 
 impl ReadDest for VecDest<'_> {
     #[inline]
@@ -204,15 +225,42 @@ impl ReadDest for VecDest<'_> {
         debug_assert_eq!(self.v.len(), self.start + at);
         self.v.extend_from_slice(src)
     }
-    fn read(&mut self, fd: &Fd, at: usize, count: usize) -> Result<usize, i32> {
+    fn read(&mut self, fd: &Fd, regular: bool, at: usize, count: usize) -> Result<usize, i32> {
+        use std::io::Read;
         debug_assert_eq!(self.v.len(), self.start + at);
-        if self.v.capacity() - self.v.len() == count {
-            return fd.read_spare(self.v);
-        }
         let l = self.v.len();
-        self.v.resize(l + count, 0);
+        if let (true, Some(file)) = (regular, fd.file()) {
+            // room for what the file still holds (std's own `File::read_to_end`
+            // hint), at most `count`: then std reads it in two or three calls
+            // instead of probing upwards from 32 bytes, and a huge request on
+            // a small file reserves next to nothing
+            let mut f: &std::fs::File = file;
+            let left = match (f.metadata(), std::io::Seek::stream_position(&mut f)) {
+                (Ok(m), Ok(pos)) => m.len().saturating_sub(pos).saturating_add(1),
+                _ => 0,
+            };
+            self.v.reserve(left.min(count as u64) as usize);
+            let r = f.take(count as u64).read_to_end(self.v);
+            let got = self.v.len() - l;
+            return match r {
+                // bytes read before an error are a successful read; the error
+                // comes again at the next read, as glibc's next `read(2)`
+                _ if got > 0 => Ok(got),
+                Ok(_) => Ok(0),
+                Err(e) => Err(fail_io(&e)),
+            };
+        }
+        let window = count.min(fd.pipe_capacity().unwrap_or(WINDOW));
+        self.v.resize(l + window, 0);
         let r = fd.read(&mut self.v[l..]);
         self.v.truncate(l + *r.as_ref().unwrap_or(&0));
         r
     }
+}
+
+/// A std error's `errno`, recorded in the model.
+fn fail_io(e: &std::io::Error) -> i32 {
+    let code = e.raw_os_error().unwrap_or(EINVAL);
+    set_errno(code);
+    code
 }

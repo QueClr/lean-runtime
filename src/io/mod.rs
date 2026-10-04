@@ -29,8 +29,8 @@
 //!   the caller allocated in its own object and returns the count: as
 //!   uninitialized memory with no zero pass ([`Handle::read_uninit`], over
 //!   rustix's reads into `MaybeUninit` and `write_copy_of_slice`), as a
-//!   `Vec`'s spare capacity ([`Handle::read_vec`], which still zero-fills in
-//!   one case, below), or as initialized bytes ([`Handle::read`]); an
+//!   `Vec` that grows as the bytes come ([`Handle::read_vec`], below), or as
+//!   initialized bytes ([`Handle::read`]); an
 //!   unbounded result (`getLine`, a path, an
 //!   environment value, a directory entry's name) is appended to a
 //!   [`ByteSink`] the caller implements on its own object;
@@ -40,32 +40,34 @@
 //! Only the cold error path owns data: [`IoError`] holds its file name and
 //! details as `String`s.
 //!
-//! **`read_vec`'s zero pass** (reviews RIO1-02, RIO1-13). `read n` (glibc's
-//! `_IO_file_xsgetn`) first copies the `have` bytes the stream's buffer
-//! holds; `want = n - have` bytes are then still wanted. If `want < bufsize`,
-//! the buffer is refilled and copied from, with no zero pass. Otherwise the
-//! direct part, `want - want % bufsize` bytes, is read straight from the
-//! descriptor into the caller's `Vec`, and the remaining `want % bufsize`
-//! come through a refill. `bufsize` is the stream's buffer size: the
-//! descriptor's `st_blksize`, or 8192 when that is 8192 or more (4096 for
-//! ext4 files and pipes here). Safe Rust can grow a `Vec` only over bytes a
-//! read initialized through rustix's `spare_capacity`, which reads into
-//! *all* of the spare capacity; so the direct part goes there only when it
-//! fills the spare capacity exactly (`want % bufsize == 0`, the `Vec` having
-//! room for no more than the `n` bytes), and otherwise into zeroed bytes: a
-//! `memset` of the direct part, about as fast as copying it once. Example:
-//! `IO.FS.readBinFile` of a 1 MiB + 1 byte ext4 file reads `n = 1048577` on
-//! an empty buffer: `have = 0`, `want = 1048577`, the direct part is 1048576
-//! bytes, short of `want`, so 1 MiB is zeroed, then the last byte comes
-//! through a refill; a file of exactly 1 MiB has `want % 4096 == 0` and no
-//! zero pass. Glue whose
-//! `ByteArray` is a `Vec` and that accepts one performance-justified `unsafe`
-//! avoids it: reserve `n`, call [`Handle::read_uninit`] on
-//! `&mut v.spare_capacity_mut()[..n]`, then `v.set_len(len + count)` (sound:
-//! `read_uninit` initialized exactly `count` bytes). Glue over its own
-//! uninitialized allocation (lean2rr's one-block arrays) calls `read_uninit`
-//! and pays nothing. The timing session measures what it costs.
+//! **How `read_vec` fills a `Vec`** (reviews RIO1-02, RIO1-13; leanrs review
+//! F4). `read n` (glibc's `_IO_file_xsgetn`) first copies the `have` bytes
+//! the stream's buffer holds; `want = n - have` bytes are then still wanted.
+//! If `want < bufsize`, the buffer is refilled and copied from. Otherwise
+//! the direct part, `want - want % bufsize` bytes, is read straight from the
+//! descriptor, and the remaining `want % bufsize` come through a refill.
+//! `bufsize` is the stream's buffer size: the descriptor's `st_blksize`, or
+//! 8192 when that is 8192 or more (4096 for ext4 files and pipes here). The
+//! `Vec` is not reserved for `n`: it grows with the bytes read, so `read
+//! (2^40)` of a 3-byte file touches only those bytes (native's array of `n`
+//! bytes is allocated but never written either).
+//! - From a **regular file** a handle owns, the direct part is read by std,
+//!   `(&file).take(count).read_to_end(v)`, into the spare capacity with no
+//!   zero pass, after reserving what the file still holds: the same bytes and
+//!   position as glibc's one `read(2)`, in two or three calls. Example:
+//!   `IO.FS.readBinFile` of a 1 MiB + 1 byte ext4 file reads `n = 1048577`
+//!   on an empty buffer: `have = 0`, `want = 1048577`, a direct part of
+//!   1048576 bytes read with `read(8192)` and `read(1040384)`, then the last
+//!   byte through a refill; nothing is zeroed.
+//! - From **any other descriptor** (a pipe, a standard descriptor, a device),
+//!   each `read(2)` of the direct part goes into a zeroed window of at most
+//!   the pipe's capacity (`F_GETPIPE_SZ`), so it returns what glibc's single
+//!   `read(2)` would, or of at most 64 KiB: a `memset` of at most that much
+//!   per call.
 //!
+//! [`Handle::read_uninit`] fills a translator's own uninitialized allocation
+//! (lean2rr's one-block arrays) with no zero pass from any descriptor.
+
 //! # Concurrency
 //!
 //! Every stream is behind a `std::sync::Mutex`, as glibc locks each `FILE`

@@ -1605,6 +1605,43 @@ fn io_modelled_errno_stdin_flush() {
     );
 }
 
+/// `read n` into a `Vec` reserves nothing for the `n` bytes and touches only
+/// the bytes read, so a huge `n` on a small file costs no memory (compiled
+/// Lean v4.34.0-rc1: `read (2^40)` of a 3-byte file gives the 3 bytes,
+/// leanrs's A828; leanrs review F4: the zeroing it replaced was OOM-killed).
+/// From leanrs's `io_read_huge_touches_nothing`. In a child under a 2G memory
+/// cap (`ulimit -v` is useless here: Lean reserves the array): the address
+/// space limit is set to 4 GiB, so a zeroed or reserved 64 GiB fails.
+#[test]
+fn io_read_huge_touches_nothing() {
+    if child_case().as_deref() == Some("huge") {
+        let f = std::env::var("IO_TEST_FILE").unwrap();
+        let h = open(&f, FsMode::Read).unwrap();
+        let mut v = Vec::new();
+        let got = h.read_vec(1 << 36, &mut v);
+        report(&[format!("{got:?} {v:?}")]);
+    }
+    let d = setup("read-huge");
+    let f = p(&d, "abc.txt");
+    fs::write(&f, "abc").unwrap();
+    let exe = std::env::current_exe().expect("test binary path");
+    let out = Command::new("/bin/sh")
+        .args(["-c", "ulimit -v 4194304; exec \"$0\" io_read_huge_touches_nothing --exact --nocapture --test-threads=1"])
+        .arg(&exe)
+        .env(CHILD_VAR, "huge")
+        .env("IO_TEST_FILE", &f)
+        .stdin(Stdio::null())
+        .output()
+        .expect("child");
+    assert_eq!(results(&out), ["Ok(3) [97, 98, 99]"], "{out:?}");
+    let h = open(&f, FsMode::Read).unwrap();
+    assert_eq!(
+        desc(&lean_runtime::io::handle::check_read_size(usize::MAX).unwrap_err()),
+        r#"ResourceExhausted(None, 12, "not enough memory")"#
+    );
+    drop(h);
+}
+
 /// `get_random_bytes_uninit` fills all of its uninitialized bytes.
 #[test]
 fn io_get_random_bytes_uninit() {

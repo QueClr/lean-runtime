@@ -301,13 +301,11 @@ impl Handle {
 
     /// [`Handle::read`] of up to `n` bytes appended to `out`, a translator's
     /// `Vec`-based `ByteArray` (call [`check_read_size`] first). The count
-    /// read. Zero pass: with `have` bytes buffered, `want = n - have`; when
-    /// `want >= bufsize` (the stream's buffer size, `st_blksize` or 8192) and
-    /// `want % bufsize != 0`, the direct part, `want - want % bufsize` bytes,
-    /// is zeroed before it is read (a `memset`; the usual `readBinFile`, e.g.
-    /// 1 MiB zeroed for a 1 MiB + 1 byte file). The rule, and the
-    /// `read_uninit` route that avoids it, are in the module comment of
-    /// `lean_runtime::io`.
+    /// read. The `Vec` grows with the bytes read (nothing is reserved for
+    /// `n`); from a regular file nothing is zeroed, from a pipe or a standard
+    /// descriptor each direct `read(2)` goes into a zeroed window of at most
+    /// the pipe's capacity or 64 KiB (the module comment of
+    /// `lean_runtime::io` has the rule and an example).
     #[inline]
     pub fn read_vec(&self, n: usize, out: &mut Vec<u8>) -> Result<usize, IoError> {
         if n == 0 {

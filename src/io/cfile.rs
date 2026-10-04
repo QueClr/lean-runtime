@@ -101,6 +101,8 @@ pub struct CFile {
     /// (`ESPIPE` on a FIFO opened `readWrite`), writing nothing and setting
     /// no error indicator.
     seek_failed: bool,
+    /// The descriptor is a regular file (known once the buffer exists).
+    regular: bool,
 }
 
 /// The `fdopen` flags of a mode (`lean_io_prim_handle_mk`): `read` is `"r"`,
@@ -131,6 +133,7 @@ impl CFile {
             used: false,
             eagain_is_epipe: false,
             seek_failed: false,
+            regular: false,
         }
     }
 
@@ -148,7 +151,10 @@ impl CFile {
     /// `"w"`, `"r+"`, `"a"`); the stream holds `fd`, which closes when the
     /// stream is dropped (`fclose`) and no `Handle` keeps a clone of it.
     pub fn fdopen(fd: OwnedFd, mode: FsMode) -> CFile {
-        CFile::with(Fd::Owned(std::sync::Arc::new(fd)), mode_flags(mode))
+        CFile::with(
+            Fd::Owned(std::sync::Arc::new(std::fs::File::from(fd))),
+            mode_flags(mode),
+        )
     }
 
     /// A write-only stream (mode `write`) over the non-blocking write end of a
@@ -232,6 +238,7 @@ impl CFile {
     fn doallocate(&mut self) {
         let mut size = BUFSIZ;
         if let Ok(st) = self.fd.fstat() {
+            self.regular = st.st_mode & 0o170000 == 0o100000;
             if st.st_mode & 0o170000 == 0o020000 {
                 let major = rustix::fs::major(st.st_rdev);
                 if (136..=143).contains(&major) || self.fd.isatty_keep_errno() {
@@ -590,7 +597,7 @@ impl CFile {
             if block >= 128 {
                 count -= want % block;
             }
-            match out.read(&self.fd, got, count) {
+            match out.read(&self.fd, self.regular, got, count) {
                 Ok(0) => {
                     self.flags |= EOF_SEEN;
                     break;
@@ -821,18 +828,15 @@ impl CFile {
         self.fread(out)
     }
 
-    /// [`CFile::read`] of up to `n` bytes appended to `out`, which first gets
-    /// room for `n` (`reserve_exact`, the array Lean allocates); the count
-    /// read. The bytes copied out of the stream's buffer are appended with no
-    /// zero pass. With `want = n - have` still wanted after the `have`
-    /// buffered bytes, a direct read happens when `want >= bufsize`, of
-    /// `want - want % bufsize` bytes: into the spare capacity, with no zero
-    /// pass, when that fills it exactly (`want % bufsize == 0` and room for
-    /// only the `n` bytes), and otherwise into zeroed bytes, a `memset` of the
-    /// direct part (`sys::VecDest`; the module comment of `lean_runtime::io`
-    /// has the rule with an example and the `read_uninit` route).
+    /// [`CFile::read`] of up to `n` bytes appended to `out`, which grows with
+    /// the bytes read (no room is reserved for `n`); the count read. Copies
+    /// out of the stream's buffer append. With `want = n - have` still wanted
+    /// after the `have` buffered bytes, a direct read happens when `want >=
+    /// bufsize`, of `want - want % bufsize` bytes: through std's `read_to_end`
+    /// from a regular file the stream owns, with no zero pass; otherwise into
+    /// zeroed windows of at most a pipe's capacity or 64 KiB (`sys::VecDest`;
+    /// the module comment of `lean_runtime::io` has the rule and an example).
     pub fn read_vec(&mut self, n: usize, out: &mut Vec<u8>) -> Result<usize, i32> {
-        out.reserve_exact(n);
         let start = out.len();
         self.fread(&mut VecDest { v: out, start, n })
     }
