@@ -60,6 +60,16 @@ pub fn lookup(id: &str) -> Option<Case> {
         "sync_walk_mutex_unref_finish" => (no_init, sync_walk_mutex_unref_finish),
         "wait_any_unref_finish" => (no_init, wait_any_unref_finish),
         "wait_any_pure_stalled" => (no_init, wait_any_pure_stalled),
+        "wait_queue_order" => (no_init, wait_queue_order),
+        "wait_head_blocks_on_main" => (no_init, wait_head_blocks_on_main),
+        "wait_any_head_blocks_on_main" => (no_init, wait_any_head_blocks_on_main),
+        "wait_any_keeps_worker" => (no_init, wait_any_keeps_worker),
+        "poll_queue_order" => (no_init, poll_queue_order),
+        "poll_threshold_promise" => (no_init, poll_threshold_promise),
+        "poll_threshold_mutex" => (no_init, poll_threshold_mutex),
+        "wait_picked_pure" => (no_init, wait_picked_pure),
+        "wait_any_picked_pure" => (no_init, wait_any_picked_pure),
+        "wait_any_finished_unnotified" => (no_init, wait_any_finished_unnotified),
         "late_task_after_main" => (no_init, late_task_after_main),
         "late_dependent_of_dedicated" => (no_init, late_dependent_of_dedicated),
         "late_wait_dedicated" => (no_init, late_wait_dedicated),
@@ -141,6 +151,18 @@ pub fn lookup(id: &str) -> Option<Case> {
         "rfx3_exit_contexts" => (no_init, crate::review::rfx3_exit_contexts),
         "rfx4_fs_signal" => (no_init, crate::review::rfx4_fs_signal),
         "rfx4_fd_after" => (no_init, crate::review::rfx4_fd_after),
+        // AR-11: Lean's stack-overflow report, owned by the crate.
+        "so_main_overflow" => (no_init, crate::review::so_main_overflow),
+        "so_task_overflow_after_switches" => {
+            (no_init, crate::review::so_task_overflow_after_switches)
+        }
+        "so_segv_in_task" => (no_init, crate::review::so_segv_in_task),
+        "so_prev_resethand" => (no_init, crate::review::so_prev_resethand),
+        // Probes of our review of sched-3 (RS3).
+        "rv3_dedicated_waiter" => (no_init, crate::review::rv3_dedicated_waiter),
+        "rv3_chain_wait" => (no_init, crate::review::rv3_chain_wait),
+        "so_rust_thread_overflow" => (no_init, crate::review::so_rust_thread_overflow),
+        "so_second_scheduler_thread" => (no_init, crate::review::so_second_scheduler_thread),
         // Not a Lean program: a Rust panic (a translator's or the runtime's
         // bug) in a task on a context of its own.
         "rust_panic_in_task" => (no_init, rust_panic_in_task),
@@ -429,7 +451,7 @@ fn promise_across_tasks(args: &[String]) -> u32 {
 //   let _ ← IO.asTask (do IO.println s!"depth {deep n}")
 //   IO.sleep 1000
 //   IO.eprintln "not reached"
-fn deep(n: u64) -> u64 {
+pub(crate) fn deep(n: u64) -> u64 {
     if n == 0 {
         0
     } else {
@@ -3135,11 +3157,11 @@ fn handoff_then_kill(args: &[String]) -> u32 {
     let _t = as_task(|| (), PRIO_DEFAULT);
     let child = ok(lio::spawn(
         "sh",
-        &["-c", "sleep 1; cat > out; echo done > marker"],
+        &["-c", "sleep 1; cat > out; exec sleep 30"],
         StdioConfig {
             stdin: Stdio::Piped,
-            stdout: Stdio::Inherit,
-            stderr: Stdio::Inherit,
+            stdout: Stdio::Null,
+            stderr: Stdio::Null,
         },
     ));
     let stdin = child.stdin.expect("piped");
@@ -3878,5 +3900,365 @@ fn signal_rearm_in_dependent(args: &[String]) -> u32 {
     let t = pb.result_opt();
     drop(pb);
     println(&format!("B got {}", repr_int(&t.get())));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// sched-3: what a waiter or a poller may run on its own stack (reviews
+// AR-9, AR-10). Each case runs with `LEAN_NUM_THREADS=1`.
+
+// def main (args : List String) : IO Unit := do
+//   let ms := args.head!.toNat!
+//   let x ← IO.asTask (do IO.sleep ms.toUInt32; IO.println "X")
+//   IO.sleep 20
+//   let b ← IO.asTask (IO.println "B")
+//   let c ← IO.asTask (IO.println "C")
+//   let a ← IO.asTask (prio := .max) (do let _ ← IO.wait c; IO.println "A")
+//   let _ ← IO.wait a
+//   let _ ← IO.wait b
+//   let _ ← IO.wait x
+//   IO.println "main done"
+fn wait_queue_order(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    let x = as_task(
+        move || {
+            sleep(ms);
+            println("X");
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(20);
+    let b = as_task(|| println("B"), PRIO_DEFAULT);
+    let c = as_task(|| println("C"), PRIO_DEFAULT);
+    let a = as_task(
+        move || {
+            c.get();
+            println("A");
+        },
+        PRIO_MAX,
+    );
+    a.get();
+    b.get();
+    x.get();
+    println("main done");
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let p : IO.Promise Nat ← IO.Promise.new
+//   let b ← IO.asTask (do
+//     let v ← IO.wait p.result?
+//     IO.println s!"b got {v.getD 0}")
+//   let c ← IO.asTask (IO.println "c ran")
+//   let _ ← IO.wait c
+//   IO.println "main resolves"
+//   p.resolve 7
+//   let _ ← IO.wait b
+//   IO.println "main done"
+fn wait_head_blocks_on_main(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let b = as_task(
+        move || {
+            let v = r.get();
+            println(&format!("b got {}", v.unwrap_or(0)));
+        },
+        PRIO_DEFAULT,
+    );
+    let c = as_task(|| println("c ran"), PRIO_DEFAULT);
+    c.get();
+    println("main resolves");
+    p.resolve(7);
+    b.get();
+    println("main done");
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let p : IO.Promise Nat ← IO.Promise.new
+//   let a ← IO.asTask (do
+//     let v ← IO.wait p.result?
+//     IO.println s!"a got {v.getD 0}"
+//     pure 1)
+//   let b ← IO.asTask (do IO.println "b ran"; pure 2)
+//   let r ← IO.waitAny [a, b]
+//   IO.println s!"waitAny: {r}"
+//   p.resolve 7
+//   let _ ← IO.wait a
+//   IO.println "main done"
+fn wait_any_head_blocks_on_main(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let pr = p.result_opt();
+    let a = as_task(
+        move || {
+            let v = pr.get();
+            println(&format!("a got {}", v.unwrap_or(0)));
+            1u64
+        },
+        PRIO_DEFAULT,
+    );
+    let b = as_task(
+        || {
+            println("b ran");
+            2u64
+        },
+        PRIO_DEFAULT,
+    );
+    let r = wait_any(&[a.clone(), b]);
+    println(&format!("waitAny: ok: {r}"));
+    p.resolve(7);
+    a.get();
+    println("main done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let ms := args.head!.toNat!
+//   let p : IO.Promise Nat ← IO.Promise.new
+//   let t ← IO.asTask (do
+//     let _ ← IO.waitAny [p.result?]
+//     IO.println "T done")
+//   IO.sleep 20
+//   let b ← IO.asTask (IO.println "B")
+//   IO.sleep ms.toUInt32
+//   IO.println "main resolves"
+//   p.resolve 1
+//   let _ ← IO.wait t
+//   let _ ← IO.wait b
+//   IO.println "main done"
+fn wait_any_keeps_worker(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    let p: Promise<u64> = Promise::new();
+    let pr = p.result_opt();
+    let t = as_task(
+        move || {
+            let _ = wait_any(&[pr]);
+            println("T done");
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(20);
+    let b = as_task(|| println("B"), PRIO_DEFAULT);
+    sleep(ms);
+    println("main resolves");
+    p.resolve(1);
+    t.get();
+    b.get();
+    println("main done");
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let b ← IO.asTask (IO.println "B")
+//   let t ← IO.asTask (IO.println "T")
+//   while !(← IO.hasFinished t) do
+//     pure ()
+//   let _ ← IO.wait b
+//   IO.println "main done"
+fn poll_queue_order(_: &[String]) -> u32 {
+    let b = as_task(|| println("B"), PRIO_DEFAULT);
+    let t = as_task(|| println("T"), PRIO_DEFAULT);
+    while !has_finished(&t) {}
+    b.get();
+    println("main done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let p : IO.Promise Nat ← IO.Promise.new
+//   let t ← IO.asTask (do
+//     let v ← IO.wait p.result?
+//     IO.println s!"t got {v.getD 0}")
+//   let mut k := 0
+//   for _ in [0:n] do
+//     if ← IO.hasFinished t then k := k + 1
+//   IO.println s!"finished while polling: {k}"
+//   p.resolve 7
+//   let _ ← IO.wait t
+//   IO.println "main done"
+fn poll_threshold_promise(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let p: Promise<u64> = Promise::new();
+    let pr = p.result_opt();
+    let t = as_task(
+        move || {
+            let v = pr.get();
+            println(&format!("t got {}", v.unwrap_or(0)));
+        },
+        PRIO_DEFAULT,
+    );
+    let mut k = 0;
+    for _ in 0..n {
+        if has_finished(&t) {
+            k += 1;
+        }
+    }
+    println(&format!("finished while polling: {k}"));
+    p.resolve(7);
+    t.get();
+    println("main done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let m ← BaseMutex.new
+//   m.lock
+//   let t ← IO.asTask (do
+//     m.lock
+//     IO.println "t has the lock"
+//     m.unlock)
+//   let mut k := 0
+//   for _ in [0:n] do
+//     if ← IO.hasFinished t then k := k + 1
+//   IO.println s!"finished while polling: {k}"
+//   m.unlock
+//   let _ ← IO.wait t
+//   IO.println "main done"
+fn poll_threshold_mutex(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let m = Rc::new(Mutex::new());
+    m.lock();
+    let m2 = m.clone();
+    let t = as_task(
+        move || {
+            m2.lock();
+            println("t has the lock");
+            m2.unlock();
+        },
+        PRIO_DEFAULT,
+    );
+    let mut k = 0;
+    for _ in 0..n {
+        if has_finished(&t) {
+            k += 1;
+        }
+    }
+    println(&format!("finished while polling: {k}"));
+    m.unlock();
+    t.get();
+    println("main done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let stop ← IO.mkRef false
+//   let ticker ← IO.asTask (prio := .dedicated) (do
+//     while !(← stop.get) do IO.sleep 20)
+//   let a ← IO.asTask (IO.println "a ran")
+//   let t := Task.spawn fun _ => (List.range n).foldl (· + ·) 0
+//   IO.println s!"t = {t.get}"
+//   stop.set true
+//   let _ ← IO.wait ticker
+//   let _ ← IO.wait a
+//   IO.println "main done"
+fn wait_picked_pure(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let stop = Ref::new(false);
+    let s2 = stop.clone();
+    let ticker = as_task(
+        move || {
+            while !s2.get() {
+                sleep(20);
+            }
+        },
+        PRIO_DEDICATED,
+    );
+    let a = as_task(|| println("a ran"), PRIO_DEFAULT);
+    let t = Task::spawn(move || (0..n).sum::<u64>(), PRIO_DEFAULT);
+    println(&format!("t = {}", t.get()));
+    stop.set(true);
+    ticker.get();
+    a.get();
+    println("main done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let stop ← IO.mkRef false
+//   let ticker ← IO.asTask (prio := .dedicated) (do
+//     while !(← stop.get) do IO.sleep 20)
+//   let t1 := Task.spawn fun _ => (List.range n).foldl (· + ·) 0
+//   let t2 := Task.spawn fun _ => (List.range (n + 1)).foldl (· + ·) 0
+//   let r ← IO.waitAny [t1, t2]
+//   IO.println s!"waitAny: {r}"
+//   stop.set true
+//   let _ ← IO.wait ticker
+//   IO.println "main done"
+fn wait_any_picked_pure(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let stop = Ref::new(false);
+    let s2 = stop.clone();
+    let ticker = as_task(
+        move || {
+            while !s2.get() {
+                sleep(20);
+            }
+        },
+        PRIO_DEDICATED,
+    );
+    let t1 = Task::spawn(move || (0..n).sum::<u64>(), PRIO_DEFAULT);
+    let t2 = Task::spawn(move || (0..n + 1).sum::<u64>(), PRIO_DEFAULT);
+    let r = wait_any(&[t1, t2]);
+    println(&format!("waitAny: {r}"));
+    stop.set(true);
+    ticker.get();
+    println("main done");
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let p : IO.Promise Nat ← IO.Promise.new
+//   let t2 ← IO.asTask (pure (some 2))
+//   let _d ← IO.mapTask (sync := true) (fun _ => do
+//     let _ ← IO.asTask (pure 0)
+//     IO.sleep 200) t2
+//   let u ← IO.asTask (do
+//     let v ← IO.wait p.result?
+//     IO.println s!"u got {v}"
+//     pure v)
+//   match ← IO.waitAny [t2, u] with
+//   | .ok v => IO.println s!"waitAny returned {v}"
+//   | .error e => IO.println s!"waitAny error {e}"
+//   p.resolve 7
+//   let _ ← IO.wait u
+//   IO.println "done"
+fn wait_any_finished_unnotified(_: &[String]) -> u32 {
+    fn opt(v: Option<u64>) -> String {
+        match v {
+            Some(n) => format!("(some {n})"),
+            None => "none".into(),
+        }
+    }
+    let p: Promise<u64> = Promise::new();
+    let t2 = as_task(|| Some(2u64), PRIO_DEFAULT);
+    // `_d` is unused: compiled Lean drops it at once.
+    drop(map_task(
+        |_: Option<u64>| {
+            drop(as_task(|| 0u64, PRIO_DEFAULT));
+            sleep(200);
+        },
+        t2.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    ));
+    let pr = p.result_opt();
+    let u = as_task(
+        move || {
+            let v = pr.get();
+            println(&format!("u got {}", opt(v)));
+            v
+        },
+        PRIO_DEFAULT,
+    );
+    let r = wait_any(&[t2, u.clone()]);
+    println(&format!("waitAny returned {}", opt(r)));
+    p.resolve(7);
+    u.get();
+    println("done");
     0
 }

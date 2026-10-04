@@ -14,8 +14,14 @@
 # compile no `unsafe` code of the crate (the root forbids it); `io,proc-title`,
 # with the native quirk of the process title (src/io/argv_title.rs: its unit
 # tests and the twins of the cases that set a title), and `io` without
-# `sched`; `unsafe-fast`; and every feature but `net` (`io,sched,proc-title,
-# unsafe-fast`), where Miri's filter runs.
+# `sched`; `sched,stack-overflow`, with the native quirk of Lean's
+# stack-overflow report (src/sched/stack_overflow.rs: its unit tests), and
+# `sched` without `io`; `unsafe-fast`; and every feature but `net`
+# (`io,sched,proc-title,stack-overflow,unsafe-fast`). Miri runs its own
+# configurations (below), which leave `stack-overflow` out: Miri cannot
+# model signal delivery. tests/sched-driver builds the crate with
+# `stack-overflow` (the twin of `tasks/stack_overflow_in_task`, the `so_*`
+# tests).
 #
 # The host is shared: the heavy steps (cargo test, Miri) run inside a memory
 # cap, `systemd-run --user --scope -p MemoryMax=$LEAN_RUNTIME_MEM` (default
@@ -29,7 +35,8 @@ if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
   exec flock -s /tmp/leanrs-timing.lock "$0" "$@"
 fi
 TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
-FEATURE_SETS=("" "io,sched" "net" "io,proc-title" "unsafe-fast" "io,sched,proc-title,unsafe-fast")
+FEATURE_SETS=("" "io,sched" "net" "io,proc-title" "sched,stack-overflow" "unsafe-fast"
+  "io,sched,proc-title,stack-overflow,unsafe-fast")
 
 # Every test run has a deadline (LEAN_RUNTIME_TEST_TIMEOUT seconds, default
 # 3600), so a test that blocks fails the check instead of hanging it. It is
@@ -117,7 +124,7 @@ cargo +"$last" fmt --all --check
 # little there for a large CPU cost on the shared host (owner, 2026-10-04).
 # Run it when an `unsafe` item changes (docs/development.md).
 # LEAN_RUNTIME_MIRI_FILTER=NAME limits it to the library's unit tests whose
-# name holds NAME, in the configuration with every feature but `net`:
+# name holds NAME, in the configuration `io,sched,proc-title,unsafe-fast`:
 # `argv_title` for the native quirk of src/io/argv_title.rs (feature
 # `proc-title`), whose tests run on a block laid out as the process's
 # arguments (Miri has no process arguments' memory).
@@ -129,7 +136,7 @@ elif cargo +"$last" miri --version >/dev/null 2>&1; then
   filter="${LEAN_RUNTIME_MIRI_FILTER:-}"
   configs=("" "unsafe-fast" "io,sched,proc-title,unsafe-fast")
   # the native quirk's tests are in `io` with `proc-title`: with a filter,
-  # only the configuration with every feature but `net` can match
+  # only that configuration can match
   [[ -n "$filter" ]] && configs=("io,sched,proc-title,unsafe-fast")
   for f in "${configs[@]}"; do
     echo "== miri features=[${f}]${filter:+ unit tests matching $filter}"

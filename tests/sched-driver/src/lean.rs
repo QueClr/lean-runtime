@@ -47,6 +47,8 @@ impl<T> Clone for Task<T> {
 /// `Task.Priority.default`, `Task.Priority.dedicated`.
 pub const PRIO_DEFAULT: u64 = 0;
 pub const PRIO_DEDICATED: u64 = 9;
+/// `Task.Priority.max`.
+pub const PRIO_MAX: u64 = 8;
 
 fn job_filling<T: 'static>(slot: &Rc<OnceCell<T>>, f: impl FnOnce() -> T + 'static) -> Job {
     let slot = slot.clone();

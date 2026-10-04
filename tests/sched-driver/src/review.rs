@@ -898,3 +898,216 @@ pub fn rfx4_fd_after(_: &[String]) -> u32 {
     ));
     0
 }
+
+// AR-11: Lean's stack-overflow report, owned by the crate
+// (`sched::install_stack_overflow_handler`, which `glue::run` calls). The
+// task's case is `tasks/stack_overflow_in_task`; these programs check the
+// rest of the handler's rule. `tests/cases.rs` checks their outcomes.
+
+/// `main`'s own stack (the guard of the thread `glue::run` registered)
+/// overflows after a task ran on a context of its own and ended: Lean's
+/// message, status 134, `main starts` (buffered) lost.
+pub fn so_main_overflow(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    println("main starts");
+    let t = as_task(
+        || {
+            sleep(10);
+            eprintln("task ran");
+        },
+        PRIO_DEFAULT,
+    );
+    // the task starts on a context while `main` sleeps, and ends there
+    sleep(50);
+    t.get();
+    println(&format!("depth {}", crate::cases::deep(n)));
+    eprintln("not reached");
+    0
+}
+
+/// A task overflows its context's stack after both it and another task
+/// blocked and resumed (the bounds follow every switch): the other task's
+/// line, then Lean's message, status 134.
+pub fn so_task_overflow_after_switches(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let _a = as_task(
+        move || {
+            sleep(100);
+            println(&format!("depth {}", crate::cases::deep(n)));
+        },
+        PRIO_DEDICATED,
+    );
+    let _b = as_task(
+        || {
+            sleep(10);
+            eprintln("b ran");
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+/// A fault that is no overflow, in a task on a context: no message, the
+/// default action (status 139), as natively.
+pub fn so_segv_in_task(_: &[String]) -> u32 {
+    let _t = as_task(
+        || {
+            sleep(10);
+            // SAFETY: none; test plumbing: a write to an unmapped address,
+            // to make the kernel deliver a SIGSEGV that is no overflow.
+            unsafe { std::ptr::write_volatile(std::ptr::without_provenance_mut::<u8>(16), 1) };
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+/// A Rust thread that never registered overflows its own stack: the fault
+/// goes on to the previous action, Rust's handler, which reports it
+/// (`thread 'plain' ... has overflowed its stack`) and aborts.
+pub fn so_rust_thread_overflow(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let h = std::thread::Builder::new()
+        .name("plain".into())
+        .stack_size(256 << 10)
+        .spawn(move || crate::cases::deep(n))
+        .unwrap();
+    let _ = h.join();
+    eprintln("not reached");
+    0
+}
+
+/// A second thread runs a scheduler of its own (`sched::start` registers it,
+/// the handler being installed), and a task overflows a context's stack
+/// there: Lean's message, status 134.
+pub fn so_second_scheduler_thread(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let h = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(move || {
+            sched::start(Rc::new(crate::glue::DriverGlue));
+            let _t = as_task(
+                move || println(&format!("depth {}", crate::cases::deep(n))),
+                PRIO_DEFAULT,
+            );
+            sleep(1000);
+            eprintln("not reached");
+        })
+        .unwrap();
+    let _ = h.join();
+    eprintln("not reached either");
+    0
+}
+
+/// Review SO-1 of AR-11: a SIGSEGV handler installed before the crate's,
+/// one-shot (`SA_RESETHAND`), that writes `prev` and returns. The crate
+/// forwards a fault that is no overflow to it as the kernel would call it:
+/// with the default restored first, so the fault, run again, ends the
+/// process (139) after one `prev`, as without the crate.
+extern "C" fn prev_resethand(_: libc::c_int, _: *mut libc::siginfo_t, _: *mut libc::c_void) {
+    let msg = b"prev\n";
+    // SAFETY: test plumbing: `write(2)` of a static buffer, async-signal-safe.
+    unsafe { libc::write(2, msg.as_ptr().cast(), msg.len()) };
+}
+
+/// Install `prev_resethand` (`SA_SIGINFO | SA_RESETHAND | SA_ONSTACK`, with
+/// SIGUSR2 in its mask) for SIGSEGV, before `glue::run` installs the crate's.
+pub fn install_prev_resethand() {
+    // SAFETY: test plumbing: a zeroed `sigaction` filled with a valid
+    // handler of the `SA_SIGINFO` signature; the mask is initialized by
+    // `sigemptyset` before `sigaddset`.
+    unsafe {
+        let mut act: libc::sigaction = std::mem::zeroed();
+        act.sa_sigaction = prev_resethand
+            as extern "C" fn(libc::c_int, *mut libc::siginfo_t, *mut libc::c_void)
+            as usize;
+        act.sa_flags = libc::SA_SIGINFO | libc::SA_RESETHAND | libc::SA_ONSTACK;
+        libc::sigemptyset(&mut act.sa_mask);
+        libc::sigaddset(&mut act.sa_mask, libc::SIGUSR2);
+        libc::sigaction(libc::SIGSEGV, &act, std::ptr::null_mut());
+    }
+}
+
+/// The program of `so_prev_resethand`: a write to an unmapped address on
+/// `main`'s stack, after a task ran on a context.
+pub fn so_prev_resethand(_: &[String]) -> u32 {
+    let t = as_task(|| sleep(5), PRIO_DEFAULT);
+    t.get();
+    eprintln("faulting");
+    // SAFETY: none; test plumbing: a write to an unmapped address, to make
+    // the kernel deliver a SIGSEGV that is no overflow.
+    unsafe { std::ptr::write_volatile(std::ptr::without_provenance_mut::<u8>(16), 1) };
+    eprintln("not reached");
+    0
+}
+
+// Probes of our review of sched-3 (RS3; review-sched3/native/*.lean,
+// recorded natively with `LEAN_NUM_THREADS=1`): `tests/cases.rs` checks
+// their outcomes.
+
+/// `DedicatedWaiter`: a dedicated task waits for `c`, queued behind `b`,
+/// which waits for a promise the dedicated task resolves afterwards.
+pub fn rv3_dedicated_waiter(_: &[String]) -> u32 {
+    let p: Rc<Promise<u64>> = Rc::new(Promise::new());
+    let r = p.result_opt();
+    let b = as_task(
+        move || {
+            let v = r.get();
+            println(&format!("b got {}", v.unwrap_or(0)));
+        },
+        PRIO_DEFAULT,
+    );
+    let c = as_task(|| println("c ran"), PRIO_DEFAULT);
+    let p2 = p.clone();
+    let d = as_task(
+        move || {
+            c.get();
+            println("d resolves");
+            p2.resolve(7);
+        },
+        PRIO_DEDICATED,
+    );
+    drop(p);
+    d.get();
+    b.get();
+    println("main done");
+    0
+}
+
+/// `ChainWait`: `main` waits for `d`, an IO dependent of `c`; `c` is queued
+/// behind `b`, which waits for a promise `main` resolves afterwards.
+pub fn rv3_chain_wait(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let b = as_task(
+        move || {
+            let v = r.get();
+            println(&format!("b got {}", v.unwrap_or(0)));
+        },
+        PRIO_DEFAULT,
+    );
+    let c = as_task(
+        || {
+            println("c ran");
+            5u64
+        },
+        PRIO_DEFAULT,
+    );
+    let d = map_task(
+        |v: u64| println(&format!("d sees {v}")),
+        c,
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    d.get();
+    println("main resolves");
+    p.resolve(7);
+    b.get();
+    println("main done");
+    0
+}

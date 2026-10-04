@@ -13,7 +13,8 @@ path = "src/lib.rs"
 # system calls and stack switches through vetted crates, so that the crate
 # itself stays free of `unsafe` (except the native quirks of UNSAFE.md, each
 # behind a feature of its own: so far `proc-title`, the write of the process
-# title into the arguments' memory):
+# title into the arguments' memory, and `stack-overflow`, Lean's
+# stack-overflow report for the scheduler's contexts):
 # - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
 #   the scheduling priority), nix (process-level libc calls: posix_spawn,
 #   unshare, poll, the password and group databases, getrusage,
@@ -23,7 +24,10 @@ path = "src/lib.rs"
 #   (mmap'd stacks with a guard page, and unwinding across the switch),
 #   rustix (the event loop's epoll and poll; sched-io), and signal-hook (the
 #   `Std.Internal.UV.Signal` watchers: its safe flag, self-pipe and
-#   conditional default actions; accepted by the owner, 2026-10-04).
+#   conditional default actions; accepted by the owner, 2026-10-04);
+# - `stack-overflow`: nix (its `sigaction` and re-exported libc, for the
+#   native quirk of Lean's stack-overflow report, `sched::stack_overflow`;
+#   AR-11).
 # The requirements are carets compatible with leanrs's offline registry (nix
 # 0.31.3, rustix 1.1.4, io-uring 0.7.13, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
 # uses; leanrs resolves them in its own workspace. lean-runtime's own builds
@@ -56,11 +60,21 @@ net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
 # `setProcessTitle` fails with ENOBUFS, as libuv does when it holds no
 # arguments' memory, and `getProcessTitle` gives `argv[0]`.
 proc-title = ["io"]
+# Lean's stack-overflow report for the scheduler's contexts and the threads
+# that run them (`sched::stack_overflow`, a native quirk written with
+# `unsafe`: UNSAFE.md, docs/native-quirks.md, AR-11):
+# `sched::install_stack_overflow_handler()` installs a SIGSEGV/SIGBUS handler
+# that knows the contexts' guard pages, and prints Lean's
+# `Stack overflow detected. Aborting.` (status 134). lean2rr enables it.
+# Without it, a task that overflows its context's stack ends with a plain
+# SIGSEGV (status 139), and the hub updates no record (no cost).
+stack-overflow = ["sched", "dep:nix"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
 # docs/development.md).
 unsafe-fast = []
-# The crate's own code contains no `unsafe` unless `proc-title` or
-# `unsafe-fast` is enabled: without them the crate root forbids it. The
+# The crate's own code contains no `unsafe` unless `proc-title`,
+# `stack-overflow` or `unsafe-fast` is enabled: without them the crate root
+# forbids it. The
 # `unsafe` of the dependencies is audited in UNSAFE.md.
 
 # The io program cases on the model (tests/io_cases.rs): the binary is also

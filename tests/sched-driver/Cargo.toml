@@ -6,8 +6,9 @@ description = "Rust-level ports of tests/cases/{tasks,sync,taskio,net} (and io's
 publish = false
 
 [dependencies]
-lean-runtime = { path = "../..", features = ["sched", "io", "net"] }
-# The glue's SIGSEGV handler and stack-overflow report (as a translator's).
+lean-runtime = { path = "../..", features = ["sched", "io", "net", "stack-overflow"] }
+# Test plumbing only: `so_prev_resethand` installs a one-shot SIGSEGV handler
+# of its own before the crate's (review SO-1 of AR-11).
 libc = "0.2.159"
 # Only for `--features asan`: corosensei's fiber annotations, so that
 # AddressSanitizer follows the stack switches (docs/sched.md, "How it is

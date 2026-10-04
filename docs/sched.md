@@ -27,6 +27,7 @@ This file covers:
 | `src/sched/mod.rs` | The public API, `start`, `ref_read`, the low-level waits |
 | `src/sched/task.rs` | Tasks: queues, dependents, walks, queries, cancellation, promises, the final run, the yield points |
 | `src/sched/ctx.rs` | Contexts: corosensei coroutines, the hub, the `Glue` trait, the running stack's bounds |
+| `src/sched/stack_overflow.rs` | Lean's stack-overflow report: the opt-in SIGSEGV handler that knows the contexts' guard pages (a native quirk with `unsafe`, AR-11; `docs/native-quirks.md`) |
 | `src/sched/reactor.rs` | The event loop (sched-io): descriptors and timers on epoll, the cooperative `poll_fds`, the loop context and its callbacks |
 | `src/sched/uv.rs` | `Std.Internal.UV`'s loop, timers and signals on the event loop |
 | `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
@@ -35,8 +36,9 @@ This file covers:
 | `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included) |
 
 `sched` depends on corosensei 0.3.4, rustix 1.1 (the event loop's epoll
-and poll) and signal-hook 0.3.18 (the signal watchers' delivery; its safe
-API only), and is built with cargo, offline, from the committed
+and poll), signal-hook 0.3.18 (the signal watchers' delivery; its safe
+API only) and nix 0.31 (`sigaction` and its re-exported libc, for the
+stack-overflow report), and is built with cargo, offline, from the committed
 `Cargo.lock` (`cargo build --offline --locked --features sched`;
 docs/development.md, "Builds").
 
@@ -49,8 +51,12 @@ needed. So a task is *deferred*: it runs at the first of these points.
 
 - **It is needed.** `Task.get` or `IO.wait` (`wait`) runs it right there,
   on the stack of whoever needs it, as a worker would while the caller
-  waits. A task whose sources are still pending first runs that chain, from
-  its deepest end, one task after the other.
+  waits, once it is the task a free worker would start (the queue's head);
+  until then the caller waits while the heads start on contexts of their
+  own. A task whose sources are still pending first runs that chain, from
+  its deepest end, one task after the other, under the same rule.
+  `IO.waitAny` runs a task of its list only when it is the only unfinished
+  one ("What a waiter or a poller runs on its own stack", sched-3).
 - **The running code blocks.** A sleep, a lock, a promise, a task running
   elsewhere, or a read, write or wait that would block in the kernel
   ("Blocking IO and the event loop") blocks it, and one of the task
@@ -61,7 +67,9 @@ needed. So a task is *deferred*: it runs at the first of these points.
   worker would have run it by then.
 - **Polling.** `IO.getTaskState`/`IO.hasFinished` report a pending task
   waiting until the program asks again after a sleep, or asks 1000 times
-  without one; the task then runs and is reported finished.
+  without one; what a free worker would start then starts on a context of
+  its own and runs before the answer, the polled task once it is the
+  queue's head; nothing runs on the poller's stack.
 - **`main` returns.** `finish` runs what is left (`lean_finalize_task_manager`;
   see "Exit" below for where it differs from native).
 
@@ -146,10 +154,94 @@ after each notification (`notify_seq`), as native's `wait_any` looks
 again only when `resolve_core` notifies: a task whose value is set while
 its walk still runs is not seen until then (`tasks/wait_any_wakes_on_finish`:
 it wakes when a queued dependent finishes, before the walk ends; review
-RS2-06). An enqueue or a context's end also wakes it (`Wait::Progress`),
-but then it only runs a task of its list that has become runnable, as a
-native worker would run it (`tasks/wait_any_pure_stalled`: a dependent
-queued by a walk that then stalls; review RS2-09).
+RS2-06). An enqueue, a start or a context's end also wakes it
+(`Wait::Any`), but then it only looks whether a task of its list can run
+now, as a native worker would run it (`tasks/wait_any_pure_stalled`: a
+dependent queued by a walk that then stalls; review RS2-09; the rule is in
+the next section).
+
+### What a waiter or a poller runs on its own stack (sched-3)
+
+Natively a waiter's thread sleeps, and a free worker takes the queue's
+head: `dequeue` takes the first task of the highest non-empty queue, first
+come, first served within a priority. `wait_for` (`Task.get`, `IO.wait`) in
+a pool task raises the worker limit by one while it waits, so a new worker
+takes the head; `wait_any` (`IO.waitAny`) does not, so its thread keeps its
+worker. Running a task on the waiter's stack is one of native's schedules
+only for a task that a free worker would run at that moment. Any other task
+run there makes the waiter wait for that task: if it blocks on something
+only the waiter provides (a promise the waiter resolves afterwards, a lock
+it holds), the program hangs where native ends (leanrs's reviews AR-9 and
+AR-10, corrected; `src/sched/task.rs`):
+- **`wait`** runs the awaited task, or the deepest pending task of the
+  chain it waits for, on the waiter's stack only once it may
+  (`may_run_awaited`): a pure task a worker has started (`PICKED`), a
+  dedicated task (a thread of its own at once), or, if a worker is free
+  (the waiter's own worker counted free, as `wait_for` raises the limit),
+  the lone worker's task or the first task of the highest non-empty queue.
+  Otherwise the waiter blocks on that task (`Wait::Cell`; a pool waiter's
+  worker is free meanwhile), and the hub starts the heads on contexts of
+  their own; the awaited task starts when it becomes the head, there or
+  on the waiter's stack when the waiter looks again.
+- **`IO.waitAny`** runs a task of its list on its own stack only when that
+  task is the only unfinished one of the list (every listed task names it:
+  none has finished, also not one whose walk has not notified yet, which
+  `IO.waitAny` returns at the notification), only once it may (the
+  waiter's worker not counted free), and only when the waiter holds no
+  worker (`main`, a dedicated task): run there by a pool waiter, it would
+  take one worker where natively it takes two. Otherwise it blocks with
+  `Wait::Any`, which keeps a pool waiter's worker (AR-10 (ii); sched-2's
+  `Wait::Progress` freed it), while the hub starts the heads on contexts of
+  their own.
+- **The polling threshold** (`IO.getTaskState`, `IO.hasFinished`: two
+  sleeps for a pure task, one for another, or 1000 answers) starts what a
+  free worker would start now on a context of its own (`start_polled`),
+  lets the others go on once, and answers the task's state then (AR-9).
+  The polled task starts when it becomes the queue's head; nothing runs on
+  the poller's stack. The next answers start over (the task is reported
+  waiting until the next threshold).
+- **The pure-task rule** still holds: a worker that reaches a queued pure
+  task no IO task waits for only marks it started (`pick`). A waiter needs
+  it, so the mark wakes the waiters of that task, and `wait` then runs it on
+  its stack (it is started, so it may); `IO.waitAny` and the polling
+  threshold start such a task, when a task they wait for needs it, on a
+  context of its own (as the last resort does).
+
+Example (`tasks/wait_queue_order`, one worker): `x` holds the worker for
+100 ms; `b` and `c` are queued, then `a` at `Task.Priority.max`, which
+waits for `c`. When `x` ends, the worker takes `a`; `c` is not the head,
+so `a` blocks, and the worker it frees runs `b`, then `c`: `X B C A`, as
+natively (sched-2 ran `a` on `main`'s stack at once, and `c` on `a`'s:
+`C A B X`).
+
+The cases, recorded natively (5 runs each, `LEAN_NUM_THREADS=1`), with
+twins in the driver; "before" is sched-2's outcome:
+
+| Case | What the program does | Native | Before |
+|---|---|---|---|
+| `tasks/wait_queue_order` | as above | `X B C A` | `C A B X` |
+| `tasks/wait_head_blocks_on_main` | `main` waits for `c` while `b`, ahead of `c`, waits for a promise `main` resolves afterwards | ends | ends (a runtime that runs the head on the waiter hangs) |
+| `tasks/wait_any_head_blocks_on_main` | `IO.waitAny [a, b]` while `a` waits for a promise `main` resolves afterwards | `waitAny` returns `b`'s value, then ends | hangs (`a` ran on `main`'s stack) |
+| `tasks/wait_any_keeps_worker` | `t` blocks in `IO.waitAny` on a promise; `b` is queued; `main` resolves after 100 ms | `T done` before `B` | `B` first |
+| `tasks/poll_queue_order` | `b` then `t` queued; `main` polls `t` without sleeps | `B T` | `T B` |
+| `tasks/poll_threshold_promise` | `t` waits for a promise `main` resolves after 3000 polls of `t` | ends | hangs at the 1000th poll |
+| `tasks/poll_threshold_mutex` | `t` locks a `BaseMutex` `main` holds across 3000 polls of `t` | ends | hangs at the 1000th poll |
+| `tasks/wait_picked_pure` | `main` waits for a pure task queued behind an IO task, while a dedicated task ticks | ends | ends (without the wake at `pick`, the new rule hangs) |
+| `tasks/wait_any_picked_pure` | `IO.waitAny` of two pure tasks while a dedicated task ticks | `t1`'s value | ends (without the start of started pure tasks, the new rule hangs) |
+| `tasks/wait_any_finished_unnotified` | `IO.waitAny [t2, u]` while `t2` has finished and its `sync` dependent queues a task, then sleeps 200 ms; `u` waits for a promise `main` resolves afterwards (also run with 20 workers) | `t2`'s value, then `u`'s line | ends (the first version of the new rule ran `u` on `main`'s stack and hung: leanrs's review) |
+
+Mutation checks (2026-10-04): with sched-2's `wait`, `wait_any` and
+`state`, the six cases marked as differing above fail (three by a
+60-second timeout); running the queue's head on the waiter's stack instead
+of blocking hangs `wait_head_blocks_on_main` and `wait_picked_pure`; a
+`pick` that wakes nobody hangs `wait_picked_pure` and
+`wait_any_picked_pure`; an `IO.waitAny` that does not start the started
+pure tasks it needs hangs `wait_any_picked_pure`; an `IO.waitAny` that
+takes the one listed task left unfinished for the only one, while another
+has finished without a notification yet, hangs
+`wait_any_finished_unnotified` (with 1 and 20 workers); a polling threshold that
+does not start them hangs the unit test
+`polling_with_sleeps_runs_a_pure_task_after_two`.
 
 A `sync` dependent that blocks for good keeps its source's waiters asleep
 until another referenced task finishes, or forever (`tasks/sync_walk_mutex_alone`,
@@ -213,7 +305,7 @@ other pure tasks, the task is only marked *started* (`pick`,
 - it runs at the first of these points:
   - it is needed (`wait`);
   - it is polled: two sleeps since the first answer, or 1000 answers
-    (`query`);
+    (`query`): it starts on a context of its own (`start_polled`);
   - an IO task comes to wait for it, directly or through other pure tasks
     (`need_up` walks the chain of waiting tasks up and gives each its *IO
     need*; `startable` starts a started pure task that gains it);
@@ -261,7 +353,8 @@ while !(← IO.hasFinished t) do IO.sleep 5
   is reported waiting at the first question), and the second, after one
   sleep, runs the task and answers true.
 - Here the first two questions answer false (waiting, then running), and the
-  third, after two sleeps, runs the task and answers true.
+  third, after two sleeps, starts the task on a context of its own, which
+  runs it before the answer, true.
 
 `polling_with_sleeps_runs_a_pure_task_after_two` (`src/sched/tests.rs`)
 records the three answers. No recorded case polls a pure task this way.
@@ -646,6 +739,8 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    hub waits in the scheduler's own event loop; the glue has no hook there
    (sched-io removed sched-1's `Glue::idle`).
 2. **Lifecycle.**
+   - `sched::install_stack_overflow_handler()` on the thread that runs the
+     initializers, and on `main`'s thread if it is another one (item 8).
    - Run the module initializers. Tasks run at once then, as natively.
    - `sched::start(glue)` on the thread that runs `main`
      (`lean_init_task_manager`). It takes Lean's numbers: the task
@@ -812,22 +907,51 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    (LB-18). The driver's `Ref` (`tests/sched-driver/src/lean.rs`) is an
    example.
 8. **Stack overflow.** Lean's report (`src/runtime/stack_overflow.cpp`) is
-   a SIGSEGV handler on an alternate signal stack. Installing one
-   (`sigaction`) is `unsafe`, so it stays in the glue, as in lean2rr's
-   `rt.rs`. The handler reports `\nStack overflow detected. Aborting.\n` and
-   aborts when the fault lies in the guard page of the thread's own stack,
-   or of the running context's stack (`running_stack()`: the faulting
-   thread's own thread-local atomics, async-signal-safe).
-   `tests/sched-driver/src/glue.rs` has one.
-   - Without such a handler, a task that overflows its context's stack ends
-     with a plain SIGSEGV, status 139, without Lean's message. Rust's own
-     handler knows only the guards of threads, not of coroutine stacks.
-   - The driver's handler looks up `main`'s guard on the process's main
-     thread, where its `main` runs. A glue whose `main` runs on a spawned
-     std thread (leanrs's does) must look up that thread's guard instead,
-     and pass every other fault on to the handler it replaced (Rust's). Rust
-     then reports an overflow of a std thread's stack as it does without
-     the glue.
+   the crate's (AR-11), behind the feature `stack-overflow` (it turns on
+   `sched`; lean2rr enables it, leanrs decides at its adoption of `sched`,
+   its DV6 until then). The glue calls
+   `sched::install_stack_overflow_handler()` once per OS thread that runs
+   Lean code, at that thread's entry, before any Lean code runs on it: the
+   process's main thread for the initializers, and `main`'s thread if it is
+   another one. The scheduler's contexts need nothing more: the hub
+   publishes each context's guard at every switch (`publish`), and
+   `sched::start` registers its own thread once the handler is installed.
+   The first call comes from `main` (or later), after Rust's runtime has
+   started, never from an ELF constructor: std's runtime start installs
+   Rust's handler, and alternate stacks for the threads std spawns, only
+   where it finds the default disposition, so installed before it, the
+   crate's handler leaves a Rust thread that does not register without
+   Rust's report (review SO-2). With a C-style entry (lean2rr's `leanrt`),
+   std's runtime start never runs, and the previous action is the default.
+   From then on:
+   - a fault in the guard page below the stack of a registered thread, or
+     of the context running on it, writes
+     `\nStack overflow detected. Aborting.\n` to descriptor 2 and aborts
+     (status 134, buffered output lost), as natively on any Lean thread;
+   - any other fault goes to the action that was there before, called as
+     the kernel would call it (its mask, `SA_NODEFER`, and the default
+     restored first under `SA_RESETHAND`; review SO-1): Rust's handler,
+     where Rust's runtime installed it (it reports an overflow of a Rust
+     thread's own stack, with Rust's message), or the default (status
+     139), as Lean's handler restores it.
+
+   The handler is a native quirk with `unsafe` (`src/sched/stack_overflow.rs`;
+   its proof in `docs/native-quirks.md`, "Lean's stack-overflow report":
+   the alternate signal stack of each registered thread, no thread-local,
+   lock or allocation in the handler, the window between a publication of
+   the running context and the switch, the forward). The glue writes no
+   `unsafe` for it (`tests/sched-driver/src/glue.rs`, built with the
+   feature). `running_stack()` (with or without the feature) gives the
+   running context's bounds, but a glue's own handler must not read it: its
+   thread-locals are not async-signal-safe in every link mode.
+
+   **Without the feature, or without the call,** a task that overflows its
+   context's stack ends with a plain SIGSEGV, status 139, without Lean's
+   message (Rust's handler knows only the guards of threads), and an
+   overflow of a Rust thread's own stack gets Rust's message. Without the
+   feature the crate compiles no `unsafe` for it, the hub updates no
+   record (no cost at a switch), and `install_stack_overflow_handler` does
+   not exist.
 
 9. **Blocking IO** needs nothing from the glue when it goes through the
    crate's `io` (handles, processes): it cooperates by itself. A stream's
@@ -1324,8 +1448,10 @@ argument is checked by:
   third review of sched-1; 31 of 31 at 089fbc4 by its reviewer); the three
   cases added in the fourth review, sched-io's fourteen and sched-2's
   twenty-four have not run under it yet. Leak
-  detection is off because the driver's glue leaks its 64 KiB alternate
-  signal stack on purpose; that leak was the only report.
+  detection was off because the driver's glue leaked its 64 KiB alternate
+  signal stack on purpose, the only report then; the crate's report
+  (AR-11) makes one only for a thread that has none, which Rust's threads
+  never are.
 
   What AddressSanitizer covers is limited. It checks the stack bounds at
   each switch and accesses to freed heap memory. A stale yielder pointer
@@ -1420,14 +1546,16 @@ The limits of one thread (lean2rr plan §10, "Tasks") hold here too:
 - **Stack overflow.** corosensei's `Stack` trait exposes `base()` and
   `limit()`, the guard page included, and `DefaultStack` maps exactly one
   guard page below the usable part. The scheduler publishes the running
-  context's guard and top in thread-local atomics (`running_stack()`),
-  updated at every switch, and none on `main`'s context.
-  - The handler and the abort stay in the glue (item 8 of "The glue").
-  - The driver's handler (`glue.rs`) reports Lean's message for a fault in
-    `main`'s guard or the running context's.
+  context's guard at every switch, none on `main`'s context: in
+  thread-local atomics (`running_stack()`), and in the record of Lean's
+  stack-overflow report (`src/sched/stack_overflow.rs`, AR-11).
+  - The handler and the abort are the crate's, opted into by the glue
+    (item 8 of "The glue").
   - `tasks/stack_overflow_in_task` matches native: the task overflows on a
     context, `\nStack overflow detected. Aborting.\n`, status 134, stdout
-    not flushed.
+    not flushed; the driver's `so_*` tests check `main`'s own stack, a
+    second scheduler thread, a fault that is no overflow and the forward
+    to Rust's handler.
   - corosensei's own trap API (`CoroutineTrapHandler`) is `unsafe` and not
     needed.
 - **Rust panics.** With unwinding (`panic = "unwind"`, Rust's default),
@@ -1473,9 +1601,10 @@ joins its thread pool (`docs/net.md`).
 - The scheduler's state: contexts, the task table, the yielder pointers.
   It is a `thread_local!` (`src/sched/mod.rs`), set up by `start` on the
   calling thread.
-- The published stack bounds (`running_stack`) and the hub-hook flag. A
-  SIGSEGV handler runs on the faulting thread and reads that thread's
-  bounds.
+- The published stack bounds (`running_stack`) and the hub-hook flag. The
+  stack-overflow report keeps one record per registered thread, found by
+  the faulting thread's `errno` address, so a fault on any thread reads
+  that thread's bounds.
 - The soundness argument (S1-S7): a scheduler resumes only its own
   coroutines, on its own thread.
 - Thread numbers (`thread_number`) are 64-bit: a worker context's number
@@ -1513,7 +1642,8 @@ program.
   that knows the worker.
 - **Promises, `release` and `resolve`** go through the shared table.
 - **The stack-overflow report** already works per thread. Each worker
-  thread installs the glue's alternate signal stack.
+  thread registers (`install_stack_overflow_handler`, or `start`): its
+  alternate signal stack and its record.
 - **`ST.Ref`** operations are atomic today only because one thread runs
   them. With real threads each `get`, `set`, `swap` and `modify` must be
   atomic, or LB-01 (a concurrent `set` lost by a `get`) comes back.

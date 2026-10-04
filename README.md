@@ -20,7 +20,7 @@ values.
 |---|---|
 | `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
 | `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error`; with the feature `proc-title` (it turns on `io`), `setProcessTitle`'s write into the arguments' memory, a native quirk written with `unsafe` (without it, `setProcessTitle` fails with `ENOBUFS`) | The memory protocol: reference counting, ownership, freeing |
-| `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
+| `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour; with the feature `stack-overflow` (it turns on `sched`), Lean's stack-overflow report for the contexts' stacks, a native quirk written with `unsafe` (without it, a task's stack overflow is a plain SIGSEGV, status 139) | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
 | `net` (feature `net`, with `io` and `sched`): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
 
 Functions take views (`&[u8]`, `&str`) and plain data (`u64`, `f64`), and
@@ -81,7 +81,14 @@ glue"), and `Option.getOrBlock!`, behind `Promise.result!`, is
 `sched::option_get_or_block`. A task's waiters wake at the end of the
 first walk of dependents that ends after its value is set (its own, a
 nested one or any other referenced task's), as natively, and also where
-`Promise.result!`'s permanent block would lose the wakeup (LB-32).
+`Promise.result!`'s permanent block would lose the wakeup (LB-32). Its
+fourth batch, sched-3, makes Lean's stack-overflow report the crate's,
+behind the feature `stack-overflow` (`sched::install_stack_overflow_handler`,
+a native quirk in `src/sched/stack_overflow.rs`; AR-11; without it, a task
+that overflows its context's stack ends with a plain SIGSEGV), and lets a
+waiter or a poller run no task on its own stack but the one a free worker
+would start now, first come, first served, with `IO.waitAny` keeping its
+worker (AR-9, AR-10).
 
 `net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
 externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code
@@ -99,13 +106,16 @@ that order. See `docs/development.md`, the rules for implementors.
 
 - The crate root denies `unsafe` code (`#![deny(unsafe_code)]`). A file may
   allow it for itself only with an entry in `UNSAFE.md`, behind a feature:
-  a native quirk that no safe API can reproduce (one so far,
-  `io::argv_title`, feature `proc-title`: `setProcessTitle` writes the
-  title into the arguments' memory, as libuv does; its proof is in
+  a native quirk that no safe API can reproduce (two so far:
+  `io::argv_title`, feature `proc-title`, where `setProcessTitle` writes the
+  title into the arguments' memory, as libuv does; and
+  `sched::stack_overflow`, feature `stack-overflow`, Lean's stack-overflow
+  report for the scheduler's context stacks; their proofs are in
   `docs/native-quirks.md`), or a faster implementation behind the opt-in
   feature `unsafe-fast`, with the same behaviour as its safe twin. Without
-  `proc-title` and `unsafe-fast` (the default build, `io`, `sched`, `net`),
-  the crate's own code contains no `unsafe`, and the root forbids it.
+  `proc-title`, `stack-overflow` and `unsafe-fast` (the default build, `io`,
+  `sched`, `net`), the crate's own code contains no `unsafe`, and the root
+  forbids it.
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
   on). The ports of glibc's `cbrt` and `cbrtf` give glibc 2.39's aarch64
@@ -119,7 +129,8 @@ that order. See `docs/development.md`, the rules for implementors.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
   `io` uses rustix, nix and io-uring, `sched` corosensei, rustix and
-  signal-hook, and `net` dns-lookup (pinned exactly; its `unsafe` audited in
+  signal-hook, `stack-overflow` nix, and `net` dns-lookup (pinned exactly;
+  its `unsafe` audited in
   `UNSAFE.md`), pinned by `Cargo.lock` and built offline from cargo's local
   registry cache.
 

@@ -3,3 +3,5 @@ area = "process"
 lean_version = "4.34.0"
 source = "leanrs's re-check of lean-runtime fixes-1 (78edede): io calls with external effects were not writer-wait points; AR-8"
 streams = "separate"
+# Made robust in sched-3 (2026-10-04): the child stays alive after `cat` (`exec sleep 30`), so
+# the kill always ends it; under load the first version's shell sometimes exited 0 first.

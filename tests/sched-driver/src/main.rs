@@ -30,5 +30,9 @@ fn main() {
         eprintln!("sched-cases: no case {id}");
         std::process::exit(2)
     };
+    // A program installed before the glue's opt-in (review SO-1 of AR-11).
+    if id == "so_prev_resethand" {
+        review::install_prev_resethand();
+    }
     glue::run(init, main, args)
 }

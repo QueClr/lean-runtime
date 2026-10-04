@@ -750,6 +750,155 @@ fn rsio_ns_partial() {
     }
 }
 
+/// Lean's message (`src/runtime/stack_overflow.cpp`).
+const STACK_OVERFLOW: &str = "\nStack overflow detected. Aborting.\n";
+
+/// A small stack for the contexts (`LEAN_STACK_SIZE_KB`), as the case
+/// `tasks/stack_overflow_in_task` sets it.
+fn small_stacks() -> Vec<(String, String)> {
+    vec![("LEAN_STACK_SIZE_KB".into(), "1024".into())]
+}
+
+/// AR-11: `main`'s own stack overflows after a task ran on a context: the
+/// crate's handler knows the guard of the thread `glue::run` registered.
+#[test]
+fn so_main_overflow() {
+    let got = run_with(
+        "so_main_overflow",
+        &["100000000".into()],
+        &small_stacks(),
+        None,
+        false,
+    );
+    assert_eq!(got.code, "134", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), format!("task ran\n{STACK_OVERFLOW}"));
+    assert!(got.out.is_empty(), "{:?}", out_of(&got));
+}
+
+/// AR-11: a task overflows its context's stack after switches.
+#[test]
+fn so_task_overflow_after_switches() {
+    let got = run_with(
+        "so_task_overflow_after_switches",
+        &["100000000".into()],
+        &small_stacks(),
+        None,
+        false,
+    );
+    assert_eq!(got.code, "134", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), format!("b ran\n{STACK_OVERFLOW}"));
+    assert!(got.out.is_empty(), "{:?}", out_of(&got));
+}
+
+/// AR-11: a fault that is no overflow takes the default action, without a
+/// message.
+#[test]
+fn so_segv_in_task() {
+    let got = run_with("so_segv_in_task", &[], &small_stacks(), None, false);
+    assert_eq!(got.code, "139", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "");
+}
+
+/// Review SO-1 of AR-11: a fault that is no overflow goes to a one-shot
+/// previous handler (`SA_RESETHAND`) as the kernel would call it, with the
+/// default restored first: one `prev`, then the default action (139), as
+/// without the crate. Calling it with the crate's handler still installed
+/// loops forever.
+#[test]
+fn so_prev_resethand() {
+    let got = run_with("so_prev_resethand", &[], &[], Some(10), false);
+    assert_eq!(got.code, "139", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "faulting\nprev\n");
+}
+
+/// AR-11: the fault of a thread that never registered goes on to Rust's
+/// handler, which reports its overflow.
+#[test]
+fn so_rust_thread_overflow() {
+    let got = run_with(
+        "so_rust_thread_overflow",
+        &["100000000".into()],
+        &[],
+        None,
+        false,
+    );
+    let err = err_of(&got);
+    assert_eq!(got.code, "134", "stderr {err:?}");
+    assert!(err.contains("thread 'plain'"), "stderr {err:?}");
+    assert!(err.contains("has overflowed its stack"), "stderr {err:?}");
+    assert!(!err.contains("Stack overflow detected"), "stderr {err:?}");
+}
+
+/// AR-11: `sched::start` on another thread registers it.
+#[test]
+fn so_second_scheduler_thread() {
+    let got = run_with(
+        "so_second_scheduler_thread",
+        &["100000000".into()],
+        &small_stacks(),
+        None,
+        false,
+    );
+    assert_eq!(got.code, "134", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), STACK_OVERFLOW);
+}
+
+/// `tasks/wait_any_finished_unnotified` with 20 workers, where natively
+/// the outcome is the same (leanrs's probe, 10 of 10): the twin must not
+/// run `u` on `main`'s stack either.
+#[test]
+fn wait_any_finished_unnotified_w20() {
+    let id = "wait_any_finished_unnotified";
+    let got = run_with(
+        id,
+        &[],
+        &[("LEAN_NUM_THREADS".into(), "20".into())],
+        None,
+        false,
+    );
+    let exp = &expected(id)[0];
+    assert_eq!(got.code, exp.code, "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), String::from_utf8_lossy(&exp.out));
+    assert_eq!(got.err, exp.err);
+}
+
+/// Our review of sched-3 (RS3), probe `DedicatedWaiter`, with native's
+/// outcome (`LEAN_NUM_THREADS=1`): a dedicated waiter blocks while the
+/// queue's head waits for a promise it resolves afterwards.
+#[test]
+fn rv3_dedicated_waiter() {
+    let got = run_with(
+        "rv3_dedicated_waiter",
+        &[],
+        &[("LEAN_NUM_THREADS".into(), "1".into())],
+        Some(20),
+        false,
+    );
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "c ran\nd resolves\nb got 7\nmain done\n");
+    assert_eq!(err_of(&got), "");
+}
+
+/// Our review of sched-3 (RS3), probe `ChainWait`, with native's outcome
+/// (`LEAN_NUM_THREADS=1`): `main` waits for an IO dependent of a task
+/// queued behind one that waits for a promise `main` resolves afterwards.
+#[test]
+fn rv3_chain_wait() {
+    let got = run_with(
+        "rv3_chain_wait",
+        &[],
+        &[("LEAN_NUM_THREADS".into(), "1".into())],
+        Some(20),
+        false,
+    );
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(
+        out_of(&got),
+        "c ran\nd sees 5\nmain resolves\nb got 7\nmain done\n"
+    );
+    assert_eq!(err_of(&got), "");
+}
+
 /// The ported cases, in one list: each becomes a test, and
 /// `every_case_is_ported` checks the list against the cases' directories
 /// (review RS1S-06 of sched-1).
@@ -809,6 +958,17 @@ cases!(
     sync_walk_mutex_unref_finish,
     wait_any_unref_finish,
     wait_any_pure_stalled,
+    // sched-3: what a waiter or a poller runs on its own stack (AR-9, AR-10)
+    wait_queue_order,
+    wait_head_blocks_on_main,
+    wait_any_head_blocks_on_main,
+    wait_any_keeps_worker,
+    poll_queue_order,
+    poll_threshold_promise,
+    poll_threshold_mutex,
+    wait_picked_pure,
+    wait_any_picked_pure,
+    wait_any_finished_unnotified,
     late_task_after_main,
     late_dependent_of_dedicated,
     late_wait_dedicated,

@@ -26,6 +26,8 @@
 mod ctx;
 mod env;
 mod reactor;
+#[cfg(feature = "stack-overflow")]
+mod stack_overflow;
 pub mod sync;
 mod task;
 #[cfg(test)]
@@ -44,6 +46,8 @@ pub use reactor::{
     poll_fds, timer_start, timer_stop, unwatch, wait_fd, watch, watch_modify, Interest,
     NoSuspendGuard, PollItem, Ready, TimerId, WatchId,
 };
+#[cfg(feature = "stack-overflow")]
+pub use stack_overflow::install_stack_overflow_handler;
 
 /// Turn on the cooperative paths as the first task does (the io layer's
 /// unit tests).
@@ -177,6 +181,10 @@ pub fn start_with(glue: Rc<dyn Glue>, workers: u32, stack_size: usize) {
         s.cx.set_stack_size(stack_size);
         s.tk.started = workers > 0;
     });
+    // Lean's stack-overflow report covers this thread too, if the glue
+    // installed it (`install_stack_overflow_handler`).
+    #[cfg(feature = "stack-overflow")]
+    stack_overflow::on_scheduler_thread();
 }
 
 static REF_YIELDS: AtomicBool = AtomicBool::new(false);

@@ -10,15 +10,16 @@ such item follows the pattern agreed with leanrs:
   `unsafe` (owner: avoid `unsafe` where it is not needed; AR-14). The crate
   root denies `unsafe_code`. A `deny` can be overridden by a file's
   `allow`, so `scripts/check.sh` fails on any file that names `unsafe_code`
-  without an entry in `UNSAFE.md`; a build with neither `proc-title` nor
-  `unsafe-fast` has no such file, and there the root forbids `unsafe`
-  outright;
+  without an entry in `UNSAFE.md`; a build with none of `proc-title`,
+  `stack-overflow` and `unsafe-fast` has no such file, and there the root
+  forbids `unsafe` outright;
 - every `unsafe` block has a `// SAFETY:` comment naming the invariant it
   relies on;
 - `UNSAFE.md` has its entry, and this file its invariants and proof;
 - leanrs reviews it before merge.
 
-So far there is one item.
+So far there are two items: the process title (feature `proc-title`) and
+Lean's stack-overflow report (feature `stack-overflow`).
 
 ## The process title in the arguments' memory (`src/io/argv_title.rs`)
 
@@ -381,3 +382,399 @@ memory belongs to the process, not to a thread.
   The crate's own constructor needs neither, and the reference keeps it
   linked.
 - **Keeping the deviation** (io-2's LIO2-06): the owner decided against it.
+
+## Lean's stack-overflow report (`src/sched/stack_overflow.rs`)
+
+This section is self-contained: with it and the source of
+`src/sched/stack_overflow.rs`, `src/sched/ctx.rs` (the stacks and the hub)
+and corosensei 0.3.4's `DefaultStack`, a reader can check the item
+(AR-11). It replaces the earlier contract, under which each glue wrote its
+own SIGSEGV handler (lean2rr's `rt.rs`, the driver's `glue.rs`) and leanrs
+had none. The file is compiled only with the feature `stack-overflow`
+(which turns on `sched`); lean2rr enables it, and leanrs decides at its
+adoption of `sched` (its DV6 until then).
+
+### What native does
+
+`src/runtime/stack_overflow.cpp` (Lean 4.34.0):
+- **Per thread.** Every thread Lean starts (the main thread, and each task
+  manager worker: `lthread`'s `_main` holds a `stack_guard`) gets an
+  alternate signal stack of `SIGSTKSZ` bytes (`malloc`, `sigaltstack`).
+- **Process-wide.** `initialize_stack_overflow` installs `segv_handler`
+  for SIGSEGV and SIGBUS with `SA_SIGINFO | SA_ONSTACK`, where the
+  disposition is the default.
+- **The handler.** If the fault's address lies in the page below the
+  faulting thread's stack (`is_within_stack_guard`: the stack address that
+  `pthread_getattr_np` reports, less one page), it writes
+  `\nStack overflow detected. Aborting.\n` to descriptor 2 and calls
+  `abort`: status 134, and buffered output is lost. Otherwise it sets the
+  disposition back to the default and returns: a fault runs its
+  instruction again and the default action ends the process (status 139);
+  a SIGSEGV sent by `kill` is consumed.
+
+Case `tasks/stack_overflow_in_task`: a task overflows, Lean's message,
+status 134.
+
+### What the crate does
+
+A task runs on a context: a corosensei coroutine on a `DefaultStack`, an
+`mmap` of `PROT_NONE` whose part above the lowest page is made writable, so
+one guard page lies below each stack (`bounds_of` in `ctx.rs`). Rust's
+handler knows only the guards of threads, and a glue's handler would need
+the scheduler's knowledge of which stack runs. So the crate owns the
+handler:
+- **The opt-in.** `sched::install_stack_overflow_handler()` registers the
+  calling thread, then, once per process (`Once`), installs `on_fault` for
+  SIGSEGV and SIGBUS with `SA_SIGINFO | SA_ONSTACK`, over whatever handler
+  is there (Rust's), which it keeps as the previous action; a disposition
+  set to ignore is left alone. `sched::start` registers its thread too,
+  once the handler is installed.
+- **Registering a thread** gives it an alternate signal stack if it has
+  none (Rust gives its own threads one), and a record in the table: the
+  thread's key (the address of its `errno`), the guard below its own stack
+  (`pthread_getattr_np`, as Lean computes it), and the guard of the context
+  running on it. A thread's `Registration`, a thread-local with a
+  destructor, frees the record for reuse when the thread ends. The table
+  is a list of chunks of 64 records: a thread that finds every record taken
+  appends a chunk (`OnceLock<Box<Chunk>>`, allocated at registration, never
+  freed), so the table grows with the number of live registered threads,
+  without a bound (review RS3-01).
+- **Publication.** The hub calls `ctx::publish` right before it resumes a
+  context and right after the context suspends or ends (and the panic
+  guard after a panic): it updates the thread-locals behind
+  `running_stack()` and, through `stack_overflow::publish`, the record's
+  context guard.
+- **The handler** (`on_fault`) finds the faulting thread's record by its
+  key, with atomic loads, and when the fault's address lies in either of
+  its guards, writes Lean's message and aborts. Otherwise it forwards the
+  fault to the previous action.
+
+### The `unsafe` operations
+
+All are in `src/sched/stack_overflow.rs`:
+- **U1.** `__errno_location()`, the thread's key.
+- **U2.** The read and the write back of `errno` in the handler.
+- **U3.** The handler's reads of `si_code` and `si_addr` from the
+  `siginfo_t` the kernel passes.
+- **U4.** `write(2)` of the message.
+- **U5.** `sigaction` back to the default (nix's wrapper), in the handler.
+- **U6.** The previous handler's address made a function pointer
+  (`transmute`), to call it.
+- **U7, U8.** The install: a query of the current disposition and of its
+  mask (`sigismember`), then `sigaction` with `on_fault` (nix's wrapper).
+- **U9.** `pthread_self`, `pthread_getattr_np`, `pthread_attr_getstack`
+  and `pthread_attr_destroy`, for the thread's own guard.
+- **U10.** `sysconf(_SC_PAGESIZE)` and `getauxval(AT_MINSIGSTKSZ)`.
+- **U11, U12.** `sigaltstack`: a query, then a new alternate stack.
+- **U13.** In the handler, for a call of the previous handler:
+  `sigemptyset`, `sigaddset` and `pthread_sigmask` on local `sigset_t`s
+  (its mask blocked, the signal unblocked under `SA_NODEFER`, then the
+  mask before restored).
+
+### What it relies on
+
+- **G1. Linux signal delivery.** A SIGSEGV or SIGBUS caused by a fault is
+  delivered to the faulting thread, which runs the handler and runs
+  nothing else until it returns; the handler sees every store the
+  interrupted code made before the fault, in program order (one thread).
+  With `SA_ONSTACK`, the kernel builds the signal frame on the thread's
+  alternate stack when one is set and the thread is not already on it;
+  without one, an overflowed stack cannot take the frame, and the kernel
+  kills the process with SIGSEGV. A fault while the handler runs with the
+  signal blocked kills the process too. `SA_SIGINFO` handlers get a valid
+  `siginfo_t`; `si_addr` is meaningful when the kernel generated the
+  signal (`si_code > 0`).
+- **G2. Async-signal-safe calls.** POSIX lists `write`, `abort`,
+  `sigaction`, `sigemptyset`, `sigaddset` and `pthread_sigmask` as
+  async-signal-safe (glibc's `pthread_sigmask` is the `rt_sigprocmask`
+  system call). `errno` may be used in a handler (a
+  handler must save and restore it), so `__errno_location` is too: glibc's
+  `errno` is glibc's own initial-exec thread-local, set up when the thread
+  is created. std's own SIGSEGV handler keys its per-thread data by the
+  same address (`library/std/src/sys/pal/unix/stack_overflow/thread_info.rs`).
+- **G3. The context stacks.** corosensei 0.3.4's `DefaultStack::new(size)`
+  maps `size` plus one page `PROT_NONE` and makes all but the lowest page
+  writable, so the guard is exactly that page, `[limit, limit + page)`
+  (`bounds_of`). A stack is unmapped only when its `DefaultStack` is
+  dropped: in `after_resume` after its context ended, or when the pool
+  drops it, both after the context's last `publish(None)`.
+- **G4. The previous action.** The disposition a handler replaces was set
+  by its owner with `sigaction`: a function with one argument, or three
+  when `SA_SIGINFO` is set, that stays mapped while it is installed, with
+  the flags and mask its owner chose; the kernel would call it with that
+  mask (and the signal) blocked, the signal unblocked under `SA_NODEFER`,
+  and with the disposition reset to the default first under
+  `SA_RESETHAND` (a one-shot handler). Which it is depends on when the glue
+  installs (review SO-2):
+  - in a Rust program whose `main` is Rust's, installed from `main` or
+    later, it is std's handler (the executable's code), which std's
+    runtime start (`std::rt::init`, before `main`) installs where it finds
+    the default disposition, together with alternate stacks for the
+    threads std spawns;
+  - with a C-style entry, where std's runtime start never runs (lean2rr's
+    `leanrt`), or in a C program that embeds the crate, it is the default;
+  - installed before std's runtime start (from an ELF constructor), it is
+    the default too, and std then finds the crate's handler, installs
+    neither its handler nor the alternate stacks of the threads it spawns:
+    a Rust thread that does not register loses Rust's report (its
+    overflow ends with SIGSEGV, 139). Hence the rule: the glue installs
+    from `main`, after Rust's runtime has started, never from an ELF
+    constructor.
+- **G5. No concurrent change at install.** No other code changes the
+  dispositions of SIGSEGV and SIGBUS while `install_stack_overflow_handler`
+  runs the first time (at the program's start). If one did, the handler
+  would forward to the disposition it read, still a valid action of G4.
+
+### The invariants the crate maintains
+
+- **I1. One handler.** `on_fault` is installed once per process
+  (`INSTALL`), for SIGSEGV and SIGBUS, with `SA_SIGINFO | SA_ONSTACK` and
+  an empty mask (the signal itself is blocked while it runs).
+- **I2. One writer per record.** A thread claims a free record with a
+  compare-and-swap of its key from 0 to `CLAIMING` (a value no `errno`
+  address has), or reuses the record that already has its key (left by
+  a thread with the same `errno` whose end did not free it). From then on
+  only that thread writes the record: `register_thread`, `publish` (called
+  only by the hub on its thread) and the `Registration`'s destructor. It
+  stores its key last (`Release`). Other threads only compare the key with
+  their own, and keys are unique among live threads.
+- **I3. A whole guard or none.** Each guard is written `lo = 0`, then
+  `hi`, then `lo` (`Record::set_pair`), with compiler fences between the
+  stores, so a handler that interrupts the writes on the same thread (G1)
+  reads `lo = 0` (no guard) or a guard whose `lo` and `hi` belong
+  together. While the handler runs, its record does not change (I2, G1).
+- **I4. A published guard is a live guard page.** `ctx::publish(Some)` runs
+  in `hub` right before `resume`; `publish(None)` right after `resume`
+  returns, and in `PanicGuard::drop` when a panic comes out of it; both
+  before `after_resume` pools or drops the stack (G3). So the record's
+  context guard is the guard page of a mapped stack, and it is set exactly
+  while code may run on that stack.
+- **I5. The previous action.** For each signal, `PREV_FLAGS` (the whole
+  `sa_flags`), `PREV_MASK` (its `sa_mask`, signals 1 to 64) and `PREV` (the
+  `sa_sigaction`, last) are stored (`Release`) before `on_fault` is
+  installed for it and never again; the handler loads them (`Acquire`). So
+  the handler sees the action read from the kernel at install (G5).
+- **I6. Every registered thread has an alternate stack**: `register_thread`
+  calls `ensure_altstack` before it claims the record. An alternate stack
+  the crate makes is `AT_MINSIGSTKSZ` (the kernel's largest signal frame on
+  this machine, at least `SIGSTKSZ`) plus 64 KiB, a heap block kept for the
+  life of the process, never referenced by Rust code.
+- **I7. An append-only table.** A chunk is reached from the static first
+  chunk through `OnceLock`s that are set once, at a registration, and
+  never cleared; a chunk is never freed. The handler walks the chunks with
+  `OnceLock::get`, which never blocks and allocates nothing (its
+  documented contract; that it is one atomic load is std's current
+  implementation, not part of the contract): a chunk being added on the same
+  thread when the handler interrupts it reads as absent, and it holds no
+  record of that thread yet.
+
+### Proof of what the handler needs
+
+- **A1. Delivery on the alternate stack.** A context's stack overflows on
+  a registered thread (only a scheduler's thread runs contexts, and
+  `sched::start` registers it once the handler is installed). The fault
+  is delivered to that thread (G1), which has an alternate stack (I6), and
+  `on_fault` has `SA_ONSTACK` (I1): the frame goes on the alternate stack,
+  not on the overflowed one. The same holds for an overflow of the
+  thread's own stack. Which alternate stack it is (review RS3-02):
+  - on a Rust thread (the translators' `main` threads, std-spawned
+    threads), std's own: the larger of `SIGSTKSZ` and `AT_MINSIGSTKSZ`
+    (16 KiB on this aarch64 host, whose kernel frame is at most 4720
+    bytes), with a guard page below it. The kernel's frame, the handler's
+    own frames (a few hundred bytes, two local `sigset_t`s) and, on a
+    forward, the previous handler's share std's slack, as std's handler
+    alone would; were it exceeded, the fault on the guard page with the
+    signal blocked kills the process (G1), it corrupts nothing;
+  - on a thread that had none (a C thread), the crate's: `AT_MINSIGSTKSZ`
+    (at least `SIGSTKSZ`) plus 64 KiB.
+- **A2. Async-signal-safety.** The handler allocates nothing, takes no
+  lock and reads no thread-local of the crate:
+  - `errno_location` is `__errno_location` (G2);
+  - `record_of` and `Record::covers` are loads of atomics in the table's
+    chunks (`AtomicUsize` is lock-free on the crate's targets), reached
+    with `OnceLock::get` (I7);
+  - the report is `write(2)` and `abort(3)` (G2; `std::process::abort` is
+    `abort`);
+  - the forward is `sigaction(2)` through nix's wrapper, which only fills a
+    `sigaction` on the stack (G2), or a call of the previous handler, whose
+    safety as a SIGSEGV handler is its owner's (G4), made with that
+    handler's mask: `sigemptyset(3)`, `sigaddset(3)` and
+    `pthread_sigmask(3)` around the call (G2, U13), all async-signal-safe;
+  - `errno` is saved first and restored before the handler returns.
+
+  It reads no thread-local of the crate on purpose. A Rust `thread_local!`
+  with a constant initializer and no destructor is a plain load at a fixed
+  offset from the thread pointer in an executable, but in a library loaded
+  by `dlopen`, glibc may allocate the thread's block of the library's
+  thread-locals at its first access (`__tls_get_addr`), which is not
+  async-signal-safe; std moved its own handler off thread-locals for that
+  reason. The table needs no thread-local: the key is `errno`'s address.
+  (`SLOT` and `REGISTRATION` are read only outside the handler.)
+- **A3. The window around a switch.** `publish(Some(b))` runs on `main`'s
+  stack before the switch to the context, and `publish(None)` on `main`'s
+  stack after the switch back (I4). In each window, code runs on `main`'s
+  stack (the hub's frames and corosensei's switch) while the record names
+  the context's guard. The handler classifies by address, and checks both
+  guards: the thread's own guard and the context's are different pages (a
+  thread stack and an `mmap` of corosensei's), so
+  - an overflow of `main`'s stack in the window faults in the thread's
+    guard, which the record holds whatever the context guard says: Lean's
+    message, as natively;
+  - the context's guard can be touched only by code on the context's stack,
+    which runs only between the two publications, when the record holds
+    that guard;
+  - a handler that interrupts a publication sees no context guard or a
+    whole one (I3), and either is right, since the code being interrupted
+    runs on `main`'s stack.
+
+  (The driver's former handler checked only the context's guard while one
+  was published, and would have taken an overflow of `main`'s stack in the
+  window for another fault: status 139 without the message.)
+- **A4. Other faults go where they went before.** A fault on a thread
+  without a record, or whose address lies in neither guard, or a signal
+  not raised by a fault (`si_code <= 0`, whose `si_addr` is no address), is
+  forwarded (I5):
+  - a previous handler is called as the kernel would call it (G4; review
+    SO-1): under `SA_RESETHAND` the default action is restored first; its
+    mask is blocked for the call, and the signal unblocked under
+    `SA_NODEFER` (U13), the mask before restored after; a handler with
+    `SA_SIGINFO` gets the kernel's three arguments, another the signal.
+    So a one-shot handler that returns without repairing the fault runs
+    once, and the fault, run again, takes the default action (139), as
+    without the crate; calling it with `on_fault` still installed would
+    loop forever (`so_prev_resethand`);
+  - where the previous handler is std's (Rust's runtime started before the
+    install, G4), it reports an overflow of a Rust thread's own stack (its
+    message, `abort`); otherwise it sets the default action and returns,
+    and so does `on_fault`: the faulting instruction runs again and the
+    default action ends the process (status 139), as natively;
+  - a previous default (or ignore, or `on_fault` itself, which cannot
+    happen under I1) restores the default and returns, as Lean's handler
+    does.
+
+### Proof of the `unsafe` operations
+
+- **U1** has no precondition (G2); its result is valid for the thread's
+  life.
+- **U2** reads and writes the calling thread's `errno` through the pointer
+  of U1, aligned and valid; no reference to it is live in Rust code (the
+  interrupted code reaches it through the same function).
+- **U3** dereferences the `siginfo_t` pointer the kernel passes to an
+  `SA_SIGINFO` handler (G1), read only; `si_addr` is read only when
+  `si_code > 0`.
+- **U4** writes `MESSAGE.len()` bytes from a static buffer.
+- **U5** installs the default action, a valid disposition for both
+  signals; nix's wrapper passes a `sigaction` it built on the stack.
+- **U6** turns `PREV[k]` into a function pointer: by I5 and G5 it is the
+  `sa_sigaction` the kernel recorded before `on_fault`, neither `SIG_DFL`
+  nor `SIG_IGN` (checked) nor `on_fault`; by G4 it is a function of the
+  signature that `SA_SIGINFO` in `PREV_FLAGS[k]` names, still mapped. It
+  is called with the arguments the kernel gave `on_fault`.
+- **U7** passes a null new action and a `MaybeUninit<sigaction>` to write;
+  it is read only on success, and `sigismember` reads its initialized
+  `sa_mask`. **U8** installs `on_fault`: an `extern "C"`
+  function with the `SA_SIGINFO` signature, in the crate's code, sound at
+  any point of the program (A2), for SIGSEGV and SIGBUS (never SIGKILL or
+  SIGSTOP).
+- **U9.** `pthread_getattr_np` initializes the zeroed `pthread_attr_t` for
+  the calling thread; `pthread_attr_getstack` reads it after success into
+  two locals; `pthread_attr_destroy` destroys it once. Neither runs in the
+  handler (`pthread_getattr_np` reads `/proc/self/maps` for the main
+  thread, as Lean's handler does at each fault).
+- **U10** have no precondition.
+- **U13** works on local `sigset_t`s: `sigemptyset` initializes one before
+  `sigaddset` and `pthread_sigmask` read it (glibc ignores the signals it
+  reserves); the mask before is written by a successful `pthread_sigmask`
+  and only then restored.
+- **U11** passes a null new stack and a `MaybeUninit<stack_t>` to write,
+  read only on success. **U12** gives the kernel `size` bytes of a block
+  allocated for that and leaked (`Box::into_raw`): valid for the rest of
+  the process, and no Rust reference points into it, so the kernel's
+  writes alias nothing. It is set only when the thread had no alternate
+  stack (`SS_DISABLE`), so the thread does not run on one at that moment.
+
+### What is outside the proof, as natively
+
+- **A frame larger than the guard page** that skips it (C code without
+  stack probes, `alloca`) faults below the guard, or writes into whatever
+  lies there. Native Lean's rule is the guard page only, and so is this
+  one: no message, status 139 (or memory corruption, as natively). Rust
+  and both translators' generated code probe their stacks page by page.
+  lean2rr's former handler also took a fault below the guard with the
+  stack pointer below it (`past_end`, from the interrupted context's stack
+  pointer, read at architecture-specific offsets of `ucontext_t`); that
+  goes beyond native's rule and is not taken over.
+- **The table** keeps every chunk it ever appended, 64 records each: its
+  size follows the largest number of registered threads alive at once.
+- **Unloading the crate.** A library that holds the crate, unloaded with
+  `dlclose` while the handler is installed, leaves the kernel pointing at
+  unmapped code: the next SIGSEGV or SIGBUS jumps there. Nothing takes the
+  handler back (it is installed for the life of the process, as Lean's);
+  a host that loads such a library must never unload it (review RS3-02).
+  Neither translator builds a loadable library.
+- **Another handler installed later** (by the program or a library)
+  replaces `on_fault`; the report is then that handler's business.
+- **The alternate stacks the crate makes** are kept for the life of the
+  process: one per registered thread that had none (Rust's threads have
+  one, so none in the translators' programs).
+
+### How it is checked
+
+- The case `tasks/stack_overflow_in_task` (native: the message, status
+  134) through its twin in `tests/sched-driver`, which builds the crate
+  with `stack-overflow` and whose glue only calls
+  `sched::install_stack_overflow_handler()`. `scripts/check.sh` builds and
+  tests `io,sched` and `net` without the feature (the root forbids
+  `unsafe` there), and the configuration with every feature but `net`
+  with it.
+- The driver's tests `so_main_overflow` (`main`'s own stack, after a task
+  ran on a context), `so_task_overflow_after_switches` (a task overflows
+  after it and another blocked and resumed), `so_segv_in_task` (a fault
+  that is no overflow, in a task: status 139, no message),
+  `so_rust_thread_overflow` (a Rust thread that never registered: Rust's
+  report, so the forward reaches std's handler) and
+  `so_second_scheduler_thread` (`sched::start` on another thread registers
+  it), and `so_prev_resethand` (review SO-1: a one-shot previous handler
+  with `SA_SIGINFO | SA_RESETHAND | SA_ONSTACK` and a mask, installed
+  before the crate's: one `prev`, then 139, as without the crate).
+- The unit tests in `stack_overflow.rs`: the guard arithmetic, a record
+  covering both guards (the window, A3), and a registered thread's record,
+  alternate stack and release at its end.
+- Mutation checks (2026-10-04): forwarding always to the default fails
+  `so_rust_thread_overflow`; no publication fails
+  `stack_overflow_in_task` and `so_task_overflow_after_switches`; no
+  registration in `sched::start` fails `so_second_scheduler_thread`; a
+  record that checks only the context's guard while one is published (the
+  former driver's rule) fails `a_record_covers_both_guards`; calling a
+  one-shot previous handler without restoring the default first (review
+  SO-1) loops in `so_prev_resethand` (a timeout, `prev` printed again and
+  again).
+- Miri cannot model the item: every `unsafe` operation is a foreign call
+  or signal delivery. Kani does not apply.
+- Adversarial review: ours, then leanrs's before merge.
+
+### Without the feature
+
+Without `stack-overflow`, `stack_overflow.rs` is not compiled: no handler,
+no records, no alternate stack of the crate's, no `unsafe` code (the root
+forbids it), and `install_stack_overflow_handler` does not exist. The hub's
+`publish` updates only the thread-locals of `running_stack()`, as before
+AR-11, so a switch costs nothing more. A task that overflows its context's
+stack then ends with a plain SIGSEGV (status 139, no message): Rust's
+handler knows only the guards of threads, takes the fault for another one,
+restores the default action and returns. An overflow of a Rust thread's own
+stack gets Rust's message (`thread '...' has overflowed its stack`) and an
+abort (134), where native prints Lean's message.
+
+### Alternatives ruled out
+
+- **Rust's handler** reports only the guard of a thread's own stack,
+  with Rust's message.
+- **corosensei's trap support** (`CoroutineTrapHandler::setup_trap_handler`)
+  is `unsafe`, and is for resuming a coroutine after a trap, not for a
+  report.
+- **signal-hook** refuses SIGSEGV (`FORBIDDEN`).
+- **A handler in each glue** (the former contract): each translator
+  writes the same `unsafe` handler, and must know the scheduler's stacks
+  (`running_stack()`), whose thread-locals are not async-signal-safe in
+  every link mode (A2).

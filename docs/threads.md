@@ -200,13 +200,13 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | A task starts | Deferred. It runs when needed, when the running code blocks with a worker free, at an effect point after 5 ms, when polled, or at exit | When a worker is free, as natively (`enqueue_core`) |
 | Pure-task rule | A started pure task runs late (`pick`) | Not needed. A started pure task runs on its worker, and `main` goes on in parallel |
 | Dropped pure task | Deleted if not started (`release`) | The same. A queued one is deleted; a running one finishes and its value is dropped (`deactivate_task`, `run_task`) |
-| `Task.get`, `IO.wait` | A pending task runs inline on the waiter's stack; otherwise the context blocks | The thread blocks (`wait_for`). A pool task frees its worker place meanwhile (the pool grows by one) |
+| `Task.get`, `IO.wait` | A pending task runs inline on the waiter's stack once it is the head a free worker would take; otherwise the context blocks (sched-3) | The thread blocks (`wait_for`). A pool task frees its worker place meanwhile (the pool grows by one) |
 | `sync` dependents, `LEAN_SYNC_PRIO` | Run on the finishing context, newest first | Run on the finishing thread, newest first (`handle_finished`, `enqueue_core`, `run_task`) |
 | Dedicated tasks | A priority-9 queue, always started | A thread each (`spawn_dedicated_worker`) |
 | `effect`, `poll`, `ref_read` | Let other contexts go first | No-ops |
 | `sleep_ms` | Blocks the context | `std::thread::sleep` |
 | `IO.getTaskState` | The polling rules (`query`) | Native's answer: queued or waiting is `waiting`; running, or an unresolved promise, is `running` (`get_task_state`, 1085) |
-| `IO.waitAny` | A finished task; else the first pending one runs inline; else wait | The first finished task in list order; else block until a task finishes (`wait_any`) |
+| `IO.waitAny` | A finished task; else the only unfinished one runs inline once it is the head (a waiter without a worker only); else wait, keeping the worker (sched-3) | The first finished task in list order; else block until a task finishes (`wait_any`) |
 | `IO.cancel` | A flag; passed on to the dependents when the task finishes | The same (`cancel`, 1074; `handle_finished`) |
 | `IO.checkCanceled` | The flag, or shutdown with the `EARLY` emulation | The flag, or the shutdown flag (`lean_io_check_canceled_core`, 1284) |
 | Promises | `promise_new`, `resolve`; dependents walked on the resolving context | The same, on the resolving thread. The first resolution wins under the lock (`resolve`, 995) |
@@ -214,7 +214,7 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | `IO.Process.exit` | From any context | From any thread. The other threads run until the process ends, as natively |
 | `Std.Sync` | Contexts block. The owner is a context plus a task's thread number | Threads block on condition variables. The owner is the OS thread |
 | A thunk forced on two threads | The glue's waiter list (`block_sync`, `wake`). Forced inside itself: `hang` | A blocking once-cell in the glue. Forced inside itself: its thread hangs (LB-08) |
-| Stack overflow | The guard of `main`'s stack or of the running context (`running_stack`) | The guard of each OS thread. `mt::Glue::thread_start` installs the thread's alternate signal stack and records its guard |
+| Stack overflow | The crate's report (`install_stack_overflow_handler`, feature `stack-overflow`, AR-11): the guard of the registered thread's stack or of the context running on it | The guard of each OS thread. Each worker and each dedicated task's thread registers (`mt::Glue::thread_start` calls `install_stack_overflow_handler`): its alternate signal stack and its record; the table grows with the live threads (review RS3-01) |
 | Current streams | Swapped per context; a task starts with the process's streams | Per OS thread. `task_begin` still starts each pool task with the process's streams |
 | `IO.getTID` | `main`'s id plus `thread_number()` | The thread's `gettid` (`lean_io_get_tid`, `process.cpp` 340) |
 | `LEAN_NUM_THREADS=0` | Tasks run at once | The same |
@@ -250,7 +250,7 @@ The single-thread files do not change. Threads mode is new code in
 | Glue | `Rc<dyn Glue>`: `suspend`, `switched`, `task_begin`, `task_end` (sched-io removed `idle`: the hub waits in the scheduler's event loop) | `Arc<dyn mt::Glue>`, `Send + Sync`: `thread_start`, `thread_end`, `task_begin`, `task_end` |
 | `Std.Sync` | State in a `RefCell`, waiters by `CtxId` (`sync.rs`) | State in a `Mutex`, and a `Condvar` per object |
 | Streams | io's thread-local slots, swapped per context (`streams.rs`, `swap_context`) | The same slots, now one set per real thread |
-| Stack bounds | `running_stack()`, per context | Not needed; the glue records each thread's guard |
+| Stack bounds | `running_stack()` and the report's record, per context | Not needed; each thread's record holds its own guard |
 | Emulation | `STALE`, `LATENCY_*`, `POLL_QUERIES`, `EARLY`, `PICKED`, `io_need` | None |
 
 The `Std.Sync` objects keep sched-1's handover rule: a released mutex goes to
@@ -517,7 +517,7 @@ its own refs (6).
 | Scheduler state | `sched/mod.rs` `SCHED` | Thread-local `RefCell` | `sched::mt`: a global `Mutex` (1.5) |
 | Ref-read polling | `sched/mod.rs` `REF_YIELDS`, `REF_READS_LEFT` | An atomic flag and a thread-local count | Not used: `ref_read` is a no-op |
 | Thread numbers | `sched/ctx.rs` `NEXT_THREAD` | A process-wide atomic | Unchanged |
-| Running stack bounds, hub flag | `sched/ctx.rs` `RUN_LO`/`HI`/`TOP`, `IN_HUB_HOOK` | Thread-locals | Not used. The glue records each thread's guard in `thread_start` |
+| Running stack bounds, hub flag | `sched/ctx.rs` `RUN_LO`/`HI`/`TOP`, `IN_HUB_HOOK`; the stack-overflow report's records (`sched/stack_overflow.rs`) | Thread-locals; a record per registered thread | Not used. Each thread registers its own guard in `thread_start` |
 | `Std.Sync` objects | `sched/sync.rs` | `RefCell` state, `CtxId` waiters | `Mutex` state and a `Condvar` per object |
 | `IO.Ref` | The translator's | `modify`'s function can block with the reference empty (3.1). `get`, `take`, `set` and `swap` of an empty reference must block until `modify`'s store: a glue duty (`docs/sched.md`, The glue, item 7; LB-01, LB-18) | A lock and a condition variable per reference, with the rule of 3.1 |
 | Standard streams' `FILE`s | `io/handle.rs` `STDIN`, `STDOUT`, `STDERR` | `static Mutex<CFile>`: glibc locks each `FILE` | Unchanged |

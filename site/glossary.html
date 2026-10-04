@@ -207,8 +207,8 @@ A native build with Lean 4.34.0 gives every expected value.</dd>
 <dd>A behaviour of native Lean that no safe API can reproduce.
 lean-runtime writes such an item with <code>unsafe</code> code, in a small file of its own (decision of 2026-10-04).
 Each has an entry in <a href="../UNSAFE.md">UNSAFE.md</a> and a written proof.
-The one so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>).
-Each is built only with a feature of its own; this one with <a href="#g-proc-title"><code>proc-title</code></a>.</dd>
+The two so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>), and Lean's stack-overflow report knows the guard pages of the contexts (<a href="sched.html#overflow">sched</a>).
+Each is built only with a feature of its own: <a href="#g-proc-title"><code>proc-title</code></a> and <a href="#g-stack-overflow"><code>stack-overflow</code></a>.</dd>
 
 <dt id="g-o12">O12 (speed floor)</dt>
 <dd>The decision of 2026-10-03: the default, safe build of every shared function must be at least as fast as Lean 4.34.0's native runtime.
@@ -249,7 +249,7 @@ See <a href="testing.html#rows">Testing</a>.</dd>
 <dt id="g-rustix">rustix, nix, io-uring</dt>
 <dd>Vetted Rust crates for system calls.
 They hold the <code>unsafe</code> code, so <code>io</code> stays free of it.
-The one <a href="#g-quirk">native quirk</a> is behind <a href="#g-proc-title"><code>proc-title</code></a>.
+The <a href="#g-quirk">native quirks</a> are behind <a href="#g-proc-title"><code>proc-title</code></a> and <a href="#g-stack-overflow"><code>stack-overflow</code></a>.
 io-uring makes the io_uring rings that libuv opens at startup.</dd>
 
 <dt id="g-sched-io">sched-io</dt>
@@ -260,6 +260,11 @@ See <a href="sched.html#sched-io">sched</a>.</dd>
 <dt id="g-schedule-dependent">Schedule-dependent</dt>
 <dd>A case whose native outcome depends on thread timing.
 The case records every outcome seen; each one is allowed.</dd>
+
+<dt id="g-stack-overflow">stack-overflow</dt>
+<dd>The Cargo feature of Lean's stack-overflow report, a <a href="#g-quirk">native quirk</a>: a SIGSEGV handler that knows the guard pages of the <a href="#g-context">contexts</a>.
+It turns on <code>sched</code>, and lean2rr turns it on.
+Without it, a task that overflows its stack ends with a plain SIGSEGV (status 139).</dd>
 
 <dt id="g-started">Started (pure task)</dt>
 <dd>A pure task that a worker would have started, but that has not run yet.

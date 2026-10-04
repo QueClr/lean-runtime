@@ -19,8 +19,7 @@
   <text x="56" y="296">Steps the crate's safe code cannot do</text>
   <text class="ts" x="56" y="314">the one dereference in Glue::suspend (sched)</text>
   <text class="ts" x="56" y="330">an ELF constructor that opens the startup descriptors</text>
-  <text class="ts" x="56" y="346">a SIGSEGV handler for stack overflow (sched)</text>
-  <text class="ts" x="56" y="362">call exit_flush at exit (no atexit without unsafe)</text>
+  <text class="ts" x="56" y="346">call exit_flush at exit (no atexit without unsafe)</text>
 
   <rect class="k-rt" x="440" y="20" width="400" height="364" rx="8"/>
   <text class="tb" x="460" y="46">In lean-runtime (shared)</text>
@@ -40,5 +39,5 @@
   <text class="ts" x="476" y="302">task queues, contexts, the hub</text>
   <text class="ts" x="476" y="318">yield points, promises, cancellation</text>
   <text class="ts" x="476" y="334">Std.Sync mutexes and condition variable</text>
-  <text class="ts" x="476" y="350">the exit order: tasks first, then flush</text>
+  <text class="ts" x="476" y="350">the exit order; Lean's stack-overflow report</text>
 </svg>

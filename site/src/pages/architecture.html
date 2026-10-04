@@ -27,8 +27,8 @@ Each translator's glue connects its own values to the crate.</p>
 {{svg:arch-features}}
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
-<code>proc-title</code> adds one file to <code>io</code>.
-Without <code>proc-title</code> and <code>unsafe-fast</code>, the crate has no <code>unsafe</code> code of its own.
+<code>proc-title</code> adds one file to <code>io</code>, and <code>stack-overflow</code> one file to <code>sched</code>.
+Without <code>proc-title</code>, <code>stack-overflow</code> and <code>unsafe-fast</code>, the crate has no <code>unsafe</code> code of its own.
 The owner approved nix, rustix, corosensei, signal-hook (its safe API only) and dns-lookup (for <code>net</code> only).
 leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegation of dependency decisions (2026-10-04).</figcaption>
 </figure>
@@ -39,7 +39,7 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
     These crates hold the <code>unsafe</code> code, so <code>io</code> has none of its own.</li>
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
-    Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
+    One <code>unsafe</code> step stays in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>.</li>
   <li><strong><code>net</code>.</strong> Turns on <code>io</code> and <code>sched</code>.
     Its sockets use the net features of rustix and nix.
     Its name lookups call glibc through dns-lookup, pinned at 2.1.1.
@@ -48,6 +48,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
     <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).
     lean2rr turns it on.
     Without it, <code>setProcessTitle</code> fails with <code>ENOBUFS</code>.</li>
+  <li><strong><code>stack-overflow</code>.</strong> Turns on <code>sched</code>, and adds a native quirk in a file of its own, with nix's <code>sigaction</code>.
+    <code>sched::stack_overflow</code> is Lean's stack-overflow report for the stacks of the contexts (<a href="sched.html#overflow">sched</a>).
+    lean2rr turns it on.
+    Without it, a task that overflows its stack ends with a plain SIGSEGV (status 139).</li>
   <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
     It may enable a faster <code>unsafe</code> version of a function.
     That version must have the same behaviour as the safe one, a written proof in <a href="repo:UNSAFE.md">UNSAFE.md</a>, and Miri checks.

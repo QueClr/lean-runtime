@@ -372,7 +372,10 @@ enum WaitStep {
 /// What `query` answers (lean2rr's codes 0-4).
 enum Query {
     Answer(TaskState),
-    /// Run the task, then it has finished (3).
+    /// The polling threshold: what a free worker would start now starts on
+    /// a context of its own (`start_polled`), the others go on once, and
+    /// the task's state is answered then (lean2rr's 3, where the task ran on
+    /// the poller's stack; review AR-9).
     Run,
     /// Let the others go on once, then answer its state (4, and a task that
     /// cannot finish without others).
@@ -1025,12 +1028,18 @@ impl Sched {
     /// A worker starts pure task `i` (natively): it can no longer be
     /// deleted, `IO.getTaskState` reports it running, and it runs when it is
     /// needed, polled, at exit, or when nothing else can go on. It does not
-    /// keep a worker: here it takes no time.
+    /// keep a worker: here it takes no time. A context that waits for it
+    /// (`wait`, blocked until it is the head, or `wait_any`) looks again: it
+    /// is needed, so it runs now (AR-10).
     fn pick(&mut self, i: u32) {
         self.unqueue(i);
         let g = self.ent(i).gen;
         self.ent_mut(i).flags |= PICKED;
         self.tk.picked.push_back((i, g));
+        if self.cx.blocked > 0 {
+            self.wake_cell((i, g));
+            self.wake_progress();
+        }
     }
 
     /// The first valid item of the highest non-empty queue (stale items in
@@ -1067,7 +1076,8 @@ impl Sched {
     /// at a priority up to `Task.Priority.max` waits for one of the task
     /// manager's workers (`LEAN_NUM_THREADS`, or one per processor); a
     /// worker waiting for a task (`IO.wait`, `Task.get`) frees its place
-    /// meanwhile (`wait_for`); a dedicated task has a thread of its own.
+    /// meanwhile (`wait_for`), one in `IO.waitAny` does not; a dedicated
+    /// task has a thread of its own.
     /// Pure tasks no IO task waits for are picked on the way (`pick`); a
     /// picked one that an IO task has come to wait for comes first.
     pub(crate) fn startable(&mut self, gate: Gate) -> Option<(u32, u32)> {
@@ -1146,7 +1156,10 @@ impl Sched {
     /// Whether a context with this bookkeeping holds one of the task
     /// manager's workers: the innermost task running on it (not on the
     /// thread of whoever ran it) is at a pool priority, and it is not
-    /// waiting for a task.
+    /// waiting for a task in `wait` (`Wait::Cell`, `Wait::Progress`: native
+    /// `wait_for` raises the worker limit by one). A context in `IO.waitAny`
+    /// (`Wait::Any`) keeps its worker, as native `wait_any` raises nothing
+    /// (review AR-10 (ii)).
     fn holds_worker(&self, st: &CtxState, w: Wait) -> bool {
         if matches!(w, Wait::Cell(..) | Wait::Progress) {
             return false;
@@ -1243,6 +1256,172 @@ impl Sched {
             || !t.picked_io.is_empty()
     }
 
+    /// Whether pending task `i`, which the running context waits for, may run
+    /// here, on the waiter's stack (AR-10): only once it is the task a free
+    /// worker would start now, as natively a free worker takes the queue's
+    /// head (`dequeue`: the first task of the highest non-empty queue) while
+    /// the waiter sleeps. That is:
+    /// - a pure task a worker has started (`PICKED`), or a dedicated one (a
+    ///   thread of its own at once);
+    /// - otherwise, if a worker is free, the lone worker's task, else the
+    ///   first task of the highest non-empty queue (pure tasks no IO task
+    ///   waits for are started on the way, `pick`, as `startable` does).
+    ///
+    /// `spare`: the waiter's own worker counts as free, as native `wait_for`
+    /// in a pool task raises the worker limit by one (`Task.get`, `IO.wait`;
+    /// not `IO.waitAny`). Running any other task here would run an unawaited
+    /// task on the waiter's stack, which then could not go on until that task
+    /// ends: a hang where it blocks on something only the waiter provides
+    /// (reviews AR-9, AR-10).
+    fn may_run_awaited(&mut self, i: u32, spare: bool) -> bool {
+        let f = self.ent(i).flags;
+        if f & PICKED != 0 || !self.tk.started {
+            return true;
+        }
+        if f & QUEUED == 0 {
+            // Not a state a pending task stays in between two steps; as
+            // before, it runs.
+            return true;
+        }
+        if self.ent(i).prio as usize == DEDICATED {
+            return true;
+        }
+        self.settle_worker();
+        let in_use = self.pool_in_use() - u32::from(spare && self.cx.cur_ctx().holds);
+        if in_use >= self.cx.pool_limit {
+            return false;
+        }
+        loop {
+            let w = self.tk.worker;
+            let cand = if w != NONE && self.ent(w).flags & QUEUED != 0 {
+                w
+            } else {
+                match self.first_queued() {
+                    Some(c) => c,
+                    None => return false,
+                }
+            };
+            if cand == i {
+                return true;
+            }
+            if self.eligible(cand) {
+                return false;
+            }
+            self.pick(cand);
+            if cand == w {
+                self.tk.worker = NONE;
+            }
+        }
+    }
+
+    /// The pending task at the deepest end of the chain of pending tasks
+    /// that `i` waits for (`i` itself if it waits for none), if every link
+    /// waits for a pending task: `None` when one waits for a running task,
+    /// a promise, the walk of a finished task, or itself (a cycle).
+    fn chain_root(&self, i: u32) -> Option<u32> {
+        let mut c = i;
+        for _ in 0..=self.tk.slab.len() {
+            let e = self.ent(c);
+            if e.flags & (RUNNING | PROMISE | FINISHED) != 0 {
+                return None;
+            }
+            if e.flags & WAITING == 0 {
+                return Some(c);
+            }
+            c = e.link;
+            if c == NONE || c == i {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// `IO.waitAny`'s next step when no finished task of its list counts
+    /// (`wait_any`). Natively the waiter sleeps, keeping its worker, while
+    /// free workers take the queue's heads (AR-10):
+    /// - a listed task that is the only unfinished one of the list runs here
+    ///   once it may (`may_run_awaited`, the waiter's worker not counted
+    ///   free), or the pending chain it waits for, from its deepest end; only
+    ///   when every listed id names that one task (none has finished: a task
+    ///   whose value is set before its walk notifies is due to be returned at
+    ///   the notification, so the other is no longer the only one; review of
+    ///   sched-3, case `tasks/wait_any_finished_unnotified`), and only when
+    ///   the waiter holds no worker (`main`, a dedicated task): run here by a
+    ///   pool waiter, it would take one worker where natively it takes two,
+    ///   its own and the runner's;
+    /// - a pure task a worker has started (`PICKED`) at the root of a listed
+    ///   task's chain starts on a context of its own: it is needed;
+    /// - otherwise the waiter blocks (`Wait::Any`), and the hub starts the
+    ///   heads on contexts of their own.
+    fn wait_any_step(&mut self, ids: &[TaskId]) -> Option<u32> {
+        let mut open: Vec<u32> = Vec::new();
+        let mut all_open = true;
+        for &id in ids {
+            match self.find(id) {
+                Some(i) => {
+                    if !open.contains(&i) {
+                        open.push(i);
+                    }
+                }
+                None => all_open = false,
+            }
+        }
+        if let ([u], true) = (&open[..], all_open) {
+            let u = *u;
+            if !self.cx.cur_ctx().holds {
+                if let Some(r) = self.chain_root(u) {
+                    if self.may_run_awaited(r, false) {
+                        self.hand(r);
+                        return Some(r);
+                    }
+                }
+            }
+        }
+        for &u in &open {
+            if let Some(r) = self.chain_root(u) {
+                let e = self.ent(r);
+                if e.flags & PICKED != 0 && !self.preselected(r) {
+                    let g = e.gen;
+                    self.start_worker(r, g);
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether a context already starts with task `i` (`preselect`).
+    fn preselected(&self, i: u32) -> bool {
+        let g = self.ent(i).gen;
+        self.cx
+            .ctxs
+            .iter()
+            .any(|c| c.status != Status::Dead && c.preselect == Some((i, g)))
+    }
+
+    /// `IO.getTaskState`'s polling threshold (`query`: `Query::Run`, review
+    /// AR-9): natively a worker would have run the task by now, so a free
+    /// worker starts what it would start, on a context of its own, never on
+    /// the poller's stack (the task may block on something only the poller
+    /// provides): the pure task a worker has started at the root of the
+    /// polled task's chain (it is needed), else the queue's head
+    /// (`startable`). The polled task itself starts once it is the head, as
+    /// natively the queue is first come, first served.
+    fn start_polled(&mut self, id: TaskId) {
+        if let Some(r) = self.find(id).and_then(|i| self.chain_root(i)) {
+            let e = self.ent(r);
+            if e.flags & PICKED != 0 {
+                if !self.preselected(r) {
+                    let g = e.gen;
+                    self.start_worker(r, g);
+                }
+                return;
+            }
+        }
+        if let Some((e, g)) = self.startable(Gate::Any) {
+            self.start_worker(e, g);
+        }
+    }
+
     /// The state of task `id` (lean2rr's `status`): unresolved promises and
     /// started pure tasks are running, as natively.
     fn status_of(&self, id: TaskId) -> TaskState {
@@ -1283,12 +1462,15 @@ impl Sched {
     /// waiting until the program asks again after some time has passed (a
     /// sleep since the first answer; two for a pure task, `Pure tasks` in
     /// docs/sched.md) or keeps asking (`POLL_QUERIES` answers): it is then
-    /// polling for the task, which a worker would have run meanwhile, so it
-    /// runs and is reported finished. A task that cannot finish without
-    /// others (an unresolved promise, a task waiting for one or for a
-    /// running task) does not run: the others go on once
-    /// (`poll`), and its state is answered then; so is a task running on
-    /// another context, at every question.
+    /// polling for the task, which a worker would have started meanwhile, so
+    /// what a free worker would start now starts on a context of its own
+    /// (`start_polled`: the polled task once it is the queue's head, never on
+    /// the poller's stack; review AR-9), the others go on once, and its state
+    /// is answered then. A task that cannot finish without others (an
+    /// unresolved promise, a task waiting for one or for a running task)
+    /// starts nothing: the others go on once (`poll`), and its state is
+    /// answered then; so is a task running on another context, at every
+    /// question.
     fn query(&mut self, id: TaskId) -> Query {
         let Some(i) = self.find(id) else {
             return Query::Answer(TaskState::Finished);
@@ -1330,11 +1512,12 @@ impl Sched {
     }
 
     /// The next step of `wait` (lean2rr's `l2r_task_get_S`,
-    /// `source_next` and `wait_running`): a pending task runs here; one
-    /// that waits for pending tasks first runs that chain from its deepest
-    /// end, one task after the other (`chain`, kept across steps, so that a
-    /// long chain neither recurses nor is searched once per task); a task
-    /// running on another context, or a promise, is waited for.
+    /// `source_next` and `wait_running`): a pending task runs here once it
+    /// may (`may_run_awaited`), else it is waited for; one that waits for
+    /// pending tasks first runs that chain from its deepest end, one task
+    /// after the other, under the same rule (`chain`, kept across steps, so
+    /// that a long chain neither recurses nor is searched once per task); a
+    /// task running on another context, or a promise, is waited for.
     fn wait_step(&mut self, id: TaskId, chain: &mut Option<Vec<(u32, u32)>>) -> WaitStep {
         let Some(i) = self.find(id) else {
             return WaitStep::Done;
@@ -1353,6 +1536,12 @@ impl Sched {
         }
         if flags & WAITING == 0 {
             *chain = None;
+            // AR-10: here only once a free worker would start it; until then
+            // the waiter blocks (a pool waiter's worker is free meanwhile),
+            // and the hub starts the heads on contexts of their own.
+            if !self.may_run_awaited(i, true) {
+                return WaitStep::Block(Wait::Cell(i, id.gen()));
+            }
             self.hand(i);
             return WaitStep::Run(i);
         }
@@ -1398,6 +1587,9 @@ impl Sched {
             }
             if let Some(w) = self.source_wait(d) {
                 return w;
+            }
+            if !self.may_run_awaited(d, true) {
+                return WaitStep::Block(Wait::Cell(d, g));
             }
             v.pop();
             self.hand(d);
@@ -1675,10 +1867,13 @@ pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) ->
 }
 
 /// `Task.get`/`IO.wait` (`lean_task_get`): returns once task `id` has
-/// finished. A pending task runs here, on the stack of whoever needs it (as
-/// natively a worker runs it while the caller waits); one running on another
-/// context, or an unresolved promise, is waited for while other contexts
-/// run; a task needed by its own computation waits forever, as natively.
+/// finished. A pending task runs here, on the stack of whoever needs it,
+/// once it is the task a free worker would start now (as natively a worker
+/// runs it while the caller waits; `may_run_awaited`, review AR-10); until
+/// then, and for a task running on another context or an unresolved
+/// promise, the caller waits while other contexts run, and the hub starts
+/// the queue's heads on contexts of their own; a task needed by its own
+/// computation waits forever, as natively.
 pub fn wait(id: TaskId) {
     super::writers_point();
     let mut chain = None;
@@ -1700,13 +1895,17 @@ pub fn is_finished(id: TaskId) -> bool {
 
 /// `IO.getTaskState` (`lean_io_get_task_state_core`), as a polling program
 /// sees it (`query`); `IO.hasFinished` is `state(id) == Finished`. A polling
-/// point: other contexts may run first.
+/// point: other contexts may run first. At the polling threshold, what a
+/// free worker would start now starts on a context of its own and runs
+/// before the answer (`start_polled`): the polled task itself only once it
+/// is the queue's head, and never on the poller's stack (review AR-9).
 pub fn state(id: TaskId) -> TaskState {
     match with(|s| s.query(id)) {
         Query::Answer(a) => a,
         Query::Run => {
-            wait(id);
-            TaskState::Finished
+            with(|s| s.start_polled(id));
+            poll();
+            with(|s| s.status_of(id))
         }
         Query::YieldThenStatus => {
             poll();
@@ -1718,20 +1917,22 @@ pub fn state(id: TaskId) -> TaskState {
 /// `IO.waitAny` (`lean_io_wait_any_core`): the index of the first finished
 /// task of `ids`. Natively `wait_any` looks at its list, then sleeps on the
 /// condition variable that a task's finish notifies (`notify_all`) and looks
-/// again after each notification. Here:
+/// again after each notification; its thread keeps its worker meanwhile
+/// (it does not raise the worker limit, as `wait_for` does). Here:
 /// - a finished task of the list counts at the first look, and after a
 ///   notification (`notify_seq` changed: the end of a walk of a referenced
 ///   task, or LB-32's wake), as natively; a task whose value is set while
 ///   its walk still runs is not seen until a notification (review RS2-06 of
 ///   sched-2);
-/// - if none counts, the first pending task of the list that can run (not
-///   waiting for an unresolved promise or a task on another context) runs
-///   here, as a native worker would run it, and the list is looked at again
-///   (its finish notifies);
-/// - otherwise the context waits (`Wait::Progress`): a notification, an
-///   enqueue or a context's end wakes it, and an enqueue may have made a
-///   task of the list runnable (review RS2-09: a dependent queued by a walk
-///   that then stalls, which natively a worker runs).
+/// - if none counts, the only unfinished task of the list, if there is one,
+///   runs here once a free worker would start it (`wait_any_step`), and a
+///   pure task a worker has started that a listed task needs starts on a
+///   context of its own; no other task runs on the waiter's stack (review
+///   AR-10);
+/// - otherwise the context waits (`Wait::Any`, keeping its worker: AR-10
+///   (ii)): a notification, an enqueue, a start or a context's end wakes it,
+///   and it looks again (review RS2-09: a dependent queued by a walk that
+///   then stalls, which natively a worker runs).
 pub fn wait_any(ids: &[TaskId]) -> usize {
     assert!(!ids.is_empty(), "lean-runtime: IO.waitAny of an empty list");
     super::writers_point();
@@ -1745,19 +1946,12 @@ pub fn wait_any(ids: &[TaskId]) -> usize {
                     return Ok(k);
                 }
             }
-            for (k, &id) in ids.iter().enumerate() {
-                if let Some(i) = s.find(id) {
-                    if s.wait_status(i) == 0 {
-                        return Err(Some(k));
-                    }
-                }
-            }
-            Err(None)
+            Err(s.wait_any_step(ids))
         });
         match pick {
             Ok(k) => return k,
-            Err(Some(k)) => wait(ids[k]),
-            Err(None) => block(Wait::Progress),
+            Err(Some(i)) => run_task(i),
+            Err(None) => block(Wait::Any),
         }
     }
 }

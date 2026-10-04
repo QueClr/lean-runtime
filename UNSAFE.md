@@ -3,10 +3,10 @@
 The crate root denies `unsafe` code (`#![deny(unsafe_code)]` in
 `src/lib.rs`). A file may allow it for itself only, and only with an entry
 here: `deny` does not stop a file's `allow`, so `scripts/check.sh` fails on
-a file that names `unsafe_code` without one. A build with neither
-`proc-title` nor `unsafe-fast` (the default build, and `io`, `sched` and
-`net` alone or together) compiles no `unsafe` code of the crate: the root
-forbids it outright there.
+a file that names `unsafe_code` without one. A build with none of
+`proc-title`, `stack-overflow` and `unsafe-fast` (the default build, and
+`io`, `sched` and `net` alone or together) compiles no `unsafe` code of the
+crate: the root forbids it outright there.
 
 There are two kinds of entry:
 - **Native quirks.** Behaviour of native Lean that no safe API can
@@ -45,6 +45,16 @@ There are two kinds of entry:
 | Invariant and proof | `docs/native-quirks.md`, "The process title in the arguments' memory": what the constructor relies on (glibc's `.init_array` convention, the kernel's layout, earlier code), the checks, the invariants I1 to I7, and the proof of U1 to U4 and of the constructor |
 | How it is checked | The cases `uvsys/title_cmdline`, `uvsys/title_in_initializer`, `uvsys/title_via_loader` and `uvsys/process_title` (and the other cases that set a title: `uv_limits`, `os_strings_lossy`, `rt_system`) through their twins in `tests/io2_cases.rs`, which link the crate's constructor as any binary does, in `scripts/check.sh`'s configurations with `proc-title` (`io,proc-title` and `io,sched,proc-title,unsafe-fast`). The constructor linked and working in downstream binaries built by cargo (debug, release), by plain `rustc` from rlibs (as lean2rr builds), and as a static library linked into a C `main`; a `cdylib` loaded by `dlopen` keeps nothing (`ENOBUFS`). The file's unit tests on blocks laid out as the kernel lays out the arguments, which Miri runs (Stacked Borrows; Tree Borrows with strict provenance; passed 2026-10-04; `LEAN_RUNTIME_MIRI=1 LEAN_RUNTIME_MIRI_FILTER=argv_title scripts/check.sh`). Miri cannot run the constructor on real arguments. Adversarial review, ours and leanrs's. Kani does not apply |
 
+### `src/sched/stack_overflow.rs`: Lean's stack-overflow report
+
+| Part | |
+|---|---|
+| Where and what | `src/sched/stack_overflow.rs`, feature `stack-overflow` (it turns on `sched`; AR-11). lean2rr enables it; leanrs decides at its adoption of `sched` (its DV6 until then). Without it, a task that overflows its context's stack ends with a plain SIGSEGV (status 139), and the hub updates no record. `sched::install_stack_overflow_handler()`, the glue's one call, installs a process-wide SIGSEGV and SIGBUS handler (`SA_SIGINFO \| SA_ONSTACK`) over the one there (Rust's, kept as the previous action), and registers the calling thread: an alternate signal stack if it has none, and a record in an append-only table that grows with the live registered threads (review RS3-01; its `errno` address as the key, the guard below its own stack, the guard of the context running on it, which the hub publishes at every switch). `sched::start` registers its thread once the handler is installed. The `unsafe` operations: `__errno_location` and `errno`'s save and restore (U1, U2), the `siginfo_t` reads (U3), `write(2)` of the message (U4), `sigaction` back to the default (U5), the previous handler's address as a function pointer (U6), called as the kernel would call it (its mask and `SA_NODEFER` through `pthread_sigmask`, U13; the default restored first under `SA_RESETHAND`, review SO-1), the install (U7, U8; the glue installs from `main`, after Rust's runtime has started, never from an ELF constructor, review SO-2), `pthread_getattr_np` and its attribute calls (U9), `sysconf` and `getauxval` (U10), `sigaltstack` (U11, U12). No glue writes `unsafe` for it |
+| Native behaviour | `src/runtime/stack_overflow.cpp`: every Lean thread has an alternate signal stack; a fault in the page below the faulting thread's stack writes `\nStack overflow detected. Aborting.\n` to descriptor 2 and aborts (status 134, buffered output lost); any other fault resets the default action and returns (status 139). Here a task's context has a stack of its own, whose guard page counts as the thread's. Case `tasks/stack_overflow_in_task` |
+| Why no safe route exists | std: its handler knows only the guards of threads, and prints Rust's message. signal-hook 0.3.18: refuses SIGSEGV (`FORBIDDEN`). corosensei 0.3.4: `CoroutineTrapHandler::setup_trap_handler` is `unsafe`, and resumes a coroutine after a trap rather than report. nix 0.31.3 and rustix 1.1.4: `sigaction` and `sigaltstack` are `unsafe` (rustix's in its `runtime` module, which bypasses libc's signal state). Installing a signal handler is `unsafe` in every crate, since the handler runs at any point of the program |
+| Invariant and proof | `docs/native-quirks.md`, "Lean's stack-overflow report": what it relies on (G1 to G5), the invariants I1 to I7, the handler's needs A1 to A4 (delivery on the alternate stack, async-signal-safety without thread-locals, the window between a publication and the switch, the forward to the previous action), and the proof of U1 to U13 |
+| How it is checked | The case `tasks/stack_overflow_in_task` through its twin in `tests/sched-driver`, which builds the crate with `stack-overflow`; `scripts/check.sh` also builds and tests `io,sched` without it, where the root forbids `unsafe`; the driver's tests `so_main_overflow`, `so_task_overflow_after_switches`, `so_segv_in_task`, `so_rust_thread_overflow`, `so_second_scheduler_thread` and `so_prev_resethand` (a one-shot previous handler, review SO-1), each also mutation-checked; the unit test `more_threads_than_a_chunk_all_have_records` (RS3-01); the file's unit tests (the guards, a record covering both guards in the window, a registered thread's record and alternate stack). Miri cannot model it (foreign calls and signal delivery only). Adversarial review, ours and leanrs's. Kani does not apply |
+
 ## `unsafe-fast`
 
 There are no entries yet.
@@ -52,8 +62,10 @@ There are no entries yet.
 ## `unsafe` in dependencies
 
 The crate's `unsafe` beyond this file's entries is in vetted dependencies:
-rustix and nix (system calls, feature `io`), corosensei (stack switching,
-`sched`) and signal-hook (signal handlers, its safe API only, `sched`),
+rustix and nix (system calls, feature `io`; nix's `sigaction` and its
+re-exported libc also for the feature `stack-overflow`), corosensei
+(stack switching, `sched`) and signal-hook (signal handlers, its safe API
+only, `sched`),
 approved by the owner; io-uring, accepted by leanrs's shared-runtime
 coordinator under the owner's delegation of dependency decisions
 (2026-10-04); and, for the feature `net`, dns-lookup (approved the same
@@ -183,9 +195,14 @@ plumbing only:
   - its `Glue::suspend` dereferences the yielder pointer the scheduler hands
     it, as every translator's glue does (`docs/sched.md`, "Why
     `Glue::suspend` is sound");
-  - it installs Lean's stack-overflow report (`sigaltstack`, `sigaction`,
-    `pthread_getattr_np`; `write` and `abort` in the handler), as
-    `src/runtime/stack_overflow.cpp` does.
+  - its stack-overflow report is the crate's
+    (`sched::install_stack_overflow_handler`), with no `unsafe` in the
+    glue;
+- `tests/sched-driver/src/review.rs`'s `so_segv_in_task` and
+  `so_prev_resethand` write to an unmapped address, to make a fault that is
+  no stack overflow, and `install_prev_resethand` installs a one-shot
+  SIGSEGV handler of its own (libc's `sigaction`; its handler only calls
+  `write`) before the crate's, for review SO-1 of AR-11.
 
 The unit tests of `src/io/argv_title.rs` make regions over blocks of their
 own, and repoint a table of their own, under the same contracts as the

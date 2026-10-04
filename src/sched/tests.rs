@@ -117,14 +117,18 @@ fn tasks_are_deferred_until_needed() {
     let b = spawn(job(&l, "b"), 0, false);
     assert!(entries(&l).is_empty());
     assert!(!is_finished(a));
+    // `b` is not the queue's head: the waiter waits while a worker takes
+    // `a`, then `b`, first come, first served (AR-10).
     wait(b);
-    assert_eq!(entries(&l), ["b"]);
+    assert_eq!(entries(&l), ["a", "b"]);
     wait(a);
-    wait(a);
-    assert_eq!(entries(&l), ["b", "a"]);
     assert!(is_finished(a) && is_finished(b));
+    // the head runs on the waiter's stack, as a free worker would run it
+    let c = spawn(job(&l, "c"), 0, true);
+    wait(c);
+    assert_eq!(entries(&l), ["a", "b", "c"]);
     finish();
-    assert_eq!(entries(&l), ["b", "a"]);
+    assert_eq!(entries(&l), ["a", "b", "c"]);
 }
 
 #[test]
@@ -566,12 +570,14 @@ fn a_bind_task_continues_as_the_task_it_returned() {
         0,
         true,
     );
+    // `t2` is the queue's head, so it runs first (AR-10), then `b`, which
+    // continues as `t2`, already finished
     wait(b);
-    assert_eq!(entries(&l), ["f", "inner", "copy inner's value"]);
+    assert_eq!(entries(&l), ["inner", "f", "copy inner's value"]);
 }
 
 #[test]
-fn wait_any_takes_a_finished_task_else_runs_a_pending_one() {
+fn wait_any_takes_a_finished_task_else_waits_for_the_heads() {
     start_test(4);
     let l = log();
     let p = promise_new().unwrap();

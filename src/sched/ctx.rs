@@ -133,11 +133,15 @@ pub(crate) enum Wait {
     None,
     /// The task or promise with this entry and generation finishes.
     Cell(u32, u32),
-    /// Something changed that `IO.waitAny`, a waiting walk or the final run
-    /// looks at: a task's finish notified, a task was queued, a context ended
-    /// (`source_wait`: a dependent the walk of its source has not queued yet;
-    /// `wait_any` tells a notification from the rest by `notify_seq`).
+    /// Something changed that a waiting walk looks at: a task's finish
+    /// notified, a task was queued or started, a context ended
+    /// (`source_wait`: a dependent the walk of its source has not queued
+    /// yet). Natively a `wait_for`: a pool waiter's worker is free meanwhile.
     Progress,
+    /// `IO.waitAny`: woken as `Progress` is (`wait_any` tells a notification
+    /// from the rest by `notify_seq`), but the context keeps its worker, as
+    /// native `wait_any` does not raise the worker limit (AR-10 (ii)).
+    Any,
     /// `main` has returned and waits for the remaining tasks: woken when a
     /// context ends, a task finishes or is queued.
     FinalRun,
@@ -182,27 +186,23 @@ pub struct StackBounds {
 }
 
 thread_local! {
-    /// The stack of the context running on this thread, for the glue's
-    /// SIGSEGV handler, which runs on the faulting thread and must not take
-    /// locks or allocate. Const-initialized thread-locals without a
-    /// destructor are plain thread-local loads, safe in a signal handler.
-    /// The contexts of a scheduler run on its thread, so a fault in a
-    /// context's stack comes from the one running there; the hub sets these
-    /// at every switch. All zero while `main`'s context runs (on the
-    /// thread's own stack, which the glue knows).
+    /// The stack of the context running on this thread (`running_stack`);
+    /// the hub sets these at every switch (`publish`). All zero while
+    /// `main`'s context runs (on the thread's own stack). Lean's
+    /// stack-overflow report does not read them: its handler keeps a record
+    /// of its own (`stack_overflow::publish`), since a thread-local is not
+    /// async-signal-safe in every link mode.
     static RUN_LO: AtomicUsize = const { AtomicUsize::new(0) };
     static RUN_HI: AtomicUsize = const { AtomicUsize::new(0) };
     static RUN_TOP: AtomicUsize = const { AtomicUsize::new(0) };
 }
 
 /// The stack of the context running on the calling thread, `None` on
-/// `main`'s context (the thread's own stack). Async-signal-safe.
+/// `main`'s context (the thread's own stack).
 ///
-/// Lean's handler (`src/runtime/stack_overflow.cpp`) reports
-/// `\nStack overflow detected. Aborting.\n` and aborts when the faulting
-/// address lies in the guard page below the faulting thread's stack; a glue
-/// reproduces it for contexts with these bounds (docs/sched.md, "Stack
-/// overflow").
+/// Not for a signal handler: Lean's stack-overflow report is the crate's
+/// (`install_stack_overflow_handler`, docs/sched.md, item 8 of "The glue"),
+/// and reads a record of its own, without thread-locals.
 pub fn running_stack() -> Option<StackBounds> {
     let lo = RUN_LO.with(|x| x.load(Ordering::Relaxed));
     if lo == 0 {
@@ -215,15 +215,22 @@ pub fn running_stack() -> Option<StackBounds> {
     })
 }
 
+/// The context running on this thread changes: the hub calls it right
+/// before it resumes a context (`Some`, its stack) and right after the
+/// context is back (`None`), and `PanicGuard` after a panic. It updates
+/// `running_stack()` and, with the feature `stack-overflow`, the record of
+/// Lean's stack-overflow report (its proof, A3 in docs/native-quirks.md,
+/// relies on these two call sites).
 fn publish(b: Option<StackBounds>) {
+    #[cfg(feature = "stack-overflow")]
+    super::stack_overflow::publish(b);
     let b = b.unwrap_or(StackBounds {
         guard_lo: 0,
         guard_hi: 0,
         top: 0,
     });
-    // The order matters for a handler interrupting this on the same thread:
     // `guard_lo` last (0 first), so a nonzero `guard_lo` comes with its own
-    // bounds. The fences keep the compiler from reordering the stores.
+    // bounds.
     RUN_LO.with(|x| x.store(0, Ordering::Relaxed));
     compiler_fence(Ordering::SeqCst);
     RUN_HI.with(|x| x.store(b.guard_hi, Ordering::Relaxed));
@@ -290,7 +297,7 @@ pub(crate) struct Contexts {
     /// Contexts waiting for a task or promise (entry, generation).
     cell_waiters: HashMap<(u32, u32), Vec<CtxId>>,
     /// Contexts waiting for a task to finish or be queued (`Wait::Progress`,
-    /// `Wait::FinalRun`).
+    /// `Wait::Any`, `Wait::FinalRun`).
     progress_waiters: Vec<CtxId>,
     pub(crate) blocked: u32,
     /// Live worker contexts.
@@ -416,14 +423,18 @@ impl Sched {
         !self.cx.cell_waiters.is_empty()
     }
 
-    /// Something changed that `Wait::Progress`/`Wait::FinalRun` waiters look
-    /// at: a task's finish notified, a task was queued, a context ended.
+    /// Something changed that `Wait::Progress`, `Wait::Any` and
+    /// `Wait::FinalRun` waiters look at: a task's finish notified, a task was
+    /// queued or started, a context ended.
     pub(crate) fn wake_progress(&mut self) {
         if self.cx.progress_waiters.is_empty() {
             return;
         }
         for c in std::mem::take(&mut self.cx.progress_waiters) {
-            if matches!(self.cx.ctxs[c].wait, Wait::Progress | Wait::FinalRun) {
+            if matches!(
+                self.cx.ctxs[c].wait,
+                Wait::Progress | Wait::Any | Wait::FinalRun
+            ) {
                 self.wake(c);
             }
         }
@@ -440,7 +451,7 @@ impl Sched {
         self.refresh_holds(c);
         match w {
             Wait::Cell(i, g) => self.cx.cell_waiters.entry((i, g)).or_default().push(c),
-            Wait::Progress | Wait::FinalRun => self.cx.progress_waiters.push(c),
+            Wait::Progress | Wait::Any | Wait::FinalRun => self.cx.progress_waiters.push(c),
             Wait::Sleep(d) | Wait::Io(Some(d)) => self.cx.sleepers.push((d, c)),
             _ => {}
         }
@@ -566,6 +577,11 @@ impl Sched {
             // A queued task on a new worker context.
             if let Some((e, g)) = self.startable(super::task::Gate::Any) {
                 self.start_worker(e, g);
+                continue;
+            }
+            // `startable` marked started a pure task that a context waits
+            // for, which woke it (`pick`): it runs before the hub waits.
+            if !self.cx.runnable.is_empty() {
                 continue;
             }
             let next_deadline = match (next_deadline, self.ev.next_timer()) {

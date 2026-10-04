@@ -41,7 +41,8 @@ Batch <a href="#sched-io">sched-io</a> adds cooperative blocking IO and the even
   <li><a href="#sync">Promises and Std.Sync</a></li>
   <li><a href="#exit">Exit</a></li>
   <li><a href="#sched-io">Blocking IO and the event loop</a></li>
-  <li><a href="#suspend">The unsafe steps in the glue</a></li>
+  <li><a href="#suspend">The unsafe step in the glue</a></li>
+  <li><a href="#overflow">Stack overflow</a></li>
   <li><a href="#limits">Limits of one thread</a></li>
   <li><a href="#plans">Plans</a></li>
 </ul></div>
@@ -53,16 +54,24 @@ It must finish the task before the task's value is needed.
 <code>sched</code> runs one of the schedules that such a pool can produce, on one thread.</p>
 <p>A task runs at the first of these points:</p>
 <ul>
-  <li><strong>It is needed.</strong> <code>Task.get</code> or <code>IO.wait</code> runs it at once, on the stack of the code that needs it.</li>
+  <li><strong>It is needed.</strong> <code>Task.get</code> or <code>IO.wait</code> runs it on the stack of the code that needs it.
+    It does so once the task is the head of the queue, which a free worker would start.
+    Until then, the code waits, and the hub starts the heads on contexts of their own (sched-3).</li>
   <li><strong>The running code blocks</strong> (a sleep, a lock, a promise, a read of an empty pipe) and a worker is free.
     The task then starts on a <a href="glossary.html#g-context">context</a> of its own.
     The number of workers is <code>LEAN_NUM_THREADS</code>, or the number of online processors.</li>
   <li><strong>An <a href="glossary.html#g-yield-point">effect point</a>.</strong> At an output, a flush, a process spawn or an exit, a task queued 5 ms ago or more goes first.
     Natively, a worker would have run it by then.</li>
-  <li><strong>Polling.</strong> The program asks for the task's state again after a sleep, or 1000 times without one.</li>
+  <li><strong>Polling.</strong> The program asks for the task's state again after a sleep, or 1000 times without one.
+    Then the head of the queue starts on a context of its own, never on the stack of the code that polls.</li>
   <li><strong><code>main</code> returns.</strong> <code>finish</code> runs the rest, as <code>lean_finalize_task_manager</code> does, with one fix (<a href="#exit">Exit</a>).</li>
 </ul>
 <p>A pure task that the program drops before it starts never runs: Lean deletes it.</p>
+<p><strong>What a waiter runs.</strong> Natively a waiting thread sleeps, and a free worker takes the head of the queue.
+So a waiter runs no task on its own stack except the one that a free worker would take now (sched-3, reviews AR-9 and AR-10).
+Another task there could block on something that only the waiter gives, and the program would hang where native ends.
+<code>IO.waitAny</code> runs a task of its list only when that task is the only unfinished one.
+While it waits, it keeps its worker, as native <code>wait_any</code> does.</p>
 
 <h2 id="hub">Contexts and the hub</h2>
 <ul>
@@ -334,10 +343,11 @@ Batch sched-io (2026-10-04) makes such calls cooperate.</p>
 Examples: <code>IO.Process.output</code> of a child that writes 300 000 bytes to stdout, and a task that reads <code>cat</code>'s output while <code>main</code> writes to it.
 The cases in <code>tests/cases/uvloop/</code> check the timers and signals; one sends SIGUSR1 to the program itself.</p>
 
-<h2 id="suspend">The unsafe steps in the glue</h2>
-<p><code>sched</code> has no <code>unsafe</code> code: the crate root denies it, outside the files that <a href="../UNSAFE.md">UNSAFE.md</a> lists.
-Two steps remain that safe code cannot do, so each translator's glue does them.
-The first is to suspend the running coroutine from deep inside a call.
+<h2 id="suspend">The unsafe step in the glue</h2>
+<p><code>sched</code> has no <code>unsafe</code> code, except one <a href="glossary.html#g-quirk">native quirk</a> behind its own feature (<a href="#overflow">Stack overflow</a>).
+The crate root denies <code>unsafe</code>, outside the files that <a href="../UNSAFE.md">UNSAFE.md</a> lists.
+One step remains that safe code cannot do, so each translator's glue does it.
+The step is to suspend the running coroutine from deep inside a call.
 corosensei gives the coroutine's <code>Yielder</code> only to its top function, and nothing safe gives it to deeper code.
 So each translator's glue does one raw-pointer dereference, in <code>Glue::suspend</code> only:</p>
 <pre><code>fn suspend(&amp;self, s: Suspend&lt;'_&gt;) {
@@ -359,9 +369,29 @@ So each translator's glue does one raw-pointer dereference, in <code>Glue::suspe
       <li>a scoped thread-local: coroutines do not nest as its scopes assume.</li>
     </ul></li>
 </ul>
-<p><strong>The second step: stack overflow.</strong> Lean prints <code>Stack overflow detected. Aborting.</code> from a SIGSEGV handler.
-Installing a handler is <code>unsafe</code>, so it also stays in the glue.
-The scheduler publishes the running context's stack bounds for that handler.</p>
+<h2 id="overflow">Stack overflow</h2>
+<p>Lean prints <code>Stack overflow detected. Aborting.</code> from a SIGSEGV handler, and aborts.
+It does this when the fault is in the guard page below the stack of the faulting thread.
+Here a task runs on a context, with a stack and a guard page of its own.
+Rust's handler does not know these guard pages, so the crate has its own handler (sched-3, AR-11), behind the feature <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a>.
+Without it, a task that overflows its stack ends with a plain SIGSEGV (status 139).</p>
+<ul>
+  <li><strong>The opt-in.</strong> The glue calls <code>sched::install_stack_overflow_handler()</code> once, on each thread that runs Lean code, before any Lean code runs there.
+    It calls it from <code>main</code>, after Rust's runtime starts, and never from an ELF constructor.
+    <code>sched::start</code> also registers its thread.</li>
+  <li><strong>Earlier handlers.</strong> A fault that is not an overflow goes to the handler that was there before.
+    The crate calls it as the kernel would: with its signal mask, and with the default action set first for a one-shot handler.</li>
+  <li><strong>A record per thread.</strong> Each registered thread gets an alternate signal stack and a record.
+    The record holds the guard of the thread's stack, and the guard of the context that runs now.
+    The hub updates it at each switch.</li>
+  <li><strong>The handler.</strong> It finds the record of the faulting thread by the address of its <code>errno</code>.
+    It reads only atomics: no lock, no allocation, no thread-local.
+    A fault in either guard gives Lean's message and an abort (status 134).</li>
+  <li><strong>Other faults</strong> go to the handler that was there before (Rust's), or to the default action (status 139), as natively.</li>
+</ul>
+<p>Installing a signal handler needs <code>unsafe</code>, so this is a native quirk, in <a href="../src/sched/stack_overflow.rs">stack_overflow.rs</a>.
+<a href="../docs/native-quirks.md">docs/native-quirks.md</a> has its proof.
+The proof covers the alternate stacks, the handler's async-signal safety, the moments between a publication and a switch, and the forward to the earlier handler.</p>
 
 <h2 id="limits">Limits of one thread</h2>
 <ul>
@@ -400,7 +430,7 @@ The timing session will measure:</p>
 </ul>
 
 <p class="more">Detail: <a href="../docs/sched.md">docs/sched.md</a>, and <a href="../src/sched/mod.rs">src/sched/</a>:
-<a href="../src/sched/task.rs">task.rs</a>, <a href="../src/sched/ctx.rs">ctx.rs</a>, <a href="../src/sched/reactor.rs">reactor.rs</a>, <a href="../src/sched/uv.rs">uv.rs</a>, <a href="../src/sched/env.rs">env.rs</a> and <a href="../src/sched/sync.rs">sync.rs</a>; io's side is <a href="../src/io/coop.rs">src/io/coop.rs</a>.
+<a href="../src/sched/task.rs">task.rs</a>, <a href="../src/sched/ctx.rs">ctx.rs</a>, <a href="../src/sched/reactor.rs">reactor.rs</a>, <a href="../src/sched/uv.rs">uv.rs</a>, <a href="../src/sched/env.rs">env.rs</a>, <a href="../src/sched/sync.rs">sync.rs</a> and <a href="../src/sched/stack_overflow.rs">stack_overflow.rs</a>; io's side is <a href="../src/io/coop.rs">src/io/coop.rs</a>.
 The program cases are in <a href="../tests/cases/README.md">tests/cases/</a> <code>tasks/</code>, <code>sync/</code>, <code>taskio/</code> and <code>uvloop/</code>.
 Their Rust twins are in <a href="../tests/sched-driver/src/cases.rs">tests/sched-driver</a>.</p>
 </main>
