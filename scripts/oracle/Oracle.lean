@@ -16,6 +16,12 @@ where each <arg> is `<kind>:<payload>`:
   f:<hex>            a Float, `Float.ofBits`; `F:` is its negation
   g:<hex>            a Float32, `Float32.ofBits`; `G:` is its negation
   l:<hex>:<d>:<e>    a String.Slice, `(s.toSlice.drop d).dropEnd e`
+  c:<hex>            a Char, its code point
+  b:0, b:1           a Bool
+  a:<d>,<d>,...      an `Array Nat` (empty: `a:`)
+  fa:<hex>,...       a FloatArray, each element `Float.ofBits`
+  P:<k>:<a>          the Nat 2^k + a (a may be negative), built with shifts:
+                     `1 <<< k`, or `(1 <<< (k - 1)) * 2` from k = 2^32 on
 
 For each request it prints every line the evaluation wrote to stderr (a
 panic message) as `@panic <line>`, the bits of a `Float`/`Float32` result
@@ -31,6 +37,10 @@ inductive Arg where
   | flt (x : Float)
   | f32 (x : Float32)
   | slice (s : String) (d e : Nat)
+  | chr (c : Char)
+  | bool (b : Bool)
+  | arr (xs : Array Nat)
+  | farr (xs : FloatArray)
 
 def hexVal (c : Char) : Option Nat :=
   if '0' ≤ c ∧ c ≤ '9' then some (c.toNat - '0'.toNat)
@@ -82,6 +92,19 @@ def parseArg (tok : String) : IO Arg := do
   | ["g", p] => return .f32 (Float32.ofBits (UInt32.ofNat (← parseHexNat p)))
   | ["G", p] => return .f32 (-(Float32.ofBits (UInt32.ofNat (← parseHexNat p))))
   | ["l", p, d, e] => return .slice (← parseStr p) (← parseNat d) (← parseNat e)
+  | ["c", p] => return .chr (Char.ofNat (← parseHexNat p))
+  | ["b", p] => return .bool (p == "1")
+  | ["a", p] => return .arr (← (p.splitOn ",").filter (· != "") |>.toArray.mapM parseNat)
+  | ["fa", p] =>
+    let xs ← (p.splitOn ",").filter (· != "") |>.toArray.mapM fun h => do
+      return Float.ofBits (UInt64.ofNat (← parseHexNat h))
+    return .farr ⟨xs⟩
+  | ["P", k, a] =>
+    let k ← parseNat k
+    let pow := if k < 2 ^ 32 then 1 <<< k else (1 <<< (k - 1)) * 2
+    match a.toInt? with
+    | some a => return .nat (if a < 0 then pow - a.natAbs else pow + a.toNat)
+    | none => fail s!"bad offset: {a}"
   | _ => fail s!"bad argument: {tok}"
 
 def natA : Arg → IO Nat
@@ -107,6 +130,18 @@ def sliceA : Arg → IO String.Slice
   | .slice s d e => pure ((s.toSlice.drop d).dropEnd e)
   | _ => fail "expected a String.Slice"
 def posA (a : Arg) : IO String.Pos.Raw := return ⟨← natA a⟩
+def chrA : Arg → IO Char
+  | .chr c => pure c
+  | _ => fail "expected a Char"
+def boolA : Arg → IO Bool
+  | .bool b => pure b
+  | _ => fail "expected a Bool"
+def arrA : Arg → IO (Array Nat)
+  | .arr xs => pure xs
+  | _ => fail "expected an Array Nat"
+def farrA : Arg → IO FloatArray
+  | .farr xs => pure xs
+  | _ => fail "expected a FloatArray"
 
 def u8 (a : Arg) : IO UInt8 := return UInt8.ofNat (← natA a)
 def u16 (a : Arg) : IO UInt16 := return UInt16.ofNat (← natA a)
@@ -419,12 +454,110 @@ def runString (fn : String) (a : List Arg) : IO (Option String) := do
   | "String.Slice.instDecidableLt", [l1, l2] => return r (decide ((← sliceA l1) < (← sliceA l2)))
   | _, _ => return none
 
+def sorryNat (_ : Unit) : Nat := sorry
+
+def runNat (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "Nat.add", [x, y] => return r (Nat.add (← natA x) (← natA y))
+  | "Nat.sub", [x, y] => return r (Nat.sub (← natA x) (← natA y))
+  | "Nat.mul", [x, y] => return r (Nat.mul (← natA x) (← natA y))
+  | "Nat.div", [x, y] => return r (Nat.div (← natA x) (← natA y))
+  | "Nat.mod", [x, y] => return r (Nat.mod (← natA x) (← natA y))
+  | "Nat.divExact", [x, y] =>
+    let x ← natA x
+    let y ← natA y
+    if h : y ∣ x then return r (Nat.divExact x y h) else return unreachable
+  | "Nat.pow", [x, y] => return r (Nat.pow (← natA x) (← natA y))
+  | "Nat.gcd", [x, y] => return r (Nat.gcd (← natA x) (← natA y))
+  | "Nat.log2", [x] => return r (Nat.log2 (← natA x))
+  | "Nat.land", [x, y] => return r (Nat.land (← natA x) (← natA y))
+  | "Nat.lor", [x, y] => return r (Nat.lor (← natA x) (← natA y))
+  | "Nat.xor", [x, y] => return r (Nat.xor (← natA x) (← natA y))
+  | "Nat.shiftLeft", [x, y] => return r (Nat.shiftLeft (← natA x) (← natA y))
+  | "Nat.shiftRight", [x, y] => return r (Nat.shiftRight (← natA x) (← natA y))
+  | "Nat.decEq", [x, y] => return r (decide ((← natA x) = (← natA y)))
+  | "Nat.decLt", [x, y] => return r (decide ((← natA x) < (← natA y)))
+  | "Nat.decLe", [x, y] => return r (decide ((← natA x) ≤ (← natA y)))
+  | "Nat.beq", [x, y] => return r (Nat.beq (← natA x) (← natA y))
+  | "Nat.ble", [x, y] => return r (Nat.ble (← natA x) (← natA y))
+  | "Nat.pred", [x] => return r (Nat.pred (← natA x))
+  | "Nat.succ", [x] => return r (Nat.succ (← natA x))
+  | _, _ => return none
+
+def runInt (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "Int.add", [x, y] => return r (Int.add (← intA x) (← intA y))
+  | "Int.sub", [x, y] => return r (Int.sub (← intA x) (← intA y))
+  | "Int.mul", [x, y] => return r (Int.mul (← intA x) (← intA y))
+  | "Int.neg", [x] => return r (Int.neg (← intA x))
+  | "Int.tdiv", [x, y] => return r (Int.tdiv (← intA x) (← intA y))
+  | "Int.tmod", [x, y] => return r (Int.tmod (← intA x) (← intA y))
+  | "Int.ediv", [x, y] => return r (Int.ediv (← intA x) (← intA y))
+  | "Int.emod", [x, y] => return r (Int.emod (← intA x) (← intA y))
+  | "Int.divExact", [x, y] =>
+    let x ← intA x
+    let y ← intA y
+    if h : y ∣ x then return r (Int.divExact x y h) else return unreachable
+  | "Int.decEq", [x, y] => return r (decide ((← intA x) = (← intA y)))
+  | "Int.decLt", [x, y] => return r (decide ((← intA x) < (← intA y)))
+  | "Int.decLe", [x, y] => return r (decide ((← intA x) ≤ (← intA y)))
+  | "Int.decNonneg", [x] => return r (Int.decNonneg (← intA x)).decide
+  | "Int.ofNat", [n] => return r (Int.ofNat (← natA n))
+  | "Int.negSucc", [n] => return r (Int.negSucc (← natA n))
+  | "Int.natAbs", [x] => return r (Int.natAbs (← intA x))
+  | _, _ => return none
+
+def runArray (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "Array.get!Internal", [xs, i] => return r ((← arrA xs).get!Internal (← natA i))
+  | "Array.set!", [xs, i, v] => return r ((← arrA xs).set! (← natA i) (← natA v))
+  | "Array.swapIfInBounds", [xs, i, j] => return r ((← arrA xs).swapIfInBounds (← natA i) (← natA j))
+  | "Array.pop", [xs] => return r (← arrA xs).pop
+  | "Array.replicate", [n, v] => return r (Array.replicate (← natA n) (← natA v))
+  | "Array.mkEmpty", [c] => return r (Array.mkEmpty (α := Nat) (← natA c))
+  | "ByteArray.get!", [b, i] => return r ((← bytesA b).get! (← natA i))
+  | "ByteArray.set!", [b, i, v] => return r ((← bytesA b).set! (← natA i) (← u8 v)).toList
+  | "ByteArray.emptyWithCapacity", [c] => return r (ByteArray.emptyWithCapacity (← natA c)).toList
+  | "ByteArray.copySlice", [src, so, dest, d, n, e] =>
+    return r (ByteArray.copySlice (← bytesA src) (← natA so) (← bytesA dest) (← natA d) (← natA n)
+      (← boolA e)).toList
+  | "FloatArray.get!", [xs, i] => retF ((← farrA xs).get! (← natA i))
+  | "FloatArray.set!", [xs, i, v] => return r ((← farrA xs).set! (← natA i) (← fA v)).toList
+  | "FloatArray.emptyWithCapacity", [c] => return r (FloatArray.emptyWithCapacity (← natA c)).toList
+  | _, _ => return none
+
+def runPanic (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "panic", [m] => return r (panic (← strA m) : Nat)
+  | "sorryAx", [] => return r (sorryNat ())
+  | _, _ => return none
+
+def runRepr (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "Nat.repr", [n] => return r (Nat.repr (← natA n))
+  | "USize.repr", [n] => return r (USize.repr (← usz n))
+  | "Int.repr", [i] => return r (Int.repr (← intA i))
+  | "Int.reprPrec", [i, p] => return r (reprPrec (← intA i) (← natA p)).pretty
+  | "Char.quote", [c] => return r (Char.quote (← chrA c))
+  | "Char.repr", [c] => return r (Char.repr (← chrA c))
+  | "Char.toString", [c] => return r (Char.toString (← chrA c))
+  | "String.quote", [s] => return r (String.quote (← strA s))
+  | "Bool.repr", [b, p] => return r (reprPrec (← boolA b) (← natA p)).pretty
+  | "toString", [b] => return r (toString (← boolA b))
+  | "Unit.repr", [] => return r (repr ()).pretty
+  | _, _ => return none
+
 def runFn (fn : String) (args : List Arg) : IO String := do
   if let some out ← runFloat fn args then return out
   if let some out ← runLibm fn args then return out
   if let some out ← runUInt fn args then return out
   if let some out ← runSInt fn args then return out
   if let some out ← runString fn args then return out
+  if let some out ← runNat fn args then return out
+  if let some out ← runInt fn args then return out
+  if let some out ← runArray fn args then return out
+  if let some out ← runPanic fn args then return out
+  if let some out ← runRepr fn args then return out
   fail s!"unknown function or arity: {fn} ({args.length} arguments)"
 
 def runLine (line : String) : IO String := do
@@ -449,8 +582,12 @@ def evalRow (line : String) : IO Unit := do
     catch e =>
       outRef.set s!"!error {e}"
   let stdout ← IO.getStdout
-  for errLine in captured.splitOn "\n" do
-    if errLine != "" then stdout.putStrLn s!"@panic {errLine}"
+  -- every line, empty ones included (a panic with an empty message prints one); the
+  -- text after the last newline is the empty string when the output ends in one
+  let lines := captured.splitOn "\n"
+  let lines := if lines.getLast? == some "" then lines.dropLast else lines
+  for errLine in lines do
+    stdout.putStrLn s!"@panic {errLine}"
   for b in ← floatBits.get do
     stdout.putStrLn s!"@bits {b}"
   stdout.putStrLn s!"=> {← outRef.get}"

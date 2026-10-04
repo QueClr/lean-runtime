@@ -28,11 +28,19 @@ translators must reproduce it.
 - `fn` (a Lean constant) with `args` (Lean term syntax, one per argument),
   or `expr` (one closed Lean expression);
 - `expected`: Lean's `repr` of the result; for a panic, `panic: <message>`
-  with `default` (the value returned) and `stderr`;
+  (its first line) with `default` (the value returned) and `stderr`; for a
+  row that ends the process, `ends`;
 - optional `bits = { args = [...], result = "0x…" }` for `Float`/`Float32`
   values, since `repr` loses NaN payloads and `-0.0`;
 - optional `ends = { stderr = "…", code = N }` for a row that ends the
-  process (`INTERNAL PANIC`);
+  process (`INTERNAL PANIC`, an abort): its whole stderr and its status
+  (128 + N for a signal N);
+- optional `env = { NAME = "value" }`: variables added to the environment
+  of the call's process (`LEAN_ABORT_ON_PANIC`);
+- optional `native = { expected = "…", … }` beside a `deviations` that names
+  an `LB-nn` of `docs/lean-bugs.md`: native Lean's outcome where the crate
+  and both translators deliberately compute the Lean definition's result,
+  which is then `expected`;
 - optional `sharing = "unique" | "shared" | "both"` for a row with an
   in-place path: Lean's result does not depend on it, but each runtime has
   two code paths.
@@ -59,6 +67,18 @@ argument terms it reads:
 - for a panic, `<message>` is the string Lean passes to `lean_panic_fn`, and
   `stderr` is what Lean printed with `LEAN_BACKTRACE=0`.
 
+`tests/rows2.rs` runs the areas nat, int, array, panic and repr, whose
+arguments may be numbers of any size, with more terms: a character `'a'`
+(Lean escapes: `'\x7f'`, `'\u0080'`), `true`/`false`, an `Array Nat`
+`#[1, 2]`, a `FloatArray` `(FloatArray.mk #[1.5, -2.25])` (decimal literals
+exact in binary), and `(2 ^ K)` or `(2 ^ K + A)` for a `Nat` too big to
+write out. A `ByteArray` or `FloatArray` result is shown as `repr x.toList`,
+since neither has a `Repr` instance. `scripts/gen_rows.py` runs a row with
+`ends`, `env` or `deviations` alone, in its own oracle process (the author
+of an `ends` row writes `ends = {}`); a `deviations` naming an `LB-nn` keeps
+the author's `expected` and records native's outcome in `native`, while a
+one-translator deviation (leanrs's `DVn`) keeps native's `expected`.
+
 ## Fields every case carries
 
 Written in `<id>.toml` for programs and inline for rows:
@@ -69,7 +89,7 @@ Written in `<id>.toml` for programs and inline for rows:
 | `lean_version` | The Lean version of the native build that produced the expected values (4.34.0) |
 | `source` | Where the case came from: a finding id and the project that found it, plus file:line where there is one |
 | `normalize` | Optional list of `regex -> replacement` applied to both outputs before comparing (pids, times, addresses) |
-| `deviations` | Optional documented translator deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "plan §10 ..." }`. The expected value stays compiled Lean's; a listed deviation is the only difference allowed |
+| `deviations` | Optional documented translator deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "plan §10 ..." }`. The expected value stays compiled Lean's; a listed deviation is the only difference allowed. A row whose deviation is an `LB-nn` that the crate itself follows expects the Lean definition's result instead and records native's outcome in `native` |
 | `files` | For IO cases: the expected directory tree after the run, with each file's SHA-256 |
 | `streams` | `"separate"` (default) or `"merged"` (stderr into stdout, to observe the order between the two) |
 | `schedule_dependent` | Optional `true` when native Lean has more than one outcome depending on thread timing. The case records the dominant native outcome (the one every measured native run took); the `.toml` comment says what the other outcome is. A translator showing the other outcome shows another native schedule, not a semantic error |

@@ -16,6 +16,24 @@ the next entry of `bits.args` (16 hex digits for `Float`, 8 for `Float32`);
 the oracle receives the bits (a negative NaN as the negation of the quiet NaN,
 the only NaNs Lean can build from bits).
 
+Batch 2's argument terms (wire kinds in scripts/oracle/Oracle.lean): a
+character literal `'a'`, `true`/`false`, an `Array Nat` `#[1, 2]`, a
+`FloatArray` `(FloatArray.mk #[1.5, -2.0])` (decimal literals, exact in
+binary), and `(2 ^ K)`, `(2 ^ K + A)`, `(2 ^ K - A)` for numbers too big to
+write out, which the oracle builds with shifts.
+
+A row with `ends`, `env` or `deviations` runs alone, in its own oracle
+process with `env` added to the environment:
+- `ends` (written as `ends = {}` by the row's author): the call ends the
+  process; `expected` becomes `ends` and `ends` the process's stderr and
+  exit code (128 + N for a signal N);
+- `deviations` naming an `LB-nn` of docs/lean-bugs.md: both translators
+  and the crate deliberately differ from native here; `expected` is the
+  author's (the definition's result) and native's outcome goes to `native`.
+  A deviation of one translator only (leanrs's `DVn`) leaves `expected`
+  native's: the crate follows native, and the row only records that this
+  translator differs.
+
 --check   rewrite nothing; report the rows whose expected values differ and
           exit 1 if any does (to compare toolchains, e.g. `--toolchain
           v4.34.0-rc1`).
@@ -33,14 +51,15 @@ import pathlib
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ORACLE_SRC = ROOT / "scripts" / "oracle"
-FIELD_ORDER = ["id", "area", "fn", "args", "expr", "bits", "expected", "default", "stderr",
-               "ends", "sharing", "lean_version", "source", "deviations"]
+FIELD_ORDER = ["id", "area", "fn", "args", "expr", "env", "bits", "expected", "default",
+               "stderr", "ends", "sharing", "lean_version", "source", "deviations", "native"]
 
 
 class RowError(Exception):
@@ -50,8 +69,9 @@ class RowError(Exception):
 # ---------------------------------------------------------------- Lean terms
 
 
-def parse_string_literal(text, i):
-    """A Lean string literal at text[i] == '"': the string and the index after it."""
+def parse_string_literal(text, i, quote='"'):
+    """A Lean string (or, with quote="'", character) literal at text[i] == quote: the
+    string and the index after it."""
     i += 1
     out = []
     simple = {"\\": "\\", '"': '"', "'": "'", "n": "\n", "t": "\t", "r": "\r"}
@@ -59,7 +79,7 @@ def parse_string_literal(text, i):
         if i >= len(text):
             raise RowError("unterminated string literal")
         c = text[i]
-        if c == '"':
+        if c == quote:
             return "".join(out), i + 1
         if c == "\\":
             e = text[i + 1]
@@ -139,6 +159,27 @@ def wire_of(term, float_bits):
     if m:
         bs = [int(b.strip(), 0) for b in m.group(1).split(",") if b.strip()]
         return "y:" + bytes(bs).hex()
+    if t.startswith("'"):
+        s, j = parse_string_literal(t, 0, quote="'")
+        if j != len(t) or len(s) != 1:
+            raise RowError(f"bad character literal: {t}")
+        return "c:%x" % ord(s)
+    if t in ("true", "false"):
+        return "b:%d" % (t == "true")
+    m = re.fullmatch(r"#\[([0-9, ]*)\]", t)
+    if m:
+        return "a:" + ",".join(str(int(x)) for x in m.group(1).split(",") if x.strip())
+    m = re.fullmatch(r"\(FloatArray\.mk #\[([-0-9., e]*)\]\)", t)
+    if m:
+        xs = [x.strip() for x in m.group(1).split(",") if x.strip()]
+        return "fa:" + ",".join("%016x" % struct.unpack("<Q", struct.pack("<d", float(x)))[0]
+                                for x in xs)
+    m = re.fullmatch(r"\(2 \^ ([0-9]+)(?: ([+-]) ([0-9]+))?\)", t)
+    if m:
+        k, sign, a = int(m.group(1)), m.group(2), int(m.group(3) or 0)
+        if k == 0:
+            raise RowError(f"use a numeral for {t}")
+        return "P:%d:%d" % (k, -a if sign == "-" else a)
     m = re.fullmatch(NAT, t)
     if m:
         return "n:%d" % int(m.group(1), 0)
@@ -251,14 +292,8 @@ def oracle_binary(toolchain):
     return wrap, build / ".lake" / "build" / "bin" / "oracle"
 
 
-def run_oracle(toolchain, requests):
-    """One (stderr lines, float result bits, repr) per request."""
-    wrap, exe = oracle_binary(toolchain)
-    env = dict(os.environ, LEAN_BACKTRACE="0")
-    stdin = "".join("\t".join(r) + "\n" for r in requests)
-    out = subprocess.run(
-        wrap + [str(exe)], input=stdin, capture_output=True, text=True, env=env, check=True
-    ).stdout
+def parse_answers(out):
+    """The answers in the oracle's stdout: (stderr lines, float result bits, repr) each."""
     results, panics, bits = [], [], []
     for line in out.split("\n"):
         if line.startswith("@panic "):
@@ -266,29 +301,93 @@ def run_oracle(toolchain, requests):
         elif line.startswith("@bits "):
             bits.append(line[len("@bits ") :])
         elif line.startswith("=> "):
-            results.append((panics, bits, line[3:]))
+            results.append({"panics": panics, "bits": bits, "value": line[3:]})
             panics, bits = [], []
-    if len(results) != len(requests):
-        raise RowError(f"oracle answered {len(results)} of {len(requests)} requests")
     return results
 
 
-def apply(row, result):
-    """The row with the oracle's answer in its expected fields."""
-    panics, bits, value = result
-    new = {k: v for k, v in row.items() if k not in ("expected", "default", "stderr")}
+def runs_alone(row):
+    return any(k in row for k in ("ends", "env", "deviations"))
+
+
+def run_oracle(toolchain, rows):
+    """One answer per row: {"panics", "bits", "value"}, or {"ends": {"stderr", "code"}}
+    for a row whose call ended the process. The rows that may end it (`runs_alone`) each
+    get their own process."""
+    wrap, exe = oracle_binary(toolchain)
+    base_env = dict(os.environ, LEAN_BACKTRACE="0")
+    batch = [r for r in rows if not runs_alone(r)]
+    stdin = "".join("\t".join(request(r)) + "\n" for r in batch)
+    out = subprocess.run(
+        wrap + [str(exe)], input=stdin, capture_output=True, text=True, env=base_env, check=True
+    ).stdout
+    answers = parse_answers(out)
+    if len(answers) != len(batch):
+        raise RowError(f"oracle answered {len(answers)} of {len(batch)} requests")
+    by_id = {r["id"]: a for r, a in zip(batch, answers)}
+    for r in rows:
+        if not runs_alone(r):
+            continue
+        env = dict(base_env, **r.get("env", {}))
+        p = subprocess.run(wrap + [str(exe)], input="\t".join(request(r)) + "\n",
+                           capture_output=True, text=True, env=env)
+        got = parse_answers(p.stdout)
+        if p.returncode == 0 and len(got) == 1:
+            by_id[r["id"]] = got[0]
+        elif p.returncode != 0 and not got:
+            code = p.returncode if p.returncode >= 0 else 128 - p.returncode
+            by_id[r["id"]] = {"ends": {"stderr": p.stderr, "code": code}}
+        else:
+            raise RowError(f"{r['id']}: oracle exit {p.returncode}, answers {got}")
+    return [by_id[r["id"]] for r in rows]
+
+
+def outcome(row, result):
+    """The expected fields for one answer."""
+    new = {}
+    if "ends" in result:
+        new["expected"] = "ends"
+        new["ends"] = result["ends"]
+        return new
+    panics, bits, value = result["panics"], result["bits"], result["value"]
     if panics:
         new["expected"] = "panic: " + panics[0]
         new["default"] = value
         new["stderr"] = "".join(p + "\n" for p in panics)
     else:
         new["expected"] = value
-    b = dict(row.get("bits", {}))
-    b.pop("result", None)
     if bits:
         if len(bits) != 1:
             raise RowError(f"{row['id']}: more than one float in the result")
-        b["result"] = bits[0]
+        new["bits_result"] = bits[0]
+    return new
+
+
+def shared_deviation(row):
+    """Whether the row's deviation is the crate's own (an `LB-nn`), so `expected` is the
+    definition's result rather than native's."""
+    return any(str(v).startswith("LB-") for v in row.get("deviations", {}).values())
+
+
+def apply(row, result):
+    """The row with the oracle's answer in its expected fields, or, for a row with an
+    `LB-nn` deviation, in `native`."""
+    got = outcome(row, result)
+    if shared_deviation(row):
+        new = dict(row)
+        native = {k: v for k, v in got.items() if k not in ("ends", "bits_result")}
+        if "ends" in got:
+            native.update(got["ends"])
+        if "bits_result" in got:
+            native["bits"] = got["bits_result"]
+        new["native"] = native
+        return ordered(new)
+    new = {k: v for k, v in row.items() if k not in ("expected", "default", "stderr", "ends")}
+    new.update({k: v for k, v in got.items() if k != "bits_result"})
+    b = dict(row.get("bits", {}))
+    b.pop("result", None)
+    if "bits_result" in got:
+        b["result"] = got["bits_result"]
     if b:
         new["bits"] = b
     else:
@@ -303,11 +402,12 @@ def main():
     ap.add_argument("files", nargs="+", type=pathlib.Path)
     opts = ap.parse_args()
     any_differ = False
-    fields = ("expected", "default", "stderr", "bits")
+    fields = ("expected", "default", "stderr", "bits", "ends", "native")
     for path in opts.files:
         header, rows = read_rows(path)
-        results = run_oracle(opts.toolchain, [request(r) for r in rows])
-        bad = [(r["id"], res[2]) for r, res in zip(rows, results) if res[2].startswith("!")]
+        results = run_oracle(opts.toolchain, rows)
+        bad = [(r["id"], res["value"]) for r, res in zip(rows, results)
+               if res.get("value", "").startswith("!")]
         if bad:
             for rid, res in bad:
                 print(f"{path}: {rid}: {res}", file=sys.stderr)
