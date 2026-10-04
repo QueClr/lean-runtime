@@ -242,6 +242,9 @@ So it may run later, as on a slow worker.</p>
   <li><strong>Evidence.</strong> Three program cases with pure tasks each gave the recorded outcome in 20 of 20 native runs.
     lean2rr's own runtime fails one of them (<code>runaway_pure_task_started</code>); this rule passes it.</li>
   <li><strong>IO need.</strong> A pure task that an IO task waits for, directly or through other pure tasks, starts as an IO task does.</li>
+  <li><strong>A known difference (LSCHED-01).</strong> Natively, runaway pure tasks queued first can take every worker, for example the only one, and keep a later IO task from running.
+    Here the IO task runs, because the pure task waits until the exit.
+    The case <code>runaway_pure_task_before_io</code> accepts both outcomes.</li>
 </ul>
 
 <h2 id="yield">Yield points</h2>

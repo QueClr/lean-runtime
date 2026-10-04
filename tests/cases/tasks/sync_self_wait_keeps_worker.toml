@@ -1,0 +1,8 @@
+id = "sync_self_wait_keeps_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime batch sched-4 (AR-16 with AR-15: a sync dependent's endless self-wait keeps the worker), 2026-10-04"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { leanrs = "DV2" }
+# leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts sched

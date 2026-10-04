@@ -1,0 +1,13 @@
+id = "runaway_pure_task_before_io"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's DV26 (b), recorded as lean-runtime's deviation LSCHED-01 of the deferred model (AR-15), batch sched-4"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { lean_runtime = "LSCHED-01", leanrs = "DV2" }
+# `expected` is native's: the only worker runs the runaway pure task, and the IO task queued after
+# it never runs. lean-runtime defers a pure task no IO task waits for (the pure-task rule), so the
+# IO task runs during main's sleep and the pure task at the exit: runaway_pure_task_before_io.alt1.*,
+# written by hand, which `check` accepts (docs/sched.md, "Known differences from native",
+# LSCHED-01). leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts
+# sched.

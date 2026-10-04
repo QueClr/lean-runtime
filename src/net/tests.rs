@@ -471,6 +471,79 @@ fn callbacks_run() -> u32 {
     CALLBACKS_RUN.with(|n| n.get())
 }
 
+/// A socket bound by `make` to a loopback port outside the kernel's
+/// ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`), and its
+/// address, for a test that drops the socket and binds the same port again
+/// at once: a parallel test's bind to port 0 is handed ports from that range
+/// only, so it cannot take this one in between (with port 0 here, it could:
+/// the freed port goes back to the range). The ports below the range, from
+/// 20000 up to 30000 where the range allows it, are tried from an offset of
+/// the process and the call, until `make` succeeds (another process may hold
+/// one).
+fn bound_outside_ephemeral<T>(mut make: impl FnMut(SocketAddr) -> Option<T>) -> (T, SocketAddr) {
+    static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let range_start = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse::<u32>().ok())
+        .unwrap_or(32768);
+    let hi = range_start.min(30000);
+    let lo = if hi > 21000 { 20000 } else { 1024 };
+    assert!(hi > lo, "no port below the ephemeral range ({range_start})");
+    let span = hi - lo;
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let start = (std::process::id().wrapping_mul(7919) ^ call.wrapping_mul(104_729)) % span;
+    for k in 0..span {
+        let port = lo + (start + k) % span;
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port as u16);
+        if let Some(x) = make(addr) {
+            return (x, addr);
+        }
+    }
+    panic!("no free port in {lo}..{hi}");
+}
+
+/// The inode of the socket bound to loopback `port` in `/proc/net/<table>`
+/// (`tcp`, `udp`), as the kernel lists it.
+fn socket_inode(table: &str, port: u16) -> Option<u64> {
+    let local = format!("0100007F:{port:04X}");
+    std::fs::read_to_string(format!("/proc/net/{table}"))
+        .ok()?
+        .lines()
+        .skip(1)
+        .map(|l| l.split_whitespace().collect::<Vec<_>>())
+        .find(|f| f.get(1) == Some(&local.as_str()))
+        .and_then(|f| f.get(9)?.parse().ok())
+}
+
+/// Whether a descriptor of this process refers to the socket with this
+/// inode (`/proc/self/fd`).
+fn fd_open_to(inode: u64) -> bool {
+    let target = format!("socket:[{inode}]");
+    std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .filter_map(|d| std::fs::read_link(d.ok()?.path()).ok())
+        .any(|p| p.as_os_str() == target.as_str())
+}
+
+/// Bind the dropped socket's port again, with plain sleeps between tries
+/// (no scheduling point, so the loop does not run meanwhile): this
+/// process's descriptor is closed already (`fd_open_to`), but a child that
+/// another test thread is spawning holds a copy of the descriptor table
+/// until it execs (`posix_spawn`'s clone), which keeps the socket bound for
+/// a moment, as it would natively.
+fn bind_again<T>(bind: impl Fn() -> std::io::Result<T>) -> T {
+    let t0 = std::time::Instant::now();
+    loop {
+        match bind() {
+            Ok(x) => return x,
+            Err(e) if t0.elapsed() > std::time::Duration::from_secs(5) => {
+                panic!("the port is free once this process closed it: {e}")
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(1)),
+        }
+    }
+}
+
 /// AR-12: a socket dropped while it is watched (a listening socket with a
 /// connection waiting, so its descriptor is ready) closes its descriptor at
 /// once, as Lean's finalizer does: the watch ends with it, the port can be
@@ -479,17 +552,24 @@ fn callbacks_run() -> u32 {
 #[cfg_attr(miri, ignore)]
 fn a_socket_dropped_while_watched_closes_at_once() {
     start_loop();
-    let t = TcpSocket::new().unwrap();
-    t.bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-        .unwrap();
-    t.listen(4).unwrap();
-    let addr = t.sock_name().unwrap();
+    // a port no parallel test's bind to port 0 can take once it is free
+    // (libuv reports a bind's EADDRINUSE at the listen)
+    let (t, addr) = bound_outside_ephemeral(|a| {
+        let t = TcpSocket::new().ok()?;
+        t.bind(a).ok()?;
+        t.listen(4).ok()?;
+        Some(t)
+    });
+    assert_eq!(t.sock_name().unwrap(), addr);
     let _client = std::net::TcpStream::connect(addr).unwrap();
     assert!(sched::io_cooperative(), "the socket is watched");
+    let inode = socket_inode("tcp", addr.port()).expect("the listening socket");
+    assert!(fd_open_to(inode));
     let before = callbacks_run();
     drop(t);
     assert!(!sched::io_cooperative(), "the watch ended with the socket");
-    std::net::TcpListener::bind(addr).expect("the port is free at once");
+    assert!(!fd_open_to(inode), "the descriptor is closed at once");
+    bind_again(|| std::net::TcpListener::bind(addr));
     sched::sleep_ms(5);
     assert_eq!(callbacks_run(), before, "no callback of the socket ran");
     sched::finish();
@@ -534,14 +614,21 @@ fn a_socket_dropped_with_a_feed_due_closes_at_once() {
     sched::sleep_ms(5);
     assert!(!sched::io_cooperative(), "the feed ran");
     assert_eq!(callbacks_run(), before, "no callback of the socket ran");
-    // UDP: a bound socket
-    let u = UdpSocket::new().unwrap();
-    u.bind(lo).unwrap();
-    let addr = u.sock_name().unwrap();
+    // UDP: a bound socket, on a port no parallel test's bind to port 0 can
+    // take once it is free
+    let (u, addr) = bound_outside_ephemeral(|a| {
+        let u = UdpSocket::new().ok()?;
+        u.bind(a).ok()?;
+        Some(u)
+    });
+    assert_eq!(u.sock_name().unwrap(), addr);
+    let inode = socket_inode("udp", addr.port()).expect("the bound socket");
+    assert!(fd_open_to(inode));
     u.feed_for_tests();
     drop(u);
+    assert!(!fd_open_to(inode), "the descriptor is closed at once");
     // without `SO_REUSEADDR`: refused while the socket is open
-    std::net::UdpSocket::bind(addr).expect("the port is free at once");
+    bind_again(|| std::net::UdpSocket::bind(addr));
     sched::sleep_ms(5);
     assert!(!sched::io_cooperative(), "the feed ran");
     assert_eq!(callbacks_run(), before, "no callback of the socket ran");

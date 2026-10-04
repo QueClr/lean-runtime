@@ -1,0 +1,3 @@
+d waits for q
+`Task.get` called from a `(sync := true)` task
+main done

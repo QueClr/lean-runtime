@@ -153,8 +153,15 @@ pub(crate) enum Wait {
     /// Descriptors registered with the loop (`reactor::poll_fds`), until one is
     /// ready or the deadline.
     Io(Option<Instant>),
-    /// Nothing: a context that waits forever.
+    /// Nothing: a context that waits forever (a thunk forced inside its own
+    /// computation, `Promise.result!` on a dropped promise). It keeps its
+    /// worker, as natively that thread spins or sleeps forever.
     Forever,
+    /// Nothing either: a `wait` that can never end, for the running task
+    /// itself, a dependent of it, or the walk of its own dependents (review
+    /// AR-15). Natively a `wait_for`, which raises the worker limit by one
+    /// for a pool task, so the context does not hold its worker.
+    OnItself,
 }
 
 impl Wait {

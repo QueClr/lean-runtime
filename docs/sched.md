@@ -111,9 +111,49 @@ to queue the dependent, as natively (review RS1S-16; cases
 `poll_dep_mid_walk`). On the walk's own context, that never happens: a
 deadlock, as natively (`tasks/sync_dep_waits_older`: a `sync` dependent
 waits for an older async one). So is a task that waits for a dependent of
-itself (`tasks/task_waits_own_dep`). `IO.waitAny` and the polling treat
+itself (`tasks/task_waits_own_dep`). Such a `wait` never ends, and the
+context waits forever (`Wait::OnItself`), but natively it is a `wait_for`,
+which raises the worker limit by one for a pool task: the context does not
+hold its worker, so a task queued meanwhile still starts (review AR-15;
+`tasks/self_wait_frees_worker`: at one worker, a task that waits for its
+own dependent, and one queued while it slept, which then runs). A wait
+forever that is no `wait_for` keeps its worker (`hang`, `Wait::Forever`: a
+thunk forced inside its own computation, `Promise.result!` on a dropped
+promise), as natively that thread holds it. `IO.waitAny` and the polling treat
 such a dependent as waiting: `IO.waitAny` returns when another task of its
 list finishes, as natively (review RS1S-17; `tasks/wait_any_own_dep`).
+
+**The workers a context holds** (`holds_worker`; reviews AR-15, AR-16,
+RS4-01). Natively a worker that finishes a pool task stays busy until
+`handle_finished` has walked its dependents, the `sync` ones run on it; and
+`wait_for` raises the worker limit by one only for a pool task, not for a
+`sync` task (its priority is `LEAN_SYNC_PRIO`, so `in_pool` is false). Here
+a context's activities are its running tasks and its walks, interleaved
+(`Walk::depth`), and the thread is the one of the innermost activity that
+runs on a thread of its own:
+- a running task not on the thread below it: a pool worker if it is a pool
+  task; its own `wait` (`Wait::Cell`, `Wait::Progress`, `Wait::OnItself`)
+  frees the worker, but only when it is the innermost activity;
+- a walk of such a task (`Walk::own`): a pool worker for the whole walk;
+- a `sync` dependent, a task at `LEAN_SYNC_PRIO` (`ON_THREAD`), and a walk
+  of a promise or of such a task run on the thread below them: their waits,
+  endless ones included, keep that thread's worker, and `wait` does not
+  count the waiter's worker as free when it decides whether the awaited
+  task is the head a free worker would start (`wait_raises_limit`).
+
+Cases (one worker, recorded natively): `tasks/sync_walk_keeps_worker` (a
+`sync` dependent sleeps in its source's walk: a task queued meanwhile runs
+only after the walk, "D done" then "B ran"; with 20 workers at once, the
+driver's `sync_walk_keeps_worker_w20`), `sync_self_wait_keeps_worker` and
+`sync_wait_in_inline_walk` (a `sync` dependent's endless wait, in a pool
+task's walk and in the walk of a task run on a pool waiter's stack: the
+queued task never runs), `sync_dep_waits_queued_task` (a `sync` dependent
+waits for a queued task while the only worker is busy in the walk: a
+deadlock, as natively). Mutation checks: walks that hold no worker fail
+`sync_walk_keeps_worker`, `sync_self_wait_keeps_worker` and
+`sync_wait_in_inline_walk`; waits in a `sync` task that free the worker
+fail the last two; counting the waiter's worker as free in a `sync` task
+runs the queued task in `sync_dep_waits_queued_task`.
 
 **Waiters wake after a walk** (reviews RS2-01, RS2-05 and RS2-06 of
 sched-2). Natively the threads blocked in `Task.get`, `IO.wait` or
@@ -182,7 +222,12 @@ AR-10, corrected; `src/sched/task.rs`):
   Otherwise the waiter blocks on that task (`Wait::Cell`; a pool waiter's
   worker is free meanwhile), and the hub starts the heads on contexts of
   their own; the awaited task starts when it becomes the head, there or
-  on the waiter's stack when the waiter looks again.
+  on the waiter's stack when the waiter looks again. `may_run_awaited`
+  also says yes for a pending task in no queue that waits for nothing
+  (`QUEUED` clear): the state of a task handed to a context that is about
+  to begin it, between `hand` and `begin`. On one thread no other context
+  observes that state, so this branch only keeps sched-2's behaviour (the
+  task runs) should it ever be reached (review AR-15).
 - **`IO.waitAny`** runs a task of its list on its own stack only when that
   task is the only unfinished one of the list (every listed task names it:
   none has finished, also not one whose walk has not notified yet, which
@@ -358,6 +403,10 @@ while !(← IO.hasFinished t) do IO.sleep 5
 
 `polling_with_sleeps_runs_a_pure_task_after_two` (`src/sched/tests.rs`)
 records the three answers. No recorded case polls a pure task this way.
+
+**A known difference: LSCHED-01.** Deferring a started pure task gives a
+schedule native's pool does not produce when runaway pure tasks, queued
+first, would take every worker ("Known differences from native" below).
 
 ## Blocking IO and the event loop (sched-io)
 
@@ -1527,6 +1576,23 @@ The limits of one thread (lean2rr plan §10, "Tasks") hold here too:
 - in a no-suspend scope (item 11 of "The glue") every io wait blocks the
   thread, but for a dropped stream's flush, which is handed to a writer
   thread when it would block.
+
+## Known differences from native
+
+lean-runtime's own deviations of the deferred model, where native Lean is
+right and the crate's outcome is another one (not a Lean bug: those are in
+`docs/lean-bugs.md`). Each has a case whose expected files are native's,
+with the crate's outcome as a hand-written alternative (`alt1`) and
+`deviations = { lean_runtime = "LSCHED-nn" }` in its `.toml`, so `check`
+accepts both (`tests/cases/README.md`).
+
+| Id | What | Native | Here | Why | Case |
+|---|---|---|---|---|---|
+| LSCHED-01 | Runaway pure tasks (`Task.spawn` of a computation that never ends), queued before an IO task, when they would take every worker (for example one, at `LEAN_NUM_THREADS=1`; leanrs's DV26 (b), reviews AR-15, RS4-02) | The workers take the pure tasks first (first come, first served) and never finish them: the IO task never runs, and the exit waits forever | The worker only marks the pure task started ("The pure-task rule"): the IO task runs during `main`'s next wait, and the pure task at the exit, which then waits forever | The pure-task rule: a pure task no IO task waits for is deferred, so that a runaway one cannot take the only thread from `main`, which natively goes on in parallel (`tasks/runaway_pure_task_started`); a pure task has no effects, so the deferral shows only in what other tasks a stalled worker would have kept from running | `tasks/runaway_pure_task_before_io` (native: `main done false false`, then a hang; here: `io task ran` first, `alt1`) |
+
+The other places where the crate's schedule is one of native's but may
+differ from the most frequent one are "Schedules that depend on the
+machine's speed" (above) and "The limits of one thread" (below).
 
 ## The checklist of decisions Q5
 

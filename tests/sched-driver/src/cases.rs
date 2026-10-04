@@ -70,6 +70,12 @@ pub fn lookup(id: &str) -> Option<Case> {
         "wait_picked_pure" => (no_init, wait_picked_pure),
         "wait_any_picked_pure" => (no_init, wait_any_picked_pure),
         "wait_any_finished_unnotified" => (no_init, wait_any_finished_unnotified),
+        "self_wait_frees_worker" => (no_init, self_wait_frees_worker),
+        "runaway_pure_task_before_io" => (no_init, runaway_pure_task_before_io),
+        "sync_walk_keeps_worker" => (no_init, sync_walk_keeps_worker),
+        "sync_self_wait_keeps_worker" => (no_init, sync_self_wait_keeps_worker),
+        "sync_wait_in_inline_walk" => (no_init, sync_wait_in_inline_walk),
+        "sync_dep_waits_queued_task" => (no_init, sync_dep_waits_queued_task),
         "late_task_after_main" => (no_init, late_task_after_main),
         "late_dependent_of_dedicated" => (no_init, late_dependent_of_dedicated),
         "late_wait_dedicated" => (no_init, late_wait_dedicated),
@@ -4260,5 +4266,224 @@ fn wait_any_finished_unnotified(_: &[String]) -> u32 {
     p.resolve(7);
     u.get();
     println("done");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// sched-4 (AR-15). Each case runs with `LEAN_NUM_THREADS=1`.
+
+// def main (_args : List String) : IO Unit := do
+//   let r ← IO.mkRef (none : Option (Task (Except IO.Error Unit)))
+//   let t ← IO.asTask (do
+//     IO.sleep 50
+//     match ← r.get with
+//     | some d =>
+//       IO.eprintln "t waits for its own dependent"
+//       let _ ← IO.wait d
+//     | none => IO.eprintln "no dependent")
+//   let d ← IO.mapTask (fun _ => pure ()) t
+//   r.set (some d)
+//   IO.sleep 20
+//   let _b ← IO.asTask (IO.eprintln "B ran")
+//   IO.sleep 300
+//   IO.eprintln "main done"
+fn self_wait_frees_worker(_: &[String]) -> u32 {
+    let r: Ref<Option<Task<()>>> = Ref::new(None);
+    let r2 = r.clone();
+    let t = as_task(
+        move || {
+            sleep(50);
+            match r2.get() {
+                Some(d) => {
+                    eprintln("t waits for its own dependent");
+                    d.get();
+                }
+                None => eprintln("no dependent"),
+            }
+        },
+        PRIO_DEFAULT,
+    );
+    let d = map_task(|_: ()| (), t, PRIO_DEFAULT, false, true);
+    r.set(Some(d));
+    sleep(20);
+    // `_b` is unused: compiled Lean drops it at once.
+    drop(as_task(|| eprintln("B ran"), PRIO_DEFAULT));
+    sleep(300);
+    eprintln("main done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let s := args.head!.toNat!.toUInt64 ||| 1
+//   let ms := args[1]!.toNat!
+//   let t := Task.spawn fun _ => spin s 0
+//   let f1 ← IO.hasFinished t
+//   let _io ← IO.asTask (IO.eprintln "io task ran")
+//   IO.sleep ms.toUInt32
+//   let f2 ← IO.hasFinished t
+//   IO.eprintln s!"main done {f1} {f2}"
+fn runaway_pure_task_before_io(args: &[String]) -> u32 {
+    let s = seed(args);
+    let ms = to_nat(&args[1]) as u32;
+    let t = Task::spawn(move || spin(s, 0), PRIO_DEFAULT);
+    let f1 = has_finished(&t);
+    // `_io` is unused: compiled Lean drops it at once.
+    drop(as_task(|| eprintln("io task ran"), PRIO_DEFAULT));
+    sleep(ms);
+    let f2 = has_finished(&t);
+    drop(t);
+    eprintln(&format!("main done {f1} {f2}"));
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let s ← IO.asTask (IO.sleep 50)
+//   let _d ← IO.mapTask (sync := true) (fun _ => do
+//     IO.sleep 100
+//     IO.eprintln "D done") s
+//   IO.sleep 20
+//   let _b ← IO.asTask (IO.eprintln "B ran")
+//   IO.sleep 300
+//   IO.eprintln "main done"
+fn sync_walk_keeps_worker(_: &[String]) -> u32 {
+    let s = as_task(|| sleep(50), PRIO_DEFAULT);
+    // `_d` is unused: compiled Lean drops it at once (an IO task still runs).
+    drop(map_task(
+        |_: ()| {
+            sleep(100);
+            eprintln("D done");
+        },
+        s,
+        PRIO_DEFAULT,
+        true,
+        true,
+    ));
+    sleep(20);
+    drop(as_task(|| eprintln("B ran"), PRIO_DEFAULT));
+    sleep(300);
+    eprintln("main done");
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let r ← IO.mkRef (none : Option (Task (Except IO.Error Unit)))
+//   let s ← IO.asTask (IO.sleep 50)
+//   let d ← IO.mapTask (sync := true) (fun _ => do
+//     match ← r.get with
+//     | some e =>
+//       IO.eprintln "d waits for its own dependent"
+//       let _ ← IO.wait e
+//     | none => IO.eprintln "no dependent") s
+//   let e ← IO.mapTask (fun _ => pure ()) d
+//   r.set (some e)
+//   IO.sleep 20
+//   let _b ← IO.asTask (IO.eprintln "B ran")
+//   IO.sleep 300
+//   IO.eprintln "main done"
+fn sync_self_wait_keeps_worker(_: &[String]) -> u32 {
+    let r: Ref<Option<Task<()>>> = Ref::new(None);
+    let s = as_task(|| sleep(50), PRIO_DEFAULT);
+    let r2 = r.clone();
+    let d = map_task(
+        move |_: ()| match r2.get() {
+            Some(e) => {
+                eprintln("d waits for its own dependent");
+                e.get();
+            }
+            None => eprintln("no dependent"),
+        },
+        s,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let e = map_task(|_: ()| (), d, PRIO_DEFAULT, false, true);
+    r.set(Some(e));
+    sleep(20);
+    drop(as_task(|| eprintln("B ran"), PRIO_DEFAULT));
+    sleep(300);
+    eprintln("main done");
+    0
+}
+
+// tests/cases/tasks/sync_wait_in_inline_walk.lean (our review's probe
+// SyncSelfWait, RS4-01; its twin rv4_sync_self_wait)
+fn sync_wait_in_inline_walk(_: &[String]) -> u32 {
+    let r: Ref<Option<Task<()>>> = Ref::new(None);
+    let r2 = r.clone();
+    // `_p` is unused: compiled Lean drops it at once (an IO task still runs).
+    drop(as_task(
+        move || {
+            sleep(50);
+            if let Some(x) = r2.get() {
+                x.get();
+            }
+        },
+        PRIO_DEFAULT,
+    ));
+    let x = as_task(|| eprintln("x ran"), PRIO_DEFAULT);
+    let d = map_task(
+        |_: ()| eprintln("d ran"),
+        x.clone(),
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    drop(map_task(
+        move |_: ()| {
+            d.get();
+            eprintln("s done");
+        },
+        x.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    ));
+    r.set(Some(x));
+    sleep(20);
+    drop(as_task(|| eprintln("B ran"), PRIO_DEFAULT));
+    sleep(300);
+    eprintln("main done");
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let r ← IO.mkRef (none : Option (Task (Except IO.Error Unit)))
+//   let s ← IO.asTask (IO.sleep 50)
+//   let _d ← IO.mapTask (sync := true) (fun _ => do
+//     match ← r.get with
+//     | some q =>
+//       IO.eprintln "d waits for q"
+//       let _ ← IO.wait q
+//       IO.eprintln "d done"
+//     | none => IO.eprintln "no q") s
+//   IO.sleep 20
+//   let q ← IO.asTask (IO.eprintln "q ran")
+//   r.set (some q)
+//   IO.sleep 300
+//   IO.eprintln "main done"
+fn sync_dep_waits_queued_task(_: &[String]) -> u32 {
+    let r: Ref<Option<Task<()>>> = Ref::new(None);
+    let s = as_task(|| sleep(50), PRIO_DEFAULT);
+    let r2 = r.clone();
+    drop(map_task(
+        move |_: ()| match r2.get() {
+            Some(q) => {
+                eprintln("d waits for q");
+                q.get();
+                eprintln("d done");
+            }
+            None => eprintln("no q"),
+        },
+        s,
+        PRIO_DEFAULT,
+        true,
+        true,
+    ));
+    sleep(20);
+    let q = as_task(|| eprintln("q ran"), PRIO_DEFAULT);
+    r.set(Some(q));
+    sleep(300);
+    eprintln("main done");
     0
 }

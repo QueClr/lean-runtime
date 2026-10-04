@@ -225,6 +225,16 @@ struct Walk {
     /// The walk's own loop stops at its end (otherwise it is the walk of a
     /// `sync` dependent, continued by the loop of the enclosing walk).
     base: bool,
+    /// The number of the context's running tasks when the walk began: it
+    /// lies above `running[..depth]`, and the tasks it runs (its `sync`
+    /// dependents) above it (`holds_worker`).
+    depth: usize,
+    /// Whose thread runs the walk: `Some(pool)` for a task that ran on a
+    /// thread of its own (not `ON_THREAD`), whose worker, if it is a pool
+    /// task, stays busy for the whole walk (`handle_finished` runs on it);
+    /// `None` for a task that ran on the thread below it, and a promise
+    /// resolved there (review AR-16).
+    own: Option<bool>,
 }
 
 /// What belongs to a context, as natively to a thread: the tasks running on
@@ -769,6 +779,7 @@ impl Sched {
     fn abandon_walks(&mut self, keep: usize) {
         while self.st_ref().walks.len() > keep {
             let w = self.st().walks.pop().unwrap();
+            self.refresh_holds(self.cx.cur);
             loop {
                 let d = self.ent(w.owner).head_dep;
                 if d == NONE {
@@ -795,10 +806,13 @@ impl Sched {
         }
     }
 
-    /// A walk of dependents begins: its owner has its value.
+    /// A walk of dependents begins: its owner has its value. The context's
+    /// worker count follows (`holds_worker`: a pool task's worker stays busy
+    /// for its walk).
     fn open_walk(&mut self, w: Walk) {
         self.tk.open_walks.push((w.owner, w.gen));
         self.st().walks.push(w);
+        self.refresh_holds(self.cx.cur);
     }
 
     /// A walk of dependents is over (or abandoned).
@@ -880,7 +894,6 @@ impl Sched {
     fn end(&mut self, i: u32) -> bool {
         let r = self.st().running.pop();
         debug_assert_eq!(r, Some(i));
-        self.refresh_holds(self.cx.cur);
         let early = self.early_now(i);
         let gen = self.ent(i).gen;
         let flags = self.ent(i).flags;
@@ -900,6 +913,7 @@ impl Sched {
             self.tk.worker = NONE;
             self.tk.wake = None;
         }
+        let prio = self.ent(i).prio as usize;
         let w = Walk {
             owner: i,
             gen,
@@ -909,6 +923,8 @@ impl Sched {
             canceled: flags & CANCELED != 0,
             worker,
             base,
+            depth: self.st_ref().running.len(),
+            own: (flags & ON_THREAD == 0).then_some(prio < DEDICATED),
         };
         self.open_walk(w);
         base
@@ -958,6 +974,7 @@ impl Sched {
         let canceled = self.ent(i).flags & CANCELED != 0;
         self.ent_mut(i).flags = FINISHED;
         let thread = self.cur_thread();
+        let depth = self.st_ref().running.len();
         self.open_walk(Walk {
             owner: i,
             gen,
@@ -967,6 +984,8 @@ impl Sched {
             canceled,
             worker: false,
             base: true,
+            depth,
+            own: None,
         });
     }
 
@@ -982,6 +1001,8 @@ impl Sched {
             let d = self.ent(owner).head_dep;
             if d == NONE {
                 let w = self.st().walks.pop().unwrap();
+                // the finishing worker is free once its walk is over
+                self.refresh_holds(self.cx.cur);
                 self.free_entry(owner);
                 self.close_walk((owner, w.gen));
                 if w.notify {
@@ -1154,24 +1175,67 @@ impl Sched {
     }
 
     /// Whether a context with this bookkeeping holds one of the task
-    /// manager's workers: the innermost task running on it (not on the
-    /// thread of whoever ran it) is at a pool priority, and it is not
-    /// waiting for a task in `wait` (`Wait::Cell`, `Wait::Progress`: native
-    /// `wait_for` raises the worker limit by one). A context in `IO.waitAny`
-    /// (`Wait::Any`) keeps its worker, as native `wait_any` raises nothing
-    /// (review AR-10 (ii)).
+    /// manager's workers, as natively its thread would. The context's
+    /// activities, innermost first, are its running tasks and its walks of
+    /// dependents, interleaved by `Walk::depth`; the thread is the one of the
+    /// innermost activity that runs on a thread of its own:
+    /// - a running task not `ON_THREAD`: a pool worker if it is at a pool
+    ///   priority. If it is the innermost activity, and waits for a task in
+    ///   `wait` (`Wait::Cell`, `Wait::Progress`, and `Wait::OnItself` for a
+    ///   wait that never ends), its worker is free: native `wait_for` raises
+    ///   the worker limit by one for a pool task (review AR-15). In
+    ///   `IO.waitAny` (`Wait::Any`) it keeps its worker, as native
+    ///   `wait_any` raises nothing (review AR-10 (ii)), and so it does when
+    ///   it waits forever otherwise (`Wait::Forever`: a thunk forced inside
+    ///   itself, `Promise.result!` on a dropped promise);
+    /// - a walk of a task that ran on a thread of its own (`Walk::own`): a
+    ///   pool worker if that task was a pool task, busy for the whole walk,
+    ///   as natively `handle_finished` runs on it (review AR-16).
+    ///
+    /// `ON_THREAD` tasks (a `sync` dependent, a task at `LEAN_SYNC_PRIO`)
+    /// and walks of promises and of such tasks run on the thread below them:
+    /// their waits raise no limit, as natively `wait_for` sees a task at
+    /// `LEAN_SYNC_PRIO` (`in_pool` false), so they keep that thread's
+    /// worker.
     fn holds_worker(&self, st: &CtxState, w: Wait) -> bool {
-        if matches!(w, Wait::Cell(..) | Wait::Progress) {
+        let (mut ri, mut wi) = (st.running.len(), st.walks.len());
+        let mut innermost = true;
+        loop {
+            let task_above = ri > 0 && (wi == 0 || ri > st.walks[wi - 1].depth);
+            if task_above {
+                let e = self.ent(st.running[ri - 1]);
+                if e.flags & ON_THREAD == 0 {
+                    let waits =
+                        innermost && matches!(w, Wait::Cell(..) | Wait::Progress | Wait::OnItself);
+                    return (e.prio as usize) < DEDICATED && !waits;
+                }
+                ri -= 1;
+            } else if wi > 0 {
+                if let Some(pool) = st.walks[wi - 1].own {
+                    return pool;
+                }
+                wi -= 1;
+            } else {
+                return false;
+            }
+            innermost = false;
+        }
+    }
+
+    /// Whether a `wait` of the running context raises the worker limit, as
+    /// native `wait_for` does for a pool task (`may_run_awaited`'s `spare`):
+    /// its innermost activity is a running pool task on a thread of its own,
+    /// not a `sync` task, and not a walk (review AR-16).
+    fn wait_raises_limit(&self) -> bool {
+        let st = self.st_ref();
+        let Some(&i) = st.running.last() else {
+            return false;
+        };
+        if st.walks.last().is_some_and(|w| w.depth >= st.running.len()) {
             return false;
         }
-        for &i in st.running.iter().rev() {
-            let e = self.ent(i);
-            if e.flags & ON_THREAD != 0 {
-                continue;
-            }
-            return (e.prio as usize) < DEDICATED;
-        }
-        false
+        let e = self.ent(i);
+        e.flags & ON_THREAD == 0 && (e.prio as usize) < DEDICATED
     }
 
     /// The number of the task manager's workers in use: a counter kept by
@@ -1279,15 +1343,18 @@ impl Sched {
             return true;
         }
         if f & QUEUED == 0 {
-            // Not a state a pending task stays in between two steps; as
-            // before, it runs.
+            // In no queue and waiting for nothing: a task handed to a
+            // context that is about to begin it (between `hand` and
+            // `begin`), a state no other context observes on one thread;
+            // as before, it runs (docs/sched.md, review AR-15).
             return true;
         }
         if self.ent(i).prio as usize == DEDICATED {
             return true;
         }
         self.settle_worker();
-        let in_use = self.pool_in_use() - u32::from(spare && self.cx.cur_ctx().holds);
+        let in_use = self.pool_in_use()
+            - u32::from(spare && self.cx.cur_ctx().holds && self.wait_raises_limit());
         if in_use >= self.cx.pool_limit {
             return false;
         }
@@ -1873,7 +1940,8 @@ pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) ->
 /// then, and for a task running on another context or an unresolved
 /// promise, the caller waits while other contexts run, and the hub starts
 /// the queue's heads on contexts of their own; a task needed by its own
-/// computation waits forever, as natively.
+/// computation waits forever, as natively, and a pool task does not hold
+/// its worker meanwhile (`self_wait`, review AR-15).
 pub fn wait(id: TaskId) {
     super::writers_point();
     let mut chain = None;
@@ -1882,9 +1950,23 @@ pub fn wait(id: TaskId) {
             WaitStep::Done => return,
             WaitStep::Run(i) => run_task(i),
             WaitStep::Block(w) => block(w),
-            WaitStep::Hang => super::hang(),
+            WaitStep::Hang => self_wait(),
             WaitStep::Again => {}
         }
+    }
+}
+
+/// A `wait` that can never end (`WaitStep::Hang`): for the running task
+/// itself, a dependent of it, or the walk of its own dependents. The
+/// context waits forever, as natively the thread waits forever in
+/// `wait_for`; but `wait_for` raises the worker limit by one for a pool
+/// task, so the context does not hold its worker (`Wait::OnItself`, review
+/// AR-15): a task queued meanwhile still starts. `hang` keeps the worker,
+/// for the waits that are no `wait_for`.
+fn self_wait() -> ! {
+    super::writers_point();
+    loop {
+        block(Wait::OnItself);
     }
 }
 

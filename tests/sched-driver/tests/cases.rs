@@ -899,6 +899,23 @@ fn rv3_chain_wait() {
     assert_eq!(err_of(&got), "");
 }
 
+/// `tasks/sync_walk_keeps_worker` with 20 workers: `b` runs at once on
+/// another worker while the walk's `sync` dependent sleeps, as natively
+/// (10 of 10: "B ran", "D done", "main done"; review AR-16).
+#[test]
+fn sync_walk_keeps_worker_w20() {
+    let got = run_with(
+        "sync_walk_keeps_worker",
+        &[],
+        &[("LEAN_NUM_THREADS".into(), "20".into())],
+        None,
+        false,
+    );
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "B ran\nD done\nmain done\n");
+    assert!(got.out.is_empty());
+}
+
 /// The ported cases, in one list: each becomes a test, and
 /// `every_case_is_ported` checks the list against the cases' directories
 /// (review RS1S-06 of sched-1).
@@ -969,6 +986,13 @@ cases!(
     wait_picked_pure,
     wait_any_picked_pure,
     wait_any_finished_unnotified,
+    // sched-4 (AR-15)
+    self_wait_frees_worker,
+    runaway_pure_task_before_io,
+    sync_walk_keeps_worker,
+    sync_self_wait_keeps_worker,
+    sync_wait_in_inline_walk,
+    sync_dep_waits_queued_task,
     late_task_after_main,
     late_dependent_of_dedicated,
     late_wait_dedicated,

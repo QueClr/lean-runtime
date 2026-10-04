@@ -1,0 +1,8 @@
+id = "self_wait_frees_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's adversarial review of its adopt-sched against lean-runtime 0882b54 (AR-15: a pool task's endless self-wait kept its worker), batch sched-4"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { leanrs = "DV2" }
+# leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts sched

@@ -88,7 +88,13 @@ a native quirk in `src/sched/stack_overflow.rs`; AR-11; without it, a task
 that overflows its context's stack ends with a plain SIGSEGV), and lets a
 waiter or a poller run no task on its own stack but the one a free worker
 would start now, first come, first served, with `IO.waitAny` keeping its
-worker (AR-9, AR-10).
+worker (AR-9, AR-10). A small fifth, sched-4, counts the workers as
+native does in two more places: a pool task that waits forever on itself
+frees its worker, as native's `wait_for` does (AR-15), and a pool task's
+worker stays busy for its walk of `sync` dependents, whose waits never
+free it (AR-16); and it records lean-runtime's first known difference of
+the deferred model, LSCHED-01 (`docs/sched.md`, "Known differences from
+native").
 
 `net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
 externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code
