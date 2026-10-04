@@ -71,10 +71,10 @@ The crate holds the behaviour.</figcaption>
 The coverage count of 2026-10-04 sorts Lean's 717 <code>Init</code> and <code>Std</code> extern symbols this way:</p>
 <ul>
   <li>171 are one machine operation that each translator emits inline (wrapping <code>+</code>, bitwise operations, casts).</li>
-  <li>66 belong to the glue, because they depend on the translator's own objects or memory protocol.
+  <li>67 belong to the glue, because they depend on the translator's own objects or memory protocol.
     Examples: append, push, size, thunk and ref cells, sharing tests, heartbeats.</li>
   <li>27 are Lean code already (<code>@[export]</code> definitions).</li>
-  <li>The other 453 need shared code. The <a href="status.html#coverage">status page</a> shows how many are done.</li>
+  <li>The other 452 need shared code. The <a href="status.html#coverage">status page</a> shows how many are done.</li>
 </ul>
 
 <h2 id="views">Views in, data out</h2>

@@ -235,6 +235,7 @@ So each translator's glue does one raw-pointer dereference, in <code>Glue::suspe
 It does this when the fault is in the guard page below the stack of the faulting thread.
 Here a task runs on a context, with a stack and a guard page of its own.
 Rust's handler does not know these guard pages, so the crate has its own handler (sched-3, AR-11), behind the feature <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a>.
+The feature is off by default, and lean2rr turns it on.
 Without it, a task that overflows its stack ends with a plain SIGSEGV (status 139).</p>
 <ul>
   <li><strong>The opt-in.</strong> The glue calls <code>sched::install_stack_overflow_handler()</code> once, on each thread that runs Lean code, before any Lean code runs there.

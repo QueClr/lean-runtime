@@ -1,6 +1,7 @@
 <h1>Status</h1>
-<p class="lead">State of 2026-10-04.
-main holds <code>semantics</code>, both <code>io</code> batches, both <code>sched</code> batches and two batches of native quirks.</p>
+<p class="lead">State of 2026-10-04, main at 0882b54.
+main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, and two native quirks, each behind a feature of its own.
+Every Lean symbol that needs shared code has a crate item on main.</p>
 
 <h2 id="merged">Merged on main</h2>
 <div class="tblwrap"><table>
@@ -25,6 +26,32 @@ Since <code>proc-title</code> (2026-10-04) it is built only with that feature.</
 <tr><td><code>quirks-2</code></td><td>Real io_uring rings among the startup descriptors, made and mapped as libuv makes them, through the io-uring crate, in place of option C's epoll stand-ins.
 A case checks the rings' <code>/proc/self/fdinfo</code> lines and mappings, and the polling ring's kernel thread.</td></tr>
 <tr><td><code>cases-tasks-1</code></td><td>Program cases for tasks and for two io findings, recorded natively; <code>scripts/cases.py</code> runs every case under a memory cap.</td></tr>
+<tr><td><code>net-1</code></td><td>The <a href="net.html">net</a> module, behind the feature <code>net</code>: <code>Std.Internal.UV</code>'s TCP, UDP, name lookups and interface addresses, on <code>sched-io</code>'s event loop.
+It covers all 34 network symbols.
+LB-21 to LB-28, each with a case that expects the correct outcome; the cases use the loopback interface only.</td></tr>
+<tr><td><code>sched-2</code></td><td>The last three Task/Promise symbols.
+The private <code>getOrBlock!</code> is a crate item; <code>Task.pure</code> and <code>Promise.result?</code> are glue (<a href="repo:docs/sched.md">docs/sched.md</a>, "The glue").
+A task finishes in native's order: it stores its value, runs its dependents, then wakes its waiters.
+LB-32 and its cases.</td></tr>
+<tr><td><code>fixes-1</code></td><td>Fixes and API requests from the translators (AR-1 to AR-3, AR-5 to AR-8).
+<code>IO.Process.output</code> stops reading when its output is out of memory, and the exit waits for the background output drains.
+A dropped stream whose flush would block gives its bytes to a writer thread.
+An exit does not wait for a reader that holds a stream (LB-29).
+A failure to open the startup descriptors ends with an internal panic (LB-30, LB-31).</td></tr>
+<tr><td>Case marks</td><td>Deviation marks on the program cases, from two of leanrs's adoption runs (the second for AR-13).
+DV2 marks the cases that leanrs refuses or runs eagerly until it adopts <code>sched</code>, <code>net</code> and the quirks.
+A few cases have DV5, DV17 or DV19.
+So <code>scripts/cases.py check --translator leanrs</code> reports them as deviations, not failures.</td></tr>
+<tr><td><code>proc-title</code></td><td>The feature <a href="glossary.html#g-proc-title"><code>proc-title</code></a> (AR-14).
+The write of the process title (<code>quirks-1</code>) is built only with it, and lean2rr turns it on.
+Without it, <code>io</code> has no <code>unsafe</code> code: <code>setProcessTitle</code> fails with <code>ENOBUFS</code>, and <code>getProcessTitle</code> gives <code>argv[0]</code>.</td></tr>
+<tr><td><code>sched-3</code></td><td>A wait runs the awaited task on the waiter's stack only when a free worker would take that task next (AR-10).
+Otherwise it blocks, and the scheduler starts the queue head on its own context.
+At the polling threshold, a task-state query starts the queue head on its own context and yields (AR-9).
+So tasks start in native's order.
+A task that waits for <code>main</code> no longer hangs the program when <code>main</code> polls it.
+Lean's stack-overflow report for tasks, behind the feature <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a> (AR-11): the second native quirk.
+lean2rr turns it on.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>
@@ -33,7 +60,10 @@ No timing session has run yet.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>Work</th><th>What</th><th>State</th></tr></thead>
 <tbody>
-<tr><td>Network</td><td>The <a href="net.html">net</a> module: TCP, UDP, DNS and interface addresses, on <code>sched-io</code>'s event loop; LB-21 to LB-28.</td><td>In review in <code>net-1</code>.</td></tr>
+<tr><td>Network without <code>Weak</code></td><td>The <a href="net.html">net</a> module without <code>Weak</code> references (AR-12).
+Today the event loop's watches and timers hold a <code>Weak</code> reference to their socket.
+leanrs's checks forbid <code>Weak</code> in runtime code, so leanrs needs this change before it adopts <code>net</code>.</td><td>In progress in <code>net-2</code>.</td></tr>
+<tr><td>Adoption</td><td>Each translator moves onto the merged batches (<a href="#adoption">Adoption</a>).</td><td>In progress in both translators.</td></tr>
 </tbody></table></div>
 <p id="superseded">Superseded: the math batch, which was to replace glibc's libm functions with a Rust library and add machine-specific variants.
 The owner decided that glibc stays (Rust's standard library calls it), and that machine-specific work is not a priority (2026-10-04).</p>
@@ -44,16 +74,20 @@ It moves its pin only after its own suite passes.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>Translator</th><th>Adopted</th><th>In adoption</th><th>Next</th></tr></thead>
 <tbody>
-<tr><td>leanrs</td><td><code>semantics-1</code> (its batch 7).</td><td><code>semantics-2</code> (its batch 8), with its out-of-memory end (leanrs's D35).</td><td><code>io-1</code> and <code>io-2</code>.
-<code>sched</code>, with <code>sched-io</code>.</td></tr>
-<tr><td>lean2rr</td><td>None yet.</td><td><code>semantics-1</code>: the switch is merging.
-Step 2, the <code>Nat</code>, <code>Int</code> and array rules of <code>semantics-2</code>: in progress.</td><td><code>io</code> and <code>sched</code>.</td></tr>
+<tr><td>leanrs</td><td><code>semantics-1</code> and <code>semantics-2</code> (its batches 7 and 8), with its out-of-memory end (leanrs's D35).</td><td><code>semantics-3</code>.
+<code>io-1</code> and <code>io-2</code>, with <code>fixes-1</code>, without <code>proc-title</code>.
+<code>sched</code>, with <code>sched-io</code> to <code>sched-3</code>.</td><td><code>net</code>, after <code>net-2</code>.</td></tr>
+<tr><td>lean2rr</td><td>Step 1 of its switch: <code>semantics-1</code>.
+Step 2: the <code>Nat</code>, <code>Int</code> and array rules, the panics and the number text of <code>semantics-2</code>.
+Its pin is 1c36a58.</td><td>Step 3: <code>io</code>.</td><td><code>sched</code>.</td></tr>
 </tbody></table></div>
+<p>lean2rr turns on both native quirks: <code>proc-title</code> and <code>stack-overflow</code>.
+Both features are off by default.</p>
 
 <h2 id="coverage">Coverage</h2>
 <p>The coverage count takes the 717 C symbols of the <code>@[extern]</code> declarations in Lean 4.34.0's <code>Init</code> and <code>Std</code>.
-264 of them need no shared code: they are inline operations, glue, or Lean code (<a href="architecture.html#split">Architecture</a>).
-The other 453 need shared code.</p>
+265 of them need no shared code: they are inline operations, glue, or Lean code (<a href="architecture.html#split">Architecture</a>).
+The other 452 need shared code.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>As of</th><th>main at</th><th class="num">Done on main</th><th class="num">With the branches' items</th></tr></thead>
 <tbody>
@@ -62,14 +96,15 @@ The other 453 need shared code.</p>
 <tr><td>2026-10-04</td><td>with sched-1</td><td class="num">348 of 453 (77%)</td><td class="num">365 of 453 (81%)</td></tr>
 <tr><td>2026-10-04</td><td>30cfbcf (with io-2)</td><td class="num">394 of 453 (87%)</td><td class="num">405 of 453 (89%)</td></tr>
 <tr><td>2026-10-04</td><td>3fe3a22 (with semantics-3)</td><td class="num">403 of 453 (89%)</td><td class="num">405 of 453 (89%)</td></tr>
+<tr><td>2026-10-04</td><td>0882b54 (with net-1, sched-2, fixes-1, proc-title and sched-3)</td><td class="num">452 of 452 (100%)</td><td class="num">452 of 452 (100%)</td></tr>
 </tbody></table></div>
+<p>From <code>sched-2</code> on, the count is out of 452, not 453, because <code>Task.pure</code> became glue.
+<code>Promise.result?</code> is glue too, but it stays in the count: a crate item makes the task that it returns.</p>
 <figure class="fig">
 {{svg:status-coverage}}
-<figcaption>Figure 1. Coverage per area, as of 2026-10-04: main at 3fe3a22, with semantics-3.
+<figcaption>Figure 1. Coverage per area, as of 2026-10-04: main at 0882b54, with sched-3.
 The longest bar is 110 symbols.
-"In progress" is 2 symbols with an item on a branch that is not merged (<code>quirks-1</code>).
-Three Task/Promise symbols have no crate item: <code>Task.pure</code>, <code>Promise.result?</code> and <code>getOrBlock!</code>.
-Each translator's glue makes them over <code>sched</code>.
+Every area is done: no symbol is in progress or planned.
 Point at a bar to see its numbers.</figcaption>
 </figure>
 <details>
@@ -89,16 +124,16 @@ Point at a bar to see its numbers.</figcaption>
 <tr><td>ByteArray</td><td class="num">4</td><td class="num">0</td><td class="num">0</td><td class="num">4</td></tr>
 <tr><td>FloatArray</td><td class="num">3</td><td class="num">0</td><td class="num">0</td><td class="num">3</td></tr>
 <tr><td>hashing</td><td class="num">4</td><td class="num">0</td><td class="num">0</td><td class="num">4</td></tr>
-<tr><td>Task/Promise</td><td class="num">15</td><td class="num">0</td><td class="num">3</td><td class="num">18</td></tr>
+<tr><td>Task/Promise</td><td class="num">17</td><td class="num">0</td><td class="num">0</td><td class="num">17</td></tr>
 <tr><td>IO files and handles</td><td class="num">24</td><td class="num">0</td><td class="num">0</td><td class="num">24</td></tr>
 <tr><td>streams</td><td class="num">6</td><td class="num">0</td><td class="num">0</td><td class="num">6</td></tr>
-<tr><td>env/clock/random</td><td class="num">10</td><td class="num">1</td><td class="num">0</td><td class="num">11</td></tr>
+<tr><td>env/clock/random</td><td class="num">11</td><td class="num">0</td><td class="num">0</td><td class="num">11</td></tr>
 <tr><td>processes</td><td class="num">8</td><td class="num">0</td><td class="num">0</td><td class="num">8</td></tr>
 <tr><td>Std.Sync</td><td class="num">19</td><td class="num">0</td><td class="num">0</td><td class="num">19</td></tr>
-<tr><td>event loop/UV</td><td class="num">32</td><td class="num">0</td><td class="num">45</td><td class="num">77</td></tr>
+<tr><td>event loop/UV</td><td class="num">77</td><td class="num">0</td><td class="num">0</td><td class="num">77</td></tr>
 <tr><td>time</td><td class="num">3</td><td class="num">0</td><td class="num">0</td><td class="num">3</td></tr>
-<tr><td>panics/misc</td><td class="num">8</td><td class="num">1</td><td class="num">0</td><td class="num">9</td></tr>
-<tr><th>all</th><th class="num">403</th><th class="num">2</th><th class="num">48</th><th class="num">453</th></tr>
+<tr><td>panics/misc</td><td class="num">9</td><td class="num">0</td><td class="num">0</td><td class="num">9</td></tr>
+<tr><th>all</th><th class="num">452</th><th class="num">0</th><th class="num">0</th><th class="num">452</th></tr>
 </tbody></table>
 </div>
 </details>
