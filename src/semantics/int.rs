@@ -222,16 +222,21 @@ pub fn emod_small(a: i64, b: i64) -> i64 {
 /// `src/int.rs` (`neg_ref`), merged.
 #[inline]
 pub fn neg<B: BigInt>(a: Int<B>) -> Int<B> {
-    match a {
-        Small(x) => of_i128(neg_small(x)),
-        Big(b) => neg_slow(b),
+    if let Small(x) = a {
+        if let Some(v) = x.checked_neg() {
+            return Small(v);
+        }
     }
+    neg_slow(a)
 }
 
 #[cold]
 #[inline(never)]
-fn neg_slow<B: BigInt>(b: B) -> Int<B> {
-    Big(b.neg())
+fn neg_slow<B: BigInt>(a: Int<B>) -> Int<B> {
+    match a {
+        Small(x) => of_i128(neg_small(x)),
+        Big(b) => Big(b.neg()),
+    }
 }
 
 /// The bit length of the magnitude: 0 for zero.
@@ -243,15 +248,22 @@ fn bit_len<B: BigInt>(a: &Int<B>) -> u64 {
     }
 }
 
+/// The word path is a checked `i64` operation, two instructions (review
+/// RS2-04); an overflow, rare, takes the slow path, which computes in `i128`.
+/// When a translator's words are narrower (lean2rr's `int32` range), the
+/// compiler sees that the operation cannot overflow and drops the check.
 macro_rules! ring_op {
-    ($(#[$doc:meta])* $name:ident, $slow:ident, $small:ident, $method:ident, $bits:expr) => {
+    ($(#[$doc:meta])* $name:ident, $slow:ident, $checked:ident, $small:ident, $method:ident,
+     $bits:expr) => {
         $(#[$doc])*
         #[inline]
         pub fn $name<B: BigInt>(a: Int<B>, b: Int<B>) -> Result<Int<B>, InternalPanic> {
-            match (a, b) {
-                (Small(x), Small(y)) => Ok(of_i128($small(x, y))),
-                (a, b) => $slow(a, b),
+            if let (Small(x), Small(y)) = (&a, &b) {
+                if let Some(v) = x.$checked(*y) {
+                    return Ok(Small(v));
+                }
             }
+            $slow(a, b)
         }
 
         #[cold]
@@ -276,6 +288,7 @@ ring_op!(
     /// `src/int.rs` (`add_ref`, `add_slow`), merged.
     add,
     add_slow,
+    checked_add,
     add_small,
     add,
     |x, y| u128::from(x.max(y)) + 1
@@ -287,6 +300,7 @@ ring_op!(
     /// `src/int.rs` (`sub_ref`, `sub_slow`), merged.
     sub,
     sub_slow,
+    checked_sub,
     sub_small,
     sub,
     |x, y| u128::from(x.max(y)) + 1
@@ -299,6 +313,7 @@ ring_op!(
     /// `src/int.rs` (`mul_ref`, `mul_slow`), merged.
     mul,
     mul_slow,
+    checked_mul,
     mul_small,
     mul,
     |x, y| u128::from(x) + u128::from(y)
