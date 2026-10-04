@@ -3,3 +3,7 @@ area = "uvsys"
 lean_version = "4.34.0"
 source = "lean2rr tests/runtime/RtOsStringsLossy.lean (with .pipe)"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
+# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
+# outcome is what `check` accepts (DV2 names no Lean bug).

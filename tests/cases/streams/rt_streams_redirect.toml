@@ -5,3 +5,5 @@ source = "lean2rr tests/runtime/RtStreamsRedirect.lean"
 streams = "separate"
 # the module name in a panic message depends on how the case is built
 normalize = ['PANIC at (\w+) [\w.]+:(\d+):(\d+): -> PANIC at \1 <module>:\2:\3:']
+deviations = { leanrs = "DV5" }
+# allocprof ends the run in leanrs (leanrs DV5); native's outcome is what `check` accepts.

@@ -14,3 +14,7 @@ normalize = [
   '(?m)^uname Linux (aarch64|x86_64) -> uname Linux <machine>',
   '(?m)^priority (-?1?[0-9]|-20) -> priority <p>',
 ]
+deviations = { leanrs = "DV2" }
+# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
+# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
+# outcome is what `check` accepts (DV2 names no Lean bug).

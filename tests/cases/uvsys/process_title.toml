@@ -3,3 +3,7 @@ area = "uvsys"
 lean_version = "4.34.0"
 source = "lean-runtime io-2: libuv 1.48 proctitle.c (lean2rr sys.rs title_get/title_set; leanrs uvsys.rs get_process_title)"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
+# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
+# outcome is what `check` accepts (DV2 names no Lean bug).

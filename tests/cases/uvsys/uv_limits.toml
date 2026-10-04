@@ -5,3 +5,7 @@ source = "lean2rr tests/runtime/RtUvSysLimits.lean (with .pipe), without its DNS
 streams = "separate"
 # with HOME unset, osHomedir is the user's password-entry directory
 normalize = ['(?m)^osHomedir: \d+ "/home/[^"]*"$ -> osHomedir: <n> "<passwd home>"']
+deviations = { leanrs = "DV2" }
+# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
+# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
+# outcome is what `check` accepts (DV2 names no Lean bug).

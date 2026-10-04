@@ -5,4 +5,7 @@ source = "lean-runtime io-2: libuv 1.48 proctitle.c uv_set_process_title; disagr
 streams = "separate"
 # Native writes the title over argv's memory; the shared runtime cannot without unsafe code
 # (title_cmdline.alt1.*: /proc/self/cmdline unchanged).
-deviations = { lean_runtime = "LIO2-06" }
+deviations = { leanrs = "DV2", lean_runtime = "LIO2-06" }
+# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
+# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
+# outcome is what `check` accepts (DV2 names no Lean bug).

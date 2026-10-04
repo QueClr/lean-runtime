@@ -3,9 +3,11 @@ area = "uvsys"
 lean_version = "4.34.0"
 source = "leanrs review of io-2 (native/G.lean and Probe.lean errno: osGetGroup of a missing gid, then getLine); LB-03"
 streams = "separate"
-deviations = { lean2rr = "LB-03", leanrs = "LB-03" }
+deviations = { lean2rr = "LB-03", leanrs = "LB-03; DV2" }
 native = { stdout = "before\n", stderr = "", code = "139" }
 # `expected` (the .out, .err and .code files) is the correct outcome, which both translators
 # give. Native's outcome is `native`, a crash (SIGSEGV, code 139, the buffered lines lost).
 # Host-dependent: recorded with NSS `group: files systemd sss`, whose getgrgid_r reports a missing
 # group as ENOENT.
+# leanrs: LB-03 as for lean2rr, and osGetGroup is refused at translation until leanrs adopts
+# quirks (leanrs DV2).
