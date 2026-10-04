@@ -25,6 +25,10 @@ use std::fmt;
 use std::hint::black_box;
 use std::time::Instant;
 
+use lean_runtime::semantics::bignum::{BigInt, BigNat};
+use lean_runtime::semantics::int::Int;
+use lean_runtime::semantics::nat::Nat;
+use lean_runtime::semantics::panic::InternalPanic;
 use lean_runtime::semantics::{float, float32, string};
 
 #[global_allocator]
@@ -113,7 +117,7 @@ pub fn int_unbox(w: u64) -> i64 {
 /// The big-number path, which no benchmark takes.
 #[cold]
 #[inline(never)]
-fn big() -> u64 {
+pub fn big() -> u64 {
     u64::MAX
 }
 
@@ -331,6 +335,282 @@ pub fn get_str(ss: &[String], j: u64) -> &[u8] {
     match ss.get(j as usize) {
         Some(s) => s.as_bytes(),
         None => b"",
+    }
+}
+
+// ---------------------------------------------------------------- Nat, Int, arrays, text (batch 2)
+
+/// The big-number backend of the `Nat`/`Int` benchmarks. Their operands and results stay words, so
+/// no method runs; each is an out-of-line cold call, as a translator's big-number path is, so that
+/// a rule's word path compiles as it would in a translator's glue.
+pub struct ColdBig(pub u64);
+
+#[cold]
+#[inline(never)]
+fn cold_big() -> ColdBig {
+    ColdBig(black_box(0))
+}
+
+#[cold]
+#[inline(never)]
+fn cold_u64() -> u64 {
+    black_box(0)
+}
+
+#[cold]
+#[inline(never)]
+fn cold_order() -> core::cmp::Ordering {
+    black_box(core::cmp::Ordering::Equal)
+}
+
+#[cold]
+#[inline(never)]
+fn cold_fmt() -> fmt::Result {
+    black_box(Ok(()))
+}
+
+impl BigNat for ColdBig {
+    fn from_u64(_: u64) -> ColdBig {
+        cold_big()
+    }
+    fn to_u64(&self) -> Option<u64> {
+        Some(cold_u64())
+    }
+    fn low_u64(&self) -> u64 {
+        cold_u64()
+    }
+    fn bit_len(&self) -> u64 {
+        cold_u64()
+    }
+    fn compare(&self, _: &ColdBig) -> core::cmp::Ordering {
+        cold_order()
+    }
+    fn add(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn add_u64(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn sub(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn sub_u64(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn mul(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn mul_u64(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn div(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn rem(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn div_u64(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn rem_u64(&self, _: u64) -> u64 {
+        cold_u64()
+    }
+    fn and(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn or(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn or_u64(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn xor(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn xor_u64(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn shl(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn shr(self, _: u64) -> ColdBig {
+        cold_big()
+    }
+    fn pow(self, _: u32) -> ColdBig {
+        cold_big()
+    }
+    fn gcd(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn write_decimal<W: fmt::Write + ?Sized>(&self, _: &mut W) -> fmt::Result {
+        cold_fmt()
+    }
+}
+
+impl BigInt for ColdBig {
+    type Nat = ColdBig;
+    fn from_i64(_: i64) -> ColdBig {
+        cold_big()
+    }
+    fn from_i128(_: i128) -> ColdBig {
+        cold_big()
+    }
+    fn from_nat(_: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn nat_abs(self) -> ColdBig {
+        cold_big()
+    }
+    fn to_i64(&self) -> Option<i64> {
+        Some(cold_u64() as i64)
+    }
+    fn low_u64(&self) -> u64 {
+        cold_u64()
+    }
+    fn is_neg(&self) -> bool {
+        cold_u64() != 0
+    }
+    fn compare(&self, _: &ColdBig) -> core::cmp::Ordering {
+        cold_order()
+    }
+    fn neg(self) -> ColdBig {
+        cold_big()
+    }
+    fn add(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn sub(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn mul(self, _: ColdBig) -> ColdBig {
+        cold_big()
+    }
+    fn tdiv_rem(self, _: &ColdBig) -> (ColdBig, ColdBig) {
+        (cold_big(), cold_big())
+    }
+    fn write_decimal<W: fmt::Write + ?Sized>(&self, _: &mut W) -> fmt::Result {
+        cold_fmt()
+    }
+}
+
+/// A `Nat` word as the rules take it: a word's value, or a big number (never in the benchmarks).
+#[inline(always)]
+pub fn nat_arg(w: u64) -> Nat<ColdBig> {
+    if w & 1 == 1 {
+        Nat::Small(w >> 1)
+    } else {
+        Nat::Big(cold_big())
+    }
+}
+
+/// A rule's `Nat` result as a word (a big result, never in the benchmarks, is the big path).
+#[inline(always)]
+pub fn nat_res(n: Nat<ColdBig>) -> u64 {
+    match n {
+        Nat::Small(v) => nat_box(v),
+        Nat::Big(_) => big(),
+    }
+}
+
+/// An `Int` word as the rules take it.
+#[inline(always)]
+pub fn int_arg(w: u64) -> Int<ColdBig> {
+    if w & 1 == 1 {
+        Int::Small(int_unbox(w))
+    } else {
+        Int::Big(cold_big())
+    }
+}
+
+/// A rule's `Int` result as a word.
+#[inline(always)]
+pub fn int_res(i: Int<ColdBig>) -> u64 {
+    match i {
+        Int::Small(v) => int_box(v),
+        Int::Big(_) => big(),
+    }
+}
+
+/// `lean_panic_fn`'s message, the path no benchmark takes.
+#[cold]
+#[inline(never)]
+pub fn lean_panic(msg: &str) {
+    eprintln!("{msg}");
+}
+
+/// An internal panic, the path no benchmark takes.
+#[cold]
+#[inline(never)]
+pub fn end(p: InternalPanic) -> ! {
+    eprintln!("INTERNAL PANIC: {}", p.message());
+    std::process::exit(1)
+}
+
+/// A new array object of `bytes` bytes, as `lean_alloc_array`/`lean_alloc_sarray` make one: one
+/// allocation of that size, its 24-byte header written.
+#[inline]
+pub fn new_object(bytes: u64) -> Vec<u8> {
+    let mut v = Vec::with_capacity(bytes as usize);
+    v.extend_from_slice(&[0u8; 24]);
+    v
+}
+
+/// `ARRAY` Nat words below 2^24 (the LCG's top 24 bits), as `Bench.natOperands`.
+pub fn nat_words() -> Vec<u64> {
+    let mut x = INPUT_SEED;
+    (0..ARRAY)
+        .map(|_| {
+            x = step(x);
+            nat_box(x >> 40)
+        })
+        .collect()
+}
+
+/// `ARRAY` bytes (the LCG's top 8 bits), as `Bench.byteOperands`.
+pub fn byte_operands() -> Vec<u8> {
+    let mut x = INPUT_SEED;
+    (0..ARRAY)
+        .map(|_| {
+            x = step(x);
+            (x >> 56) as u8
+        })
+        .collect()
+}
+
+/// The 64 bytes 0, 1, ..., 63, as `Bench.srcBytes`.
+pub fn src_bytes() -> Vec<u8> {
+    (0..64).collect()
+}
+
+/// 16 characters, escapes among them, as `Bench.charOperands`.
+pub fn char_operands() -> Vec<char> {
+    vec![
+        'a', 'z', '0', ' ', '\n', '\t', '\\', '"', '\'', '\0', '\x1f', '\x7f', '\u{80}', 'é', '€', '😀',
+    ]
+}
+
+/// 16 strings with escapes, as `Bench.quoteStrings`.
+pub fn quote_strings() -> Vec<String> {
+    (0..16)
+        .map(|k| format!("item {k}: \"q\" \\ tab\there\n{}", "é".repeat(k)))
+        .collect()
+}
+
+/// The character at index `j` (`Array.get!`: the default 'A' out of range).
+#[inline(always)]
+pub fn get_char(cs: &[char], j: u64) -> char {
+    match cs.get(j as usize) {
+        Some(&c) => c,
+        None => 'A',
+    }
+}
+
+/// The string at index `j` (`Array.get!`: the default, "", out of range).
+#[inline(always)]
+pub fn get_string(ss: &[String], j: u64) -> &str {
+    match ss.get(j as usize) {
+        Some(s) => s,
+        None => "",
     }
 }
 

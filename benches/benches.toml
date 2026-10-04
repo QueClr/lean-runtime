@@ -1203,3 +1203,478 @@ name = "string_walk_prev_mixed"
 function = "string::utf8_prev"
 comparable = true
 note = "one iteration is a whole walk: p = prev(s, p) from a chunk end to 0, over 896 bytes of mixed text"
+
+[[bench]]
+name = "nat_add"
+function = "nat::add"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_sub"
+function = "nat::sub"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_mul"
+function = "nat::mul"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_div"
+function = "nat::div"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_rem"
+function = "nat::rem"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_gcd"
+function = "nat::gcd"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_land"
+function = "nat::land"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_lor"
+function = "nat::lor"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_lxor"
+function = "nat::lxor"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_shiftr"
+function = "nat::shiftr"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_succ"
+function = "nat::succ"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_pred"
+function = "nat::pred"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_log2"
+function = "nat::log2"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_pow"
+function = "nat::pow"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test (an exponent of 2^32 or more) is made on both sides"
+
+[[bench]]
+name = "nat_shiftl"
+function = "nat::shiftl"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test (an exponent of 2^32 or more) is made on both sides"
+
+[[bench]]
+name = "nat_div_exact"
+function = "nat::div_exact, nat::mul, nat::rem"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; both sides make the program's test that supplies the proof (`b ∣ a`, a remainder)"
+
+[[bench]]
+name = "nat_dec_eq"
+function = "nat::dec_eq"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "nat_dec_lt"
+function = "nat::dec_lt"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "nat_dec_le"
+function = "nat::dec_le"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "nat_compare"
+function = "nat::compare"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "nat_write_decimal"
+function = "nat::write_decimal"
+comparable = true
+note = "values of 2^62 or so, so Nat.repr takes lean_string_of_usize, never the shared strings below 128; the Rust twin formats on the stack and makes one new string object"
+
+[[bench]]
+name = "nat_add_small"
+function = "nat::add_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_mul_small"
+function = "nat::mul_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_sub_small"
+function = "nat::sub_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_div_small"
+function = "nat::div_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_mod_small"
+function = "nat::mod_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_gcd_small"
+function = "nat::gcd_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_shiftr_small"
+function = "nat::shiftr_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "nat_pow_small"
+function = "nat::pow_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words (the limit test is the caller's)"
+
+[[bench]]
+name = "nat_shiftl_small"
+function = "nat::shiftl_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words (the limit test is the caller's)"
+
+[[bench]]
+name = "nat_log2_small"
+function = "nat::log2_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63"
+
+[[bench]]
+name = "nat_pow_exponent"
+function = "nat::pow_exponent, nat::pow_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test, then the word helper, as a translator's fast path composes them"
+
+[[bench]]
+name = "nat_shiftl_amount"
+function = "nat::shiftl_amount, nat::shiftl_small"
+comparable = true
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test, then the word helper, as a translator's fast path composes them"
+
+[[bench]]
+name = "int_add"
+function = "int::add"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_sub"
+function = "int::sub"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_mul"
+function = "int::mul"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_tdiv"
+function = "int::tdiv"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_tmod"
+function = "int::tmod"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_ediv"
+function = "int::ediv"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_emod"
+function = "int::emod"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_neg"
+function = "int::neg"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_div_exact"
+function = "int::div_exact, int::mul, int::emod"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; both sides make the program's test that supplies the proof (`b ∣ a`, a remainder)"
+
+[[bench]]
+name = "int_dec_eq"
+function = "int::dec_eq"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "int_dec_lt"
+function = "int::dec_lt"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "int_dec_le"
+function = "int::dec_le"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "int_compare"
+function = "int::compare"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; operands in 16 values, so equal ones are frequent"
+
+[[bench]]
+name = "int_dec_nonneg"
+function = "int::dec_nonneg"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_of_nat"
+function = "int::of_nat"
+comparable = true
+note = "Nat words below 2^31, so the Int is a word"
+
+[[bench]]
+name = "int_neg_succ_of_nat"
+function = "int::neg_succ_of_nat"
+comparable = true
+note = "Nat words below 2^30, so the Int is a word"
+
+[[bench]]
+name = "int_nat_abs"
+function = "int::nat_abs"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there"
+
+[[bench]]
+name = "int_write_decimal"
+function = "int::write_decimal"
+comparable = true
+note = "Int.repr is Lean code: a negative value costs native two strings and an append, where a translator replaces it with one formatting call (on the stack, then one new string object)"
+
+[[bench]]
+name = "int_add_small"
+function = "int::add_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_sub_small"
+function = "int::sub_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_mul_small"
+function = "int::mul_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_tdiv_small"
+function = "int::tdiv_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_ediv_small"
+function = "int::ediv_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_tmod_small"
+function = "int::tmod_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_emod_small"
+function = "int::emod_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words, the glue's own fast path"
+
+[[bench]]
+name = "int_neg_small"
+function = "int::neg_small"
+comparable = true
+note = "Int words in the int32 range on both sides; every result stays there; the word helper on unboxed words"
+
+[[bench]]
+name = "array_get_bang"
+function = "array::get_bang"
+comparable = true
+note = "indices in bounds: out of bounds both sides print a panic message"
+
+[[bench]]
+name = "array_set_bang"
+function = "array::set_bang"
+comparable = true
+note = "the array is updated in place on both sides (Lean's is unique after its first copy of the input, the Rust twin's a copy made once)"
+
+[[bench]]
+name = "array_swap_if_in_bounds"
+function = "array::swap_if_in_bounds"
+comparable = true
+note = "the array is updated in place on both sides (Lean's is unique after its first copy of the input, the Rust twin's a copy made once); the second index is out of bounds half the time (no message)"
+
+[[bench]]
+name = "array_pop"
+function = "array::pop"
+comparable = true
+note = "the array is updated in place on both sides (Lean's is unique after its first copy of the input, the Rust twin's a copy made once); each iteration pops and pushes one element"
+
+[[bench]]
+name = "array_byte_array_get"
+function = "array::byte_array_get"
+comparable = true
+note = "half the indices are out of bounds (0, no message)"
+
+[[bench]]
+name = "array_byte_array_set"
+function = "array::byte_array_set"
+comparable = true
+note = "the array is updated in place on both sides (Lean's is unique after its first copy of the input, the Rust twin's a copy made once); half the indices are out of bounds (no message)"
+
+[[bench]]
+name = "array_float_array_get"
+function = "array::float_array_get"
+comparable = true
+note = "half the indices are out of bounds (0.0, no message)"
+
+[[bench]]
+name = "array_float_array_set"
+function = "array::float_array_set"
+comparable = true
+note = "the array is updated in place on both sides (Lean's is unique after its first copy of the input, the Rust twin's a copy made once); half the indices are out of bounds (no message)"
+
+[[bench]]
+name = "array_alloc_bytes"
+function = "array::alloc_bytes"
+comparable = true
+note = "ByteArray.emptyWithCapacity: one allocation of the object's 24 + c bytes on both sides"
+
+[[bench]]
+name = "array_empty_with_capacity"
+function = "array::empty_with_capacity"
+comparable = true
+note = "Array.mkEmpty: one allocation of the object's 24 + 8c bytes on both sides"
+
+[[bench]]
+name = "array_replicate_len"
+function = "array::replicate_len"
+comparable = true
+note = "Array.replicate: one allocation of the object's 24 + 8n bytes, n words stored, on both sides"
+
+[[bench]]
+name = "array_copy_slice"
+function = "array::copy_slice"
+comparable = true
+note = "the array is updated in place on both sides (Lean's is unique after its first copy of the input, the Rust twin's a copy made once); offsets anywhere in the 64-byte source and destination, lengths up to 15, so the destination grows to at most 78 bytes"
+
+[[bench]]
+name = "repr_decimal_u64"
+function = "repr::decimal_u64"
+comparable = true
+note = "values of 2^62 or so (lean_string_of_usize); one new string object on both sides"
+
+[[bench]]
+name = "repr_usize_repr"
+function = "repr::usize_repr"
+comparable = true
+note = "lean_string_of_usize; one new string object on both sides"
+
+[[bench]]
+name = "repr_bool_text"
+function = "repr::bool_text"
+comparable = true
+note = "a constant string on both sides (no allocation)"
+
+[[bench]]
+name = "repr_needs_app_paren"
+function = "repr::needs_app_paren, int::write_decimal"
+comparable = false
+reason = "Repr.addAppParen builds a Format (a tree the program renders later); the crate only answers its test"
+o12 = "by inspection: two comparisons, which Repr.addAppParen makes as well"
+
+[[bench]]
+name = "repr_char_quote_core"
+function = "repr::char_quote_core"
+comparable = true
+note = "Lean code natively (small strings and appends); the Rust twin formats on the stack and makes one new string object, its characters counted; 16 characters, escapes among them"
+
+[[bench]]
+name = "repr_char_quote"
+function = "repr::char_quote"
+comparable = true
+note = "Lean code natively (small strings and appends); the Rust twin formats on the stack and makes one new string object, its characters counted; 16 characters, escapes among them"
+
+[[bench]]
+name = "repr_char_to_string"
+function = "repr::char_to_string"
+comparable = true
+note = "Lean code natively (small strings and appends); the Rust twin formats on the stack and makes one new string object, its characters counted; 16 characters, escapes among them"
+
+[[bench]]
+name = "repr_string_quote"
+function = "repr::string_quote"
+comparable = true
+note = "Lean code natively (small strings and appends); the Rust twin formats on the stack and makes one new string object, its characters counted; 16 strings of 30 to 60 bytes with escapes"

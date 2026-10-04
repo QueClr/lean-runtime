@@ -80,3 +80,37 @@ Smaller asymmetries that remain are noted in each pair's `note`:
 - `Array.get!` on an array of strings retains and releases the string in
   Lean, where the Rust twin borrows it;
 - a `black_box` on a loop-invariant hash operand in Rust.
+
+## The `Nat`, `Int`, array and text pairs (semantics batch 2)
+
+- **Word paths.** The `nat_*` and `int_*` pairs time the rules on `Nat` and
+  `Int` words whose results stay words on both sides (`Int` in the `int32`
+  range, as Lean's C and lean2rr keep it). The rules are generic over the
+  translator's big-number backend; here it is `ColdBig`, whose methods are
+  out-of-line cold calls that never run, as a translator's big path is
+  never taken on these operands. The big-number paths time the backend
+  (GMP in lean2rr's glue, malachite in leanrs's) more than this crate, so
+  each translator measures them with its own backend.
+- **Word helpers.** Each `*_small` helper has its own pair on the same
+  operands as its rule, against the same native operation.
+- **Comparisons** draw both operands from 16 values, so equal operands are
+  frequent and the checksum is not a constant.
+- **Arrays updated in place** (`array_set_bang`, `array_swap_if_in_bounds`,
+  `array_pop`, the `ByteArray`/`FloatArray` stores, `array_copy_slice`)
+  carry the array through the loop: Lean's copy of the input is made at the
+  first update and is unique afterwards; the Rust twin copies it once
+  before the loop. Out-of-bounds indices print a panic message only for
+  `Array.get!`/`set!`, whose pairs therefore stay in bounds; the silent
+  accessors take out-of-bounds indices half the time.
+- **Allocators** (`array_alloc_bytes`, `array_empty_with_capacity`,
+  `array_replicate_len`): the Rust twin makes one allocation of the native
+  object's size (`new_object`: 24 bytes of header and the elements).
+- **Text.** `Int.repr`, `Char.quote`, `Char.quoteCore`, `Char.toString` and
+  `String.quote` are Lean code natively (small strings and appends); the
+  Rust twin formats on the stack and makes one new string object, as a
+  translator that replaces them does.
+- **Not timed:** `semantics::panic` (constants and decisions on settings;
+  the cost of a panic is printing it) and the accessors of the `Nat`/`Int`
+  view (`to_u64`, `low_u64`, `is_zero`, `is_neg`, ...), which read the
+  translator's own representation. `repr_needs_app_paren` is marked
+  `comparable = false`: `Repr.addAppParen` builds a `Format`.

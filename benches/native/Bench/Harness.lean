@@ -111,6 +111,38 @@ def validInput (s : String) : ValidInput :=
 @[inline] def pick (s : String) (ps : Array s.Pos) (i : Nat) : s.Pos :=
   if h : i < ps.size then ps[i] else s.startPos
 
+/-! ## Nat, Int, arrays, text (batch 2) -/
+
+/-- `ARRAY` Nats below 2^24 (the LCG's top 24 bits). -/
+def natOperands : Array Nat := Id.run do
+  let mut xs := Array.emptyWithCapacity ARRAY
+  let mut x := INPUT_SEED
+  for _ in [0:ARRAY] do
+    x := step x
+    xs := xs.push (x >>> 40).toNat
+  return xs
+
+/-- `ARRAY` bytes (the LCG's top 8 bits). -/
+def byteOperands : ByteArray := Id.run do
+  let mut xs := ByteArray.emptyWithCapacity ARRAY
+  let mut x := INPUT_SEED
+  for _ in [0:ARRAY] do
+    x := step x
+    xs := xs.push (x >>> 56).toUInt8
+  return xs
+
+/-- The 64 bytes 0, 1, ..., 63. -/
+def srcBytes : ByteArray := ⟨(List.range 64).toArray.map (·.toUInt8)⟩
+
+/-- 16 characters, escapes among them. -/
+def charOperands : Array Char :=
+  #['a', 'z', '0', ' ', '\n', '\t', '\\', '"', '\'', '\x00', '\x1f', '\x7f', '\u0080', 'é', '€', '😀']
+
+/-- 16 strings with escapes. -/
+def quoteStrings : Array String :=
+  (List.range 16).toArray.map fun k =>
+    s!"item {k}: \"q\" \\ tab\there\n" ++ String.join (List.replicate k "é")
+
 /-! ## Running -/
 
 /-- Runs one benchmark: N from the single argument, the input built and pinned before the first
