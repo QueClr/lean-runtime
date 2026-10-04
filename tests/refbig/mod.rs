@@ -4,10 +4,11 @@
 //! rules through it; it is checked against `u128`/`i128` arithmetic by
 //! `refbig_matches_wide_arithmetic`.
 //!
-//! `RNat::pow2(k)` allocates its zero limbs with `vec![0; n]` (zeroed pages
-//! from the system, untouched) and writes only the top limb, so the LB-04
-//! rows can hold 2^(2^32) (2^26 limbs) without touching 512 MiB, as long as
-//! the operations on it read only the top limbs (`shr`, `bit_len`).
+//! `RNat::pow2(k)` and `shl` allocate their zero limbs with `vec![0; n]`
+//! (zeroed pages from the system, untouched) and write only the top limbs,
+//! so the LB-04, LB-11 and LB-12 rows can hold 2^(2^32) (2^26 limbs) without
+//! touching 512 MiB, as long as the operations on it read only the top
+//! limbs (`shr`, `bit_len`).
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -85,22 +86,25 @@ fn bit(a: &[u64], i: u64) -> bool {
         .is_some_and(|l| (l >> (i % 64)) & 1 == 1)
 }
 
+/// `a * 2^s`, its low limbs zeroed pages from the system (`vec![0; n]`
+/// allocates zeroed memory), written only at the top: a shift by 2^32 costs
+/// no more than the limbs of `a`.
 fn shl_mag(a: &[u64], s: u64) -> Vec<u64> {
     if a.is_empty() {
         return Vec::new();
     }
     let (limbs, bits) = ((s / 64) as usize, s % 64);
-    let mut out = vec![0u64; limbs];
+    let mut out = vec![0u64; limbs + a.len() + 1];
     let mut carry = 0u64;
-    for &x in a {
+    for (i, &x) in a.iter().enumerate() {
         if bits == 0 {
-            out.push(x);
+            out[limbs + i] = x;
         } else {
-            out.push((x << bits) | carry);
+            out[limbs + i] = (x << bits) | carry;
             carry = x >> (64 - bits);
         }
     }
-    out.push(carry);
+    out[limbs + a.len()] = carry;
     out
 }
 
@@ -312,7 +316,7 @@ impl BigNat for RNat {
     fn shr(self, s: u64) -> RNat {
         trim(shr_mag(&self.0, s))
     }
-    fn pow(self, mut e: u32) -> RNat {
+    fn pow(self, mut e: u64) -> RNat {
         let mut base = self;
         let mut acc = RNat::from_u64(1);
         while e > 0 {

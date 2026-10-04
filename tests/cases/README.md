@@ -25,8 +25,9 @@ translators must reproduce it.
 
 **`row`**: one function call, as a TOML `[[row]]` table in
 `<area>/<area>.rows.toml`:
-- `fn` (a Lean constant) with `args` (Lean term syntax, one per argument),
-  or `expr` (one closed Lean expression);
+- `fn` (a Lean constant, or a `fun` term over constants, for a result too
+  big to print: `fun a e => Nat.log2 (a ^ e)`) with `args` (Lean term
+  syntax, one per argument), or `expr` (one closed Lean expression);
 - `expected`: Lean's `repr` of the result; for a panic, `panic: <message>`
   (its first line) with `default` (the value returned) and `stderr`; for a
   row that ends the process, `ends`;

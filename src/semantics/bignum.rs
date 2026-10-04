@@ -32,9 +32,11 @@
 //! # Backend limits
 //!
 //! The rules lift Lean's size caps where a value is computable (owner,
-//! 2026-10-03: LB-04 and LB-06 compute the definition's result, and the LB-05
-//! requirement to reproduce GMP's limb cap is withdrawn). A backend still
-//! stops where its library stops:
+//! 2026-10-03: LB-04, LB-06, LB-11 and LB-12 compute the definition's
+//! result, and the LB-05 requirement to reproduce GMP's limb cap is
+//! withdrawn). The rules refuse only a result of 2^64 bits or more
+//! (`nat::check_result_bits`, `INTERNAL PANIC: out of memory`). A backend
+//! still stops where its library stops:
 //! - **GMP.** `mpz_t` sizes are `int`s: an `mpz_*` function whose allocation
 //!   request exceeds `INT_MAX` limbs (2^31 - 1 limbs, 16 GiB) calls
 //!   `__gmp_overflow_in_mpz`. In GMP 6.3.0, the version Lean 4.34.0 links
@@ -147,16 +149,18 @@ pub trait BigNat: Sized {
     /// `self ^ o`.
     fn xor_u64(self, o: u64) -> Self;
 
-    /// `self * 2^s` (`mpz_mul_2exp`). The rules call it with `s < 2^32`
-    /// (`Nat.shiftLeft`'s limit, kept as native).
+    /// `self * 2^s` (`mpz_mul_2exp`), for any `s` whose result has fewer
+    /// than 2^64 bits (`nat::check_result_bits`; LB-12 is lifted).
     fn shl(self, s: u64) -> Self;
 
     /// `self / 2^s` rounded down (`mpz_tdiv_q_2exp`), for any `s` (LB-04 is
     /// lifted: the rule passes shift amounts of 2^32 and more).
     fn shr(self, s: u64) -> Self;
 
-    /// `self ^ e` (`mpz_pow_ui`), with `0 ^ 0 = 1`.
-    fn pow(self, e: u32) -> Self;
+    /// `self ^ e` (`mpz_pow_ui`), where `self >= 2` and the result has fewer
+    /// than 2^64 bits (`nat::pow` handles bases 0 and 1 and checks the size;
+    /// LB-11 is lifted, so `e` may be 2^32 or more).
+    fn pow(self, e: u64) -> Self;
 
     /// The greatest common divisor, with `gcd 0 x = x` (`mpz_gcd`).
     fn gcd(self, o: Self) -> Self;

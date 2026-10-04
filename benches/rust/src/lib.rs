@@ -436,7 +436,7 @@ impl BigNat for ColdBig {
     fn shr(self, _: u64) -> ColdBig {
         cold_big()
     }
-    fn pow(self, _: u32) -> ColdBig {
+    fn pow(self, _: u64) -> ColdBig {
         cold_big()
     }
     fn gcd(self, _: ColdBig) -> ColdBig {

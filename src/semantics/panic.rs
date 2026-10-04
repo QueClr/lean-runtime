@@ -64,7 +64,8 @@ pub const UNCAUGHT_EXCEPTION_PREFIX: &str = "uncaught exception: ";
 pub enum InternalPanic {
     /// `lean_internal_panic_out_of_memory`: a failed allocation, a size of
     /// 2^64 or more (`lean_mk_array`), a capacity of 2^63 or more
-    /// (`lean_mk_empty_array_with_capacity`).
+    /// (`lean_mk_empty_array_with_capacity`); here also a `Nat.pow` or
+    /// `Nat.shiftLeft` result of 2^64 bits or more (`nat::check_result_bits`).
     OutOfMemory,
     /// `lean_internal_panic_unreachable`.
     Unreachable,
@@ -75,9 +76,12 @@ pub enum InternalPanic {
     IntegerOverflow,
     /// `lean_sorry`: a `sorry` evaluated at run time.
     Sorry,
-    /// `lean_nat_pow` with an exponent of 2^32 or more.
+    /// `lean_nat_pow` with an exponent of 2^32 or more. Lifted (LB-11):
+    /// `semantics::nat::pow` computes the result, so no rule returns it;
+    /// listed for the message.
     NatPowExponent,
-    /// `lean_nat_shiftl` of a nonzero value by 2^32 or more.
+    /// `lean_nat_shiftl` of a nonzero value by 2^32 or more. Lifted (LB-12):
+    /// no rule returns it; listed for the message.
     NatShiftlExponent,
     /// `lean_nat_big_shiftr` of a value of 2^32 bits or more by 2^32 or
     /// more. Lifted (LB-04): `semantics::nat::shiftr` computes the result,

@@ -13,12 +13,19 @@
 //!   result is `Small` only when the rule computed it on words; a translator
 //!   normalizes every result with its own boundary (2^63 for both).
 //!
-//! Lean's limits (`semantics::panic::InternalPanic`): `Nat.pow` and
-//! `Nat.shiftLeft` with an exponent of 2^32 or more end the process as
-//! natively, in one function each (`pow_exponent`, `shiftl_amount`).
-//! `Nat.shiftRight` has no limit: native panics when it shifts an operand of
-//! 2^32 bits or more by 2^32 or more (LB-04); here it computes the
-//! definition's result (owner, 2026-10-03).
+//! No limits of Lean's (owner, 2026-10-03: "if we can lift the
+//! restrictions, then we can lift them"; `docs/lean-bugs.md`). Native ends
+//! the process where these rules compute the definition's result:
+//! - `Nat.pow` with an exponent of 2^32 or more (LB-11): `0 ^ e = 0` for
+//!   `e >= 1`, `1 ^ e = 1`, and other bases as far as the result fits;
+//! - `Nat.shiftLeft` of a nonzero value by 2^32 or more (LB-12);
+//! - `Nat.shiftRight` of an operand of 2^32 bits or more by 2^32 or more
+//!   (LB-04).
+//!
+//! A result that cannot exist in memory fails at once, before any
+//! computation: `pow` and `shiftl` give `INTERNAL PANIC: out of memory` when
+//! the result has 2^64 bits or more (`check_result_bits`). A smaller result
+//! that the machine cannot hold fails where the backend allocates it.
 //!
 //! The `Nat` externs of 4.34.0 are `lean_nat_add`, `_sub`, `_mul`, `_div`,
 //! `_div_exact`, `_mod`, `_pow`, `_gcd`, `_log2`, `_land`, `_lor`, `_lxor`,
@@ -149,8 +156,7 @@ pub fn mod_small(a: u64, b: u64) -> u64 {
 }
 
 /// `a ^ e` when it fits a word (`mpz_pow_ui` otherwise), with `0 ^ 0 = 1`.
-/// `None` when the power is 2^64 or more. The exponent limit is
-/// `pow_exponent`'s, checked before.
+/// `None` when the power is 2^64 or more.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`Nat::pow`'s fast path), extended to every
 /// exponent: a base of 0 or 1 never overflows.
@@ -197,8 +203,7 @@ pub fn log2_small(a: u64) -> u64 {
     a.checked_ilog2().map_or(0, u64::from)
 }
 
-/// `a <<< s` when it fits a word, else `None`. The shift limit is
-/// `shiftl_amount`'s, checked before.
+/// `a <<< s` when it fits a word, else `None`.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`Nat::shl`'s fast path), extended to
 /// results up to 2^64 - 1.
@@ -225,39 +230,20 @@ pub fn shiftr_small(a: u64, s: u64) -> u64 {
     }
 }
 
-// ------------------------------------------------------------------ the limits kept
+// ------------------------------------------------------------------ the size of a big result
 
-/// `Nat.pow`'s limit (`lean_nat_pow`): an exponent of 2^32 or more ends the
-/// process with `INTERNAL PANIC: Nat.pow exponent is too big`, whatever the
-/// base, 0 and 1 included. Otherwise the exponent as a `u32`.
+/// The size check of `pow` and `shiftl`, which can ask for a result of any
+/// size: `bits` is the result's bit length (a lower bound of it, for
+/// `pow`), as a `u128` since it may exceed 64 bits. A result of 2^64 bits or
+/// more is `OutOfMemory` at once, as a size that is not a word is for the
+/// array allocators (`semantics::array::replicate_len`); otherwise the bit
+/// length as a `u64`, which the backend's `pow` and `shl` take (and fail on,
+/// as any allocation fails, if the machine cannot hold the result).
 ///
-/// Kept as native: the owner's decision lifted LB-04..06 only. Lifting this
-/// one too is this function returning the exponent for every base whose
-/// power is computable.
-///
-/// Source: lean2rr leanrt `src/nat.rs` (`nat_pow`'s first test), unchanged.
+/// Source: new (LB-11 and LB-12 lifted, owner 2026-10-03).
 #[inline]
-pub fn pow_exponent<B: BigNat>(e: &Nat<B>) -> Result<u32, InternalPanic> {
-    match e.to_u64().map(u32::try_from) {
-        Some(Ok(e)) => Ok(e),
-        _ => Err(InternalPanic::NatPowExponent),
-    }
-}
-
-/// `Nat.shiftLeft`'s limit (`lean_nat_shiftl`): a shift of 2^32 or more of a
-/// nonzero value ends the process with `INTERNAL PANIC: Nat.shiftl exponent
-/// is too big`. Zero shifted by anything is zero (C tests that first).
-/// Otherwise the shift amount.
-///
-/// Kept as native, as `pow_exponent`.
-///
-/// Source: lean2rr leanrt `src/nat.rs` (`nat_shiftl`), unchanged.
-#[inline]
-pub fn shiftl_amount<B: BigNat>(s: &Nat<B>) -> Result<u64, InternalPanic> {
-    match s.to_u64() {
-        Some(s) if s <= u32::MAX as u64 => Ok(s),
-        _ => Err(InternalPanic::NatShiftlExponent),
-    }
+pub fn check_result_bits(bits: u128) -> Result<u64, InternalPanic> {
+    u64::try_from(bits).map_err(|_| InternalPanic::OutOfMemory)
 }
 
 // ------------------------------------------------------------------ the rules
@@ -421,27 +407,65 @@ fn rem_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
     }
 }
 
-/// `Nat.pow` (`lean_nat_pow`): `a ^ e`, `0 ^ 0 = 1`; an exponent of 2^32 or
-/// more is `pow_exponent`'s internal panic, returned for the caller to end
-/// the process with.
+/// `Nat.pow` (`lean_nat_pow`): `a ^ e`, `0 ^ 0 = 1`, for any exponent
+/// (LB-11 lifted: native ends with `INTERNAL PANIC: Nat.pow exponent is too
+/// big` from 2^32 on, whatever the base). `0 ^ e = 0` for `e >= 1` and
+/// `1 ^ e = 1`, also for an exponent of 2^64 or more. For a base of 2 or
+/// more, a result of 2^64 bits or more is `check_result_bits`'
+/// `OutOfMemory`, returned for the caller to end the process with; the
+/// test uses the lower bound `(bit_len(a) - 1) * e + 1` of the result's bit
+/// length, so no computable result is refused. A word base that is a power
+/// of two is shifted (`shl`) instead of multiplied.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`Nat::pow`, `pow_slow`) and lean2rr leanrt
-/// `src/nat.rs` (`nat_pow`), merged.
+/// `src/nat.rs` (`nat_pow`, the power-of-two case), merged; without native's
+/// exponent limit.
 #[inline]
 pub fn pow<B: BigNat>(a: Nat<B>, e: Nat<B>) -> Result<Nat<B>, InternalPanic> {
-    let e = pow_exponent(&e)?;
-    if let Small(x) = a {
-        if let Some(v) = pow_small(x, u64::from(e)) {
+    if let (Small(x), Small(y)) = (&a, &e) {
+        if let Some(v) = pow_small(*x, *y) {
             return Ok(Small(v));
         }
     }
-    Ok(pow_slow(a, e))
+    pow_slow(a, e)
 }
 
 #[cold]
 #[inline(never)]
-fn pow_slow<B: BigNat>(a: Nat<B>, e: u32) -> Nat<B> {
-    Big(a.into_big().pow(e))
+fn pow_slow<B: BigNat>(a: Nat<B>, e: Nat<B>) -> Result<Nat<B>, InternalPanic> {
+    match (a.to_u64(), e.to_u64()) {
+        (_, Some(0)) => return Ok(Small(1)),
+        (Some(0), _) => return Ok(Small(0)),
+        (Some(1), _) => return Ok(Small(1)),
+        (Some(x), Some(y)) => {
+            if let Some(v) = pow_small(x, y) {
+                return Ok(Small(v));
+            }
+        }
+        _ => {}
+    }
+    // a >= 2, e >= 1: a ^ e >= 2 ^ ((bit_len(a) - 1) * e)
+    let Some(e) = e.to_u64() else {
+        return Err(InternalPanic::OutOfMemory);
+    };
+    let factor_bits = u128::from(bit_len(&a) - 1);
+    check_result_bits(factor_bits * u128::from(e) + 1)?;
+    if let Some(x) = a.to_u64() {
+        if x.is_power_of_two() {
+            // (2^j)^e = 2^(j e), j e < 2^64 by the check
+            return Ok(Big(B::from_u64(1).shl(u64::from(x.trailing_zeros()) * e)));
+        }
+    }
+    Ok(Big(a.into_big().pow(e)))
+}
+
+/// The bit length: 0 for zero, `log2 a + 1` otherwise.
+#[inline]
+fn bit_len<B: BigNat>(a: &Nat<B>) -> u64 {
+    match a {
+        Small(x) => u64::from(u64::BITS - x.leading_zeros()),
+        Big(b) => b.bit_len(),
+    }
 }
 
 /// `Nat.gcd` (`lean_nat_gcd`): `gcd 0 b = b`, `gcd a 0 = a`.
@@ -542,30 +566,41 @@ fn lxor_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
     }
 }
 
-/// `Nat.shiftLeft` (`lean_nat_shiftl`): `a * 2^s`. Zero stays zero for any
-/// `s`; otherwise a shift of 2^32 or more is `shiftl_amount`'s internal
-/// panic, returned for the caller to end the process with.
+/// `Nat.shiftLeft` (`lean_nat_shiftl`): `a * 2^s`, for any shift (LB-12
+/// lifted: native ends with `INTERNAL PANIC: Nat.shiftl exponent is too big`
+/// for a nonzero value shifted by 2^32 or more). Zero stays zero for any
+/// `s`; a result of 2^64 bits or more is `check_result_bits`' `OutOfMemory`,
+/// returned for the caller to end the process with.
 ///
 /// Source: lean2rr leanrt `src/nat.rs` (`nat_shiftl`) and leanrs_rt
-/// `src/nat.rs` (`Nat::shl`, `shl_slow`), merged.
+/// `src/nat.rs` (`Nat::shl`, `shl_slow`), merged; without native's shift
+/// limit.
 #[inline]
 pub fn shiftl<B: BigNat>(a: Nat<B>, s: Nat<B>) -> Result<Nat<B>, InternalPanic> {
+    if let (Small(x), Small(y)) = (&a, &s) {
+        if let Some(v) = shiftl_small(*x, *y) {
+            return Ok(Small(v));
+        }
+    }
+    shiftl_slow(a, s)
+}
+
+#[cold]
+#[inline(never)]
+fn shiftl_slow<B: BigNat>(a: Nat<B>, s: Nat<B>) -> Result<Nat<B>, InternalPanic> {
     if a.is_zero() {
         return Ok(Small(0));
     }
-    let s = shiftl_amount(&s)?;
+    let Some(s) = s.to_u64() else {
+        return Err(InternalPanic::OutOfMemory);
+    };
+    check_result_bits(u128::from(bit_len(&a)) + u128::from(s))?;
     if let Small(x) = a {
         if let Some(v) = shiftl_small(x, s) {
             return Ok(Small(v));
         }
     }
-    Ok(shiftl_slow(a, s))
-}
-
-#[cold]
-#[inline(never)]
-fn shiftl_slow<B: BigNat>(a: Nat<B>, s: u64) -> Nat<B> {
-    Big(a.into_big().shl(s))
+    Ok(Big(a.into_big().shl(s)))
 }
 
 /// `Nat.shiftRight` (`lean_nat_shiftr`): `a / 2^s`, 0 once `s` reaches the
@@ -696,5 +731,7 @@ mod tests {
             (shiftr_small(u64::MAX, 63), shiftr_small(u64::MAX, 64)),
             (1, 0)
         );
+        assert_eq!(check_result_bits(u128::from(u64::MAX)), Ok(u64::MAX));
+        assert_eq!(check_result_bits(1 << 64), Err(InternalPanic::OutOfMemory));
     }
 }

@@ -501,7 +501,8 @@ for f, lean, args in [("pow", "{0} ^ {1}", ("p4", "e4")), ("shiftl", "{0} <<< {1
         f"match nat::{f}({rn(args[0])}, {rn(args[1])}) {{ Ok(v) => nat_unbox(nat_res(v)), "
         f"Err(p) => end(p) }}",
         "(" + lean.format(ln_(args[0]), ln_(args[1])) + ").toUInt64",
-        note=NAT_NOTE + "; the limit test (an exponent of 2^32 or more) is made on both sides")
+        note=NAT_NOTE + "; native tests its exponent limit (2^32) first, which the crate lifts "
+             "(LB-11, LB-12): its word path is the word helper")
 add("nat_div_exact", "nat::div_exact, nat::mul, nat::rem", NONE,
     f"{{ let b = {NW['b8'][0]}; let a = nat_res(nat::mul({rn('a30')}, nat_arg(b))); "
     f"if nat::rem(nat_arg(a), nat_arg(b)).is_zero() "
@@ -544,17 +545,15 @@ for f, lean, args in [("pow_small", "{0} ^ {1}", ("p4", "e4")),
         f"match nat::{f}(nat_unbox({NW[args[0]][0]}), nat_unbox({NW[args[1]][0]})) "
         f"{{ Some(v) => nat_unbox(nat_box(v)), None => big() }}",
         "(" + lean.format(ln_(args[0]), ln_(args[1])) + ").toUInt64",
-        note=NAT_NOTE + "; the word helper on unboxed words (the limit test is the caller's)")
+        note=NAT_NOTE + "; the word helper on unboxed words")
 add("nat_log2_small", "nat::log2_small", NONE, f"nat::log2_small(nat_unbox({NW['a63'][0]}))",
     f"(Nat.log2 {ln_('a63')}).toUInt64", note=NAT_NOTE)
-for f, small, lean, args in [("pow_exponent", "pow_small", "{0} ^ {1}", ("p4", "e4")),
-                             ("shiftl_amount", "shiftl_small", "{0} <<< {1}", ("a24", "s31"))]:
-    add(f"nat_{f}", f"nat::{f}, nat::{small}", NONE,
-        f"match nat::{f}(&{rn(args[1])}) {{ Ok(e) => match nat::{small}(nat_unbox({NW[args[0]][0]}), "
-        f"e as u64) {{ Some(v) => nat_unbox(nat_box(v)), None => big() }}, Err(p) => end(p) }}",
-        "(" + lean.format(ln_(args[0]), ln_(args[1])) + ").toUInt64",
-        note=NAT_NOTE + f"; the limit test, then the word helper, as a translator's fast path "
-             f"composes them")
+add("nat_check_result_bits", "nat::check_result_bits", NONE,
+    "match nat::check_result_bits(u128::from(x >> 1) + 64) { Ok(b) => b, Err(p) => end(p) }",
+    "((x >>> 1) + 64)", comparable=False,
+    reason="the size test of nat::pow and nat::shiftl on a big result; native has no "
+           "counterpart (it refuses exponents and shifts of 2^32 or more instead, LB-11 and LB-12)",
+    o12="by inspection: one comparison, made on the slow path of a big result only")
 
 for f, lean, args in [("add", "{0} + {1}", ("a29", "b29")), ("sub", "{0} - {1}", ("a29", "b29")),
                       ("mul", "{0} * {1}", ("a15", "b15")),

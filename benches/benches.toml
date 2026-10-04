@@ -1286,13 +1286,13 @@ note = "Nat words on both sides (2n+1); every result stays below 2^63"
 name = "nat_pow"
 function = "nat::pow"
 comparable = true
-note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test (an exponent of 2^32 or more) is made on both sides"
+note = "Nat words on both sides (2n+1); every result stays below 2^63; native tests its exponent limit (2^32) first, which the crate lifts (LB-11, LB-12): its word path is the word helper"
 
 [[bench]]
 name = "nat_shiftl"
 function = "nat::shiftl"
 comparable = true
-note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test (an exponent of 2^32 or more) is made on both sides"
+note = "Nat words on both sides (2n+1); every result stays below 2^63; native tests its exponent limit (2^32) first, which the crate lifts (LB-11, LB-12): its word path is the word helper"
 
 [[bench]]
 name = "nat_div_exact"
@@ -1376,13 +1376,13 @@ note = "Nat words on both sides (2n+1); every result stays below 2^63; the word 
 name = "nat_pow_small"
 function = "nat::pow_small"
 comparable = true
-note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words (the limit test is the caller's)"
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words"
 
 [[bench]]
 name = "nat_shiftl_small"
 function = "nat::shiftl_small"
 comparable = true
-note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words (the limit test is the caller's)"
+note = "Nat words on both sides (2n+1); every result stays below 2^63; the word helper on unboxed words"
 
 [[bench]]
 name = "nat_log2_small"
@@ -1391,16 +1391,11 @@ comparable = true
 note = "Nat words on both sides (2n+1); every result stays below 2^63"
 
 [[bench]]
-name = "nat_pow_exponent"
-function = "nat::pow_exponent, nat::pow_small"
-comparable = true
-note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test, then the word helper, as a translator's fast path composes them"
-
-[[bench]]
-name = "nat_shiftl_amount"
-function = "nat::shiftl_amount, nat::shiftl_small"
-comparable = true
-note = "Nat words on both sides (2n+1); every result stays below 2^63; the limit test, then the word helper, as a translator's fast path composes them"
+name = "nat_check_result_bits"
+function = "nat::check_result_bits"
+comparable = false
+reason = "the size test of nat::pow and nat::shiftl on a big result; native has no counterpart (it refuses exponents and shifts of 2^32 or more instead, LB-11 and LB-12)"
+o12 = "by inspection: one comparison, made on the slow path of a big result only"
 
 [[bench]]
 name = "int_add"

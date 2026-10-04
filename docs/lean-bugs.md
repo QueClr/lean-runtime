@@ -91,17 +91,13 @@ can.
 | LB-04 | `Nat.shiftRight` by 2^32 or more, of an operand with that many bits: `INTERNAL PANIC: Nat.shiftr exponent is too big` | object.cpp:1594-1612 (32-bit shift count) | lifted: both compute the definition's result (leanrs DV17 (a)); `semantics::nat::shiftr`; rows `nat/shiftr.2^4294967296+*.2^32` |
 | LB-05 | A `Nat` beyond GMP's limb count ends the process: GMP 6.3.0, the version Lean 4.34.0 links, raises `SIGFPE` with no message (status 136), e.g. for `(2^62)^(2^32 - 1)`, whose power asks for about 2^32 limbs at once. (Older GMPs printed `gmp: overflow in mpz type` and aborted.) | GMP 6.3.0 `_mpz_realloc` (more than `INT_MAX` limbs) calls `__gmp_overflow_in_mpz`, whose `__gmp_exception` raises `SIGFPE` (errno.c); reached through mpz.cpp | lifted where the big-number backend allows: leanrs computes (DV17 (b)); lean2rr computes unless an operation still goes through GMP's mpz layer, which keeps GMP's own `SIGFPE` (`semantics::bignum`, "Backend limits") |
 | LB-06 | `ByteArray.copySlice` with an offset or length of 2^64 or more: `INTERNAL PANIC: out of memory` | object.cpp:2556-2565 (`lean_nat_to_size_t`) | lifted: both return the definition's clamped copy (leanrs DV17 (c)); `semantics::array::copy_slice`; rows `array/copyslice.*` with an argument of 2^64 or more |
+| LB-11 | `Nat.pow` with an exponent of 2^32 or more: `INTERNAL PANIC: Nat.pow exponent is too big`, whatever the base, so also `0 ^ (2^64)` (0) and `1 ^ (2^64)` (1) | object.cpp:1616-1619 (`lean_nat_pow`: `lean_unbox(a2) > UINT_MAX`, or an exponent that is not a scalar) | lifted (owner, 2026-10-03): `semantics::nat::pow` computes the result; one of 2^64 bits or more is `INTERNAL PANIC: out of memory` at once (`nat::check_result_bits`); rows `nat/pow.*` and `nat/powlog2.*` with an exponent of 2^32 or more, `panic/pow.abort` |
+| LB-12 | `Nat.shiftLeft` of a nonzero value by 2^32 or more: `INTERNAL PANIC: Nat.shiftl exponent is too big` | object.cpp:1578-1592 (`lean_nat_shiftl`: the same 32-bit test) | lifted (owner, 2026-10-03): `semantics::nat::shiftl` computes the result, with the same out-of-memory end; rows `nat/shiftllog2.*`, `nat/shiftl.1.2^64`, `nat/shiftl.7.*` |
 
-The LB-04 and LB-06 rows expect the definition's result and record native's
-panic in their `native` field.
-
-Not listed, and kept as native: `Nat.pow` with an exponent of 2^32 or more
-(`INTERNAL PANIC: Nat.pow exponent is too big`, whatever the base, 0 and 1
-included) and `Nat.shiftLeft` of a nonzero value by 2^32 or more
-(`INTERNAL PANIC: Nat.shiftl exponent is too big`). They are limits of the
-same kind; each is one function (`semantics::nat::pow_exponent`,
-`shiftl_amount`), so lifting them is a small change if the owner extends
-the decision to them.
+The LB-04, LB-06, LB-11 and LB-12 rows expect the definition's result (or
+the out-of-memory end of a result of 2^64 bits or more) and record native's
+panic in their `native` field. A result that is too big for the machine but
+under 2^64 bits fails where the translator's backend allocates it.
 
 Related upstream: #15193, #15194, #15439, PRs #14286 and #14274.
 

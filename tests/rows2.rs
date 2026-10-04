@@ -218,9 +218,11 @@ fn read_rows(file: &str, text: &str) -> Vec<Row> {
                 .unwrap_or_default()
                 .into_iter();
             let texts = t.get("args").map(Value::strings).unwrap_or_default();
-            let huge = texts
-                .iter()
-                .any(|a| power_of(a).is_some_and(|k| k >= 1 << 20));
+            // a `fun` row's result is 2^32 bits or more, as are `(2 ^ K)` arguments
+            let huge = func.starts_with("fun ")
+                || texts
+                    .iter()
+                    .any(|a| power_of(a).is_some_and(|k| k >= 1 << 20));
             let args = if cfg!(miri) && huge {
                 Vec::new()
             } else {
@@ -580,6 +582,19 @@ fn nat_fns(r: &mut Registry) {
     r.add("Nat.log2", |a, rp, _| {
         nat::log2(&nat(&a[0], rp)).to_string()
     });
+    // results too big to print (LB-11, LB-12), seen through their log2
+    r.add("fun a e => Nat.log2 (a ^ e)", |a, rp, env| {
+        ending(
+            nat::pow(nat(&a[0], rp), nat(&a[1], rp)).map(|v| nat::log2(&v).to_string()),
+            env,
+        )
+    });
+    r.add("fun a s => Nat.log2 (a <<< s)", |a, rp, env| {
+        ending(
+            nat::shiftl(nat(&a[0], rp), nat(&a[1], rp)).map(|v| nat::log2(&v).to_string()),
+            env,
+        )
+    });
     r.add("Nat.pred", |a, rp, _| nat_text(&nat::pred(nat(&a[0], rp))));
     r.add("Nat.succ", |a, rp, _| nat_text(&nat::succ(nat(&a[0], rp))));
 }
@@ -882,7 +897,7 @@ fn run(file: &str, text: &str, deviations: usize) {
     ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
 )]
 fn nat_rows() {
-    run("nat", include_str!("cases/nat/nat.rows.toml"), 2);
+    run("nat", include_str!("cases/nat/nat.rows.toml"), 17);
 }
 
 #[test]
@@ -918,7 +933,7 @@ fn array_rows() {
     ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
 )]
 fn panic_rows() {
-    run("panic", include_str!("cases/panic/panic.rows.toml"), 0);
+    run("panic", include_str!("cases/panic/panic.rows.toml"), 1);
 }
 
 #[test]

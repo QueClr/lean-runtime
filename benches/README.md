@@ -113,4 +113,7 @@ Smaller asymmetries that remain are noted in each pair's `note`:
   the cost of a panic is printing it) and the accessors of the `Nat`/`Int`
   view (`to_u64`, `low_u64`, `is_zero`, `is_neg`, ...), which read the
   translator's own representation. `repr_needs_app_paren` is marked
-  `comparable = false`: `Repr.addAppParen` builds a `Format`.
+  `comparable = false`: `Repr.addAppParen` builds a `Format`; so is
+  `nat_check_result_bits`, the size test of a big `pow` or `shiftl` result,
+  which native has no counterpart for (it refuses an exponent of 2^32 or
+  more instead).

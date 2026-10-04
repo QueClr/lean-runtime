@@ -482,6 +482,9 @@ def runNat (fn : String) (a : List Arg) : IO (Option String) := do
   | "Nat.ble", [x, y] => return r (Nat.ble (← natA x) (← natA y))
   | "Nat.pred", [x] => return r (Nat.pred (← natA x))
   | "Nat.succ", [x] => return r (Nat.succ (← natA x))
+  -- a result too big to print, seen through its log2
+  | "fun a e => Nat.log2 (a ^ e)", [x, y] => return r (Nat.log2 ((← natA x) ^ (← natA y)))
+  | "fun a s => Nat.log2 (a <<< s)", [x, y] => return r (Nat.log2 ((← natA x) <<< (← natA y)))
   | _, _ => return none
 
 def runInt (fn : String) (a : List Arg) : IO (Option String) := do
