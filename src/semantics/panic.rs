@@ -6,7 +6,9 @@
 //! Two paths:
 //! - **`lean_panic_fn`** (`panic!`, `get!` out of bounds, ...): the message
 //!   goes to Lean's current stderr stream (`io_eprintln`, so `IO.setStderr`
-//!   and `withIsolatedStreams` capture it) as one line, then, unless
+//!   and `withIsolatedStreams` capture it) as one line, all its bytes, NUL
+//!   bytes included (`lean_panic_impl` takes the string's size, not
+//!   `strlen`; row `panic/panic.nul`), then, unless
 //!   `LEAN_BACKTRACE=0`, `backtrace:` and the frames; the call returns the
 //!   default value. With `LEAN_ABORT_ON_PANIC` set (any value) or
 //!   exit-on-panic on, the lines go to the process's stderr directly
@@ -70,7 +72,10 @@ pub enum InternalPanic {
     OutOfMemory,
     /// `lean_internal_panic_unreachable`.
     Unreachable,
-    /// `lean_internal_panic_rc_overflow`.
+    /// `lean_internal_panic_rc_overflow`: declared in `lean.h` but never
+    /// raised in 4.34.0, whose reference counts saturate instead
+    /// (`LEAN_RC_STICKY`, `lean.h` 614-622); listed for the message only
+    /// (review RS2-07).
     RcOverflow,
     /// `lean_internal_panic_overflow`: an object's byte size above 2^64 - 1
     /// (`lean_usize_mul_checked`, `lean_usize_add_checked`).

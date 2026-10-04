@@ -61,6 +61,8 @@ use Nat::{Big, Small};
 
 impl<B: BigNat> Nat<B> {
     /// The value when it is below 2^64.
+    ///
+    /// Source: leanrs_rt `src/nat.rs` (`TryFrom<&Nat> for u64`), on the view.
     #[inline]
     pub fn to_u64(&self) -> Option<u64> {
         match self {
@@ -71,6 +73,9 @@ impl<B: BigNat> Nat<B> {
 
     /// The value modulo 2^64 (`lean_uint64_of_nat`; the `UIntN.ofNat` rows
     /// of `semantics::uint` take it).
+    ///
+    /// Source: leanrs_rt `src/nat.rs` (`Nat::low_u64`) and lean2rr leanrt
+    /// `src/nat.rs` (`LNat::low_u64`).
     #[inline]
     pub fn low_u64(&self) -> u64 {
         match self {
@@ -81,12 +86,17 @@ impl<B: BigNat> Nat<B> {
 
     /// The value, or `u64::MAX` when it is 2^64 or more: an index or a size
     /// that no array reaches.
+    ///
+    /// Source: leanrs_rt `src/array.rs` (`clamped_arg`) and lean2rr's
+    /// `runtime/prelude.rr` (`l2r_nat_sat_u64`).
     #[inline]
     pub fn to_u64_saturating(&self) -> u64 {
         self.to_u64().unwrap_or(u64::MAX)
     }
 
     /// Whether the value is zero.
+    ///
+    /// Source: leanrs_rt `src/nat.rs` (`Nat::is_zero`), on the view.
     #[inline]
     pub fn is_zero(&self) -> bool {
         self.to_u64() == Some(0)

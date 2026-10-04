@@ -59,6 +59,17 @@ lean_version = "4.34.0"
 source = "lean-runtime batch 2: lean_panic_fn (object.cpp lean_panic_impl): the message on Lean's stderr stream, the default returned; LEAN_BACKTRACE=0 as the oracle runs"
 
 [[row]]
+id = "panic/panic.nul"
+area = "panic"
+fn = "panic"
+args = ['"a\x00b"']
+expected = "panic: a\u0000b"
+default = "0"
+stderr = "a\u0000b\n"
+lean_version = "4.34.0"
+source = "review RS2-06: lean_panic_fn prints every byte of the message, a NUL included (lean_panic_impl takes the string's size)"
+
+[[row]]
 id = "panic/panic.abort"
 area = "panic"
 fn = "panic"

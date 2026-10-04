@@ -9,15 +9,18 @@
 //! to_u64_saturating`). Lean's C treats every `Nat` of 2^63 or more as out
 //! of bounds, which these functions do since no array has 2^63 elements.
 //!
-//! Rules (all from C, which differs from the Lean definitions in places):
+//! Rules (all from the C of each `@[extern]`, which a translator follows; the
+//! Lean definitions say only which value results):
 //! - `Array.get!Internal` (`xs[i]!`) and `Array.set!` out of bounds print
 //!   `Error: index out of bounds` through `lean_panic_fn` and return the
-//!   default, or the array unchanged. (`Array.set!`'s Lean definition is
-//!   silent; its C panics.)
+//!   default, or the array unchanged. Their Lean definitions are silent
+//!   (`Array.getD a i default`, `Array.setIfInBounds`); their C prints.
 //! - `Array.swapIfInBounds`, `ByteArray.set!` and `FloatArray.set!` out of
 //!   bounds return the array unchanged, and `ByteArray.get!`/`FloatArray.get!`
-//!   return 0/0.0, with no message. (Their Lean definitions panic; their C
-//!   does not.)
+//!   return 0/0.0, with no message, in C. Their Lean definitions give the
+//!   same values but are written with `Array`'s (`bs[i]!`, `bs.set! i b`),
+//!   whose externs print: compiling those definitions instead of the
+//!   externs would print where C does not (review RS2-08).
 //! - `Array.pop` of an empty array is the empty array.
 //! - The allocators end the process with `INTERNAL PANIC: integer overflow in
 //!   runtime computation` when the object size `24 + elem * n` exceeds

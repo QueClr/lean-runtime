@@ -49,6 +49,8 @@ use Int::{Big, Small};
 
 impl<B: BigInt> Int<B> {
     /// The value when it is in the `i64` range.
+    ///
+    /// Source: leanrs_rt `src/int.rs` (`Int::Small`'s range), on the view.
     #[inline]
     pub fn to_i64(&self) -> Option<i64> {
         match self {
@@ -59,6 +61,9 @@ impl<B: BigInt> Int<B> {
 
     /// The value modulo 2^64 in two's complement (`lean_int64_of_int`; the
     /// `IntN.ofInt` rows of `semantics::sint` take it).
+    ///
+    /// Source: leanrs_rt `src/int.rs` (`Int::low_u64`) and lean2rr leanrt
+    /// `src/nat.rs` (`int_low_twos`).
     #[inline]
     pub fn low_u64(&self) -> u64 {
         match self {
@@ -68,12 +73,16 @@ impl<B: BigInt> Int<B> {
     }
 
     /// Whether the value is zero.
+    ///
+    /// Source: new (a test on the view).
     #[inline]
     pub fn is_zero(&self) -> bool {
         self.to_i64() == Some(0)
     }
 
     /// Whether the value is below zero.
+    ///
+    /// Source: lean2rr leanrt `src/nat.rs` (`int_is_neg`), on the view.
     #[inline]
     pub fn is_neg(&self) -> bool {
         match self {
