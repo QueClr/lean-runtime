@@ -1,0 +1,14 @@
+id = "set_during_modify"
+area = "refs"
+lean_version = "4.34.0"
+source = "leanrs's review of docs/threads.md (threads-design, 2026-10-04): its native probe of a set during modify; LB-01 (judge refs2, JR-1, 2026-10-04)"
+streams = "separate"
+deviations = { lean2rr = "LB-01", leanrs = "LB-01" }
+native = { stdout = "get after main's set: 100, at once\nafter modify: 1\n", stderr = "", code = "0" }
+# `expected` (the .out, .err and .code files) is the correct outcome,
+# written by hand: `modify` is atomic, so `main`'s set waits for modify's
+# store and is not lost (`r` ends 100). Lean 4.35.0-rc1 gives it (3 of 3
+# runs). Native Lean 4.34.0's outcome, the same in 5 of 5 runs when this
+# case was recorded, is `native`: `lean_st_ref_set` (io.cpp 1504-1514)
+# stores into the slot that modify's take left empty, and modify's set
+# overwrites it (LB-01).

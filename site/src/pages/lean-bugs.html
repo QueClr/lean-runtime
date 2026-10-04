@@ -21,14 +21,18 @@ Its <a href="glossary.html#g-deviation">deviation</a> names the entry.</figcapti
 <p>Decision (2026-10-03): these bugs are not reported upstream.
 They are recorded in <a href="repo:docs/lean-bugs.md">docs/lean-bugs.md</a> only.
 Each translator also lists them among its intended differences.
-LB-01's case is <code>refs/lost_update</code>, and LB-02's is <code>io/read_after_write</code>.
+LB-01's cases are <code>refs/lost_update</code> and <code>refs/set_during_modify</code>, LB-18's is <code>refs/swap_during_modify</code>, and LB-02's is <code>io/read_after_write</code>.
 LB-03 has four cases, in <code>io/</code>, <code>temp/</code> and <code>uvsys/</code>.</p>
 
 <h2 id="confirmed">Confirmed bugs</h2>
 <div class="tblwrap"><table>
 <thead><tr><th>Id</th><th>What native Lean does</th><th>What lean-runtime and the translators do</th></tr></thead>
 <tbody>
-<tr id="lb-01"><td>LB-01</td><td>A multi-threaded <code>IO.Ref.get</code> can undo a concurrent <code>set</code>, so the ref goes back to its old value.</td><td>Both translators' ref cells (glue) make every operation atomic: a completed <code>set</code> is seen by every later <code>get</code>. (Upstream fixed it in Lean 4.35.0-rc1.)</td></tr>
+<tr id="lb-01"><td>LB-01</td><td>On a multi-threaded ref, a completed <code>set</code> can be lost.
+A concurrent <code>IO.Ref.get</code> puts the old value back.
+Or a <code>modify</code> in progress overwrites a <code>set</code> made while its function ran.</td><td>Both translators' ref cells (glue) make every operation atomic, as Lean 4.35 does: a completed <code>set</code> is seen by every later <code>get</code>.
+While a <code>modify</code> holds the ref, <code>get</code>, <code>take</code>, <code>set</code> and <code>swap</code> wait for its store.
+(Upstream fixed it in Lean 4.35.0-rc1.)</td></tr>
 <tr id="lb-02"><td>LB-02</td><td>After output on a handle, a read of a whole buffer or more makes glibc drop the pending output.</td><td>It writes the pending bytes first, then reads.</td></tr>
 <tr id="lb-03"><td>LB-03</td><td>An error without a file name (<code>getCurrentDir</code> after its directory was removed) crashes with SIGSEGV instead of raising an <code>IO.Error</code>.</td><td>It raises the <code>IO.Error</code>, with the file name <code>""</code>.</td></tr>
 <tr id="lb-13"><td>LB-13</td><td>After <code>main</code> returns, a pool task enqueued when no pool worker is left never runs.
@@ -43,6 +47,11 @@ So <code>kill</code> kills the child alone, and its process group survives.</td>
 This needs one free descriptor more than native in one rare case.</td></tr>
 <tr><td colspan="3">Both judges confirmed LB-14 to LB-17 on 2026-10-04.
 Their cases are in <code>process/</code> and <code>temp/</code>.</td></tr>
+<tr id="lb-18"><td>LB-18</td><td>On a multi-threaded ref, a <code>swap</code> made while a <code>modify</code> (or a <code>get</code>) holds the ref does not wait.
+It returns its own argument, and the ref keeps that object with one reference count for two owners.
+The process can use freed memory, or crash.</td><td>A <code>swap</code> waits for the holder's store, then returns the ref's previous value.
+(Upstream fixed it in Lean 4.35.0-rc1, issue #14584.)
+A judge confirmed it on 2026-10-04.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

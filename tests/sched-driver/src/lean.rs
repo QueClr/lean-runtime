@@ -2,7 +2,7 @@
 //! need: tasks (the value in a slot the task's job fills, the handle's last
 //! reference releasing the task), promises, and `IO.Ref`.
 
-use lean_runtime::sched::{self, Job, Outcome, TaskId, TaskState};
+use lean_runtime::sched::{self, CtxId, Job, Outcome, TaskId, TaskState};
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
@@ -234,7 +234,33 @@ impl<T: Clone + 'static> Drop for Promise<T> {
 
 /// `IO.Ref α`: reads are polling points in programs with tasks
 /// (`sched::ref_read`).
-pub struct Ref<T>(Rc<RefCell<T>>);
+///
+/// The semantics are Lean 4.35's (LB-01, LB-18 in docs/lean-bugs.md):
+/// - `modify` is `take`, then a store into the emptied cell (`put`,
+///   `ST.Prim.Ref.modifyUnsafe`), so the cell is empty while `modify`'s
+///   function runs. That function may block (`Task.get`), and other contexts
+///   then run.
+/// - Only `modify`'s own store fills the empty cell. Until then `get`,
+///   `take`, `set` and `swap` wait: each blocks the context (a yield point)
+///   until the store wakes it. `set` is `swap` with the result dropped.
+/// - So `modify` and `swap` are atomic. The cost, as in 4.35: a `modify`
+///   whose function waits for a task that uses the same reference deadlocks.
+///
+/// Native 4.34.0 differs where its reference is shared with a task
+/// (multi-threaded): `get` and `take` spin while the slot is empty, as here
+/// (io.cpp 1459-1500, case `refs/get_during_modify`), but `set` stores into
+/// the empty slot, and `modify`'s store then overwrites it (LB-01,
+/// `refs/set_during_modify`), and `swap` returns its own argument (LB-18,
+/// `refs/swap_during_modify`) (docs/sched.md, The glue, item 7;
+/// docs/threads.md, 3.1).
+pub struct Ref<T>(Rc<RefObj<T>>);
+
+struct RefObj<T> {
+    /// `None` while `modify` holds it.
+    val: RefCell<Option<T>>,
+    /// The contexts waiting for `modify`'s store.
+    waiters: RefCell<Vec<CtxId>>,
+}
 
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Self {
@@ -245,23 +271,87 @@ impl<T> Clone for Ref<T> {
 impl<T: Clone> Ref<T> {
     /// `IO.mkRef`.
     pub fn new(v: T) -> Ref<T> {
-        Ref(Rc::new(RefCell::new(v)))
+        Ref(Rc::new(RefObj {
+            val: RefCell::new(Some(v)),
+            waiters: RefCell::new(Vec::new()),
+        }))
     }
+
+    /// `f` on the cell once it holds a value: while it is empty, the context
+    /// blocks until `modify`'s store wakes it.
+    fn when_full<R>(&self, mut f: impl FnMut(&mut Option<T>) -> Option<R>) -> R {
+        loop {
+            if let Some(r) = f(&mut self.0.val.borrow_mut()) {
+                return r;
+            }
+            self.0.waiters.borrow_mut().push(sched::current_context());
+            sched::block_sync();
+        }
+    }
+
     /// `ST.Ref.get`.
     pub fn get(&self) -> T {
         sched::ref_read();
-        self.0.borrow().clone()
+        self.when_full(|c| c.clone())
     }
-    /// `ST.Ref.set`.
-    pub fn set(&self, v: T) {
-        *self.0.borrow_mut() = v;
-    }
-    /// `ST.Ref.modify`.
-    pub fn modify(&self, f: impl FnOnce(T) -> T) {
+
+    /// `ST.Ref.take`: the value, leaving the cell empty until `put`.
+    fn take(&self) -> T {
         sched::ref_read();
-        let v = self.0.borrow().clone();
-        *self.0.borrow_mut() = f(v);
+        self.when_full(Option::take)
     }
+
+    /// `ST.Ref.put`: fills the cell `take` emptied, and wakes the contexts
+    /// waiting for it.
+    fn put(&self, v: T) {
+        let old = self.0.val.borrow_mut().replace(v);
+        debug_assert!(old.is_none(), "put into a full reference");
+        let ws = std::mem::take(&mut *self.0.waiters.borrow_mut());
+        for c in ws {
+            sched::wake(c);
+        }
+    }
+
+    /// The exchange of `swap` and `set`, once the cell holds a value.
+    fn exchange(&self, v: T) -> T {
+        let mut new = Some(v);
+        self.when_full(|c| {
+            if c.is_some() {
+                std::mem::replace(c, new.take())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// `ST.Ref.set`: `swap` with the result dropped (Lean 4.35), so it waits
+    /// while `modify` holds the cell (LB-01). The old value is dropped after
+    /// the cell's borrow.
+    pub fn set(&self, v: T) {
+        drop(self.exchange(v));
+    }
+
+    /// `ST.Ref.swap`: waits while `modify` holds the cell (LB-18).
+    pub fn swap(&self, v: T) -> T {
+        sched::ref_read();
+        self.exchange(v)
+    }
+
+    /// `ST.Ref.modify`: `take`, then `put` (`Ref.modifyUnsafe`).
+    pub fn modify(&self, f: impl FnOnce(T) -> T) {
+        let v = self.take();
+        self.put(f(v));
+    }
+}
+
+/// `IO.monoMsNow`: a clock read, so a polling point.
+pub fn mono_ms_now() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    sched::poll();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_millis() as u64
 }
 
 /// `IO.sleep`.

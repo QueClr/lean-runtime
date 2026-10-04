@@ -347,4 +347,7 @@ cases!(
     task_waits_own_dep,
     sync_dep_waits_older,
     lost_update,
+    set_during_modify,
+    get_during_modify,
+    swap_during_modify,
 );

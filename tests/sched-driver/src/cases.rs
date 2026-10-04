@@ -48,6 +48,9 @@ pub fn lookup(id: &str) -> Option<Case> {
         "task_waits_own_dep" => (no_init, task_waits_own_dep),
         "sync_dep_waits_older" => (no_init, sync_dep_waits_older),
         "lost_update" => (no_init, lost_update),
+        "set_during_modify" => (no_init, set_during_modify),
+        "get_during_modify" => (no_init, get_during_modify),
+        "swap_during_modify" => (no_init, swap_during_modify),
         // Not a Lean program: a Rust panic (a translator's or the runtime's
         // bug) in a task on a context of its own.
         "rust_panic_in_task" => (no_init, rust_panic_in_task),
@@ -1184,6 +1187,151 @@ fn lost_update(args: &[String]) -> u32 {
         }
     }
     println(&format!("lost {lost}"));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// tests/cases/refs: a reference taken by `modify` while its function blocks.
+
+// def slowValue (slow : Task (Except IO.Error Nat)) : Nat :=
+//   match slow.get with
+//   | .ok n => n
+//   | .error _ => 0
+//
+// def main (args : List String) : IO Unit := do
+//   let setMs := args[0]!.toNat!
+//   let slowMs := args[1]!.toNat!
+//   let r ← IO.mkRef (0 : Nat)
+//   let slow ← IO.asTask (prio := .dedicated) do
+//     IO.sleep slowMs.toUInt32
+//     return 1
+//   let t ← IO.asTask (prio := .dedicated) do
+//     r.modify fun v => v + slowValue slow
+//   IO.sleep setMs.toUInt32
+//   r.set 100
+//   let t0 ← IO.monoMsNow
+//   let v ← r.get
+//   let t1 ← IO.monoMsNow
+//   let how := if t1 - t0 ≥ (slowMs - setMs) / 2 then "after modify's set" else "at once"
+//   IO.println s!"get after main's set: {v}, {how}"
+//   let _ ← IO.wait t
+//   IO.println s!"after modify: {← r.get}"
+fn set_during_modify(args: &[String]) -> u32 {
+    let set_ms = to_nat(&args[0]);
+    let slow_ms = to_nat(&args[1]);
+    let r = Ref::new(0u64);
+    let slow = as_task(
+        move || {
+            sleep(slow_ms as u32);
+            1u64
+        },
+        PRIO_DEDICATED,
+    );
+    let r2 = r.clone();
+    let t = as_task(move || r2.modify(|v| v + slow.get()), PRIO_DEDICATED);
+    sleep(set_ms as u32);
+    r.set(100);
+    let t0 = mono_ms_now();
+    let v = r.get();
+    let t1 = mono_ms_now();
+    let how = if t1 - t0 >= slow_ms.saturating_sub(set_ms) / 2 {
+        "after modify's set"
+    } else {
+        "at once"
+    };
+    println(&format!("get after main's set: {v}, {how}"));
+    t.get();
+    println(&format!("after modify: {}", r.get()));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let readMs := args[0]!.toNat!
+//   let slowMs := args[1]!.toNat!
+//   let r ← IO.mkRef (0 : Nat)
+//   let slow ← IO.asTask (prio := .dedicated) do
+//     IO.sleep slowMs.toUInt32
+//     return 1
+//   let t ← IO.asTask (prio := .dedicated) do
+//     r.modify fun v => v + slowValue slow
+//   IO.sleep readMs.toUInt32
+//   let t0 ← IO.monoMsNow
+//   let v ← r.get
+//   let t1 ← IO.monoMsNow
+//   let how := if t1 - t0 ≥ (slowMs - readMs) / 2 then "after modify's set" else "at once"
+//   IO.println s!"get during modify: {v}, {how}"
+//   let _ ← IO.wait t
+//   IO.println s!"after modify: {← r.get}"
+fn get_during_modify(args: &[String]) -> u32 {
+    let read_ms = to_nat(&args[0]);
+    let slow_ms = to_nat(&args[1]);
+    let r = Ref::new(0u64);
+    let slow = as_task(
+        move || {
+            sleep(slow_ms as u32);
+            1u64
+        },
+        PRIO_DEDICATED,
+    );
+    let r2 = r.clone();
+    let t = as_task(move || r2.modify(|v| v + slow.get()), PRIO_DEDICATED);
+    sleep(read_ms as u32);
+    let t0 = mono_ms_now();
+    let v = r.get();
+    let t1 = mono_ms_now();
+    let how = if t1 - t0 >= slow_ms.saturating_sub(read_ms) / 2 {
+        "after modify's set"
+    } else {
+        "at once"
+    };
+    println(&format!("get during modify: {v}, {how}"));
+    t.get();
+    println(&format!("after modify: {}", r.get()));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let swapMs := args[0]!.toNat!
+//   let slowMs := args[1]!.toNat!
+//   let r ← IO.mkRef (0 : Nat)
+//   let slow ← IO.asTask (prio := .dedicated) do
+//     IO.sleep slowMs.toUInt32
+//     return 1
+//   let t ← IO.asTask (prio := .dedicated) do
+//     r.modify fun v => v + slowValue slow
+//   IO.sleep swapMs.toUInt32
+//   let t0 ← IO.monoMsNow
+//   let old ← r.swap 100
+//   let t1 ← IO.monoMsNow
+//   let how := if t1 - t0 ≥ (slowMs - swapMs) / 2 then "after modify's set" else "at once"
+//   IO.println s!"swap during modify returned: {old}, {how}"
+//   let _ ← IO.wait t
+//   IO.println s!"after modify: {← r.get}"
+fn swap_during_modify(args: &[String]) -> u32 {
+    let swap_ms = to_nat(&args[0]);
+    let slow_ms = to_nat(&args[1]);
+    let r = Ref::new(0u64);
+    let slow = as_task(
+        move || {
+            sleep(slow_ms as u32);
+            1u64
+        },
+        PRIO_DEDICATED,
+    );
+    let r2 = r.clone();
+    let t = as_task(move || r2.modify(|v| v + slow.get()), PRIO_DEDICATED);
+    sleep(swap_ms as u32);
+    let t0 = mono_ms_now();
+    let old = r.swap(100);
+    let t1 = mono_ms_now();
+    let how = if t1 - t0 >= slow_ms.saturating_sub(swap_ms) / 2 {
+        "after modify's set"
+    } else {
+        "at once"
+    };
+    println(&format!("swap during modify returned: {old}, {how}"));
+    t.get();
+    println(&format!("after modify: {}", r.get()));
     0
 }
 

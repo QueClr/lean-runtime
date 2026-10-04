@@ -28,7 +28,7 @@ This file covers:
 | `src/sched/ctx.rs` | Contexts: corosensei coroutines, the hub, the `Glue` trait, the running stack's bounds |
 | `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
-| `tests/sched-driver/` | Every case of `tests/cases/tasks` and `tests/cases/sync` as a Rust program over `sched`, with the glue a translator writes |
+| `tests/sched-driver/` | Every case of `tests/cases/tasks`, `tests/cases/sync` and `tests/cases/refs` as a Rust program over `sched`, with the glue a translator writes |
 
 `sched` depends on corosensei 0.3.4 and is built with cargo, offline, from
 the committed `Cargo.lock` (`cargo build --offline --locked --features
@@ -294,6 +294,36 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    `block_sync()`, and `wake(c)` each waiter when the value is stored. A
    thunk forced inside its own computation: `hang()` (lean-bugs LB-08:
    natively it spins forever; the other contexts go on).
+
+   **A reference taken by `modify`** waits the same way. The semantics are
+   Lean 4.35's (LB-01 and LB-18 in `docs/lean-bugs.md`):
+   - `ST.Ref.modify` is `take`, then a store into the emptied reference
+     (`ST.Prim.Ref.modifyUnsafe`), so the reference is empty while its
+     function runs.
+   - That function can block (a `Task.get` in it), and other contexts then
+     run.
+   - Only `modify`'s own store fills the empty reference. Until then `get`,
+     `take`, `set` and `swap` wait: each is a blocking yield point. Register
+     the context, `block_sync()`, and look again when woken. `set` is
+     `swap` with the result dropped.
+   - `modify`'s store fills the reference and wakes the waiters.
+   - Without this, a reader sees the empty cell, a placeholder, at once.
+   - The cost, as in 4.35: a `modify` whose function waits for a task that
+     uses the same reference deadlocks.
+   - A Lean panic in modify's function returns its default, so the store
+     still runs. A Rust panic ends the process, and the glue must not catch
+     it and leave the cell empty.
+
+   Native 4.34.0 differs, where its reference is shared with a task
+   (multi-threaded). `get` and `take` spin while it is empty, as here
+   (`io.cpp` 1459-1500). But `set` stores into the empty slot and is then
+   overwritten by `modify`'s store (LB-01), and `swap` returns its own
+   argument, one object with two owners (LB-18).
+
+   Cases: `refs/get_during_modify` (the read waits for `modify`'s store, as
+   natively), `refs/set_during_modify` (LB-01) and `refs/swap_during_modify`
+   (LB-18). The driver's `Ref` (`tests/sched-driver/src/lean.rs`) is an
+   example.
 8. **Stack overflow.** Lean's report (`src/runtime/stack_overflow.cpp`) is
    a SIGSEGV handler on an alternate signal stack. Installing one
    (`sigaction`) is `unsafe`, so it stays in the glue, as in lean2rr's
@@ -540,6 +570,9 @@ Each invariant names the code that establishes it.
    that task is empty (item 3 of "The glue"); a finished task's id becomes
    `TaskId::FINISHED`. This is not about soundness, but about naming the
    right task after 2^32 tasks.
+7. `get`, `take`, `set` and `swap` of a reference that `modify` has taken
+   block until `modify`'s own store (item 7 of "The glue"; LB-01, LB-18).
+   This is not about soundness either, but about Lean's semantics.
 
 ### How it is checked
 
