@@ -3,3 +3,4 @@ area = "process"
 lean_version = "4.34.0"
 source = "lean2rr tests/runtime/RtProcess.lean"
 streams = "separate"
+# leanrs: translator item A936 (no runtime deviation): translator item: Select's dependent mode fails closed (chapter 03 T15 step 1) on two takeStdin of one child

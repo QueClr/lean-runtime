@@ -3,3 +3,5 @@ area = "refs"
 lean_version = "4.34.0"
 source = "leanrs's review of docs/threads.md (threads-design, 2026-10-04): its native probe of a read during modify"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: the task runs at its creation, so it never interleaves with main's modify

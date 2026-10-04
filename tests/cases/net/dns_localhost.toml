@@ -8,3 +8,5 @@ streams = "separate"
 # no service for ports 49999 and 65535 nor the name `no-such-service-here`.
 # A host with `::1 localhost` gives `localhost` IPv6 entries too; that is the
 # host's configuration, not a flake.
+deviations = { leanrs = "DV2" }
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

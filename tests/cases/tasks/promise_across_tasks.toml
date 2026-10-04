@@ -3,3 +3,5 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "lean-runtime sched batch 1 (promises on the scheduler); after lean2rr tests/runtime/RtPromise.lean"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: IO.Promise refused at translation

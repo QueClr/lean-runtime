@@ -4,3 +4,5 @@ lean_version = "4.34.0"
 source = "review of lean-runtime sched-2 (RS2-02, RS2-03; probes CancelMix and DepOrder2), 2026-10-04"
 streams = "separate"
 expect = { hang = 3 }
+deviations = { leanrs = "DV2" }
+# leanrs DV2: IO.Promise refused at translation

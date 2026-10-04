@@ -4,3 +4,5 @@ lean_version = "4.34.0"
 source = "leanrs exit probes, 2026-10-03"
 streams = "separate"
 expect = { hang = 3 }
+deviations = { leanrs = "DV2" }
+# leanrs DV2: the runaway task runs at its creation, so main's later output never appears

@@ -3,7 +3,8 @@ area = "net"
 lean_version = "4.34.0"
 source = "LB-24 (the net-1 judge; upstream PR #15174's tests/compile/uv_udp_cancel_recv_leak.lean shape)"
 streams = "separate"
-deviations = { lean2rr = "LB-24", leanrs = "LB-24" }
+deviations = { lean2rr = "LB-24", leanrs = "LB-24; DV2" }
 native = { stdout = "leaked 64 file descriptors\n", stderr = "", code = "0" }
 # `expected` is the correct outcome (the judge's draft LB-24); native's,
 # recorded over 5 runs, is `native`: every cancelled socket stays open.
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

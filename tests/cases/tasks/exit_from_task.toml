@@ -3,3 +3,5 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs's review of lean-runtime sched-1 (item 7), 2026-10-03"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: the task runs at its creation, so main's later output differs

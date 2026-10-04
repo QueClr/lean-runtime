@@ -5,3 +5,5 @@ source = "net-1 (Std.Internal.UV.UDP; libuv 1.48 udp.c)"
 streams = "separate"
 # Depends on the host: IPv6 on the loopback interface (::1) and the kernel's
 # multicast answers there (leaving a group never joined: EADDRNOTAVAIL).
+deviations = { leanrs = "DV2" }
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

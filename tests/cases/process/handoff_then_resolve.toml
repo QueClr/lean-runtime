@@ -3,3 +3,5 @@ area = "process"
 lean_version = "4.34.0"
 source = "leanrs's re-check of lean-runtime fixes-1 (a771e57): a hand-off's dropping context publishes before its writer ends; AR-8"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: IO.Promise refused at translation

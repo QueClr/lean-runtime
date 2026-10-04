@@ -8,3 +8,4 @@ native = { stdout = "takeStdin false: killed 137, grandchild gone\ntakeStdin tru
 # `expected` (the .out, .err and .code files) is the correct outcome, which both translators
 # give: the group is killed in both runs. Native's outcome is `native`: the child takeStdin
 # returns lost the setsid flag, so kill signals the pid alone and the grandchild survives.
+# leanrs: translator item A941 (no runtime deviation): translator item: Lower's rebuild of IO.Process.Child is a struct literal without its hidden field (rustc E0063)

@@ -7,3 +7,5 @@ expect = { hang = 3 }
 # The task sleeps 20 ms, `main` 500 ms (50 ms before 2026-10-04): with 50,
 # a host at load 56 started the task more than 30 ms late once, so `main`'s
 # line came first, an order native's threads allow under the same delay.
+deviations = { leanrs = "DV2" }
+# leanrs DV2: tasks run at their creation, so the wait finishes where native's never does

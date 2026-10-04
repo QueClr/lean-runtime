@@ -3,3 +3,5 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "review of lean-runtime sched-2, RS2-01 (b) (lean2rr-side judge: not a bug, followed; probe SyncOrder), 2026-10-04"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: IO.Promise refused at translation

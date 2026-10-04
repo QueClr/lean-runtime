@@ -3,3 +3,5 @@ area = "net"
 lean_version = "4.34.0"
 source = "net-1 (Std.Internal.UV.UDP); lean2rr tests/runtime/RtUdp.lean"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

@@ -3,7 +3,7 @@ area = "net"
 lean_version = "4.34.0"
 source = "the net-1 judge's probe B_Multicast (LB-22), l2r-scratch/compare/shared-runtime/judge/net1"
 streams = "separate"
-deviations = { lean2rr = "LB-22", leanrs = "LB-22" }
+deviations = { lean2rr = "LB-22", leanrs = "LB-22; DV2" }
 native = { stdout = "text ff02::1:ff00:12 (15)\njoin: ok\nleave: ok\ntext ff02::1:ff00:123 (16)\n", stderr = "LEAN ASSERTION VIOLATION\nFile: /home/runner/work/lean4/lean4/src/runtime/uv/net_addr.cpp\nLine: 50\nret == 0\nlibc++abi: terminating due to uncaught exception of type lean::unreachable_reached: 'unreachable' code was reached\n", code = "134" }
 # `expected` is the correct outcome (the judge's draft LB-22: libuv 1.48's
 # own answers for these texts, l2r-scratch/compare/shared-runtime/judge/net1/
@@ -12,3 +12,4 @@ native = { stdout = "text ff02::1:ff00:12 (15)\njoin: ok\nleave: ok\ntext ff02::
 # Depends on the host: IPv6 on the loopback interface with a multicast route
 # (the 15-character join is the in-case control). A host without them gives
 # the kernel's error for every length alike.
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

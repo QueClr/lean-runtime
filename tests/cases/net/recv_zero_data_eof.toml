@@ -3,8 +3,9 @@ area = "net"
 lean_version = "4.34.0"
 source = "the net-1 judge's probe R_Recv0 (dataeof), l2r-scratch/compare/shared-runtime/judge/net1/LB-26-draft.md"
 streams = "separate"
-deviations = { lean2rr = "LB-26", leanrs = "LB-26" }
+deviations = { lean2rr = "LB-26", leanrs = "LB-26; DV2" }
 native = { stdout = "recv? 0: error resource exhausted (error code: 105, no buffer space available)\nrecv? 16: ok some some \"hello\"\nrecv? 0: error resource exhausted (error code: 105, no buffer space available)\nrecv? 16: ok none\n", stderr = "", code = "0" }
 # `expected` is the correct outcome (the judge's draft LB-26: Lean's
 # docstring says `none` at the end of the stream); native's, recorded over
 # 5 runs, is `native`.
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

@@ -5,3 +5,4 @@ source = "lean2rr cross-test XT-6 (leanrs fixture A482 at size 0), 2026-10-03; l
 streams = "separate"
 # No twin: the case tests what a translator generates (Lean's common-subexpression elimination
 # after type erasure, so the panic prints once); the panic's text is in the rows of panic/.
+# leanrs: translator item A935 (no runtime deviation): translator item: Select refuses the merged call of a declaration that is not pure-total

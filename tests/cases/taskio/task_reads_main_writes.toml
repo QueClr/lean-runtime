@@ -3,3 +3,5 @@ area = "taskio"
 lean_version = "4.34.0"
 source = "sched-io acceptance (a task blocked reading a pipe while main writes to it)"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: the task runs at its creation and polls for main's later write, which never comes

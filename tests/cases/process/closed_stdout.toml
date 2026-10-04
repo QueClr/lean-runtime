@@ -6,3 +6,5 @@ streams = "separate"
 # No twin: the case starts the program with a closed standard descriptor, which a Rust twin's
 # entry (`lang_start`) reopens on /dev/null before `main` (leanrs DV19), where a translator's
 # entry does not (tests/io2_cases.rs).
+deviations = { leanrs = "DV19" }
+# leanrs DV19: std reopens the closed fd 1 on /dev/null before main, and the child inherits it open

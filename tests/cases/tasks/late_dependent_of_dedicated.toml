@@ -3,10 +3,11 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "LB-13 (docs/lean-bugs.md; review RS1S-02 of sched-1; lean2rr-side judge, leanrs-side judge confirms, 2026-10-03)"
 streams = "separate"
-deviations = { lean2rr = "LB-13", leanrs = "LB-13" }
+deviations = { lean2rr = "LB-13", leanrs = "LB-13; DV2" }
 native = { stdout = "", stderr = "main returns\ndedicated done\n", code = "0" }
 # `expected` (the .out, .err and .code files) is the correct outcome,
 # which lean-runtime's scheduler gives (written by hand from
 # tests/sched-driver's twin); native Lean 4.34.0's outcome, recorded
 # over 10 runs, is `native`: the task enqueued after
 # main returned never runs (LB-13).
+# leanrs DV2: the late task runs at its creation, before main returns

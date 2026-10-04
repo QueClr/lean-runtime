@@ -12,3 +12,5 @@ expect = { hang = 3 }
 # (`resolve_core`'s `notify_all`; a deleted task's finish skips it).
 # Native's outcome is followed: not LB-32, which covers
 # `Promise.result!`'s permanent block only.
+deviations = { leanrs = "DV2" }
+# leanrs DV2: IO.Promise refused at translation
