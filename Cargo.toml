@@ -31,3 +31,10 @@ sched = []
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
 # CONTRIBUTING.md). The default build is unsafe-free.
 unsafe-fast = []
+
+# The io program cases on the model (tests/io_cases.rs): the binary is also
+# each case's twin, so it runs without libtest.
+[[test]]
+name = "io_cases"
+harness = false
+required-features = ["io"]

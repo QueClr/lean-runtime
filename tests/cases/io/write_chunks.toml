@@ -1,0 +1,5 @@
+id = "write_chunks"
+area = "io"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtStdioChunks.lean (the glibc FILE model)"
+streams = "separate"

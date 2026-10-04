@@ -1,0 +1,1 @@
+exec $BIN $ARGS 2>&1

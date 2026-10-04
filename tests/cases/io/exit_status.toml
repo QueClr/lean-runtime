@@ -1,0 +1,5 @@
+id = "exit_status"
+area = "io"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtExit.lean, RtForceExit.lean"
+streams = "separate"

@@ -1,0 +1,5 @@
+id = "broken_pipe"
+area = "io"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtBrokenPipe.lean"
+streams = "separate"

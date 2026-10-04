@@ -1,0 +1,5 @@
+id = "stdin_ahead"
+area = "io"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtStdioStdinAhead.lean, RtStdioStdinFlush.lean (the glibc FILE model)"
+streams = "separate"

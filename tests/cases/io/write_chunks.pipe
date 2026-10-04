@@ -1,0 +1,1 @@
+$BIN $ARGS 2>&1 | md5sum; md5sum < c1.txt; md5sum < c2.txt; wc -c < c2.txt

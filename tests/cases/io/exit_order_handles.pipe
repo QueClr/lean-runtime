@@ -1,0 +1,1 @@
+$BIN $ARGS 2>&1 | cat; echo "exit $?"

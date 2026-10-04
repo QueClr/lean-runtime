@@ -1,0 +1,4 @@
+stdout before exit
+exit 7
+written via the global handle
+line before exit

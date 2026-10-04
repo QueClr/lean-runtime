@@ -1,0 +1,4 @@
+first: "old1\n"
+after rewind 1: "mid1\n"
+after rewind 2: "mid1\n"
+rest: "mid2\n"

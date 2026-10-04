@@ -1,0 +1,5 @@
+id = "buf_order"
+area = "io"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtBufOrder.lean (the glibc FILE model)"
+streams = "separate"

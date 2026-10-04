@@ -1,0 +1,5 @@
+id = "rewind_serves_buffer"
+area = "io"
+lean_version = "4.34.0"
+source = "LB-09 (docs/lean-bugs.md; leanrs DV20 (b), withdrawn)"
+streams = "separate"

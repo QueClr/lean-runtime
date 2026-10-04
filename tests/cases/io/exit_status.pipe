@@ -1,0 +1,1 @@
+$BIN exit 10 3 42; echo "status $?"; $BIN force 3; echo "status $?"

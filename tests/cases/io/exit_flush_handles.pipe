@@ -1,0 +1,1 @@
+$BIN $ARGS; echo "exit $?"; cat global.txt local.txt
