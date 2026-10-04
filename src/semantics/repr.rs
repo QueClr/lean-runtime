@@ -79,6 +79,8 @@ pub fn needs_app_paren(negative: bool, prec: u32) -> bool {
 }
 
 /// `Bool.repr` and `toString` of a `Bool`.
+///
+/// Source: leanrs_rt `src/fmt.rs` (`LeanToString for bool`), as a constant.
 #[inline]
 pub fn bool_text(b: bool) -> &'static str {
     if b {
@@ -88,7 +90,7 @@ pub fn bool_text(b: bool) -> &'static str {
     }
 }
 
-/// `repr ()` and `toString ()`.
+/// `repr ()` and `toString ()` (leanrs_rt `src/fmt.rs`, `LeanRepr for ()`).
 pub const UNIT_TEXT: &str = "()";
 
 /// `Char.quoteCore c inString`: `\n`, `\t`, `\\` and `\"` escaped, `\'`

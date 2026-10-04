@@ -52,8 +52,10 @@ pub const NO_BACKTRACE: &str = "(stack trace unavailable)";
 pub const STACK_OVERFLOW_MESSAGE: &str = "\nStack overflow detected. Aborting.\n";
 
 /// The prefix of the line `lean_io_result_show_error` writes to `std::cerr`
-/// when `main` ends with an uncaught `IO` error (`io.cpp`); the error's text
-/// and a newline follow, and the process exits with status 1.
+/// (tied to C's `stdout`, so pending output is flushed first) when `main`
+/// ends with an uncaught `IO` error (`io.cpp`); the error's text up to its
+/// first NUL (`string_cstr`) and a newline follow, and the process exits with
+/// status 1 (lean2rr's leanrt `uncaught_exception` does the same).
 pub const UNCAUGHT_EXCEPTION_PREFIX: &str = "uncaught exception: ";
 
 /// The internal panics of Lean 4.34.0's runtime that a translator's runtime
@@ -215,6 +217,8 @@ pub fn internal_panic_end(s: PanicSettings) -> PanicEnd {
 }
 
 /// The status a shell sees after a `PanicEnd` that ends the process.
+///
+/// Source: new (`abort()` is `SIGABRT`; `std::exit(1)`).
 pub const fn end_status(end: PanicEnd) -> Option<i32> {
     match end {
         PanicEnd::Return => None,

@@ -44,8 +44,9 @@
 //!   e.g. for `(2^62)^(2^32 - 1)`, whose `mpz_n_pow_ui` asks for about 2^32
 //!   limbs at once. A GMP-backed implementation reaches this limit in the
 //!   operations it routes through `mpz` functions on an `mpz_t`: lean2rr's
-//!   `big.rs` does so for `pow` (`mpz_pow_ui`), `gcd` (`mpz_gcd`) and the
-//!   decimal conversions (`mpz_get_str`, `mpz_set_str`); its `add`, `sub`,
+//!   `big.rs` does so for `pow` (`mpz_pow_ui`, except a word base that is a
+//!   power of two, which it shifts), `gcd` (`mpz_gcd`) and the decimal
+//!   conversions (`mpz_get_str`, `mpz_set_str`); its `add`, `sub`,
 //!   `mul`, divisions, shifts and bitwise operations call `mpn` functions
 //!   on its own blocks, whose limit is its own block size (`MAX_LIMBS`,
 //!   `i32::MAX` limbs, then `INTERNAL PANIC: out of memory`).

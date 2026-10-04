@@ -421,25 +421,32 @@ fn compare_slow<B: BigInt>(a: &Int<B>, b: &Int<B>) -> Ordering {
 }
 
 /// `Int.decEq` (`lean_int_dec_eq`).
+///
+/// Source: leanrs_rt `src/int.rs` (`Ord for Int`), through `compare`.
 #[inline]
 pub fn dec_eq<B: BigInt>(a: &Int<B>, b: &Int<B>) -> bool {
     compare(a, b) == Ordering::Equal
 }
 
 /// `Int.decLt` (`lean_int_dec_lt`).
+///
+/// Source: leanrs_rt `src/int.rs` (`Ord for Int`), through `compare`.
 #[inline]
 pub fn dec_lt<B: BigInt>(a: &Int<B>, b: &Int<B>) -> bool {
     compare(a, b) == Ordering::Less
 }
 
 /// `Int.decLe` (`lean_int_dec_le`).
+///
+/// Source: leanrs_rt `src/int.rs` (`Ord for Int`), through `compare`.
 #[inline]
 pub fn dec_le<B: BigInt>(a: &Int<B>, b: &Int<B>) -> bool {
     compare(a, b) != Ordering::Greater
 }
 
-/// `Int.decNonneg` (`lean_int_dec_nonneg`), behind `0 ≤ a` in compiled
-/// `Int` pattern matches.
+/// `Int.decNonneg` (`lean_int_dec_nonneg`): whether `a >= 0`.
+///
+/// Source: leanrs_rt `src/int.rs` (`Int::is_nonneg`), on the view.
 #[inline]
 pub fn dec_nonneg<B: BigInt>(a: &Int<B>) -> bool {
     !a.is_neg()

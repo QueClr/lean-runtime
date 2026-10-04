@@ -285,6 +285,8 @@ fn add_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
 }
 
 /// `Nat.succ` (`lean_nat_succ`, which compiled code uses for `n + 1`).
+///
+/// Source: lean2rr's `runtime/prelude.rr` (`lean_nat_succ`: `add` of 1).
 #[inline]
 pub fn succ<B: BigNat>(a: Nat<B>) -> Nat<B> {
     add(a, Small(1))
@@ -621,18 +623,24 @@ fn compare_slow<B: BigNat>(a: &Nat<B>, b: &Nat<B>) -> Ordering {
 }
 
 /// `Nat.decEq` and `Nat.beq` (`lean_nat_dec_eq`).
+///
+/// Source: leanrs_rt `src/nat.rs` (`PartialEq for Nat`), through `compare`.
 #[inline]
 pub fn dec_eq<B: BigNat>(a: &Nat<B>, b: &Nat<B>) -> bool {
     compare(a, b) == Ordering::Equal
 }
 
 /// `Nat.decLt` (`lean_nat_dec_lt`).
+///
+/// Source: leanrs_rt `src/nat.rs` (`lt_ref`), through `compare`.
 #[inline]
 pub fn dec_lt<B: BigNat>(a: &Nat<B>, b: &Nat<B>) -> bool {
     compare(a, b) == Ordering::Less
 }
 
 /// `Nat.decLe` and `Nat.ble` (`lean_nat_dec_le`).
+///
+/// Source: leanrs_rt `src/nat.rs` (`le_ref`), through `compare`.
 #[inline]
 pub fn dec_le<B: BigNat>(a: &Nat<B>, b: &Nat<B>) -> bool {
     compare(a, b) != Ordering::Greater
