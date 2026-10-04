@@ -1,0 +1,5 @@
+main tryLock again: true
+task tryLock: false
+main unlocked once
+main unlocks the second time
+task has the lock

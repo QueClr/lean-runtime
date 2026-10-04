@@ -45,6 +45,12 @@ the debug primitives, with bench pairs for its hot paths in `benches/io/`
 (not timed yet); processes, `Std.Time`, temporary files, the `UV.System`
 queries and stream redirection come next. See `src/io/mod.rs`.
 
+`sched` has its first batch (feature `sched`): deferred tasks on corosensei
+contexts, the yield points, promises, `Std.Sync`'s primitives and Lean's
+exit behaviour. Every case of `tests/cases/tasks` and `tests/cases/sync`
+passes as a Rust program over it (`tests/sched-driver`). A translator's glue
+has one `unsafe` step, whose soundness argument is in `docs/sched.md`.
+
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
 that order. See `CONTRIBUTING.md`.
@@ -65,8 +71,8 @@ that order. See `CONTRIBUTING.md`.
   test suite passes.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
-  `io` uses rustix and nix, pinned by `Cargo.lock` and built offline from
-  cargo's local registry cache.
+  `io` uses rustix and nix, and `sched` corosensei, pinned by `Cargo.lock`
+  and built offline from cargo's local registry cache.
 
 Bugs in Lean's own runtime that both translators deliberately do not reproduce, each verified first, are listed in `docs/lean-bugs.md`.
 

@@ -1,0 +1,5 @@
+id = "exit_from_task"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime sched-1 (item 7), 2026-10-03"
+streams = "separate"

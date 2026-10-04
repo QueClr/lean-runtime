@@ -23,4 +23,12 @@ plumbing only:
   the reads into uninitialized memory;
 - `tests/io_cases.rs` registers an ELF constructor (`#[link_section =
   ".init_array"]`), as a translator's glue does, to open native Lean's
-  startup descriptors (`io::startup`) before Rust's runtime starts.
+  startup descriptors (`io::startup`) before Rust's runtime starts;
+- `tests/sched-driver/src/glue.rs` is the glue a translator writes around
+  `sched`:
+  - its `Glue::suspend` dereferences the yielder pointer the scheduler hands
+    it, as every translator's glue does (`docs/sched.md`, "Why
+    `Glue::suspend` is sound");
+  - it installs Lean's stack-overflow report (`sigaltstack`, `sigaction`,
+    `pthread_getattr_np`; `write` and `abort` in the handler), as
+    `src/runtime/stack_overflow.cpp` does.

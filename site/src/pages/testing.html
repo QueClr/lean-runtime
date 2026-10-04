@@ -57,7 +57,8 @@ So the oracle reads its inputs at run time.</p>
 </ul>
 <p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
 Usually its expected output stays native's, and the deviation's outcome is also allowed.
-When native's outcome is a <a href="lean-bugs.html">Lean bug</a> and is nondeterministic, the case expects the correct outcome instead.</p>
+When native's outcome is a <a href="lean-bugs.html">Lean bug</a>, the case may expect the correct outcome instead.
+It then records native's outcome in a <code>native</code> field, which <code>cases.py expect</code> checks (LB-13's cases do).</p>
 
 <h2 id="twins">Rust twins</h2>
 <p>A <a href="glossary.html#g-twin">twin</a> is a Rust program that makes the same calls through lean-runtime as the case's Lean program makes through Lean's runtime.
@@ -66,7 +67,7 @@ It adds only what a translator's glue adds.</p>
   <li><code>tests/io_cases.rs</code> has a twin for each io case.
     It runs <code>cases.py check</code> on them, the same checker that the translators use.</li>
   <li>Branch <code>io-2</code> adds <code>tests/io2_cases.rs</code>.
-    Branch <code>sched-1</code> adds <code>tests/sched-driver</code>: every <code>tasks/</code> and <code>sync/</code> case over <code>sched</code>, with a complete example of the glue.</li>
+    <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code> and <code>sync/</code> case over <code>sched</code>, with a complete example of the glue.</li>
   <li>So the crate is checked against native output before either translator adopts it.</li>
 </ul>
 

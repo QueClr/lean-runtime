@@ -15,7 +15,7 @@ The verdict needs three things:</p>
 {{svg:lb-verdict}}
 <figcaption>Figure 1. Three outcomes of a verdict.
 Each confirmed bug gets an entry and a <a href="glossary.html#g-case">case</a>.
-Its expected output is native's, or the correct output when native's is nondeterministic.
+Its expected output is native's, or the correct output with native's recorded beside it.
 Its <a href="glossary.html#g-deviation">deviation</a> names the entry.</figcaption>
 </figure>
 <p>Decision (2026-10-03): these bugs are not reported upstream.
@@ -31,7 +31,9 @@ The cases of LB-01, LB-02 and LB-03 are on branch <code>cases-xt</code>, not on 
 <tr id="lb-02"><td>LB-02</td><td>After output on a handle, a read of a whole buffer or more makes glibc drop the pending output.</td><td>It writes the pending bytes first, then reads.</td></tr>
 <tr id="lb-03"><td>LB-03</td><td>An error without a file name (<code>getCurrentDir</code> after its directory was removed) crashes with SIGSEGV instead of raising an <code>IO.Error</code>.</td><td>It raises the <code>IO.Error</code>, with the file name <code>""</code>.</td></tr>
 <tr id="lb-13"><td>LB-13</td><td>After <code>main</code> returns, a pool task enqueued when no pool worker is left never runs.
-Its effects are lost, and a wait on it hangs.</td><td>The task runs, and a wait on it returns (<code>sched</code>, branch <code>sched-1</code>). Both judges confirmed it on 2026-10-03; its entry and its case are not in the repository yet.</td></tr>
+Its effects are lost, and a wait on it hangs.</td><td>The task runs, and a wait on it returns (<a href="sched.html#exit">sched</a>).
+Both judges confirmed it on 2026-10-03.
+Its cases are <code>tasks/late_*</code>, with three controls that follow native.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

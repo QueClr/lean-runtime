@@ -1,0 +1,6 @@
+sync dep of b done
+a ran
+main got a
+sync dep of b2 done
+c ran
+main saw c finished

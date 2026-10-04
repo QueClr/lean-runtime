@@ -1,0 +1,5 @@
+id = "get_in_sync_task"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime sched-1 (item 8: object.cpp:1034), 2026-10-03"
+streams = "separate"

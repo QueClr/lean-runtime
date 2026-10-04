@@ -1,0 +1,5 @@
+id = "pure_bind_io_dep"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review RS1S-01 of lean-runtime sched-1 (a Task.bind variant of probes/PureChainIoDep.lean), 2026-10-03"
+streams = "separate"

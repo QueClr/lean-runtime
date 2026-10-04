@@ -9,25 +9,30 @@ publish = false
 name = "lean_runtime"
 path = "src/lib.rs"
 
-# The default build has no dependencies. The `io` layer makes its system calls
-# through vetted crates, so that the crate itself stays free of `unsafe`:
-# rustix (the FILE model's descriptor calls, the clock) and nix (process-level
-# libc calls). The requirements are carets compatible with leanrs's offline
-# registry (nix 0.31.3, rustix 1.1.4), with only the features io/ uses; leanrs
-# resolves them in its own workspace. lean-runtime's own builds and lean2rr's
-# use Cargo.lock and cargo's local registry cache, offline (`cargo build
-# --offline --locked --features io`; `cargo fetch --locked` once fills the
-# cache).
+# The default build has no dependencies. The optional layers make their
+# system calls and stack switches through vetted crates, so that the crate
+# itself stays free of `unsafe`:
+# - `io`: rustix (the FILE model's descriptor calls, the clock) and nix
+#   (process-level libc calls);
+# - `sched`: corosensei (decisions Q5 and O2), with its default features
+#   (mmap'd stacks with a guard page, and unwinding across the switch).
+# The requirements are carets compatible with leanrs's offline registry (nix
+# 0.31.3, rustix 1.1.4, corosensei 0.3.4), with only the features the crate
+# uses; leanrs resolves them in its own workspace. lean-runtime's own builds
+# and lean2rr's use Cargo.lock and cargo's local registry cache, offline
+# (`cargo build --offline --locked --features io,sched`; `cargo fetch
+# --locked` once fills the cache).
 [dependencies]
 rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "stdio", "system", "termios", "time"] }
 nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "process", "signal"] }
+corosensei = { version = "0.3.4", optional = true }
 
 [features]
 default = []
 # OS-level IO mirroring Lean's C runtime (files, handles, standard streams).
 io = ["dep:rustix", "dep:nix"]
 # The deferred task scheduler, promises and Std.Sync.
-sched = []
+sched = ["dep:corosensei"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
 # CONTRIBUTING.md). The default build is unsafe-free.
 unsafe-fast = []
@@ -38,3 +43,10 @@ unsafe-fast = []
 name = "io_cases"
 harness = false
 required-features = ["io"]
+
+# tests/sched-driver: the tasks/ and sync/ cases as Rust programs over
+# `sched`, with the glue a translator provides (`cargo test -p
+# sched-driver`). The benchmarks are packages of their own.
+[workspace]
+members = ["tests/sched-driver"]
+exclude = ["benches"]

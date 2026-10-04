@@ -14,7 +14,8 @@ translators must reproduce it.
 - optional `<id>.files/`: the starting directory tree, copied into the
   working directory before the run;
 - `<id>.out`, `<id>.err` and `<id>.code` hold the stdout, stderr and exit code
-  of the native build, recorded by `scripts/cases.py expect`, which builds
+  of the native build (for a Lean bug, the correct outcome; see `native`
+  below), recorded by `scripts/cases.py expect`, which builds
   natively with Lean 4.34.0 and requires identical results over 5 runs
   (a `schedule_dependent` case records every outcome seen: the most frequent
   as `<id>.out/.err/.code`, the others as `<id>.altK.out/.err/.code`, all of
@@ -22,6 +23,13 @@ translators must reproduce it.
 - a translator checks its own builds with
   `scripts/cases.py check --exe-dir DIR`, where `DIR/<id>` is its executable
   for each case.
+
+A program case whose behaviour is a confirmed Lean bug (`docs/lean-bugs.md`)
+expects the correct outcome in `<id>.out/.err/.code`, written by hand, and
+records native Lean's in its `.toml` as `native = { stdout = "…", stderr =
+"…", code = "…" }` (`code` as in `<id>.code`: a status, or `timeout` for a
+hang), beside `deviations` naming the `LB-nn`; `scripts/cases.py expect`
+then checks native against `native` and leaves the expected files alone.
 
 **`row`**: one function call, as a TOML `[[row]]` table in
 `<area>/<area>.rows.toml`:
@@ -94,7 +102,7 @@ Written in `<id>.toml` for programs and inline for rows:
 | `files` | For IO cases: the expected directory tree after the run, with each file's SHA-256 |
 | `streams` | `"separate"` (default) or `"merged"` (stderr into stdout, to observe the order between the two) |
 | `schedule_dependent` | Optional `true` when native Lean has more than one outcome depending on thread timing. The case records the dominant native outcome (the one every measured native run took); the `.toml` comment says what the other outcome is. A translator showing the other outcome shows another native schedule, not a semantic error |
-| `expect` | Optional `{ hang = N }` (N seconds, about 3 to 5) for a program that natively never exits. The output produced before the timeout is compared; the code is `timeout`. Each run starts in its own process group, which the runner kills by its id, never by name |
+| `expect` | Optional `{ hang = N }` (N seconds, about 3 to 5) for a program that natively never exits. The output produced before the timeout is compared; the code is `timeout`. In a case with `native`, `hang` only bounds the run (native's, and a translator's): the expected code is the corrected one in `<id>.code`. Each run starts in its own process group, which the runner kills by its id, never by name |
 
 ## How a case runs
 

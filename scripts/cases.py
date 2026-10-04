@@ -16,6 +16,11 @@ output, and check a translator's executables against it.
 A requested CASE that no case has is reported as `NO CASE <id>` and fails
 the command.
 
+A case whose <id>.toml has `native = { stdout = ..., stderr = ...,
+code = ... }` (beside `deviations` naming an LB-nn of docs/lean-bugs.md)
+expects the correct outcome, written by hand: `expect` checks that native
+still gives `native`, and leaves the expected files alone.
+
 Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
 ("separate" or "merged": stderr into stdout) and optionally
@@ -141,6 +146,19 @@ def cmd_expect(ns):
                 print(f"NONDETERMINISTIC {case.stem}: {len(distinct)} different results in {ns.runs} runs"
                       " (mark it schedule_dependent to record every outcome)")
                 ok = False
+                continue
+            native = meta(case).get("native")
+            if native is not None:
+                # A Lean bug (LB-nn): the expected files are the correct
+                # outcome, written by hand; native's is in `native`.
+                want = (native.get("stdout", "").encode(), native.get("stderr", "").encode(),
+                        str(native.get("code", "0")))
+                if distinct != [want]:
+                    print(f"NATIVE CHANGED {case.stem}: got " + ", ".join(
+                        f"code {c} stdout {o!r} stderr {e!r}" for o, e, c in distinct))
+                    ok = False
+                else:
+                    print(f"native confirmed {case.stem}: code {want[2]} x{len(runs)}")
                 continue
             # The most frequent outcome is the primary one; others are <id>.altK.*
             distinct.sort(key=lambda r: -runs.count(r))

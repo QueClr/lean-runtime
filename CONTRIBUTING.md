@@ -16,8 +16,11 @@ once.
 ## Code
 
 - **No `unsafe` in the default build.** Anything that needs `unsafe` comes
-  from a vetted external crate: `nix` or `rustix` for system calls, a
-  coroutine crate for task switching.
+  from a vetted external crate: `nix` or `rustix` for system calls,
+  corosensei for task switching. What no crate offers safely stays in each
+  translator's glue, behind a contract the crate states and upholds: so far
+  `sched::Glue::suspend` (one dereference of a coroutine's yielder) and the
+  SIGSEGV handler of Lean's stack-overflow report (`docs/sched.md`).
 - **`unsafe-fast`.** Every `unsafe` item has its own `#[allow(unsafe_code)]` (the crate root denies it under this feature). An implementation behind this feature must:
   - have the same observable behaviour as the safe one, which stays;
   - have an entry in `UNSAFE.md` with a written proof;
@@ -26,15 +29,15 @@ once.
   The tests run both configurations.
 - **Signatures on views and plain data.** No function here owns, allocates
   or frees a Lean value of either translator.
-- **Builds.** Offline and with no nightly features. The default build and
-  `sched` have no dependencies, and a plain `rustc --crate-type rlib` build of
-  them must work (one translator does not use cargo for them). `io` depends on
-  rustix and nix, whose build scripts plain rustc cannot run, so it is built
-  with cargo: `cargo build --offline --locked --features io` works from a
-  clean checkout, the versions pinned by the committed `Cargo.lock` and the
-  crates taken from cargo's local registry cache (`cargo fetch --locked` fills
-  it once; `scripts/check.sh` says so when a crate is missing). Nothing is
-  vendored in the repository.
+- **Builds.** Offline and with no nightly features. The default build has
+  no dependencies, and a plain `rustc --crate-type rlib` build of it must
+  work (one translator does not use cargo for it). `io` depends on rustix and
+  nix, whose build scripts plain rustc cannot run, and `sched` on
+  corosensei, so they are built with cargo: `cargo build --offline --locked
+  --features io,sched` works from a clean checkout, the versions pinned by
+  the committed `Cargo.lock` and the crates taken from cargo's local registry
+  cache (`cargo fetch --locked` fills it once; `scripts/check.sh` says so
+  when a crate is missing). Nothing is vendored in the repository.
 - **Dependencies.** Requirements are carets compatible with leanrs's offline
   registry, which leanrs resolves in its own workspace (it ignores
   `Cargo.lock`), with only the features the crate uses. Before adding a

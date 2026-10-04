@@ -15,9 +15,10 @@ again.
 
 Every confirmed bug has:
 - an entry below;
-- a case in `tests/cases/` whose `expected` is native's output (or, when
-  native is nondeterministic, the correct output), with `deviations` naming
-  the entry.
+- a case in `tests/cases/` with `deviations` naming the entry, whose
+  `expected` is native's output, or the correct output with native's
+  recorded in a `native` field (rows; program cases such as LB-13's; also
+  when native is nondeterministic).
 
 Each translator also lists it among its intended differences. The owner's
 decision (2026-10-03): these bugs are not reported upstream. They are
@@ -77,6 +78,19 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Translators | lean2rr: plan §10, "Runtime"; leanrs: DV18 (a) |
 | Upstream | Not reported (owner: record only) |
 | Verdict | leanrs-side judge, 2026-10-03 |
+
+### LB-13: a pool task enqueued after `main` once no standard worker is left never runs
+
+| Field | Content |
+|---|---|
+| Summary | After `main` returns, a default-priority (pool) task enqueued once no standard worker exists never runs: it stays `waiting`, its effects are lost (exit 0), and an `IO.wait`/`Task.get` on it from any task hangs the process. This includes tasks created by a dedicated task after `main`, and dependents (`mapTask`/`bindTask`) of a dedicated task that finishes after `main` |
+| Where | `src/runtime/object.cpp` (v4.34.0): `spawn_worker` returns at once during shutdown (831-833, commit 380dd9e, 2023); `enqueue_core` either spawns a worker or notifies an idle one (805-806), and with no worker neither does anything; a live worker exits only when the queue is empty and shutdown has begun, so it drains queued work (839-845), skipping the throttle during shutdown (857-858, PR #12052); `handle_finished` re-enqueues dependents through `enqueue_core` (938-950); `wait_for`'s pool-size increase spawns nothing (1036-1043); `~task_manager` joins the standard workers, then waits for the dedicated ones (972-988, #7958); called by `lean_finalize_task_manager` (1129-1134) after `main`. No path runs such a task: its only consumers are standard workers, none exists, and none can be created. 380dd9e's early return protects `m_std_workers` while the destructor joins it (976-977): a memory-safety consequence of joining threads instead of detaching them, with no stated decision to drop tasks |
+| Why it is a bug | `Task.get`'s documentation (Init/Core.lean): when a pool task waits, "the maximum threadpool size is temporarily increased by one while waiting so as to ensure the process cannot be deadlocked by threadpool starvation"; a pool task waiting for a late task deadlocks exactly so. `IO.asTask`/`mapTask` (Init/System/IO.lean): "started eagerly … will run even if the last reference to the task is dropped"; the late task never starts and its write is lost. Shutdown intends to finish work: #7958 waits on dedicated tasks "instead of exiting forcefully"; live workers drain the queue; #12094 / PR #12052 fixed a hang of that drain as a bug. The outcome is an accident of thread history: the same late task runs when an unrelated pool task is still busy |
+| Native repro | Lean 4.34.0, 100 ms sleeps, deterministic (10 of 10 runs per case, and 3 of 3 for each judge): a dedicated task enqueues a pool task after `main` returned: it never runs (`tasks/late_task_after_main`; the judges' LateWrite: exit 0, its file never written); a dependent of a dedicated task that finishes after `main` never runs (`tasks/late_dependent_of_dedicated`); a dedicated or a pool task that waits for such a task hangs the process after `main returns` (`tasks/late_wait_dedicated`, `tasks/late_wait_pool`). Controls that follow native: a pool task's own late child runs (`tasks/late_pool_child_runs`), so does a dedicated task's late dedicated child (`tasks/late_dedicated_child_runs`), and the program finishes if `main` waits for the dedicated task (`tasks/main_waits_dedicated_child`). Probes: lean-runtime coordination `judge/rs1s-02/` |
+| Our behaviour | After `main` returns, Lean's shutdown flag is set (`IO.checkCanceled` is true in tasks, as natively), and the exit waits until no task is queued or running: a pool task enqueued during shutdown, by any task or by a dependency that finishes, gets a worker and runs, and a wait on it returns. Dedicated tasks run to completion, as natively. A task whose dependency never finishes (an unresolved promise, a cycle) is not waited for, as natively. The cases expect this outcome and record native's in `native` |
+| Translators | lean2rr: plan §10, "Runtime"; leanrs: no DV (its tasks run at creation, chapter 05 D30, so late tasks already run; it lists LB-13 as a judged bug it does not exhibit) |
+| Upstream | Not reported (owner: record only). Related: #7958, #12094 / PR #12052, commit 380dd9e |
+| Verdict | lean2rr-side judge, 2026-10-03; leanrs-side judge confirms |
 
 ## Limits
 

@@ -1,0 +1,5 @@
+id = "wait_any_own_dep"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review RS1S-17 of lean-runtime sched-1 (probe WaitAnyOwnDep.lean), 2026-10-04"
+streams = "separate"

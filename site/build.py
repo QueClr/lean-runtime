@@ -75,7 +75,7 @@ MAX_WORDS = 25
 # Lean bugs that lean-bugs.html describes before docs/lean-bugs.md has their
 # entry. When the entry lands, the page's "not in docs/lean-bugs.md yet"
 # becomes stale: update the page and remove the id here.
-PENDING_LB = {"LB-13"}
+PENDING_LB = set()
 
 # Branches that status.html (and other pages) call in progress, each with a
 # file that only that branch adds. When the file is in the checkout, the
@@ -83,7 +83,6 @@ PENDING_LB = {"LB-13"}
 # fresh clone and after the branch is deleted.
 IN_FLIGHT = {
     "io-2": "src/io/process.rs",
-    "sched-1": "docs/sched.md",
     "cases-xt": "tests/cases/refs/lost_update.lean",
 }
 

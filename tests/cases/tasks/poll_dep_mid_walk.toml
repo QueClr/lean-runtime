@@ -1,0 +1,5 @@
+id = "poll_dep_mid_walk"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review RS1S-16 of lean-runtime sched-1 (probe WaitDepMidWalk.lean), 2026-10-04"
+streams = "separate"

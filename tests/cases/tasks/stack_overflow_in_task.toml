@@ -1,0 +1,5 @@
+id = "stack_overflow_in_task"
+area = "tasks"
+lean_version = "4.34.0"
+source = "shared-runtime decisions, checklist for the sched/ step (stack overflow in a task); lean-runtime sched batch 1"
+streams = "separate"

@@ -1,0 +1,3 @@
+task finished before resolve: false
+task got 42
+dropped promise: true

@@ -1,0 +1,6 @@
+id = "task_waits_own_dep"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review round 4 of lean-runtime sched-1 (probe TaskWaitsOwnDep.lean), 2026-10-04"
+streams = "separate"
+expect = { hang = 3 }

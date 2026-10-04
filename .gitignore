@@ -1,6 +1,6 @@
 /target
 /vendor
-# Only the crate's own lock file is committed (it pins io's dependencies).
+# Only the crate's own lock file is committed (it pins the dependencies).
 Cargo.lock
 !/Cargo.lock
 __pycache__/

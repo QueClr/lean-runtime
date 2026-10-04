@@ -1,0 +1,4 @@
+task tries: false
+main tries its own lock: false
+main unlocks
+task has the lock

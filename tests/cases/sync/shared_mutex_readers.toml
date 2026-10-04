@@ -1,0 +1,5 @@
+id = "shared_mutex_readers"
+area = "sync"
+lean_version = "4.34.0"
+source = "lean-runtime sched batch 1 (Std.Sync on the scheduler); after lean2rr tests/runtime/RtSyncMutex.lean"
+streams = "separate"

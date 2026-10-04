@@ -1,0 +1,3 @@
+`Task.get` called from a `(sync := true)` task
+dependent got some 5
+main done

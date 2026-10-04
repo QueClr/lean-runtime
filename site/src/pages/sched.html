@@ -2,7 +2,7 @@
 <p class="lead"><code>sched</code> (feature <code>sched</code>) is Lean 4.34.0's task manager on one OS thread.
 Tasks are <a href="glossary.html#g-deferred">deferred</a> and run as coroutines.</p>
 
-<div class="note"><p>The scheduler is on branch <code>sched-1</code>; it is not on main yet.
+<div class="note"><p>The scheduler came with batch <code>sched-1</code>.
 The task model is a decision of 2026-10-03 (Q5).
 It has deferred tasks, polling yield points and Lean's exit behaviour, and it switches stacks through corosensei.
 Neither translator adopts <code>sched</code> before <a href="#sched-io">sched-io</a> lands.</p></div>
@@ -34,7 +34,7 @@ It must finish the task before the task's value is needed.
   <li><strong>An <a href="glossary.html#g-yield-point">effect point</a>.</strong> At an output, a flush, a process spawn or an exit, a task queued 5 ms ago or more goes first.
     Natively, a worker would have run it by then.</li>
   <li><strong>Polling.</strong> The program asks for the task's state again after a sleep, or 1000 times without one.</li>
-  <li><strong><code>main</code> returns.</strong> <code>finish</code> runs the rest, as <code>lean_finalize_task_manager</code> does.</li>
+  <li><strong><code>main</code> returns.</strong> <code>finish</code> runs the rest, as <code>lean_finalize_task_manager</code> does, with one fix (<a href="#exit">Exit</a>).</li>
 </ul>
 <p>A pure task that the program drops before it starts never runs: Lean deletes it.</p>
 
@@ -111,7 +111,7 @@ So <code>while !(← IO.hasFinished t) do pure ()</code> ends, as it does native
 <ul>
   <li><code>IO.Promise.new</code>, <code>resolve</code> and the drop of an unresolved promise follow Lean.
     Only the first resolution stores a value.</li>
-  <li><code>sched::sync</code> has Lean's <code>BaseMutex</code>, <code>Condvar</code>, <code>BaseRecursiveMutex</code> and <code>BaseSharedMutex</code>.</li>
+  <li><a href="repo:src/sched/sync.rs"><code>sched::sync</code></a> has Lean's <code>BaseMutex</code>, <code>Condvar</code>, <code>BaseRecursiveMutex</code> and <code>BaseSharedMutex</code>.</li>
   <li><code>Std.Channel</code>, <code>Barrier</code>, <code>Semaphore</code> and the rest of <code>Std.Sync</code> are Lean code over these and promises.
     They need nothing more.</li>
 </ul>
@@ -119,11 +119,16 @@ So <code>while !(← IO.hasFinished t) do pure ()</code> ends, as it does native
 <h2 id="exit">Exit</h2>
 <ol>
   <li><code>main</code> returns.</li>
-  <li><code>finish</code> sets Lean's shutdown flag, runs the remaining tasks, and waits for every other context.</li>
+  <li><code>finish</code> sets Lean's shutdown flag and runs the remaining tasks.
+    It waits until no task is queued or running, and no context but <code>main</code>'s is left.</li>
   <li>The glue flushes the streams (<a href="io.html#exit">io's exit order</a>) and exits.</li>
 </ol>
 <p>So a runaway task keeps the process alive, as natively.
-A task enqueued after <code>main</code> returns also runs; natively it can be lost (<a href="lean-bugs.html#lb-13">LB-13</a>).</p>
+Dedicated tasks run to completion, as natively.
+A task whose dependency never finishes, such as an unresolved promise, is not waited for.</p>
+<p>A pool task enqueued after <code>main</code> returns also runs.
+Natively it is lost once no pool worker is left (<a href="lean-bugs.html#lb-13">LB-13</a>).</p>
+<p><code>IO.Process.exit</code>, also from a task, exits at once: no task is waited for.</p>
 
 <h2 id="suspend">The unsafe steps in the glue</h2>
 <p>lean-runtime stays <code>forbid(unsafe_code)</code>.
@@ -136,8 +141,9 @@ So each translator's glue does one raw-pointer dereference, in <code>Glue::suspe
     unsafe { (*s.yielder()).suspend(()) }
 }</code></pre>
 <ul>
-  <li><strong>The proof.</strong> <code>docs/sched.md</code> (branch <code>sched-1</code>) states it in full, with seven invariants (S1 to S7).
-    Each invariant names the code that keeps it.</li>
+  <li><strong>The proof.</strong> <a href="repo:docs/sched.md">docs/sched.md</a> states it in full, with seven invariants (S1 to S7).
+    Each invariant names the code that keeps it.
+    leanrs's two checkers found it sound as documented (2026-10-04).</li>
   <li><strong>The checks.</strong> Miri cannot run corosensei's stack switch.
     So the argument rests on review, runtime assertions, the driver's integration tests, and AddressSanitizer runs by hand.</li>
   <li><strong>The glue's duties.</strong> The dereference stays in <code>suspend</code>; the pointer is not kept; scheduler functions run only on stacks that the scheduler knows.</li>
@@ -164,7 +170,7 @@ The scheduler publishes the running context's stack bounds for that handler.</p>
 <h2 id="plans">Plans</h2>
 <h3 id="sched-io">sched-io: cooperative blocking IO</h3>
 <p>Agreed by both projects (2026-10-03).
-It is its own batch, after sched-1 merges.
+It is its own batch, the next one for <code>sched</code>.
 Neither translator adopts <code>sched</code> before it lands.</p>
 <ul>
   <li>When tasks exist, reads and writes on pipes, FIFOs and child stdio are tried without blocking.
@@ -200,4 +206,7 @@ The timing session will measure:</p>
   <li>the memory that pooled stacks keep.</li>
 </ul>
 
-<p class="more">Detail: <code>docs/sched.md</code> and <code>src/sched/</code> on branch <code>sched-1</code> (not on main yet); the program cases in <a href="repo:tests/cases/README.md">tests/cases/</a> <code>tasks/</code>.</p>
+<p class="more">Detail: <a href="repo:docs/sched.md">docs/sched.md</a>, and <a href="repo:src/sched/mod.rs">src/sched/</a>:
+<a href="repo:src/sched/task.rs">task.rs</a>, <a href="repo:src/sched/ctx.rs">ctx.rs</a>, <a href="repo:src/sched/env.rs">env.rs</a> and <a href="repo:src/sched/sync.rs">sync.rs</a>.
+The program cases are in <a href="repo:tests/cases/README.md">tests/cases/</a> <code>tasks/</code> and <code>sync/</code>.
+Their Rust twins are in <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a>.</p>

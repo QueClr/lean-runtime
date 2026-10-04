@@ -1,0 +1,4 @@
+two readers inside: tryWrite false, tryRead true
+readers leave
+writer entered
+after: tryWrite true
