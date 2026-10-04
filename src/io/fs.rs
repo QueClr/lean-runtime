@@ -139,7 +139,7 @@ pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
 /// `ENAMETOOLONG`, ...), is `mk_file_not_found_error`: `noFileOrDirectory path
 /// 2 ""`, with `realpath`'s own code as the modelled `errno`. A success leaves
 /// it at `EINVAL` when glibc's walk called `readlink` on a component that is
-/// not a symbolic link ([`walk_reads_non_link`]; leanrs review F2).
+/// not a symbolic link (`walk_reads_non_link`; leanrs review F2).
 pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoError> {
     let path = c_path(p)?;
     match std::fs::canonicalize(path) {
