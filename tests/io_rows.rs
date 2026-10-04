@@ -1472,6 +1472,139 @@ fn io_get_random_bytes() {
     );
 }
 
+/// The modelled `errno`: a `getLine` whose check finds the error indicator
+/// set reports the code C's `errno` holds then, which later operations change:
+/// every failure, and four successes (`realPath`'s `EINVAL` walk, a `false`
+/// `isTty`, a `false` `tryLock`, a flush of read-ahead that cannot seek back);
+/// the libuv-based rows clear it; a task's is its own. From leanrs's
+/// `io_modelled_errno` (`local/follow-native`; compiled Lean v4.34.0-rc1,
+/// leanrs's A820; leanrs review F2).
+#[test]
+fn io_modelled_errno() {
+    let d = setup("errno");
+    let k = std::cell::Cell::new(0);
+    let code_after = |act: &dyn Fn()| -> String {
+        k.set(k.get() + 1);
+        let f = p(&d, &format!("e{}.txt", k.get()));
+        fs::write(&f, "line1\n").unwrap();
+        let h = open(&f, FsMode::Read).unwrap();
+        assert!(put(&h, "x").is_err());
+        act();
+        desc(&get_line(&h).unwrap_err())
+    };
+    let ebadf = r#"InvalidArgument(None, 9, "bad file descriptor")"#;
+    let einval = r#"InvalidArgument(None, 22, "invalid argument")"#;
+    assert_eq!(code_after(&|| ()), ebadf);
+    assert_eq!(
+        code_after(&|| drop(real_path(b"/usr/bin").unwrap())),
+        einval
+    );
+    assert_eq!(code_after(&|| drop(real_path(b"/usr/..").unwrap())), einval);
+    assert_eq!(code_after(&|| drop(real_path(b"/").unwrap())), ebadf);
+    assert_eq!(code_after(&|| drop(real_path(b".").unwrap())), ebadf);
+    let probe = p(&d, "probe.txt");
+    fs::write(&probe, "x").unwrap();
+    assert_eq!(
+        code_after(&|| assert!(!open(&probe, FsMode::Read).unwrap().is_tty())),
+        r#"IllegalOperation(25, "inappropriate ioctl for device")"#
+    );
+    let lock = p(&d, "lock.txt");
+    let a = open(&lock, FsMode::Write).unwrap();
+    a.lock(true).unwrap();
+    assert_eq!(
+        code_after(&|| assert!(!open(&lock, FsMode::Write).unwrap().try_lock(true).unwrap())),
+        r#"ResourceExhausted(None, 11, "resource temporarily unavailable")"#
+    );
+    drop(a);
+    assert_eq!(
+        code_after(&|| drop(lfs::create_dir(b".").unwrap_err())),
+        r#"AlreadyExists(None, 17, "file already exists")"#
+    );
+    assert_eq!(code_after(&|| drop(read_dir(".").unwrap())), ebadf);
+    // the rows Lean runs through libuv's `uv_fs_*` clear it to 0
+    let zero = r#"OtherError(0, "Unknown system error 0")"#;
+    assert_eq!(
+        code_after(&|| {
+            lfs::metadata(probe.as_bytes()).unwrap();
+        }),
+        zero
+    );
+    assert_eq!(
+        code_after(&|| {
+            lfs::symlink_metadata(probe.as_bytes()).unwrap();
+        }),
+        zero
+    );
+    let rm = p(&d, "rm.txt");
+    assert_eq!(
+        code_after(&|| {
+            fs::write(&rm, "x").unwrap();
+            lfs::remove_file(rm.as_bytes()).unwrap();
+        }),
+        zero
+    );
+    let link = p(&d, "link.txt");
+    assert_eq!(
+        code_after(&|| lfs::hard_link(probe.as_bytes(), link.as_bytes()).unwrap()),
+        zero
+    );
+    // a task's (a thread's) `errno` is its own
+    assert_eq!(
+        code_after(&|| {
+            std::thread::spawn(|| drop(real_path(b"/usr/bin").unwrap()))
+                .join()
+                .unwrap();
+        }),
+        ebadf
+    );
+}
+
+/// A flush of standard input from a pipe gives the read-ahead back without
+/// the seek, which fails with `ESPIPE`; the flush succeeds and C's `errno`
+/// keeps `ESPIPE` (compiled Lean v4.34.0-rc1: `getLine`'s report after it is
+/// `unsupported operation (error code: 29, invalid seek)`). From leanrs's
+/// `io_modelled_errno_stdin_flush` (leanrs review F2).
+#[test]
+fn io_modelled_errno_stdin_flush() {
+    if child_case().as_deref() == Some("pipe") {
+        let f = std::env::var("IO_TEST_FILE").unwrap();
+        let h = open(&f, FsMode::Read).unwrap();
+        assert!(put(&h, "x").is_err());
+        let i = Handle::stdin();
+        get_line(&i).unwrap();
+        i.flush().unwrap();
+        report(&[desc(&get_line(&h).unwrap_err())]);
+    }
+    let d = setup("errno-stdin");
+    let f = p(&d, "r.txt");
+    fs::write(&f, "line\n").unwrap();
+    let mut c = Command::new(std::env::current_exe().expect("test binary path"));
+    c.args([
+        "io_modelled_errno_stdin_flush",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1",
+    ])
+    .env(CHILD_VAR, "pipe")
+    .env("IO_TEST_FILE", &f);
+    let out = {
+        c.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut proc = c.spawn().expect("child test process");
+        proc.stdin
+            .take()
+            .expect("stdin pipe")
+            .write_all(b"abc\ndef\n")
+            .unwrap();
+        proc.wait_with_output().expect("child output")
+    };
+    assert_eq!(
+        results(&out),
+        [r#"UnsupportedOperation(29, "invalid seek")"#]
+    );
+}
+
 /// `get_random_bytes_uninit` fills all of its uninitialized bytes.
 #[test]
 fn io_get_random_bytes_uninit() {

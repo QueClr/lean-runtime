@@ -20,7 +20,7 @@
 //! buffers, `setCurrentDir`'s C string, `getCurrentDir` without a file name).
 
 use super::env::PATH_MAX;
-use super::error::{set_errno, IoError, ENAMETOOLONG, ERANGE};
+use super::error::{set_errno, IoError, EINVAL, ENAMETOOLONG, ERANGE};
 use super::ByteSink;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
@@ -137,10 +137,16 @@ pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
 /// resolution without a buffer, so the length is checked here. Every failure,
 /// whatever the `errno` (`ENOENT`, `EACCES`, `ELOOP`, `ENOTDIR`,
 /// `ENAMETOOLONG`, ...), is `mk_file_not_found_error`: `noFileOrDirectory path
-/// 2 ""`.
+/// 2 ""`, with `realpath`'s own code as the modelled `errno`. A success leaves
+/// it at `EINVAL` when glibc's walk called `readlink` on a component that is
+/// not a symbolic link ([`walk_reads_non_link`]; leanrs review F2).
 pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoError> {
-    match std::fs::canonicalize(c_path(p)?) {
+    let path = c_path(p)?;
+    match std::fs::canonicalize(path) {
         Ok(r) if r.as_os_str().len() < PATH_MAX => {
+            if walk_reads_non_link(path) {
+                set_errno(EINVAL);
+            }
             out.extend_from_slice(r.as_os_str().as_bytes());
             Ok(())
         }
@@ -153,6 +159,65 @@ pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoEr
             Err(IoError::file_not_found(p))
         }
     }
+}
+
+/// Whether glibc's `realpath` (`stdlib/canonicalize.c`) calls `readlink` on a
+/// component that is not a symbolic link while it resolves `path`, which
+/// leaves `errno` at `EINVAL` when it succeeds. It walks from `/`, or from the
+/// working directory for a relative path (whose own components it does not
+/// read): `.` is dropped, `..` goes back one component without a `readlink`,
+/// every other component is read, a symbolic link's target replacing it (from
+/// `/` when the target is absolute). Called after `realpath` succeeded; a
+/// failing `readlink` other than `EINVAL` (a race) stops the walk. From
+/// leanrs's `rt/leanrs_rt/src/io/fs.rs` (`local/follow-native`).
+fn walk_reads_non_link(path: &Path) -> bool {
+    use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::{Component, PathBuf};
+    let mut dest = if path.is_absolute() {
+        PathBuf::from("/")
+    } else {
+        match std::env::current_dir() {
+            Ok(d) => d,
+            Err(_) => return false,
+        }
+    };
+    let comps = |p: &Path| -> Vec<OsString> {
+        p.components()
+            .filter_map(|c| match c {
+                Component::Normal(n) => Some(n.to_os_string()),
+                Component::ParentDir => Some(OsString::from("..")),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut rest: VecDeque<OsString> = comps(path).into();
+    let mut links = 0;
+    while let Some(c) = rest.pop_front() {
+        if c == ".." {
+            dest.pop();
+            continue;
+        }
+        dest.push(&c);
+        match std::fs::read_link(&dest) {
+            Ok(target) => {
+                links += 1;
+                if links > 40 {
+                    return false;
+                }
+                dest.pop();
+                if target.is_absolute() {
+                    dest = PathBuf::from("/");
+                }
+                for t in comps(&target).into_iter().rev() {
+                    rest.push_front(t);
+                }
+            }
+            Err(e) if e.raw_os_error() == Some(EINVAL) => return true,
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// `System.FilePath.readDir` (`lean_io_read_dir`, `opendir` then `readdir`):
