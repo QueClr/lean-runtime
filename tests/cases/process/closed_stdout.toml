@@ -3,3 +3,6 @@ area = "process"
 lean_version = "4.34.0"
 source = "lean2rr tests/runtime/RtProcessClosedFd.lean (with .pipe)"
 streams = "separate"
+# No twin: the case starts the program with a closed standard descriptor, which a Rust twin's
+# entry (`lang_start`) reopens on /dev/null before `main` (leanrs DV19), where a translator's
+# entry does not (tests/io2_cases.rs).

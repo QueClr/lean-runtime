@@ -4,6 +4,7 @@ lean_version = "4.34.0"
 source = "leanrs DV15 (b) (lean_always_assert on the template's length, io.cpp lean_io_create_tempdir); LB-16 (docs/lean-bugs.md; lean2rr-side judge, leanrs-side judge confirms, 2026-10-04)"
 streams = "separate"
 deviations = { lean2rr = "LB-16", leanrs = "LB-16" }
-# `expected` is native's assertion abort (status 134). The correct behaviour, which both
-# translators give, is the system's answer for the over-long path (ENAMETOOLONG, no file name),
-# the alternative outcome temp_long_dir.alt1.*.
+native = { stdout = "before\n", stderr = "LEAN ASSERTION VIOLATION\nFile: /home/runner/work/lean4/lean4/src/runtime/io.cpp\nLine: 1334\nPATH_MAX >= strlen(path) + file_pattern_size + 1\nlibc++abi: terminating due to uncaught exception of type lean::unreachable_reached: 'unreachable' code was reached\n", code = "134" }
+# `expected` (the .out, .err and .code files) is the correct outcome, which both translators
+# give: the system's answer for the over-long path (ENAMETOOLONG, no file name). Native's outcome
+# is `native`, an assertion abort (status 134).

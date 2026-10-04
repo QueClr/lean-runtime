@@ -1,0 +1,10 @@
+id = "read_after_write"
+area = "io"
+lean_version = "4.34.0"
+source = "LB-02 (docs/lean-bugs.md; lean2rr-side judge, 2026-10-03), leanrs DV20 (a); lean2rr tests/runtime/RtReadAfterWrite.lean"
+streams = "separate"
+deviations = { leanrs = "DV20 (a)", lean2rr = "LB-02" }
+native = { stdout = "F: error: invalid argument (error code: 9, bad file descriptor); contents \"\"\nA: error: invalid argument (error code: 9, bad file descriptor); contents \"0123\"\nG: read \"0123456789\"; contents \"0123456789\"\nS: read \"3456\"; contents \"abc3456789\"\nerror: invalid argument (error code: 9, bad file descriptor)\n", stderr = "", code = "0" }
+# `expected` (the .out, .err and .code files) is the correct outcome, which both translators
+# give: the pending output written first (from lean2rr's build, by hand). Native's outcome is
+# `native`: the pending bytes lost.

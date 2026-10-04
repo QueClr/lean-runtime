@@ -28,12 +28,17 @@ A program case whose behaviour is a confirmed Lean bug (`docs/lean-bugs.md`)
 expects the correct outcome in `<id>.out/.err/.code`, written by hand, and
 records native Lean's in its `.toml` as `native = { stdout = "…", stderr =
 "…", code = "…" }` (`code` as in `<id>.code`: a status, or `timeout` for a
-hang), beside `deviations` naming the `LB-nn`; `scripts/cases.py expect`
-then checks native against `native` and leaves the expected files alone.
-The Lean-bug cases of io-2 (LB-03, LB-14 to LB-17) still use the older
-form, to be moved to `native` later (leanrs review LRIO2-F4): native's
-outcome in `<id>.out/.err/.code` and the correct one as `<id>.alt1.*`,
-which alone `check` accepts (`deviations` below).
+hang, with `expect = { hang = N }` to bound the run), beside `deviations`
+naming the `LB-nn`; `scripts/cases.py expect` then checks native against
+`native` (`NATIVE CHANGED` if it differs) and leaves the expected files
+alone. Where native's wrong outcome is also nondeterministic, the case has
+`hand_written = true` instead of `native`, and `expect` skips it
+(`refs/lost_update`). `check` accepts the expected files and the case's
+alternatives `<id>.altK.*`, which for such a case are other correct
+outcomes, never native's wrong one: both commands fail a case whose
+`native` equals its expected files or an alternative (`NATIVE EXPECTED`),
+and a case whose `deviations` name an `LB-nn` without `native` or
+`hand_written` (`OLD FORM`).
 
 **`row`**: one function call, as a TOML `[[row]]` table in
 `<area>/<area>.rows.toml`:
@@ -102,8 +107,10 @@ Written in `<id>.toml` for programs and inline for rows:
 | `id`, `area` | Unique name and area |
 | `lean_version` | The Lean version of the native build that produced the expected values (4.34.0) |
 | `source` | Where the case came from: a finding id and the project that found it, plus file:line where there is one |
-| `normalize` | Optional list of `regex -> replacement` applied to both outputs before comparing (pids, times, addresses) |
-| `deviations` | Optional documented translator deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "plan §10 ..." }`. The expected value stays compiled Lean's; a listed deviation is the only difference allowed. A row whose deviation is an `LB-nn` that the crate itself follows expects the Lean definition's result instead and records native's outcome in `native`. A program case with `deviations` and no `native` field keeps native's outcome in `<id>.out/.err/.code` and the deviating one as `<id>.alt1.*`. Where a deviation names a Lean bug (`LB-nn`), `check` accepts only the alternatives, so a regression to native's bug fails; where none does (a translator's or the shared runtime's own deviation, native being right: `LIO2-05`, `LIO2-06` of the coordination notes), native's outcome passes too |
+| `normalize` | Optional list of `"regex -> replacement"` rules (Python `re`, multi-line mode, on bytes), applied in order to stdout and stderr of every run before recording or comparing (pids, times, addresses, native's backtrace lines) |
+| `deviations` | Optional documented deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "LB-03" }`. Where one names a Lean bug (`LB-nn`), the expected value is the correct one and native's is in `native` (rows and programs alike). Where none does (a translator's or the shared runtime's own deviation, native being right: leanrs's `DVnn`, `LIO2-05` and `LIO2-06` of the coordination notes), the expected value stays compiled Lean's, a program case keeps the deviating outcome as `<id>.alt1.*`, written by hand, and `check` accepts both |
+| `native` | With a `deviations` naming an `LB-nn`: native Lean's outcome, `{ stdout, stderr, code }` for a program, `{ expected, … }` for a row |
+| `hand_written` | Optional `true` for a Lean bug whose native outcome is nondeterministic: the expected files are the correct outcome, written by hand, and `expect` skips the case |
 | `files` | For IO cases: the expected directory tree after the run, with each file's SHA-256 |
 | `streams` | `"separate"` (default) or `"merged"` (stderr into stdout, to observe the order between the two) |
 | `schedule_dependent` | Optional `true` when native Lean has more than one outcome depending on thread timing. The case records the dominant native outcome as `<id>.*` and each other native outcome seen as `<id>.altK.*`, and `check` accepts any of them; the `.toml` comment says what they are and how often each was seen. An outcome possible natively but never seen is named in the comment and not accepted (`tasks/dropped_pure_task`): a translator showing it shows another native schedule, not a semantic error |

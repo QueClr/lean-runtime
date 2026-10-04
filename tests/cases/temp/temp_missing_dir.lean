@@ -2,7 +2,7 @@
 `mkdtemp` fail with `ENOENT`, which io.cpp decodes without a file name
 (`decode_uv_error(ret, nullptr)`), and the decoder dereferences the null name: native crashes
 (SIGSEGV, status 139, stdout lost). LB-03: both translators give the error with the empty file
-name instead (the alternative outcome). -/
+name instead (the expected outcome). -/
 def main : IO Unit := do
   IO.println "before"
   try

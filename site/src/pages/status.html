@@ -16,6 +16,7 @@ The file system, the environment, the clock, the debug primitives and the startu
 A Rust twin for each of its program cases; LB-14 to LB-17 and their cases.</td></tr>
 <tr><td><code>semantics-3</code></td><td><code>String.Pos.Raw.set</code>, <code>ByteArray.validateUTF8</code>, the toolchain's build facts, and the text functions of IP addresses.
 The libm ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> on every target.</td></tr>
+<tr><td><code>cases-xt</code></td><td>Program cases from lean2rr's cross-test of leanrs's fixtures, cases for LB-01, LB-02 and LB-03, and cases for two decisions (DV5, DV10).</td></tr>
 <tr><td><code>cases-tasks-1</code></td><td>Program cases for tasks and for two io findings, recorded natively; <code>scripts/cases.py</code> runs every case under a memory cap.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
@@ -26,8 +27,21 @@ No timing session has run yet.</p>
 <thead><tr><th>Work</th><th>What</th><th>State</th></tr></thead>
 <tbody>
 <tr><td><code>sched-io</code></td><td>Cooperative blocking IO for pipes and child processes (<a href="sched.html#sched-io">details</a>).</td><td>Agreed (2026-10-03). Its own batch, the next one for <code>sched</code>. A gate: neither translator adopts <code>sched</code> before it lands.</td></tr>
-<tr><td><code>cases-xt</code></td><td>Program cases from lean2rr's cross-test of leanrs's fixtures, cases for LB-01, LB-02 and LB-03, and cases for two decisions (DV5, DV10).</td><td>Branch, not merged.</td></tr>
-<tr><td>Event loop and network</td><td>The event loop and timers, signals, and the network: TCP, UDP, DNS, interface addresses.</td><td>Planned for later.</td></tr>
+<tr><td>Event loop and network</td><td>The event loop and timers, signals, and the network: TCP, UDP, DNS, interface addresses.</td><td>In progress: the event loop, timers and signals in <code>sched-io</code>; the network in <code>net-1</code>, on top of it.</td></tr>
+</tbody></table></div>
+<p id="superseded">Superseded: the math batch, which was to replace glibc's libm functions with a Rust library and add machine-specific variants.
+The owner decided that glibc stays (Rust's standard library calls it), and that machine-specific work is not a priority (2026-10-04).</p>
+
+<h2 id="adoption">Adoption</h2>
+<p>Each translator adopts the merged batches one at a time.
+It moves its pin only after its own suite passes.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Translator</th><th>Adopted</th><th>In adoption</th><th>Next</th></tr></thead>
+<tbody>
+<tr><td>leanrs</td><td><code>semantics-1</code> (its batch 7).</td><td><code>semantics-2</code> (its batch 8), with its out-of-memory end (leanrs's D35).</td><td><code>io-1</code> and <code>io-2</code>.
+<code>sched</code> waits for <code>sched-io</code>.</td></tr>
+<tr><td>lean2rr</td><td>None yet.</td><td><code>semantics-1</code>: the switch is merging.
+Step 2, the <code>Nat</code>, <code>Int</code> and array rules of <code>semantics-2</code>: in progress.</td><td><code>io</code> and <code>sched</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="coverage">Coverage</h2>
@@ -40,13 +54,14 @@ The other 453 need shared code.</p>
 <tr><td>2026-10-03</td><td>8823ad0 (semantics-1)</td><td class="num">227 of 453 (50%)</td><td class="num">364 of 453 (80%)</td></tr>
 <tr><td>2026-10-04</td><td>39a8d66 (with semantics-2 and io-1)</td><td class="num">313 of 453 (69%)</td><td class="num">364 of 453 (80%)</td></tr>
 <tr><td>2026-10-04</td><td>with sched-1</td><td class="num">348 of 453 (77%)</td><td class="num">365 of 453 (81%)</td></tr>
-<tr><td>2026-10-04</td><td>30cfbcf (with io-2), and semantics-3</td><td class="num">403 of 453 (89%)</td><td class="num">405 of 453 (89%)</td></tr>
+<tr><td>2026-10-04</td><td>30cfbcf (with io-2)</td><td class="num">394 of 453 (87%)</td><td class="num">405 of 453 (89%)</td></tr>
+<tr><td>2026-10-04</td><td>3fe3a22 (with semantics-3)</td><td class="num">403 of 453 (89%)</td><td class="num">405 of 453 (89%)</td></tr>
 </tbody></table></div>
 <figure class="fig">
 {{svg:status-coverage}}
-<figcaption>Figure 1. Coverage per area, as of 2026-10-04: main at 30cfbcf, and semantics-3.
+<figcaption>Figure 1. Coverage per area, as of 2026-10-04: main at 3fe3a22, with semantics-3.
 The longest bar is 110 symbols.
-"In progress" is 2 symbols with an item on a branch that is not merged.
+"In progress" is 2 symbols with an item on a branch that is not merged (<code>quirks-1</code>).
 Three Task/Promise symbols have no crate item: <code>Task.pure</code>, <code>Promise.result?</code> and <code>getOrBlock!</code>.
 Each translator's glue makes them over <code>sched</code>.
 Point at a bar to see its numbers.</figcaption>
@@ -81,7 +96,9 @@ Point at a bar to see its numbers.</figcaption>
 </tbody></table>
 </div>
 </details>
-<p>The coverage script lives in the projects' coordination notes, outside this repository.
+<p>Since the count with io-2, the script also finds two kinds of item it missed before.
+These are the <code>UV.System</code> queries, whose comments name libuv functions, and the getters of the standard streams.
+The coverage script lives in the projects' coordination notes, outside this repository.
 Run it again after each merge.</p>
 
 <p class="more">Detail: <a href="repo:README.md">README.md</a> ("Status"), <a href="repo:src/io/mod.rs">src/io/mod.rs</a>, and <a href="repo:docs/sched.md">docs/sched.md</a>.</p>

@@ -1,5 +1,6 @@
-//! The io program cases (`tests/cases/io/*.lean`) on the model: each case has
-//! a twin here, a Rust function making the same calls through
+//! The io program cases (`tests/cases/io/*.lean`) on the model: each case
+//! (but `borrow_with_ref_struct`, which tests only what a translator
+//! generates; see its `.toml`) has a twin here, a Rust function making the same calls through
 //! `lean_runtime::io` as the case's Lean program makes through Lean's
 //! runtime, with the little a translator's glue adds (`IO.println` is one
 //! `putStr` of the line and `\n`; `IO.FS.readFile` and `writeFile` are their
@@ -9,10 +10,10 @@
 //!
 //! The test runs `scripts/cases.py check` (the checker translators use) on
 //! wrappers that start this binary as each case's twin, so every twin's
-//! stdout, stderr and exit code must equal native Lean 4.34.0's recorded
-//! outcome, or a documented alternative (LB-02, LB-03). The twins whose cases
-//! live in another branch until it merges are listed in `PENDING` and
-//! reported as pending; a missing case of any other twin fails the run.
+//! stdout, stderr and exit code must equal the case's expected outcome:
+//! native Lean 4.34.0's, or the correct one where native is wrong (LB-02,
+//! LB-03 in `docs/lean-bugs.md`; native's is then in the case's `native`
+//! field). A twin whose case is missing fails the run (`NO CASE`).
 //!
 //! The binary runs without libtest (`harness = false`): as a twin it writes
 //! only what the program writes. It is each case's twin when started under
@@ -371,7 +372,8 @@ fn rewind_serves_buffer(args: &[String]) -> R<()> {
     println(&format!("rest: {}", quote(&get_line(&h)?)))
 }
 
-/// LB-02's case (`io/read_after_write`): the alternative outcome.
+/// LB-02's case (`io/read_after_write`): the correct outcome, which the case
+/// expects.
 fn read_after_write(args: &[String]) -> R<()> {
     let t = &args[0];
     let w = open("f.txt", FsMode::Write)?;
@@ -408,7 +410,8 @@ fn read_after_write(args: &[String]) -> R<()> {
     println(&r)
 }
 
-/// LB-03's case (`io/error_without_file_name`): the alternative outcome.
+/// LB-03's case (`io/error_without_file_name`): the correct outcome, which
+/// the case expects.
 fn error_without_file_name(args: &[String]) -> R<()> {
     let d = format!("gone-{}", args.len());
     lfs::create_dir(d.as_bytes())?;
@@ -566,6 +569,70 @@ fn realpath_errno(args: &[String]) -> R<()> {
     Ok(())
 }
 
+/// `fresh name`: an empty file, then an append handle on it.
+fn fresh(name: &str) -> R<Handle> {
+    write_file(name, "")?;
+    open(name, FsMode::Append)
+}
+
+/// The case `io/handle_release_order` (cross-test XT-1): a caller releases
+/// the dead handles it lent to a call after the call, last argument first
+/// (each variable at its first occurrence; one passed to an owned parameter
+/// first is the callee's to release). A handle's buffered text reaches the
+/// file when its last reference goes.
+fn handle_release_order(args: &[String]) -> R<()> {
+    let s = args;
+    // `put3 (a b c : IO.FS.Handle) s`: all borrowed
+    let put3 = |a: &Handle, b: &Handle, c: &Handle| -> R<()> {
+        a.put_str(s[0].as_bytes())?;
+        b.put_str(s[1].as_bytes())?;
+        c.put_str(s[2].as_bytes())
+    };
+    let a = fresh("o1.txt")?;
+    let b = open("o1.txt", FsMode::Append)?;
+    let c = open("o1.txt", FsMode::Append)?;
+    put3(&a, &b, &c)?;
+    drop(c);
+    drop(b);
+    drop(a);
+    println(&format!("put3: {}", read_file("o1.txt")?))?;
+    let w = fresh("o2.txt")?;
+    let h1 = open("o2.txt", FsMode::Append)?;
+    let h2 = open("o2.txt", FsMode::Append)?;
+    // `put4 w h1 h2 h1`
+    w.put_str(s[0].as_bytes())?;
+    h1.put_str(s[1].as_bytes())?;
+    h2.put_str(s[2].as_bytes())?;
+    h1.put_str(s[3].as_bytes())?;
+    drop(h2);
+    drop(h1);
+    drop(w);
+    println(&format!("put4 w h1 h2 h1: {}", read_file("o2.txt")?))?;
+    let x = fresh("o3.txt")?;
+    let y = open("o3.txt", FsMode::Append)?;
+    // `own3 x y x`: `a` owned (kept in a reference until `own3` returns),
+    // `b` and `c` borrowed; the caller then releases `y`, and `x` last
+    let own3 = |a: Handle, b: &Handle, c: &Handle| -> R<()> {
+        let r = a; // `IO.mkRef a`
+        b.put_str(s[1].as_bytes())?;
+        c.put_str(s[2].as_bytes())?;
+        r.put_str(s[0].as_bytes())
+    };
+    own3(x.clone(), &y, &x)?;
+    drop(y);
+    drop(x);
+    println(&format!("own3 x y x: {}", read_file("o3.txt")?))?;
+    let a = fresh("o4.txt")?;
+    let b = open("o4.txt", FsMode::Append)?;
+    let c = open("o4.txt", FsMode::Append)?;
+    // `apply3 put3 a b c`: `put3._boxed` releases after the call the same way
+    put3(&a, &b, &c)?;
+    drop(c);
+    drop(b);
+    drop(a);
+    println(&format!("apply3 put3: {}", read_file("o4.txt")?))
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -591,13 +658,8 @@ const TWINS: &[(&str, Twin)] = &[
     ("lock_exit", lock_exit),
     ("lock_during_read", lock_during_read),
     ("realpath_errno", realpath_errno),
+    ("handle_release_order", handle_release_order),
 ];
-
-/// Twins whose cases are in another branch (cases-xt) until it merges: they
-/// are checked when their case is in the tree, and listed as pending (not
-/// requested) otherwise. Every other twin's case must exist: `cases.py
-/// check` fails with `NO CASE <id>`.
-const PENDING: &[&str] = &["read_after_write", "error_without_file_name"];
 
 /// The twin named by `argv[0]`'s file name, if any.
 fn twin_name(argv0: &[u8]) -> Option<&'static str> {
@@ -646,21 +708,11 @@ fn main() {
     for (id, _) in TWINS {
         std::os::unix::fs::symlink(&exe, dir.join(id)).unwrap();
     }
-    let has_case =
-        |id: &str| std::path::Path::new(&format!("{root}/tests/cases/io/{id}.lean")).exists();
-    let mut requested = Vec::new();
-    for (id, _) in TWINS {
-        if PENDING.contains(id) && !has_case(id) {
-            println!("PENDING {id}: its case is not in the tree yet");
-        } else {
-            requested.push(*id);
-        }
-    }
     let status = std::process::Command::new("python3")
         .arg(format!("{root}/scripts/cases.py"))
         .args(["check", "--exe-dir"])
         .arg(&dir)
-        .args(&requested)
+        .args(TWINS.iter().map(|(id, _)| *id))
         .env("LEAN_RUNTIME_NO_CAP", "1")
         .status()
         .expect("python3 scripts/cases.py");

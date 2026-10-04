@@ -139,24 +139,25 @@ So the oracle reads its inputs at run time.</p>
   <li>A case that natively never ends records the output before its timeout.</li>
   <li><code>scripts/cases.py check --exe-dir DIR</code> runs a translator's build of each case and compares it with the recorded files.</li>
   <li>Each run starts in a fresh directory, with an empty environment, pipes for the three streams, a memory cap and a CPU-time limit.</li>
-  <li>There are 96 program cases.
-    Per area: <code>io/</code> 20, <code>process/</code> 19, <code>streams/</code> 4, <code>sync/</code> 4, <code>tasks/</code> 28, <code>temp/</code> 7, <code>time/</code> 3, <code>uvsys/</code> 11.</li>
+  <li>There are 111 program cases, in these areas:
+    <ul class="areas"><li><code>clock/</code> 1</li><li><code>cse/</code> 1</li><li><code>debug/</code> 3</li><li><code>folding/</code> 3</li><li><code>io/</code> 25</li><li><code>panics/</code> 1</li><li><code>process/</code> 19</li><li><code>refs/</code> 1</li><li><code>streams/</code> 4</li><li><code>sync/</code> 4</li><li><code>tasks/</code> 28</li><li><code>temp/</code> 7</li><li><code>time/</code> 3</li><li><code>uvsys/</code> 11</li></ul></li>
 </ul>
 <p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
-Usually its expected output stays native's, and the deviation's outcome is also allowed.
-When native's outcome is a <a href="lean-bugs.html">Lean bug</a>, the case may expect the correct outcome instead.
-It then records native's outcome in a <code>native</code> field, which <code>cases.py expect</code> checks (LB-13's cases do).
-The Lean-bug cases of io-2 keep native's outcome and add the correct one as an alternative.
-For them, <code>check</code> accepts the alternative only, so a return of the bug fails.</p>
+For a translator's own deviation, the expected output stays native's, and the deviation's outcome is also allowed.
+When native's outcome is a <a href="lean-bugs.html">Lean bug</a>, the case expects the correct outcome instead.
+It records native's outcome in a <code>native</code> field, which <code>cases.py expect</code> checks.
+<code>check</code> does not accept native's outcome there, so a return of the bug fails.</p>
 
 <h2 id="twins">Rust twins</h2>
 <p>A <a href="glossary.html#g-twin">twin</a> is a Rust program that makes the same calls through lean-runtime as the case's Lean program makes through Lean's runtime.
 It adds only what a translator's glue adds.</p>
 <ul>
-  <li><code>tests/io_cases.rs</code> has a twin for each io case.
+  <li><code>tests/io_cases.rs</code> has a twin for each case of the first io batch.
     It runs <code>cases.py check</code> on them, the same checker that the translators use.</li>
-  <li><code>tests/io2_cases.rs</code> does the same for the cases of the second io batch.
-    <a href="../tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code> and <code>sync/</code> case over <code>sched</code>, with a complete example of the glue.</li>
+  <li><code>tests/io2_cases.rs</code> does the same for the cases of the second io batch, and for the <code>debug/</code>, <code>clock/</code> and <code>panics/</code> cases.
+    <a href="../tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code>, <code>sync/</code> and <code>refs/</code> case over <code>sched</code>, with a complete example of the glue.</li>
+  <li>A few cases have no twin, because they test what a translator generates, for example whether its compiler folds a libm call.
+    Their <code>.toml</code> says why.</li>
   <li>So the crate is checked against native output before either translator adopts it.</li>
 </ul>
 
@@ -179,6 +180,7 @@ It adds only what a translator's glue adds.</p>
 <h2 id="check">The check before each commit</h2>
 <p><code>scripts/check.sh</code> runs before every commit:</p>
 <ul>
+  <li>the site check: the pages are up to date, with no broken link (<code>site/build.py --check</code>);</li>
   <li>build, tests and clippy on the Rust toolchains of both translators, in every feature configuration;</li>
   <li>formatting;</li>
   <li>the plain-rustc builds that one translator uses, with its driver's cfg flags;</li>
@@ -198,7 +200,7 @@ Run it when an <code>unsafe-fast</code> item changes.</p>
   <li>The work starts with a cross-test of the two translators' runtimes.
     Each disagreement is fixed in whichever runtime is wrong.</li>
   <li>Each side runs the other's tests (decision Q9).
-    The cases from the cross-test of leanrs's fixtures are on branch <code>cases-xt</code>.</li>
+    The cases from lean2rr's cross-test of leanrs's fixtures are in <code>folding/</code>, <code>io/</code>, <code>panics/</code> and <code>cse/</code>.</li>
 </ul>
 
 <h2 id="review">Reviews</h2>
@@ -228,7 +230,7 @@ The pairs exist; nothing is timed yet.</p>
     A timing session runs only with the owner's approval.</li>
 </ul>
 
-<p class="more">Detail: <a href="../tests/cases/README.md">tests/cases/README.md</a> (the case format), <a href="../benches/README.md">benches/README.md</a>, <a href="../benches/io/README.md">benches/io/README.md</a>, <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a> ("Tests", "Performance"), <a href="../scripts/check.sh">scripts/check.sh</a>, <a href="../scripts/cases.py">scripts/cases.py</a>.</p>
+<p class="more">Detail: <a href="../tests/cases/README.md">tests/cases/README.md</a> (the case format), <a href="../benches/README.md">benches/README.md</a>, <a href="../benches/io/README.md">benches/io/README.md</a>, <a href="../docs/development.md">docs/development.md</a> ("Tests", "Performance"), <a href="../scripts/check.sh">scripts/check.sh</a>, <a href="../scripts/cases.py">scripts/cases.py</a>.</p>
 </main>
 <footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
 Written about 80% to ASD-STE100 (Simplified Technical English).

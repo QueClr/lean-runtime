@@ -3,3 +3,6 @@ area = "time"
 lean_version = "4.34.0"
 source = "leanrs validate/io/time_format (probe v4.34.0-rc1, its 4 cases as the .pipe's runs)"
 streams = "separate"
+# No twin: the case tests Lean code a translator compiles (Std.Time's zone rules and TZif reader);
+# its one runtime call, the current time (`io::time`, unit-tested in src/io/time.rs), is compared
+# only for order.

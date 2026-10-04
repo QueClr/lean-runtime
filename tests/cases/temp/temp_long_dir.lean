@@ -2,7 +2,7 @@
 `PATH_MAX`), but Lean's `lean_always_assert(PATH_MAX >= strlen(path) + file_pattern_size + 1)`
 (io.cpp, 1334) fails once `/tmp.XXXXXXXX` is appended: native aborts with `LEAN ASSERTION
 VIOLATION`, status 134 (LB-16). Both translators let the system answer for the path:
-`ENAMETOOLONG`, the alternative outcome. -/
+`ENAMETOOLONG`, the expected outcome. -/
 def main : IO Unit := do
   IO.println "before"
   (← IO.getStdout).flush

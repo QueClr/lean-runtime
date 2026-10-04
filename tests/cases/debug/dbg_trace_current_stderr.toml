@@ -1,0 +1,5 @@
+id = "dbg_trace_current_stderr"
+area = "debug"
+lean_version = "4.34.0"
+source = "DV5 (leanrs deviation), owner's O4 ruling 2026-10-03: dbgTrace prints to the current stderr and continues"
+streams = "separate"

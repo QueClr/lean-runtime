@@ -1,6 +1,7 @@
-//! The io-2 program cases (`tests/cases/{process,temp,uvsys,streams}`) on
-//! the crate: each case has a twin here, a Rust function making the same
-//! calls through `lean_runtime::io` as the case's Lean program makes through
+//! The io-2 program cases (`tests/cases/{process,temp,uvsys,streams}`, and
+//! `io/temp_file_error`), and those of `tests/cases/{debug,clock,panics}`,
+//! on the crate: each case has a twin here, a Rust function making the same
+//! calls through `lean_runtime` as the case's Lean program makes through
 //! Lean's runtime, with what a translator's glue adds (`IO.println` is one
 //! `putStr` of the line and `\n` on the current standard output;
 //! `Handle.readToEnd` reads 1024 bytes at a time and checks UTF-8;
@@ -10,11 +11,13 @@
 //! The test runs `scripts/cases.py check` (the checker translators use) on
 //! hard links of this binary named after each case, so a twin keeps
 //! `argv[0]`, `IO.appPath` and the environment the checker gives it; every
-//! twin's stdout, stderr and exit code must equal native Lean 4.34.0's
-//! recorded outcome, or its documented alternative where native is wrong
-//! (LB-03, LB-14, LB-15, LB-16, LB-17 in `docs/lean-bugs.md`), where safe
-//! code cannot follow it (LIO2-06, the process title in `argv`'s memory) or
-//! where LB-17's fix costs a descriptor (LIO2-05, `pipe_null_two_free`).
+//! twin's stdout, stderr and exit code must equal the case's expected
+//! outcome: native Lean 4.34.0's, or the correct one where native is wrong
+//! (LB-03, LB-14, LB-15, LB-16, LB-17 in `docs/lean-bugs.md`; native's is
+//! then in the case's `native` field), or the documented alternative where
+//! safe code cannot follow native (LIO2-06, the process title in `argv`'s
+//! memory) or where LB-17's fix costs a descriptor (LIO2-05,
+//! `pipe_null_two_free`).
 //!
 //! The binary runs without libtest (`harness = false`).
 
@@ -24,6 +27,8 @@ use std::rc::Rc;
 use lean_runtime::io::process::{self, Child, SpawnArgs, Stdio, StdioConfig};
 use lean_runtime::io::streams::{self, StdStream};
 use lean_runtime::io::{debug, env as lenv, exit, fs as lfs, temp, uvsys, FsMode, Handle, IoError};
+use lean_runtime::semantics::array;
+use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
 
 // ---- the glue a translator adds ----
 
@@ -1277,6 +1282,32 @@ fn temp_missing_dir(_: &[String]) -> R<()> {
         |d| format!("created {d}"),
         |e| format!("dir: {e}"),
     ))?;
+    println("after")
+}
+
+/// `describe` of the case `io/temp_file_error`: `noFileOrDirectory` with
+/// its fields, any other error as its text.
+fn describe_error(e: &IoError) -> String {
+    match e {
+        IoError::NoFileOrDirectory(f, c, m) => {
+            format!("noFileOrDirectory {} {c} {}", quote(f), quote(m))
+        }
+        e => format!("other error: {}", to_string(e)),
+    }
+}
+
+/// LB-03's case `io/temp_file_error` (`TMPDIR` names a missing directory):
+/// the correct outcome, which the case expects.
+fn temp_file_error(args: &[String]) -> R<()> {
+    println(&format!("before {}", args.len()))?;
+    match temp_file() {
+        Ok((_, p)) => println(&format!("temp file {p}"))?,
+        Err(e) => println(&describe_error(&e))?,
+    }
+    match temp_dir() {
+        Ok(p) => println(&format!("temp dir {p}"))?,
+        Err(e) => println(&describe_error(&e))?,
+    }
     println("after")
 }
 
@@ -2637,6 +2668,134 @@ fn group_missing_errno(args: &[String]) -> R<()> {
     println("after")
 }
 
+// ---- debug, clock and allocator cases (cases-xt) ----
+
+/// `@[noinline] def traced (n : Nat) : Nat := dbgTrace s!"trace {n}" fun _ => n + 1`.
+fn traced(n: u64) -> u64 {
+    debug::dbg_trace(format!("trace {n}").as_bytes());
+    n + 1
+}
+
+/// The case `debug/dbg_trace_current_stderr` (DV5): the trace goes to the
+/// current standard error, a buffer inside `IO.withStderr`.
+fn dbg_trace_current_stderr(args: &[String]) -> R<()> {
+    let n = args.len() as u64;
+    eprintln("before")?;
+    let buf: Rc<RefCell<Vec<u8>>> = Rc::default();
+    // `IO.withStderr`: set, run, restore (also on an error)
+    let old = set_stderr(Stream::Buffer(buf.clone()));
+    let r = (|| -> R<u64> {
+        let size = buf.borrow().len() as u64;
+        let v = traced(n + size);
+        println(&format!("value {v}"))?;
+        Ok(v)
+    })();
+    set_stderr(old);
+    let v = r?;
+    println(&format!("captured {}", quote(&text(&buf))))?;
+    let w = traced(v + 1);
+    eprintln(&format!("after {w}"))
+}
+
+/// The case `debug/dbg_sleep` (DV5): `dbgSleep 300` sleeps between the two
+/// clock readings.
+fn dbg_sleep(args: &[String]) -> R<()> {
+    let n = args.len() as u64;
+    eprintln("before sleep")?;
+    let t0 = lenv::mono_ms_now();
+    // `@[noinline] def slept (ms : UInt32) (n : Nat) : Nat := dbgSleep ms fun _ => n + 1`
+    debug::dbg_sleep(300);
+    let v = n + 1;
+    println(&format!("value {v}"))?;
+    let t1 = lenv::mono_ms_now();
+    eprintln("after sleep")?;
+    println(&format!(
+        "slept at least 300 ms: {}",
+        t1.saturating_sub(t0) >= 300
+    ))
+}
+
+/// The case `debug/dbg_stack_trace_continues` (DV5): `dbgStackTrace`
+/// continues without a trace, so the glue calls nothing (the case's
+/// `normalize` drops native's frame lines).
+fn dbg_stack_trace_continues(args: &[String]) -> R<()> {
+    let n = args.len() as u64;
+    eprintln("before")?;
+    println(&format!("value {}", n + 1))?;
+    eprintln("after")
+}
+
+/// The case `clock/mono_clock_origin` (DV10): `IO.monoNanosNow` and
+/// `IO.monoMsNow` count from the boot, as `/proc/uptime` does.
+fn mono_clock_origin(args: &[String]) -> R<()> {
+    let s = read_file("/proc/uptime")?;
+    let up: u64 = s.split('.').next().unwrap_or("").parse().unwrap_or(0);
+    let near = |a: u64, b: u64| a.abs_diff(b) <= 2;
+    let ns = lenv::mono_nanos_now();
+    let ms = lenv::mono_ms_now();
+    println(&format!(
+        "monoNanosNow is the uptime: {}",
+        near(ns / 1_000_000_000, up)
+    ))?;
+    println(&format!("monoMsNow is the uptime: {}", near(ms / 1000, up)))?;
+    println(&format!("arguments {}", args.len()))
+}
+
+/// `lean_internal_panic`: its line on the C `stderr`, then `exit(1)` (or an
+/// abort under `LEAN_ABORT_ON_PANIC`).
+fn internal_panic(p: InternalPanic) -> ! {
+    let mut line = String::new();
+    let _ = p.write_line(&mut line);
+    let _ = Handle::stderr().put_str(line.as_bytes());
+    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
+    let backtrace = std::env::var_os("LEAN_BACKTRACE");
+    let s = PanicSettings::from_env(
+        abort.as_ref().map(|v| v.as_encoded_bytes()),
+        backtrace.as_ref().map(|v| v.as_encoded_bytes()),
+    );
+    match panic::internal_panic_end(s) {
+        PanicEnd::Abort => std::process::abort(),
+        _ => exit::exit(panic::PANIC_EXIT_STATUS),
+    }
+}
+
+/// The case `panics/replicate_overflow`: the allocators' size rules
+/// (`semantics::array`); the size is below 2^64 (`Nat::to_u64`) or `None`.
+/// A size the rules accept is reserved (the translator's allocator; its
+/// failure is `out of memory` too); the case's sizes never get there.
+fn replicate_overflow(args: &[String]) -> R<()> {
+    let n: Option<u64> = args[1].parse().ok();
+    let word = array::WORD_ELEMENT_BYTES;
+    let reserve = |elem: u64, len: usize| {
+        let mut v: Vec<u8> = Vec::new();
+        if v.try_reserve_exact(len.saturating_mul(elem as usize))
+            .is_err()
+        {
+            internal_panic(InternalPanic::OutOfMemory);
+        }
+    };
+    let size = match args[0].as_str() {
+        "replicate" | "replicateNat" | "replicateInt" | "replicateFloat" => {
+            let len = array::replicate_len(n).unwrap_or_else(|p| internal_panic(p));
+            reserve(word, len);
+            len
+        }
+        k @ ("mkEmpty" | "mkEmptyNat" | "byteArray" | "floatArray") => {
+            let elem = if k == "byteArray" {
+                array::BYTE_ELEMENT_BYTES
+            } else {
+                word
+            };
+            let c = array::empty_with_capacity(elem, n.unwrap_or(u64::MAX))
+                .unwrap_or_else(|p| internal_panic(p));
+            reserve(elem, c);
+            0
+        }
+        _ => return println("unknown case"),
+    };
+    println(&size.to_string())
+}
+
 // ---- the twins ----
 
 type Twin = fn(&[String]) -> R<()>;
@@ -2662,6 +2821,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("temp_modes", temp_modes),
     ("temp_missing_dir", temp_missing_dir),
     ("temp_long_dir", temp_long_dir),
+    ("temp_file_error", temp_file_error),
     ("uv_system", uv_system),
     ("uv_limits", uv_limits),
     ("process_title", process_title),
@@ -2688,6 +2848,11 @@ const TWINS: &[(&str, Twin)] = &[
     ("failed_child_order", failed_child_order),
     ("spawn_fds_exhausted", spawn_fds_exhausted),
     ("group_missing_errno", group_missing_errno),
+    ("dbg_trace_current_stderr", dbg_trace_current_stderr),
+    ("dbg_sleep", dbg_sleep),
+    ("dbg_stack_trace_continues", dbg_stack_trace_continues),
+    ("mono_clock_origin", mono_clock_origin),
+    ("replicate_overflow", replicate_overflow),
 ];
 
 fn main() {

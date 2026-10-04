@@ -1,0 +1,7 @@
+id = "panic_once_across_types"
+area = "cse"
+lean_version = "4.34.0"
+source = "lean2rr cross-test XT-6 (leanrs fixture A482 at size 0), 2026-10-03; lean2rr plan §10 'Merging after erasure'"
+streams = "separate"
+# No twin: the case tests what a translator generates (Lean's common-subexpression elimination
+# after type erasure, so the panic prints once); the panic's text is in the rows of panic/.

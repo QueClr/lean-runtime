@@ -3,7 +3,7 @@ without closing the descriptor it opened (process.cpp, `spawn`), which is not cl
 the program it runs has one more descriptor on `/dev/null` per `null` stream (LB-15). The case
 counts the child's descriptors above 2 that name `/dev/null` (their numbers depend on the
 descriptors the parent holds). The shared runtime opens `/dev/null` close-on-exec in the parent
-and `posix_spawn` `dup2`s it, so none leaks (the alternative outcome). -/
+and `posix_spawn` `dup2`s it, so none leaks (the expected outcome). -/
 def script : String :=
   "n=0; for f in /proc/$$/fd/*; do i=${f##*/}; if [ \"$i\" -gt 2 ] && [ \"$(readlink $f)\" = /dev/null ]; then n=$((n+1)); fi; done; echo $n >&2"
 

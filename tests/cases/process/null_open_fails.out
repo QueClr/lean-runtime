@@ -1,8 +1,6 @@
 stdout null:
-  child: written to the parent
-  exit 0
+  spawn failed: resource exhausted (error code: 24, too many open files)
 stdin null:
-  child: read line1
-  exit 0
-parent reads: line2
+  spawn failed: resource exhausted (error code: 24, too many open files)
+parent reads: line1
 handles kept open: true

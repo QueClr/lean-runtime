@@ -60,9 +60,9 @@ See <a href="sched.html#model">sched</a>.</dd>
 <dt id="g-deviation">Deviation</dt>
 <dd>A documented, intended difference from native Lean.
 A case lists it in its <code>deviations</code> field.
-Usually the expected output stays native's, and the deviation's outcome is also allowed.
-When native's outcome is a Lean bug and is nondeterministic, the case expects the correct outcome instead.
-A row for a lifted limit expects the definition's result and keeps native's outcome beside it.
+For a translator's own deviation, the expected output stays native's, and the deviation's outcome is also allowed.
+When native's outcome is a Lean bug, the case expects the correct outcome and keeps native's beside it, in its <code>native</code> field.
+A row for a lifted limit does the same with the definition's result.
 leanrs names its deviations DV<i>n</i>; lean2rr lists them in section 10 of its translation plan.</dd>
 
 <dt id="g-dv">DV<i>n</i></dt>

@@ -1,1 +1,3 @@
 before
+dir: invalid argument (error code: 36, name too long)
+after

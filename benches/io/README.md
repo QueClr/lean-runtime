@@ -21,7 +21,7 @@ the same checksum:
 
 `scripts/check_io_benches.sh [N]` builds both sides and checks that each pair
 prints the same checksum; it times nothing. Timing follows the measurement
-protocol in `CONTRIBUTING.md` ("Performance") and runs only in an
+protocol in `docs/development.md` ("Performance") and runs only in an
 owner-approved session.
 
 ## What a binary does

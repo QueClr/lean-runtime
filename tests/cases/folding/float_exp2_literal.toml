@@ -1,0 +1,12 @@
+id = "float_exp2_literal"
+area = "folding"
+lean_version = "4.34.0"
+source = "leanrs review of the shared crate (exp2(35.74477454358792)), 2026-10-03; lean2rr tests/runtime/RtFloatLibmFold.lean"
+streams = "separate"
+# The operands are literals on purpose (and the same values from argv): the
+# case checks that a translation does not let its compiler fold or rewrite
+# the libm call. The expected bits are glibc 2.39's (aarch64), where these
+# inputs separate glibc's results from the folded or rewritten ones.
+# No twin: the case tests what a translator generates (whether its compiler folds a libm call
+# on a literal operand); the crate's libm functions are checked by the rows and by
+# tests/libm_folding.rs.

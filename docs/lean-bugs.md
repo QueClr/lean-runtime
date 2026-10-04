@@ -16,11 +16,11 @@ again.
 Every confirmed bug has:
 - an entry below;
 - a case in `tests/cases/` with `deviations` naming the entry, whose
-  `expected` is native's output, or the correct output with native's
-  recorded in a `native` field (rows; program cases such as LB-13's; also
-  when native is nondeterministic). io-2's program cases (LB-03, LB-14 to
-  LB-17) keep native's output and give the correct one as `<id>.alt1.*`,
-  which alone `scripts/cases.py check` accepts (to move to `native` later).
+  expected outcome is the correct one, with native's recorded in a `native`
+  field (rows and program cases alike), or, where native is also
+  nondeterministic, `hand_written = true` (LB-01). `scripts/cases.py
+  expect` re-checks native against `native`, and `check` rejects
+  native's wrong outcome (`tests/cases/README.md`).
 
 Each translator also lists it among its intended differences. The owner's
 decision (2026-10-03): these bugs are not reported upstream. They are
@@ -49,7 +49,7 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Summary | A multi-threaded `IO.Ref.get` can undo a concurrent `set`: the ref reverts to its old value after the `set` has returned |
 | Where | `src/runtime/io.cpp`, `lean_st_ref_get` (lines 1459-1484). The value is taken out with `exchange(nullptr)` (1467) and put back with an unconditional `exchange(val)` (1470), which releases whatever a concurrent writer stored meanwhile (1471-1474). `lean_st_ref_set` (1504-1514) stores with a bare `exchange` (1511) |
 | Why it is a bug | Lost data, and not linearizable. io.cpp (1446-1456) says the ref API is thread-safe so that a ref "may be used to communicate data between threads", and `IO.CancelToken` relies on exactly that. Upstream's own analysis (leanprover/stref-veil, "F3") calls it a lost update and a linearizability violation |
-| Native repro | A task does `r.set 1` once while `main` reads `r`; after `IO.wait` on the task, `main` reads 0 in 841 of 2000 trials on a dedicated thread and 13 of 2000 on the pool (0 of 3000 without concurrent reads). A spin `while !(← flag.get) do pure ()` hangs in about half the runs for this reason. Native output is nondeterministic, so the case expects the correct result |
+| Native repro | A task does `r.set 1` once while `main` reads `r`; after `IO.wait` on the task, `main` reads 0 in 841 of 2000 trials on a dedicated thread and 13 of 2000 on the pool (0 of 3000 without concurrent reads). A spin `while !(← flag.get) do pure ()` hangs in about half the runs for this reason. Native output is nondeterministic, so the case expects the correct result, written by hand (`hand_written`). Case: `refs/lost_update` |
 | Our behaviour | Every ref operation is atomic: a completed `set` is seen by every later `get`; `swap` and `modify` are atomic, as in Lean 4.35 |
 | Translators | lean2rr: plan §10, "Runtime"; leanrs: no deviation needed (single-threaded `Rc<RefCell>`) |
 | Upstream | Known and fixed: lean4 PR #14775 (merged 2026-08-14), first released in v4.35.0-rc1; not in v4.34.0 or v4.34.1. Related: #14584 / PR #14585 |

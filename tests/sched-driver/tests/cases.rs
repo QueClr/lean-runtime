@@ -1,12 +1,20 @@
 //! Runs the Rust port (`sched-cases ID`) of every case of
-//! `tests/cases/{tasks,sync}` as `scripts/cases.py check` runs a translator's
-//! executable, and compares its stdout, stderr and exit code with the
-//! recorded native ones (or a recorded alternative of a schedule-dependent
-//! case):
+//! `tests/cases/{tasks,sync,refs}` as `scripts/cases.py check` runs a
+//! translator's executable, and compares its stdout, stderr and exit code
+//! with the case's expected ones: native's, or the correct ones where native
+//! has a Lean bug (LB-01, LB-13), or a recorded alternative of a
+//! schedule-dependent case:
 //! - arguments from `ID.args`, an empty environment plus `LEAN_BACKTRACE=0`
 //!   and `ID.env`, a fresh working directory, stdin from `/dev/null`;
 //! - stdout and stderr as pipes (merged into one with `streams = "merged"`);
 //! - `expect = { hang = N }`: the output seen in N seconds, code `timeout`.
+//!
+//! That is how `scripts/cases.py check` runs a case and what it accepts
+//! (the expected files, then the alternatives `ID.altK.*`), for the fields
+//! these areas use, but for stdin (`cases.py` gives an empty pipe, which
+//! reads as end of file at once, as `/dev/null` does). A case with what this
+//! runner does not implement (`.stdin`, `.pipe`, `.files/`, `normalize`)
+//! fails here instead of being compared differently.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -14,7 +22,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// The areas whose cases run through `sched`.
-const AREAS: &[&str] = &["tasks", "sync"];
+const AREAS: &[&str] = &["tasks", "sync", "refs"];
 
 fn cases_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../cases")
@@ -71,6 +79,19 @@ fn meta(id: &str) -> (Option<u64>, bool) {
 
 fn run(id: &str) -> Outcome {
     let dir = case_dir(id);
+    for f in [".stdin", ".pipe", ".files"] {
+        assert!(
+            !dir.join(format!("{id}{f}")).exists(),
+            "{id}: this runner does not implement {f} (scripts/cases.py does)"
+        );
+    }
+    let toml = std::fs::read_to_string(dir.join(format!("{id}.toml"))).unwrap_or_default();
+    assert!(
+        !toml
+            .lines()
+            .any(|l| l.trim_start().starts_with("normalize")),
+        "{id}: this runner does not implement normalize (scripts/cases.py does)"
+    );
     let args: Vec<String> = std::fs::read_to_string(dir.join(format!("{id}.args")))
         .unwrap_or_default()
         .split_whitespace()
@@ -325,4 +346,5 @@ cases!(
     wait_any_own_dep,
     task_waits_own_dep,
     sync_dep_waits_older,
+    lost_update,
 );

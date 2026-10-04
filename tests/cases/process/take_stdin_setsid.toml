@@ -4,6 +4,7 @@ lean_version = "4.34.0"
 source = "lean-runtime io-2: process.cpp lean_io_process_child_take_stdin (leanrs chapter 05 O8 item 6); LB-14 (docs/lean-bugs.md; lean2rr-side judge, leanrs-side judge confirms, 2026-10-04)"
 streams = "separate"
 deviations = { lean2rr = "LB-14", leanrs = "LB-14" }
-# `expected` is native's: the child takeStdin returns lost the setsid flag, so kill signals the
-# pid alone and the grandchild survives. The correct behaviour, which both translators give, is
-# the alternative outcome take_stdin_setsid.alt1.* (the group is killed in both runs).
+native = { stdout = "takeStdin false: killed 137, grandchild gone\ntakeStdin true: killed 137, grandchild alive\n", stderr = "", code = "0" }
+# `expected` (the .out, .err and .code files) is the correct outcome, which both translators
+# give: the group is killed in both runs. Native's outcome is `native`: the child takeStdin
+# returns lost the setsid flag, so kill signals the pid alone and the grandchild survives.

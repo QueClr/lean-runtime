@@ -1,0 +1,9 @@
+id = "dbg_stack_trace_continues"
+area = "debug"
+lean_version = "4.34.0"
+source = "DV5 (leanrs deviation), owner's O4 ruling 2026-10-03: dbgStackTrace continues; its trace text is dropped"
+streams = "separate"
+# Native prints one `backtrace_symbols` line per frame to stderr, e.g.
+# `./prog(+0x1d222c) [0xb97edcfc222c]` (addresses vary per run); the rule
+# deletes those lines, so a translator that prints no trace passes.
+normalize = ['^.*\+0x[0-9a-f]+\) \[0x[0-9a-f]+\]\n -> ']

@@ -10,27 +10,31 @@ output, and check a translator's executables against it.
       output seen before its timeout and the code "timeout").
 
   scripts/cases.py check --exe-dir DIR [CASE...]
-      Run DIR/<id> (a translator's build of each case) and compare with the
-      recorded expected files.
+      Run DIR/<id> (a translator's build of each case; DIR may be relative)
+      and compare with the recorded expected files.
 
 A requested CASE that no case has is reported as `NO CASE <id>` and fails
 the command.
 
-A case whose <id>.toml has `native = { stdout = ..., stderr = ...,
-code = ... }` (beside `deviations` naming an LB-nn of docs/lean-bugs.md)
-expects the correct outcome, written by hand: `expect` checks that native
-still gives `native`, and leaves the expected files alone.
+`check` accepts <id>.out/.err/.code and the alternatives <id>.altK.*.
 
-A case whose <id>.toml says `hand_written = true` (native is wrong and
-nondeterministic there) is skipped by `expect`: its expected files are the
-correct result, written by hand. A case with `deviations` keeps its
-<id>.altK.* files across `expect` (the correct outcome where native is
-wrong, written by hand); otherwise `expect` rewrites them. For such a case
-whose `deviations` name a Lean bug (a value `LB-nn`, docs/lean-bugs.md),
-with alternatives and no `native` field, `check` accepts only the
-alternatives: a translator that gives native's outcome there has the bug
-back. A deviation that names no Lean bug (a translator's or the shared
-runtime's own, where native is right) keeps native's outcome allowed.
+A Lean bug (`deviations` naming an LB-nn of docs/lean-bugs.md): the
+expected files are the correct outcome, written by hand, and the <id>.toml
+records native's as `native = { stdout = ..., stderr = ..., code = ... }`;
+`expect` checks that native still gives `native` (NATIVE CHANGED if not)
+and leaves the expected files alone. A case whose <id>.toml says
+`hand_written = true` (native is wrong and nondeterministic there, so it
+has no `native`) is skipped by `expect`. Any alternatives of these cases
+are other correct outcomes, never native's wrong one: both commands fail
+a case whose `native` equals its expected files or an alternative (NATIVE
+EXPECTED), and a case whose `deviations` name an LB-nn with neither
+`native` nor `hand_written` (an older form, OLD FORM).
+
+A deviation that names no Lean bug (a translator's or the shared
+runtime's own, native being right: LIO2-nn, DVnn) keeps native's outcome
+in <id>.out/.err/.code and the deviating one as <id>.altK.*, written by
+hand: `expect` keeps the alternatives of a case with `deviations` that is
+not schedule_dependent, and rewrites them otherwise.
 
 Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
@@ -84,9 +88,40 @@ def meta(case):
     t = case.with_suffix(".toml")
     return tomllib.loads(t.read_text()) if t.exists() else {}
 
-def names_lean_bug(m):
-    """Whether one of the case's `deviations` is a Lean bug (`LB-nn`)."""
-    return any(re.match(r"LB-\d+\b", str(v)) for v in m.get("deviations", {}).values())
+def old_form(m):
+    """Whether the case's `deviations` name a Lean bug (`LB-nn`) without a
+    `native` field or `hand_written`: the older form, whose expected files
+    were native's wrong outcome."""
+    names_lean_bug = any(re.match(r"LB-\d+\b", str(v)) for v in m.get("deviations", {}).values())
+    return names_lean_bug and "native" not in m and not m.get("hand_written")
+
+OLD_FORM = ("OLD FORM {}: its deviations name a Lean bug; the expected files must be the correct "
+            "outcome and native's must be in `native` (tests/cases/README.md)")
+
+def accepted(case):
+    """The outcomes `check` accepts, as (stdout, stderr, code): <id>.out/.err/.code,
+    then the alternatives <id>.altK.* (each one whose .code exists)."""
+    stems = [case.stem] + sorted(p.name[:-len(".code")] for p in case.parent.glob(case.stem + ".alt*.code"))
+    return [((case.parent / (s + ".out")).read_bytes(), (case.parent / (s + ".err")).read_bytes(),
+             (case.parent / (s + ".code")).read_text().strip())
+            for s in stems if (case.parent / (s + ".code")).exists()]
+
+def native_of(m):
+    """The case's `native` field (native Lean's outcome where it has a Lean
+    bug) as (stdout, stderr, code), or None."""
+    n = m.get("native")
+    if n is None:
+        return None
+    return (n.get("stdout", "").encode(), n.get("stderr", "").encode(), str(n.get("code", "0")))
+
+def native_expected(case, m):
+    """Whether native's wrong outcome (`native`) is among the accepted ones:
+    a half-migrated Lean-bug case, which would let the bug back in."""
+    nat = native_of(m)
+    return nat is not None and nat in accepted(case)
+
+NATIVE_EXPECTED = ("NATIVE EXPECTED {}: `native` (native's outcome, a Lean bug) equals the expected files "
+                   "or an alternative; they must hold the correct outcome")
 
 def build_native(case, outdir):
     c_file = outdir / (case.stem + ".c")
@@ -172,6 +207,14 @@ def cmd_expect(ns):
         ok = False
     with tempfile.TemporaryDirectory() as d:
         for case in find_cases(ns.cases):
+            if old_form(meta(case)):
+                print(OLD_FORM.format(case.stem))
+                ok = False
+                continue
+            if native_expected(case, meta(case)):
+                print(NATIVE_EXPECTED.format(case.stem))
+                ok = False
+                continue
             if meta(case).get("hand_written"):
                 # Native is wrong and nondeterministic here: the expected
                 # files are the correct result, written by hand.
@@ -185,12 +228,10 @@ def cmd_expect(ns):
                       " (mark it schedule_dependent to record every outcome)")
                 ok = False
                 continue
-            native = meta(case).get("native")
-            if native is not None:
+            want = native_of(meta(case))
+            if want is not None:
                 # A Lean bug (LB-nn): the expected files are the correct
                 # outcome, written by hand; native's is in `native`.
-                want = (native.get("stdout", "").encode(), native.get("stderr", "").encode(),
-                        str(native.get("code", "0")))
                 if distinct != [want]:
                     print(f"NATIVE CHANGED {case.stem}: got " + ", ".join(
                         f"code {c} stdout {o!r} stderr {e!r}" for o, e, c in distinct))
@@ -221,22 +262,27 @@ def cmd_check(ns):
         print(f"NO CASE {name}")
         failed += 1
     for case in find_cases(ns.cases):
-        exe = pathlib.Path(ns.exe_dir) / case.stem
+        # absolute: each run's working directory is a fresh temporary one
+        exe = pathlib.Path(ns.exe_dir).resolve() / case.stem
         if not exe.exists():
             print(f"MISSING {case.stem}")
             failed += 1
             continue
-        out, err, code = run(exe, case)
-        allowed = []
-        for stem in [case.stem] + sorted(p.name[:-len(".code")] for p in case.parent.glob(case.stem + ".alt*.code")):
-            allowed.append(((case.parent / (stem + ".out")).read_bytes(),
-                            (case.parent / (stem + ".err")).read_bytes(),
-                            (case.parent / (stem + ".code")).read_text().strip()))
         m = meta(case)
-        if names_lean_bug(m) and "native" not in m and len(allowed) > 1:
-            # <id>.out is native's wrong outcome (a Lean bug); only the
-            # corrected ones pass
-            allowed = allowed[1:]
+        if old_form(m):
+            print(OLD_FORM.format(case.stem))
+            failed += 1
+            continue
+        if native_expected(case, m):
+            print(NATIVE_EXPECTED.format(case.stem))
+            failed += 1
+            continue
+        allowed = accepted(case)
+        if not allowed or not (case.parent / (case.stem + ".code")).exists():
+            print(f"NO EXPECTED {case.stem}: {case.stem}.code is missing")
+            failed += 1
+            continue
+        out, err, code = run(exe, case)
         want = allowed[0]
         if (out, err, code) in allowed:
             print(f"PASS {case.stem}")

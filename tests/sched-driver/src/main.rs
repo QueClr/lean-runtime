@@ -1,7 +1,7 @@
 //! `sched-cases ID [ARGS...]`, or a link named `ID` to it (for
 //! `scripts/cases.py check --exe-dir`): the Rust port of
-//! `tests/cases/tasks/ID.lean`, run through `lean_runtime::sched` with the
-//! glue a translator writes.
+//! `tests/cases/{tasks,sync,refs}/ID.lean`, run through `lean_runtime::sched`
+//! with the glue a translator writes.
 
 mod cases;
 mod glue;

@@ -13,7 +13,7 @@ checksum:
 with each pair's function and whether it is comparable). The shared parts
 are written by hand: `rust/src/lib.rs` and `native/Bench/Harness.lean`.
 `scripts/check_benches.sh` builds both sides and checks them; it times
-nothing. Timing follows the measurement protocol in `CONTRIBUTING.md`
+nothing. Timing follows the measurement protocol in `docs/development.md`
 ("Performance") and runs only in an owner-approved session.
 
 ## What a binary does

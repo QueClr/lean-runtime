@@ -36,7 +36,7 @@ io = ["dep:rustix", "dep:nix"]
 # The deferred task scheduler, promises and Std.Sync.
 sched = ["dep:corosensei"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
-# CONTRIBUTING.md). The default build is unsafe-free.
+# docs/development.md). The default build is unsafe-free.
 unsafe-fast = []
 
 # The io program cases on the model (tests/io_cases.rs): the binary is also

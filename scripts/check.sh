@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Checks run before every commit: build, test and clippy on the Rust
-# toolchains both translators use, in every feature configuration; the task
-# and sync cases' Rust ports over `sched` (tests/sched-driver); fmt; the
-# plain-rustc build of the dependency-free configuration, which one
-# translator builds without cargo; `sched`'s offline build from Cargo.lock;
-# and, only with LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
+# Checks run before every commit: the site's pages up to date
+# (site/build.py --check); build, test and clippy on the Rust toolchains both
+# translators use, in every feature configuration; the task, sync and refs
+# cases' Rust ports over `sched` (tests/sched-driver); fmt; the plain-rustc
+# build of the dependency-free configuration, which one translator builds
+# without cargo; `sched`'s offline build from Cargo.lock; and, only with
+# LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
 #
 # The host is shared: the heavy steps (cargo test, Miri) run inside a memory
 # cap, `systemd-run --user --scope -p MemoryMax=$LEAN_RUNTIME_MEM` (default
@@ -43,6 +44,11 @@ if ! cargo +"${TOOLCHAINS[0]}" fetch --offline --locked >/dev/null 2>&1; then
   exit 1
 fi
 
+# The site (site/) is built from the repository's files: its pages must be
+# up to date, with no broken link and no warning. Cheap, so it runs first.
+echo "== site/build.py --check"
+python3 site/build.py --check
+
 for tc in "${TOOLCHAINS[@]}"; do
   for f in "${FEATURE_SETS[@]}"; do
     echo "== $tc test features=[${f}]"
@@ -63,8 +69,8 @@ for tc in "${TOOLCHAINS[@]}"; do
   rm -rf "$out"
   echo "== $tc cargo build --offline --locked --features io,sched"
   capped cargo +"$tc" build --offline --locked --quiet --features io,sched
-  # The cases of tests/cases/{tasks,sync} as Rust programs over `sched`, with
-  # a translator's glue, compared with native Lean's outcomes.
+  # The cases of tests/cases/{tasks,sync,refs} as Rust programs over
+  # `sched`, with a translator's glue, compared with the cases' outcomes.
   echo "== $tc test sched-driver"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --offline --locked --quiet -p sched-driver
   echo "== $tc release test sched-driver"
@@ -79,7 +85,7 @@ cargo +"$last" fmt --all --check
 # Miri runs where `unsafe` can be: the unsafe-fast configurations. It is
 # opt-in (LEAN_RUNTIME_MIRI=1): the default build forbids `unsafe`, so Miri
 # checks little there for a large CPU cost on the shared host (owner,
-# 2026-10-04). Run it when an `unsafe-fast` item changes (CONTRIBUTING.md).
+# 2026-10-04). Run it when an `unsafe-fast` item changes (docs/development.md).
 # Tests that call foreign code or switch stacks are marked
 # #[cfg_attr(miri, ignore)].
 if [[ "${LEAN_RUNTIME_MIRI:-}" != 1 ]]; then

@@ -81,9 +81,7 @@ PENDING_LB = set()
 # file that only that branch adds. When the file is in the checkout, the
 # branch is merged and the pages are stale. This needs no git: it works in a
 # fresh clone and after the branch is deleted.
-IN_FLIGHT = {
-    "cases-xt": "tests/cases/refs/lost_update.lean",
-}
+IN_FLIGHT = {}
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
         "source", "track", "wbr"}
@@ -124,8 +122,8 @@ def values():
     for c in cases:
         area = os.path.relpath(c, os.path.join(REPO, "tests/cases")).split(os.sep)[0]
         per_area[area] = per_area.get(area, 0) + 1
-    # "<code>io/</code> 20, ...": two words an area, so the sentence stays short
-    case_areas = ", ".join(f"<code>{html.escape(a)}/</code> {n}" for a, n in sorted(per_area.items()))
+    # one list item an area ("<code>io/</code> 20"), for a list in columns
+    case_areas = "".join(f"<li><code>{html.escape(a)}/</code> {n}</li>" for a, n in sorted(per_area.items()))
     benches = read("benches/benches.toml")
     io_benches = read("benches/io/benches.toml")
     return {

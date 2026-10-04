@@ -1,0 +1,5 @@
+id = "replicate_overflow"
+area = "panics"
+lean_version = "4.34.0"
+source = "lean2rr cross-test XT-5 (leanrs prims panics, row array_replicate_nonscalar), 2026-10-03; lean2rr tests/runtime/RtAllocBigNat.lean"
+streams = "separate"

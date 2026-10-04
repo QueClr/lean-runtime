@@ -1,0 +1,4 @@
+put3: CBA
+put4 w h1 h2 h1: CBDA
+own3 x y x: BCA
+apply3 put3: CBA

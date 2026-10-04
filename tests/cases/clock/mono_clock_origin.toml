@@ -1,0 +1,7 @@
+id = "mono_clock_origin"
+area = "clock"
+lean_version = "4.34.0"
+source = "DV10 (leanrs deviation: clock from process start), owner's O4 ruling 2026-10-03: follow Lean, CLOCK_MONOTONIC"
+streams = "separate"
+# Assumes the machine has not been suspended since boot (CLOCK_MONOTONIC does
+# not count suspended time, /proc/uptime does).

@@ -1,6 +1,6 @@
-//! Rust-level ports of `tests/cases/tasks/*.lean`, line by line, as a
-//! translator's output would read: the same tasks, values and effects in the
-//! same order, and each value dropped where compiled Lean releases it.
+//! Rust-level ports of `tests/cases/{tasks,sync,refs}/*.lean`, line by line,
+//! as a translator's output would read: the same tasks, values and effects in
+//! the same order, and each value dropped where compiled Lean releases it.
 
 use crate::glue::{eprintln, println};
 use crate::lean::*;
@@ -47,6 +47,7 @@ pub fn lookup(id: &str) -> Option<Case> {
         "wait_any_own_dep" => (no_init, wait_any_own_dep),
         "task_waits_own_dep" => (no_init, task_waits_own_dep),
         "sync_dep_waits_older" => (no_init, sync_dep_waits_older),
+        "lost_update" => (no_init, lost_update),
         // Not a Lean program: a Rust panic (a translator's or the runtime's
         // bug) in a task on a context of its own.
         "rust_panic_in_task" => (no_init, rust_panic_in_task),
@@ -1133,6 +1134,56 @@ fn sync_dep_waits_older(args: &[String]) -> u32 {
     );
     sleep(ms[1]);
     eprintln("main done");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// LB-01: a concurrent `IO.Ref.set` is not lost (`tests/cases/refs`). The
+// twin gives the correct outcome, which the case expects (native loses some
+// trials, a different number each run).
+
+// def trial (bound : Nat) : IO Bool := do
+//   let r ← IO.mkRef (0 : Nat)
+//   let t ← IO.asTask (prio := .dedicated) (r.set 1)
+//   let mut i := 0
+//   while i < bound do
+//     if (← r.get) == 1 then break
+//     i := i + 1
+//   let _ ← IO.wait t
+//   return (← r.get) == 0
+fn trial(bound: u64) -> bool {
+    let r = Ref::new(0u64);
+    let r2 = r.clone();
+    let t = as_task(move || r2.set(1), PRIO_DEDICATED);
+    let mut i = 0;
+    while i < bound {
+        if r.get() == 1 {
+            break;
+        }
+        i += 1;
+    }
+    t.get();
+    drop(t);
+    r.get() == 0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let trials := args[0]!.toNat!
+//   let bound := args[1]!.toNat!
+//   let mut lost := 0
+//   for _ in [0:trials] do
+//     if ← trial bound then lost := lost + 1
+//   IO.println s!"lost {lost}"
+fn lost_update(args: &[String]) -> u32 {
+    let trials = to_nat(&args[0]);
+    let bound = to_nat(&args[1]);
+    let mut lost = 0;
+    for _ in 0..trials {
+        if trial(bound) {
+            lost += 1;
+        }
+    }
+    println(&format!("lost {lost}"));
     0
 }
 

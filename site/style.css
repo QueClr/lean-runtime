@@ -94,6 +94,7 @@ main p, main li, main dd { max-width: 46em; }
   margin: 1em 0;
 }
 .toc ul { margin: 0.2em 0; padding-left: 1.2em; columns: 2; column-gap: 2em; }
+ul.areas { columns: 4; column-gap: 2em; }
 
 .note, .rule {
   border-left: 4px solid var(--link);
@@ -172,6 +173,7 @@ footer {
 
 @media (max-width: 700px) {
   .toc ul { columns: 1; }
+  ul.areas { columns: 2; }
   main { padding: 1em 0.9em 2em; }
 }
 

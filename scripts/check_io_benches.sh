@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the io micro-benchmarks (benches/io/README.md), both sides, and checks that every pair
 # prints the same checksum at a small N. It times nothing: timing follows the measurement protocol
-# in CONTRIBUTING.md and runs only in an owner-approved session. The builds run inside the same
+# in docs/development.md and runs only in an owner-approved session. The builds run inside the same
 # memory cap as check.sh's heavy steps.
 set -euo pipefail
 cd "$(dirname "$0")/.."

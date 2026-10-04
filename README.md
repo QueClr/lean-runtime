@@ -60,7 +60,7 @@ has one `unsafe` step, whose soundness argument is in `docs/sched.md`.
 
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
-that order. See `CONTRIBUTING.md`.
+that order. See `docs/development.md`, the rules for implementors.
 
 ## Rules in short
 

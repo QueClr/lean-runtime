@@ -1,0 +1,4 @@
+before 0
+noFileOrDirectory "" 2 "no such file or directory"
+noFileOrDirectory "" 2 "no such file or directory"
+after

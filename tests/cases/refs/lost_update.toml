@@ -1,0 +1,13 @@
+id = "lost_update"
+area = "refs"
+lean_version = "4.34.0"
+source = "LB-01 (docs/lean-bugs.md; lean2rr-side judge, 2026-10-03); upstream lean4 PR #14775, fixed in v4.35.0-rc1"
+streams = "separate"
+deviations = { lean2rr = "LB-01", leanrs = "LB-01" }
+hand_written = true
+# Native Lean 4.34.0 is wrong here and nondeterministic: it loses some of the
+# 200 trials (a different count each run: 5 different counts in 5 runs when
+# this case was written; see docs/lean-bugs.md).
+# So `scripts/cases.py expect` cannot record this case: the expected files
+# (`lost 0`, empty stderr, code 0) were written by hand, and are the correct
+# result, which both translators must give.

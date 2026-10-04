@@ -1,6 +1,6 @@
 /-! `createTempDir` with a temporary directory of 4095 bytes, the longest libuv accepts: Lean's first
 assertion, `lean_always_assert(PATH_MAX >= base_len + 1 + 1)` (io.cpp, 1327), fails: native
-aborts, status 134 (LB-16). Both translators give the system's `ENAMETOOLONG` (the alternative
+aborts, status 134 (LB-16). Both translators give the system's `ENAMETOOLONG` (the expected
 outcome). -/
 def main (args : List String) : IO Unit := do
   IO.println "before"

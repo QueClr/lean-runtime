@@ -90,9 +90,9 @@ pub(crate) struct FileStream {
 /// streams are linked at its head, and the exit walks it from there). Each
 /// slot is a strong reference, held besides the stream's `Handle`s (no
 /// non-owning reference: leanrs's ownership rule S4 forbids std's in
-/// runtime code). Every other reference is let go through [`release`], under this lock, so the
-/// one that leaves the slot alone with it sees a count of 2 and empties the
-/// slot, and the stream closes.
+/// runtime code). Every other reference is let go through [`release`],
+/// under this lock, so the one that leaves the slot alone with it sees a
+/// count of 2 and empties the slot, and the stream closes.
 static OPEN: Mutex<Vec<Arc<FileStream>>> = Mutex::new(Vec::new());
 
 impl Drop for FileStream {
@@ -110,9 +110,14 @@ impl Drop for FileStream {
 /// and the file closes, as Lean's finalizer `fclose`s it, outside the lock
 /// (closing writes pending output, which may wait on a pipe).
 fn release(f: Arc<FileStream>) {
+    // `f` and the open list's slot, which stays while any other reference
+    // does.
+    debug_assert!(Arc::strong_count(&f) >= 2);
     let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
     if Arc::strong_count(&f) == 2 {
-        if let Some(i) = open.iter().rposition(|g| Arc::ptr_eq(g, &f)) {
+        let slot = open.iter().rposition(|g| Arc::ptr_eq(g, &f));
+        debug_assert!(slot.is_some(), "an open file's last reference has its slot");
+        if let Some(i) = slot {
             let slot = open.remove(i);
             drop(open);
             drop(slot);
@@ -154,6 +159,10 @@ pub(crate) fn open_files_newest_first() -> OpenFiles {
 #[derive(Clone, Debug)]
 pub struct Handle(Repr);
 
+/// Every drop of a file's `Handle` takes the [`OPEN`] lock (in
+/// [`release`]), also when other clones remain. Handle drops are rare (a
+/// translator drops one when it frees its Lean handle object), and reads and
+/// writes take only the stream's own lock.
 impl Drop for Handle {
     fn drop(&mut self) {
         if let Repr::File(_) = self.0 {

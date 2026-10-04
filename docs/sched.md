@@ -32,7 +32,7 @@ This file covers:
 
 `sched` depends on corosensei 0.3.4 and is built with cargo, offline, from
 the committed `Cargo.lock` (`cargo build --offline --locked --features
-sched`; CONTRIBUTING.md, "Builds").
+sched`; docs/development.md, "Builds").
 
 ## The model
 
