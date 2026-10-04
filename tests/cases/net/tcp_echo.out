@@ -1,0 +1,15 @@
+listening on a port: true
+peer port matches: true
+client got echo joe
+then <none>
+peer port matches: true
+client got echo mike
+then <none>
+server got ping
+client got pong
+server got <none> after the client's shutdown
+send after shutdown: resource vanished (error code: 32, broken pipe)
+big send ok: true, shutdown ok: true
+server received 16777216
+tryAccept: none
+server still listening on the port: true

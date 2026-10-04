@@ -4,7 +4,8 @@
 //!
 //! The crate holds what does not depend on how a translator represents Lean
 //! values: pure semantics on views and plain data (`semantics`), OS-level IO
-//! (`io`, feature `io`) and the task scheduler (`sched`, feature `sched`).
+//! (`io`, feature `io`), the task scheduler (`sched`, feature `sched`) and
+//! networking on its event loop (`net`, feature `net`).
 //! Each translator keeps its own value representations, memory protocol and
 //! hot paths in its own glue, and calls this crate for the rest.
 //!
@@ -33,6 +34,9 @@ pub mod io;
 
 #[cfg(feature = "sched")]
 pub mod sched;
+
+#[cfg(feature = "net")]
+pub mod net;
 
 /// The Lean version whose runtime this crate mirrors. Every expected value in
 /// the test suite comes from a native build with this version.

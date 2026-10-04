@@ -1,0 +1,10 @@
+id = "keepalive_zero_delay"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe C_KeepAlive (LB-23), l2r-scratch/compare/shared-runtime/judge/net1"
+streams = "separate"
+deviations = { lean2rr = "LB-23", leanrs = "LB-23" }
+native = { stdout = "fresh (no fd) keepAlive 1 0: ok\nfresh bind after keepAlive 1 0: ok\nbound keepAlive 1 0: operation not permitted (error code: 1)\nbound keepAlive 1 0 again: operation not permitted (error code: 1)\nbound keepAlive 0 0: ok\nbound keepAlive 1 1: ok\nbound keepAlive 1 40000 (above Linux's TCP_KEEPIDLE max): invalid argument (error code: 22, invalid argument)\nconnected keepAlive 1 0: operation not permitted (error code: 1)\nconnected keepAlive 1 30: ok\n", stderr = "", code = "0" }
+# `expected` is the correct outcome (the judge's draft LB-23: libuv 1.49's
+# UV_EINVAL, which Lean's docstring names); native's, recorded over 5 runs,
+# is `native`. The 40000 line relies on Linux's MAX_TCP_KEEPIDLE (32767).

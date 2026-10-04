@@ -2,11 +2,12 @@
 # Checks run before every commit: the site's pages up to date
 # (site/build.py --check); build, test and clippy on the Rust toolchains both
 # translators use, in every feature configuration; the Rust ports of the
-# task, sync, refs, taskio and uvloop cases and of the io cases with tasks,
-# over `sched` and `io` (tests/sched-driver); fmt; the plain-rustc
-# build of the dependency-free configuration, which one translator builds
-# without cargo; `sched`'s offline build from Cargo.lock; that every file
-# allowing `unsafe` has its UNSAFE.md entry; and, only with
+# task, sync, refs, taskio, uvloop and net cases and of the io cases with
+# tasks, over `sched`, `io` and `net` (tests/sched-driver); fmt; the
+# plain-rustc build of the dependency-free configuration, which one
+# translator builds without cargo; the optional modules' offline build from
+# Cargo.lock; that every file allowing `unsafe` has its UNSAFE.md entry; and,
+# only with
 # LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
 #
 # The host is shared: the heavy steps (cargo test, Miri) run inside a memory
@@ -21,7 +22,7 @@ if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
   exec flock -s /tmp/leanrs-timing.lock "$0" "$@"
 fi
 TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
-FEATURE_SETS=("" "io,sched" "unsafe-fast" "io,sched,unsafe-fast")
+FEATURE_SETS=("" "io,sched" "net" "unsafe-fast" "io,sched,unsafe-fast")
 
 # Every test run has a deadline (LEAN_RUNTIME_TEST_TIMEOUT seconds, default
 # 3600), so a test that blocks fails the check instead of hanging it. It is
@@ -87,9 +88,9 @@ for tc in "${TOOLCHAINS[@]}"; do
   rustc +"$tc" --edition 2021 --crate-type rlib --crate-name lean_runtime \
     --out-dir "$out" src/lib.rs
   rm -rf "$out"
-  echo "== $tc cargo build --offline --locked --features io,sched"
-  capped cargo +"$tc" build --offline --locked --quiet --features io,sched
-  # The cases of tests/cases/{tasks,sync,refs,taskio,uvloop} and the io
+  echo "== $tc cargo build --offline --locked --features io,sched,net"
+  capped cargo +"$tc" build --offline --locked --quiet --features io,sched,net
+  # The cases of tests/cases/{tasks,sync,refs,taskio,uvloop,net} and the io
   # cases with tasks as Rust programs over `sched` and `io`, with a
   # translator's glue, compared with the cases' outcomes.
   echo "== $tc test sched-driver"

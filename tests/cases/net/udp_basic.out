@@ -1,0 +1,15 @@
+b got (some ping) from a: true
+a got (some pong)
+peer: true
+b got (some connected)
+readable: true
+truncated: (some (a long))
+options set
+send without address: invalid argument (error code: 89, destination address required)
+send with address when connected: already exists (error code: 106, socket is already connected)
+connect twice: already exists (error code: 106, socket is already connected)
+TTL 0: invalid argument (error code: 22, invalid argument)
+option without a descriptor: invalid argument (error code: 9, bad file descriptor)
+name without a descriptor: invalid argument (error code: 9, bad file descriptor)
+peer of an unconnected socket: invalid argument (error code: 107, socket is not connected)
+sockets kept: true true

@@ -51,9 +51,10 @@ There are no entries yet.
 The crate's `unsafe` beyond this file's entries is in vetted dependencies:
 rustix and nix (system calls, feature `io`), corosensei (stack switching,
 `sched`) and signal-hook (signal handlers, its safe API only, `sched`),
-approved by the owner; and io-uring, accepted by leanrs's shared-runtime
+approved by the owner; io-uring, accepted by leanrs's shared-runtime
 coordinator under the owner's delegation of dependency decisions
-(2026-10-04).
+(2026-10-04); and, for the feature `net`, dns-lookup (approved the same
+day) and the `net` features of nix and rustix.
 
 ### io-uring 0.7.13 (tokio-rs), feature `io`
 
@@ -87,6 +88,80 @@ Checked natively: case `io/startup_rings` (the rings' `/proc/self/fdinfo`
 lines, their inodes, the four `anon_inode:[io_uring]` mappings, the polling
 thread) and the descriptor numbers in `io/startup_fd_limit` and
 `io/startup_closed_stdio`.
+
+### dns-lookup 2.1.1 (`net`; approved 2026-10-04, pinned `=2.1.1`)
+
+`net::dns` calls `dns_lookup::getaddrinfo(Some(host), Some(service),
+Some(hints))` and `dns_lookup::getnameinfo(&addr, 0)`, on the crate's two
+lookup threads, and nothing else of the crate. Its dependencies are libc
+(the declarations), socket2 0.6 (`SockAddr`) and cfg-if; windows-sys is for
+Windows only. Audited at 2.1.1 (`src/addrinfo.rs`, `src/nameinfo.rs`,
+`src/err.rs`):
+
+- **`getaddrinfo` and `freeaddrinfo` pair up.** The hints are an all-zero
+  `addrinfo` (null pointers) with the four integer fields set; host and
+  service are `CString`s alive for the call (an interior NUL is an error
+  before the call; Lean's own check lets none through). On failure the
+  function returns the error at once and builds no iterator: glibc leaves
+  `*res` unset and frees its partial list itself, so nothing is freed or
+  leaked. On success the list is owned by `AddrInfoIter`, whose `Drop`
+  calls `freeaddrinfo` once on the list's head, whether the iteration
+  finished, stopped early or met an entry it could not convert; each entry
+  is copied out (`AddrInfo::from_ptr`) before the next pointer is followed,
+  so no entry outlives the list. `net::dns` consumes the iterator on the
+  thread that made it (the crate's `unsafe impl Send/Sync` is not relied on).
+- **Copying an entry's address.** `from_ptr` copies `ai_addrlen` bytes into
+  a `sockaddr_storage` (socket2's `SockAddr::try_init`): in bounds because
+  glibc's entries are `sockaddr_in` or `sockaddr_in6` (16 or 28 bytes, at
+  most 128). An entry of another family is an `Err` item, which `net::dns`
+  skips as Lean does. `ai_canonname` is read only when it is not null, and
+  it is null without `AI_CANONNAME` (the hints' flags are 0): its
+  `.unwrap()` on UTF-8 is never reached.
+- **`getnameinfo`'s buffers.** The host buffer has 1024 bytes and the
+  service buffer 32, each passed with its own length, so glibc never writes
+  past them; on success glibc writes NUL-terminated strings that fit, so
+  `CStr::from_ptr` stays inside the buffers; on failure they are not read.
+  `NI_MAXSERV` is 32; glibc's `NI_MAXHOST` is 1025 (libuv's buffer), so a
+  host name of exactly 1024 bytes fails here with `EAI_OVERFLOW` where libuv
+  gets it: LNET-01, a judged behaviour difference, not a soundness one
+  (`docs/net.md`), kept because a buffer of our own needs `unsafe`. A name
+  that is not UTF-8 is an `io::Error` with error number 0, not a panic;
+  `net::dns` reports it as `EAI_FAIL` where native decodes it lossily:
+  LNET-02, kept because reading the bytes from the C buffer needs `unsafe`.
+- **`EAI_SYSTEM` and `errno`.** `LookupError::new` runs right after the C
+  call, on the same thread, and reads `errno` there
+  (`io::Error::last_os_error`), before any other C call; `net::dns` takes
+  the number back with `raw_os_error` and makes libuv's code of it. For the
+  other codes it calls `gai_strerror`, whose result is a static string,
+  read up to its NUL; its `.unwrap()` on UTF-8 holds for glibc's messages
+  in the C locale, which neither translator's programs leave.
+- **The rest of the crate** (`gethostname`, `lookup_host`, Windows) is not
+  called.
+
+How it is checked: the unit tests of `net` (`src/net/tests.rs`, the sync
+errors and the EAI mapping) and the program cases `dns_localhost` and
+`dns_pending_at_exit` against native Lean, in the debug and release builds
+of `tests/sched-driver`. Miri does not run foreign calls.
+
+The audit holds for socket2 0.6.5 (`SockAddr::try_init`, `as_socket`), the
+version `Cargo.lock` pins under dns-lookup 2.1.1 (whose requirement admits
+`>= 0.6.0, < 0.7`). A consumer that resolves its own lock file (leanrs)
+must pin socket2 to 0.6.5 too, or audit the version it takes.
+
+### nix's `net` feature (`net`)
+
+`net::iface` and `net::tcp` (the link-local scope of an IPv6 connect) call
+`nix::ifaddrs::getifaddrs`, whose iterator walks glibc's list, converts each
+address with `SockaddrStorage::from_raw` (reading `sa_family`, then
+copying that family's structure), and frees the list with `freeifaddrs` in
+its `Drop`. The feature pulls in memoffset 0.9.1 (offsets of `sockaddr`
+fields; build dependency autocfg, already in `Cargo.lock`).
+
+### rustix's `net` feature (`net`)
+
+Sockets, socket options, `sendmmsg`, `recvfrom`, `accept4` and
+`ioctl(FIONREAD)` through rustix's raw system calls, as the rest of the
+crate already uses rustix. No new crate.
 
 ## `unsafe` in the tests
 

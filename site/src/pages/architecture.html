@@ -1,10 +1,10 @@
 <h1>Architecture</h1>
-<p class="lead">lean-runtime has three modules.
+<p class="lead">lean-runtime has four modules.
 Cargo features select them.
 Each translator's glue connects its own values to the crate.</p>
 
 <div class="toc"><ul>
-  <li><a href="#modules">The three modules</a></li>
+  <li><a href="#modules">The four modules</a></li>
   <li><a href="#features">Features and dependencies</a></li>
   <li><a href="#split">Shared code and glue</a></li>
   <li><a href="#views">Views in, data out</a></li>
@@ -12,13 +12,14 @@ Each translator's glue connects its own values to the crate.</p>
   <li><a href="#builds">Builds and platform</a></li>
 </ul></div>
 
-<h2 id="modules">The three modules</h2>
+<h2 id="modules">The four modules</h2>
 <div class="tblwrap"><table>
 <thead><tr><th>Module</th><th>What it holds</th><th>Feature</th><th>Page</th></tr></thead>
 <tbody>
 <tr><td><code>semantics</code></td><td>Pure rules: numbers, floats, strings, hashing, arrays, panic texts, the text of leaf values.</td><td>always built</td><td><a href="semantics.html">semantics</a></td></tr>
 <tr><td><code>io</code></td><td>OS-level IO: glibc's <code>FILE</code> model, handles, <code>IO.Error</code>, files, environment, clock, startup descriptors, exit.</td><td><code>io</code></td><td><a href="io.html">io</a></td></tr>
 <tr><td><code>sched</code></td><td>The task scheduler: deferred tasks as coroutines, yield points, promises, <code>Std.Sync</code>, Lean's exit behaviour.</td><td><code>sched</code></td><td><a href="sched.html">sched</a></td></tr>
+<tr><td><code>net</code></td><td>Networking on the scheduler's event loop: TCP, UDP, DNS, interface addresses.</td><td><code>net</code></td><td><a href="net.html">net</a></td></tr>
 </tbody></table></div>
 
 <h2 id="features">Features and dependencies</h2>
@@ -26,7 +27,7 @@ Each translator's glue connects its own values to the crate.</p>
 {{svg:arch-features}}
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
-The owner approved nix, rustix, corosensei and signal-hook (its safe API only).
+The owner approved nix, rustix, corosensei, signal-hook (its safe API only) and dns-lookup (for <code>net</code> only).
 leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegation of dependency decisions (2026-10-04).</figcaption>
 </figure>
 <ul>
@@ -39,6 +40,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
+  <li><strong><code>net</code>.</strong> Turns on <code>io</code> and <code>sched</code>.
+    Its sockets use the net features of rustix and nix.
+    Its name lookups call glibc through dns-lookup, pinned at 2.1.1.
+    <a href="repo:UNSAFE.md">UNSAFE.md</a> records the audit of that crate's <code>unsafe</code> code.</li>
   <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
     It may enable a faster <code>unsafe</code> version of a function.
     That version must have the same behaviour as the safe one, a written proof in <a href="repo:UNSAFE.md">UNSAFE.md</a>, and Miri checks.
@@ -101,6 +106,7 @@ Text and unbounded bytes go straight into the glue's own storage.</figcaption>
     The crate builds on the Rust toolchains of both translators.</li>
   <li>Cargo.lock is committed.
     <code>io</code> builds with <code>cargo build --offline --locked --features io</code>, from cargo's local registry cache.
+    The same command builds <code>sched</code> and <code>net</code>.
     Nothing is vendored.</li>
   <li>A new dependency needs a check against leanrs's offline registry.
     A new crate that wraps <code>unsafe</code> needs the owner's decision.</li>

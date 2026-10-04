@@ -715,7 +715,7 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    `sched::wait_fd(fd, interest)` or `sched::poll_fds(items, timeout)`,
    which are plain `poll(2)` when `io_cooperative()` is false; any state of
    its own that another context may need, it releases first.
-10. **The event loop's callbacks** (the UV externs, the network):
+10. **The event loop's callbacks** (the UV externs, the network, `net`):
     `timer_start(deadline, callback)` and `timer_stop`, and `watch(fd,
     interest, callback)`, `watch_modify(id, interest)` and `unwatch(id)`
     ("The watch API" above). The callbacks run on the loop context and may
@@ -1165,6 +1165,18 @@ The limits of one thread (lean2rr plan §10, "Tasks") hold here too:
 The owner's direction (2026-10-03): parallelism will be supported later.
 The model stays single-threaded for now, and nothing here should block
 real threads.
+
+**The one helper thread pair today: DNS lookups (`net`).** `net::dns` runs
+glibc's `getaddrinfo` and `getnameinfo` on two threads of its own, started
+by the first lookup (never at startup), as libuv runs them on its thread
+pool. They are an internal helper, not Lean-visible parallelism: they get
+plain data (a host, a service, a family, an address), wait in the C
+library, send plain data back (addresses, names, libuv's error code), and
+wake the loop through the loop's eventfd. No Lean value, `Rc` or scheduler
+state crosses to them; the promise is resolved on the loop context, on the
+scheduler's thread, like every other callback. At exit the process waits
+for the lookups in progress and drops their answers, as native's libuv
+joins its thread pool (`docs/net.md`).
 
 **Already per thread.**
 - The scheduler's state: contexts, the task table, the yielder pointers.

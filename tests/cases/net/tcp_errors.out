@@ -1,0 +1,55 @@
+getPeerName new: invalid argument (error code: 9, bad file descriptor)
+getSockName new: invalid argument (error code: 9, bad file descriptor)
+send new: invalid argument (error code: 9, bad file descriptor)
+send new, no buffers: ok, then ok
+recv? new: invalid argument (error code: 107, socket is not connected)
+waitReadable new: invalid argument (error code: 107, socket is not connected)
+shutdown new: invalid argument (error code: 107, socket is not connected)
+tryAccept new: ok, none
+noDelay new: ok
+keepAlive 1 5 new: ok
+cancelRecv new: ok
+cancelAccept new: ok
+keepAlive 1 40000: invalid argument (error code: 22, invalid argument)
+keepAlive 0 0: ok
+keepAlive 1 5: ok
+noDelay: ok
+getPeerName bound: invalid argument (error code: 107, socket is not connected)
+bind again: invalid argument (error code: 22, invalid argument)
+recv? listening: invalid argument (error code: 107, socket is not connected)
+shutdown listening: invalid argument (error code: 107, socket is not connected)
+send listening: resource vanished (error code: 32, broken pipe)
+connect listening: already exists (error code: 106, socket is already connected)
+connect, then ok
+connect again: ok, then ok
+connect a third time: already exists (error code: 106, socket is already connected)
+accept of a connection the loop took: resolved at once true
+peer of the accepted socket is the client: true
+waitReadable while a recv? is pending: ok, connection already in progress (error code: 114)
+cancelled waitReadable resolved: false
+waitReadable: ok, then true
+recv? 3: ok, then some hel
+recv? 100: ok, then some lo
+send of 4 buffers: ok, then ok, then some abc
+shutdown while one is pending: connection already in progress (error code: 114)
+send while it is pending: resource vanished (error code: 32, broken pipe)
+big send, then ok
+shutdown, then ok
+the client read 33554432 bytes, then end of file
+shutdown after it: invalid argument (error code: 107, socket is not connected)
+send after shutdown: resource vanished (error code: 32, broken pipe)
+waitReadable at end of file: ok, then true
+recv? at end of file: ok, then none
+recv? at end of file again: ok, then none
+send to the half-closed peer: ok, then ok
+the peer reads it: ok, then some late
+connect to a closed port: ok, then no such thing (error code: 111, connection refused)
+getPeerName after it: invalid argument (error code: 107, socket is not connected)
+getSockName after it: ok, port chosen true
+connect again after it: software caused connection abort (error code: 103)
+bind to the port in use: ok
+getSockName: resource busy (error code: 98, address already in use)
+listen: resource busy (error code: 98, address already in use)
+connect: ok, then resource busy (error code: 98, address already in use)
+connect an IPv4 socket to ::1: unsupported operation (error code: 97, address family not supported)
+sockets kept: true true true

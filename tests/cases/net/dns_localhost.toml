@@ -1,0 +1,10 @@
+id = "dns_localhost"
+area = "net"
+lean_version = "4.34.0"
+source = "net-1 (Std.Internal.UV.DNS); native probes l2r-scratch/lean-runtime-work/net1/probe/P3.lean"
+streams = "separate"
+# Depends on the host's name service: recorded on a host whose /etc/hosts
+# maps `localhost` to 127.0.0.1 only (not ::1) and whose /etc/services names
+# no service for ports 49999 and 65535 nor the name `no-such-service-here`.
+# A host with `::1 localhost` gives `localhost` IPv6 entries too; that is the
+# host's configuration, not a flake.

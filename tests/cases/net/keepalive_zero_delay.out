@@ -1,0 +1,9 @@
+fresh (no fd) keepAlive 1 0: ok
+fresh bind after keepAlive 1 0: ok
+bound keepAlive 1 0: invalid argument (error code: 22, invalid argument)
+bound keepAlive 1 0 again: invalid argument (error code: 22, invalid argument)
+bound keepAlive 0 0: ok
+bound keepAlive 1 1: ok
+bound keepAlive 1 40000 (above Linux's TCP_KEEPIDLE max): invalid argument (error code: 22, invalid argument)
+connected keepAlive 1 0: invalid argument (error code: 22, invalid argument)
+connected keepAlive 1 30: ok

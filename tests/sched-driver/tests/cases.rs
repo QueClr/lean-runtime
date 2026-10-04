@@ -1,5 +1,5 @@
 //! Runs the Rust port (`sched-cases ID`) of every case of
-//! `tests/cases/{tasks,sync,refs,taskio}`, and of the cases of
+//! `tests/cases/{tasks,sync,refs,taskio,uvloop,net}`, and of the cases of
 //! `tests/cases/io` that create tasks, as `scripts/cases.py check` runs a
 //! translator's executable, and compares its stdout, stderr and exit code
 //! with the case's expected ones: native's, or the correct ones where native
@@ -26,7 +26,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// The areas whose cases all run through `sched`.
-const AREAS: &[&str] = &["tasks", "sync", "refs", "taskio", "uvloop"];
+const AREAS: &[&str] = &["tasks", "sync", "refs", "taskio", "uvloop", "net"];
 
 /// The cases of `tests/cases/io` that create tasks, which run through
 /// `sched` too.
@@ -332,6 +332,42 @@ fn adv_exit_from_task() {
     assert!(got.out.is_empty());
 }
 
+/// RNET-01 of net-1's review: a receive's allocation that ends the process
+/// (Lean's internal panic, an effect point) while a task uses the same
+/// socket ends it as native does, not with a Rust panic.
+#[test]
+fn rnet_alloc_reentry() {
+    for kind in ["tcp", "udp"] {
+        let got = run_with("rnet_alloc_reentry", &[kind.to_string()], &[], None, false);
+        assert_eq!(got.code, "1", "{kind}: stderr {:?}", err_of(&got));
+        assert_eq!(
+            err_of(&got),
+            "INTERNAL PANIC: integer overflow in runtime computation\n",
+            "{kind}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&got.out),
+            "calling recv with a huge size\n",
+            "{kind}"
+        );
+    }
+}
+
+/// RNET-02 of net-1's review (LB-28): a shutdown requested while the
+/// connect is surely pending happens once the connect succeeds, and fails
+/// with `ECANCELED` behind a connect that fails.
+#[test]
+fn rnet_shutdown_in_connect() {
+    let got = run_with("rnet_shutdown_in_connect", &[], &[], None, false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(
+        String::from_utf8_lossy(&got.out),
+        "connect: ok\nshutdown: ok\npeer recv?: ok none (end of stream)\n\
+         refused connect: error no such thing (error code: 111, connection refused)\n\
+         its shutdown: error operation canceled (error code: 125)\n"
+    );
+}
+
 // The regression programs of sched-io's reviews (src/review.rs).
 
 fn out_of(o: &Outcome) -> String {
@@ -552,4 +588,29 @@ cases!(
     lock_blocked,
     lock_exit,
     lock_during_read,
+    // tests/cases/net (net-1)
+    tcp_echo,
+    tcp_errors,
+    tcp_v6,
+    udp_basic,
+    udp_errors,
+    dns_localhost,
+    dns_pending_at_exit,
+    iface_lo,
+    accept_parallel,
+    accept_parallel_try,
+    keepalive_zero_delay,
+    multicast_ipv6_long,
+    recv_huge_overflow,
+    recv_huge_oom,
+    udp_recv_huge_overflow,
+    udp_cancel_recv_leak,
+    tcp_shutdown_fail_leak,
+    recv_zero_eof,
+    recv_zero_data_eof,
+    recv_zero_data,
+    udp_recv_zero,
+    shutdown_during_connect,
+    shutdown_after_queued_write,
+    shutdown_after_connect,
 );

@@ -1,0 +1,5 @@
+id = "udp_recv_huge_overflow"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe D_RecvHuge (not a bug: lean_alloc_sarray's checked arithmetic), l2r-scratch/compare/shared-runtime/judge/net1/D-not-a-bug.md"
+streams = "separate"

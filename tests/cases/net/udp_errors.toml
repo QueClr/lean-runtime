@@ -1,0 +1,7 @@
+id = "udp_errors"
+area = "net"
+lean_version = "4.34.0"
+source = "net-1 (Std.Internal.UV.UDP; libuv 1.48 udp.c)"
+streams = "separate"
+# Depends on the host: IPv6 on the loopback interface (::1) and the kernel's
+# multicast answers there (leaving a group never joined: EADDRNOTAVAIL).

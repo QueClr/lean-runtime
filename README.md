@@ -21,6 +21,7 @@ values.
 | `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
 | `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error` | The memory protocol: reference counting, ownership, freeing |
 | `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
+| `net` (feature `net`, with `io` and `sched`): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
 
 Functions take views (`&[u8]`, `&str`) and plain data (`u64`, `f64`), and
 return plain data or write into a buffer the caller supplies, so either
@@ -73,6 +74,14 @@ scheduler's event loop (epoll, timers, descriptor watches), with
 of `tests/cases/taskio` and `uvloop` and the io cases with tasks pass
 through the driver.
 
+`net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
+externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code
+over non-blocking sockets, on the scheduler's event loop), `DNS` (glibc's
+`getaddrinfo` and `getnameinfo` through dns-lookup, on two helper threads)
+and `Std.Net.interfaceAddresses`. The cases of `tests/cases/net` pass
+through the driver; eight native bugs are not reproduced (LB-21 to LB-28).
+See `docs/net.md`.
+
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
 that order. See `docs/development.md`, the rules for implementors.
@@ -98,8 +107,10 @@ that order. See `docs/development.md`, the rules for implementors.
   test suite passes.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
-  `io` uses rustix, nix and io-uring, and `sched` corosensei, rustix and signal-hook, pinned by `Cargo.lock`
-  and built offline from cargo's local registry cache.
+  `io` uses rustix, nix and io-uring, `sched` corosensei, rustix and
+  signal-hook, and `net` dns-lookup (pinned exactly; its `unsafe` audited in
+  `UNSAFE.md`), pinned by `Cargo.lock` and built offline from cargo's local
+  registry cache.
 
 Bugs in Lean's own runtime that both translators deliberately do not reproduce, each verified first, are listed in `docs/lean-bugs.md`.
 

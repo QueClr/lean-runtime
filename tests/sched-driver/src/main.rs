@@ -7,6 +7,8 @@ mod cases;
 mod glue;
 mod lean;
 mod lio;
+mod lnet;
+mod netcases;
 mod review;
 
 fn main() {

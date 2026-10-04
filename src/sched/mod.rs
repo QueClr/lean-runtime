@@ -36,6 +36,9 @@ pub use ctx::{running_stack, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
 #[cfg(feature = "io")]
 pub(crate) use reactor::block_until;
+/// `net`'s externs take the loop's lock natively, as `sched::uv`'s do.
+#[cfg(feature = "net")]
+pub(crate) use reactor::catch_up;
 pub use reactor::{
     coop_possible, enter_no_suspend, in_no_suspend, io_cooperative, leave_no_suspend, no_suspend,
     poll_fds, timer_start, timer_stop, unwatch, wait_fd, watch, watch_modify, Interest,

@@ -103,7 +103,8 @@ pub fn lookup(id: &str) -> Option<Case> {
         "adv_block_in_drop_during_unwind" => (no_init, adv_block_in_drop_during_unwind),
         "adv_panic_in_sync_dep_of_drop" => (no_init, adv_panic_in_sync_dep_of_drop),
         "adv_exit_from_task" => (no_init, adv_exit_from_task),
-        _ => return None,
+        // tests/cases/net: networking (net-1)
+        _ => return crate::netcases::lookup(id),
     })
 }
 

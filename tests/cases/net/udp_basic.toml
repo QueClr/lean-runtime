@@ -1,0 +1,5 @@
+id = "udp_basic"
+area = "net"
+lean_version = "4.34.0"
+source = "net-1 (Std.Internal.UV.UDP); lean2rr tests/runtime/RtUdp.lean"
+streams = "separate"

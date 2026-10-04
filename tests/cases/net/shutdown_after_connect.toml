@@ -1,0 +1,5 @@
+id = "shutdown_after_connect"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe RNET02_Probe (after), l2r-scratch/compare/shared-runtime/judge/net1/LB-28-draft.md"
+streams = "separate"

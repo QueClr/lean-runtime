@@ -1,0 +1,4 @@
+connect: ok
+shutdown: ok
+peer recv?: ok none (end of stream)
+done

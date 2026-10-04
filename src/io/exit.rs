@@ -6,7 +6,10 @@
 //! `lean_io_exit`). Its atexit work, in order:
 //! 1. libc++'s `ios_base::Init` destructor flushes `std::cout`, which with
 //!    `sync_with_stdio` is `fflush(stdout)`;
-//! 2. glibc's `_IO_cleanup`: `_IO_flush_all` writes the pending output of
+//! 2. the program's destructors (`_dl_fini`), among them libuv's
+//!    `uv_library_shutdown`, which waits for the name lookups in progress on
+//!    its thread pool (`net::dns`, with the feature `net`);
+//! 3. glibc's `_IO_cleanup`: `_IO_flush_all` writes the pending output of
 //!    every `FILE`, newest first (the open handles, then `stderr`, `stdout`,
 //!    `stdin`), then `_IO_unbuffer_all` syncs every used buffered stream,
 //!    which gives seekable read-ahead back (stdin is left where the program
@@ -27,8 +30,8 @@ use super::handle::{lock, open_files_newest_first, try_lock, STDERR, STDIN, STDO
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The streams' part of C's `exit` in a native Lean program (see the module
-/// comment): `fflush(stdout)`, then `_IO_flush_all`, then
-/// `_IO_unbuffer_all`. Errors are ignored. `_IO_flush_all` waits for each
+/// comment): `fflush(stdout)`, then (feature `net`) the wait for the name
+/// lookups in progress, then `_IO_flush_all`, then `_IO_unbuffer_all`. Errors are ignored. `_IO_flush_all` waits for each
 /// stream's lock; `_IO_unbuffer_all` skips a stream another thread holds (glibc
 /// gives it two tries).
 pub fn exit_flush() {
@@ -43,6 +46,8 @@ pub fn exit_flush() {
     if super::coop::deferred_pending() {
         super::coop::close_deferred();
     }
+    #[cfg(feature = "net")]
+    crate::net::dns::exit_wait();
     let open = open_files_newest_first();
     for f in open.iter() {
         lock(&f.file).exit_flush();

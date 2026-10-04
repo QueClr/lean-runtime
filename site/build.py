@@ -52,6 +52,7 @@ PAGES = [
     ("semantics", "semantics"),
     ("io", "io"),
     ("sched", "sched"),
+    ("net", "net"),
     ("testing", "Testing"),
     ("lean-bugs", "Lean bugs"),
     ("status", "Status"),
@@ -364,7 +365,7 @@ def check_sources(pages):
         warn(f"{i} is in docs/lean-bugs.md now: update lean-bugs.html and remove it from PENDING_LB")
     for i in sorted(lb_page - lb_doc - PENDING_LB):
         warn(f"lean-bugs.html mentions {i}, which docs/lean-bugs.md does not have")
-    for module, page in (("semantics", "semantics"), ("io", "io"), ("sched", "sched")):
+    for module, page in (("semantics", "semantics"), ("io", "io"), ("sched", "sched"), ("net", "net")):
         mod_rs = os.path.join(REPO, "src", module, "mod.rs")
         if not os.path.exists(mod_rs):
             continue

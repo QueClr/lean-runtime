@@ -146,8 +146,9 @@ pub fn get_pid() -> u32 {
     lean_runtime::io::env::get_pid()
 }
 
-/// Lean's `IO.Error.toString`, for the errors the cases print.
+/// Lean's `IO.Error.toString` (`Init/System/IOError.lean`).
 pub fn error_text(e: &IoError) -> String {
+    use IoError as E;
     let down = |s: &str| {
         let mut c = s.chars();
         match c.next() {
@@ -155,11 +156,40 @@ pub fn error_text(e: &IoError) -> String {
             None => String::new(),
         }
     };
+    let fopen = |gist: &str, f: &str, c: &u32, d: Option<&String>| match d {
+        Some(d) => format!("{} (error code: {c}, {})\n  file: {f}", down(gist), down(d)),
+        None => format!("{} (error code: {c})\n  file: {f}", down(gist)),
+    };
+    let other = |gist: &str, c: &u32, d: Option<&String>| match d {
+        Some(d) => format!("{} (error code: {c}, {})", down(gist), down(d)),
+        None => format!("{} (error code: {c})", down(gist)),
+    };
     match e {
-        IoError::InvalidArgument(None, c, d) => {
-            format!("invalid argument (error code: {c}, {})", down(d))
-        }
-        e => format!("{e:?}"),
+        E::UnexpectedEof => "end of file".into(),
+        E::InappropriateType(Some(f), c, d) => fopen("inappropriate type", f, c, Some(d)),
+        E::InappropriateType(None, c, d) => other("inappropriate type", c, Some(d)),
+        E::Interrupted(f, c, d) => fopen("interrupted system call", f, c, Some(d)),
+        E::InvalidArgument(Some(f), c, d) => fopen("invalid argument", f, c, Some(d)),
+        E::InvalidArgument(None, c, d) => other("invalid argument", c, Some(d)),
+        E::NoFileOrDirectory(f, c, _) => fopen("no such file or directory", f, c, None),
+        E::NoSuchThing(Some(f), c, d) => fopen("no such thing", f, c, Some(d)),
+        E::NoSuchThing(None, c, d) => other("no such thing", c, Some(d)),
+        E::PermissionDenied(Some(f), c, d) => fopen(d, f, c, None),
+        E::PermissionDenied(None, c, d) => other(d, c, None),
+        E::ResourceExhausted(Some(f), c, d) => fopen("resource exhausted", f, c, Some(d)),
+        E::ResourceExhausted(None, c, d) => other("resource exhausted", c, Some(d)),
+        E::AlreadyExists(None, c, d) => other("already exists", c, Some(d)),
+        E::AlreadyExists(Some(f), c, d) => fopen("already exists", f, c, Some(d)),
+        E::OtherError(c, d) => other(d, c, None),
+        E::ResourceBusy(c, d) => other("resource busy", c, Some(d)),
+        E::ResourceVanished(c, d) => other("resource vanished", c, Some(d)),
+        E::HardwareFault(c, _) => other("hardware fault", c, None),
+        E::IllegalOperation(c, d) => other("illegal operation", c, Some(d)),
+        E::ProtocolError(c, d) => other("protocol error", c, Some(d)),
+        E::TimeExpired(c, d) => other("time expired", c, Some(d)),
+        E::UnsatisfiedConstraints(c, _) => other("directory not empty", c, None),
+        E::UnsupportedOperation(c, d) => other("unsupported operation", c, Some(d)),
+        E::UserError(m) => m.clone(),
     }
 }
 

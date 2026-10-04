@@ -1,0 +1,17 @@
+id = "dns_pending_at_exit"
+area = "net"
+lean_version = "4.34.0"
+source = "LB-27 (the net-1 judge; net-1 probe l2r-scratch/lean-runtime-work/net1/probe/P6.lean)"
+streams = "separate"
+hand_written = true
+deviations = { lean2rr = "LB-27", leanrs = "LB-27" }
+# The expected files are the correct outcome, written by hand (as LB-01's
+# refs/lost_update): `started`, exit 0; the exit waits for the lookup, as
+# natively, and drops its answer (the wait itself is pinned by the unit
+# test `exit_waits_for_running_lookups`: a case could pin it only with an
+# LD_PRELOAD shim that makes glibc slow). Native Lean 4.34.0 is wrong and
+# nondeterministic: a
+# lookup finishing while the process exits crashes it (SIGSEGV, 139, in the
+# event loop's thread: `lean_promise_resolve` on the finalized task
+# manager) in 7 of 20 runs (the judge) and 17 of 40 (the implementer); the
+# other runs exit 0 with `started`.

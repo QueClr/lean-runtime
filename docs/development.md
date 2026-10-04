@@ -22,7 +22,9 @@ once.
 - **No `unsafe` in the default build.**
   Anything that needs `unsafe` comes from a vetted external crate: `nix` or
   `rustix` for system calls, io-uring for the startup rings, corosensei for
-  task switching, signal-hook (its safe API only) for signal handlers. What
+  task switching, signal-hook (its safe API only) for signal handlers,
+  dns-lookup (feature `net`) for glibc's `getaddrinfo` and `getnameinfo`.
+  What
   no crate offers safely stays in each translator's glue, behind a
   contract the crate states and upholds: so far `sched::Glue::suspend`
   (one dereference of a coroutine's yielder) and the SIGSEGV handler of
@@ -63,8 +65,9 @@ once.
   no dependencies, and a plain `rustc --crate-type rlib` build of it must
   work (one translator does not use cargo for it). `io` depends on rustix
   and nix, whose build scripts plain rustc cannot run, and `sched` on
-  corosensei, rustix and signal-hook, so they are built with cargo: `cargo build --offline --locked
-  --features io,sched` works from a clean checkout, the versions pinned by
+  corosensei, rustix and signal-hook, and `net` on dns-lookup, so they are
+  built with cargo: `cargo build --offline --locked --features io,sched,net`
+  works from a clean checkout, the versions pinned by
   the committed `Cargo.lock` and the crates taken from cargo's local
   registry cache (`cargo fetch --locked` fills it once; `scripts/check.sh`
   says so when a crate is missing). Nothing is vendored.
@@ -76,7 +79,9 @@ once.
   decision (nix, rustix, corosensei and signal-hook are approved;
   io-uring 0.7.13, pinned exactly, for the startup rings, was accepted by
   leanrs's shared-runtime coordinator under the owner's delegation of
-  dependency decisions (2026-10-04)).
+  dependency decisions (2026-10-04); dns-lookup 2.1.1, pinned exactly, for
+  `net` only, approved the same way). The `unsafe` of every new crate or
+  feature is audited in `UNSAFE.md`, "Dependencies".
 
 ## Tests
 

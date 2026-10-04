@@ -1,0 +1,12 @@
+id = "accept_parallel"
+area = "net"
+lean_version = "4.34.0"
+source = "LB-21 (the net-1 judge's probe A_Accept; net-1 probe P4), l2r-scratch/compare/shared-runtime/judge/net1"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { lean2rr = "LB-21", leanrs = "LB-21" }
+native = { stdout = "second accept: connection already in progress (error code: 114)\nconnect started\n", stderr = "", code = "timeout" }
+# `expected` (the .out, .err and .code files) is the correct outcome
+# (the judge's draft LB-21; lean-runtime's twin gives it); native Lean
+# 4.34.0's outcome, recorded over 5 runs, is `native`: the second `accept`
+# keeps the event loop locked, so the connect never resolves (a hang).

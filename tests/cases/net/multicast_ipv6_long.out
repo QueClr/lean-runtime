@@ -1,0 +1,13 @@
+text ff02::1:ff00:12 (15)
+join: ok
+leave: ok
+text ff02::1:ff00:123 (16)
+join: ok
+leave: ok
+text ff02::1:ff00:1234 (17)
+join: ok
+leave: ok
+text fe80::1234:5678:9abc (20)
+multicast interface: ok
+join g7 on interface i20: ok
+after

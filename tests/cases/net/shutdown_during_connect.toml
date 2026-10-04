@@ -1,0 +1,20 @@
+id = "shutdown_during_connect"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe RNET02_Probe (early), l2r-scratch/compare/shared-runtime/judge/net1/LB-28-draft.md"
+streams = "separate"
+deviations = { lean2rr = "LB-28", leanrs = "LB-28; DV2" }
+native = { stdout = "connect: ok\nshutdown: pending\npeer recv?: pending\ndone\n", stderr = "", code = "0" }
+# `expected` is the correct outcome (the judge's draft LB-28): the shutdown
+# queued behind the connect happens once the connect succeeds. Native's,
+# `native`, is the shutdown that never happens (each wait is bounded at
+# 2 s, so a native run takes about 4 s): 3/3 for the judge, 13/13 for the
+# reviewer, 22/22 for the implementer. Natively the loop thread can, rarely,
+# finish the connect before the shutdown is requested, and then the
+# shutdown happens (seen once in 5 runs under load, while recording).
+# Its twin passes on the crate even without the LB-28 fix: each extern first
+# lets the loop run what is due (`catch_up`), which completes the loopback
+# connect before the shutdown is requested. The driver test
+# `rnet_shutdown_in_connect` (tests/sched-driver) requests the shutdown
+# while the connect is surely pending, and is the test that pins LB-28
+# (review RNET-09).

@@ -1,0 +1,5 @@
+id = "udp_recv_zero"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe R_Recv0 (udp), l2r-scratch/compare/shared-runtime/judge/net1/LB-26-draft.md"
+streams = "separate"

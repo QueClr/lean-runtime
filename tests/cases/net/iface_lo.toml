@@ -1,0 +1,7 @@
+id = "iface_lo"
+area = "net"
+lean_version = "4.34.0"
+source = "net-1 (Std.Net.interfaceAddresses)"
+streams = "separate"
+# Depends on the host: recorded where `lo` has 127.0.0.1/8 and ::1/128, in
+# that order. A host without IPv6 on `lo` lists one entry.

@@ -15,6 +15,7 @@
     <a href="semantics.html">semantics</a>
     <a href="io.html">io</a>
     <a href="sched.html">sched</a>
+    <a href="net.html">net</a>
     <a href="testing.html">Testing</a>
     <a href="lean-bugs.html">Lean bugs</a>
     <a href="status.html">Status</a>
@@ -23,12 +24,12 @@
 </header>
 <main>
 <h1>Architecture</h1>
-<p class="lead">lean-runtime has three modules.
+<p class="lead">lean-runtime has four modules.
 Cargo features select them.
 Each translator's glue connects its own values to the crate.</p>
 
 <div class="toc"><ul>
-  <li><a href="#modules">The three modules</a></li>
+  <li><a href="#modules">The four modules</a></li>
   <li><a href="#features">Features and dependencies</a></li>
   <li><a href="#split">Shared code and glue</a></li>
   <li><a href="#views">Views in, data out</a></li>
@@ -36,74 +37,85 @@ Each translator's glue connects its own values to the crate.</p>
   <li><a href="#builds">Builds and platform</a></li>
 </ul></div>
 
-<h2 id="modules">The three modules</h2>
+<h2 id="modules">The four modules</h2>
 <div class="tblwrap"><table>
 <thead><tr><th>Module</th><th>What it holds</th><th>Feature</th><th>Page</th></tr></thead>
 <tbody>
 <tr><td><code>semantics</code></td><td>Pure rules: numbers, floats, strings, hashing, arrays, panic texts, the text of leaf values.</td><td>always built</td><td><a href="semantics.html">semantics</a></td></tr>
 <tr><td><code>io</code></td><td>OS-level IO: glibc's <code>FILE</code> model, handles, <code>IO.Error</code>, files, environment, clock, startup descriptors, exit.</td><td><code>io</code></td><td><a href="io.html">io</a></td></tr>
 <tr><td><code>sched</code></td><td>The task scheduler: deferred tasks as coroutines, yield points, promises, <code>Std.Sync</code>, Lean's exit behaviour.</td><td><code>sched</code></td><td><a href="sched.html">sched</a></td></tr>
+<tr><td><code>net</code></td><td>Networking on the scheduler's event loop: TCP, UDP, DNS, interface addresses.</td><td><code>net</code></td><td><a href="net.html">net</a></td></tr>
 </tbody></table></div>
 
 <h2 id="features">Features and dependencies</h2>
 <figure class="fig">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 330" role="img" aria-labelledby="ar1-t ar1-d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 330" role="img" aria-labelledby="ar1-t ar1-d">
   <title id="ar1-t">Modules, features and their dependencies</title>
-  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei for the stack switch, rustix for the event loop and signal-hook for the signal watchers. Feature unsafe-fast is opt-in and has no entries yet. The crate root denies unsafe code; only the files that UNSAFE.md lists may allow it.</desc>
+  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei for the stack switch, rustix for the event loop and signal-hook for the signal watchers. Feature net adds the net module and turns on io and sched; it uses dns-lookup for name lookups, and the net features of rustix and nix. Feature unsafe-fast is opt-in and has no entries yet. The crate root denies unsafe code; only the files that UNSAFE.md lists may allow it.</desc>
   <defs>
     <marker id="ar1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
   </defs>
-  <rect class="k-rt" x="20" y="20" width="960" height="170" rx="8"/>
+  <rect class="k-rt" x="20" y="20" width="1120" height="170" rx="8"/>
   <text class="tb" x="40" y="44">lean-runtime</text>
   <text class="ts" x="160" y="44">#![deny(unsafe_code)]: unsafe only in the files UNSAFE.md lists</text>
 
-  <rect class="k-none" x="40" y="60" width="230" height="110" rx="6"/>
-  <text class="tb" x="155" y="86" text-anchor="middle">semantics</text>
-  <text x="155" y="108" text-anchor="middle">default build</text>
-  <text class="ts" x="155" y="128" text-anchor="middle">no dependencies</text>
-  <text class="ts" x="155" y="146" text-anchor="middle">builds with plain rustc too</text>
+  <rect class="k-none" x="40" y="60" width="220" height="110" rx="6"/>
+  <text class="tb" x="150" y="86" text-anchor="middle">semantics</text>
+  <text x="150" y="108" text-anchor="middle">default build</text>
+  <text class="ts" x="150" y="128" text-anchor="middle">no dependencies</text>
+  <text class="ts" x="150" y="146" text-anchor="middle">builds with plain rustc too</text>
 
-  <rect class="k-none" x="310" y="60" width="230" height="110" rx="6"/>
-  <text class="tb" x="425" y="86" text-anchor="middle">io</text>
-  <text x="425" y="108" text-anchor="middle">feature io</text>
-  <text class="ts" x="425" y="128" text-anchor="middle">built with cargo, offline,</text>
-  <text class="ts" x="425" y="146" text-anchor="middle">from the committed Cargo.lock</text>
+  <rect class="k-none" x="280" y="60" width="220" height="110" rx="6"/>
+  <text class="tb" x="390" y="86" text-anchor="middle">io</text>
+  <text x="390" y="108" text-anchor="middle">feature io</text>
+  <text class="ts" x="390" y="128" text-anchor="middle">built with cargo, offline,</text>
+  <text class="ts" x="390" y="146" text-anchor="middle">from the committed Cargo.lock</text>
 
-  <rect class="k-none" x="580" y="60" width="380" height="110" rx="6"/>
-  <text class="tb" x="770" y="86" text-anchor="middle">sched</text>
-  <text x="770" y="108" text-anchor="middle">feature sched</text>
-  <text class="ts" x="770" y="128" text-anchor="middle">tasks, the event loop, Std.Internal.UV;</text>
-  <text class="ts" x="770" y="146" text-anchor="middle">built with cargo, offline</text>
+  <rect class="k-none" x="520" y="60" width="320" height="110" rx="6"/>
+  <text class="tb" x="680" y="86" text-anchor="middle">sched</text>
+  <text x="680" y="108" text-anchor="middle">feature sched</text>
+  <text class="ts" x="680" y="128" text-anchor="middle">tasks, the event loop, Std.Internal.UV;</text>
+  <text class="ts" x="680" y="146" text-anchor="middle">built with cargo, offline</text>
 
-  <line class="ar" x1="425" y1="170" x2="340" y2="226" marker-end="url(#ar1-a)"/>
-  <line class="ar" x1="425" y1="170" x2="510" y2="226" marker-end="url(#ar1-a)"/>
-  <line class="ar" x1="600" y1="170" x2="400" y2="226" marker-end="url(#ar1-a)"/>
-  <line class="ar" x1="740" y1="170" x2="720" y2="226" marker-end="url(#ar1-a)"/>
-  <line class="ar" x1="860" y1="170" x2="895" y2="226" marker-end="url(#ar1-a)"/>
+  <rect class="k-none" x="860" y="60" width="260" height="110" rx="6"/>
+  <text class="tb" x="990" y="86" text-anchor="middle">net</text>
+  <text x="990" y="108" text-anchor="middle">feature net (with io and sched)</text>
+  <text class="ts" x="990" y="128" text-anchor="middle">TCP, UDP, DNS, interfaces;</text>
+  <text class="ts" x="990" y="146" text-anchor="middle">also rustix and nix (net features)</text>
 
-  <rect class="k-os" x="250" y="228" width="170" height="44" rx="6"/>
-  <text x="335" y="248" text-anchor="middle">rustix 1.1</text>
-  <text class="ts" x="335" y="264" text-anchor="middle">descriptor calls, epoll</text>
-  <rect class="k-os" x="430" y="228" width="170" height="44" rx="6"/>
-  <text x="515" y="248" text-anchor="middle">nix 0.31</text>
-  <text class="ts" x="515" y="264" text-anchor="middle">process-level calls</text>
-  <rect class="k-os" x="635" y="228" width="170" height="44" rx="6"/>
-  <text x="720" y="248" text-anchor="middle">corosensei 0.3.4</text>
-  <text class="ts" x="720" y="264" text-anchor="middle">stack switch</text>
-  <rect class="k-os" x="815" y="228" width="160" height="44" rx="6"/>
-  <text x="895" y="248" text-anchor="middle">signal-hook 0.3</text>
-  <text class="ts" x="895" y="264" text-anchor="middle">signal delivery</text>
+  <line class="ar" x1="390" y1="170" x2="330" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ar" x1="390" y1="170" x2="490" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ar" x1="560" y1="170" x2="350" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ar" x1="680" y1="170" x2="680" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ar" x1="800" y1="170" x2="855" y2="226" marker-end="url(#ar1-a)"/>
+  <line class="ar" x1="1040" y1="170" x2="1045" y2="226" marker-end="url(#ar1-a)"/>
 
-  <rect class="k-none plan" x="40" y="228" width="190" height="44" rx="6"/>
-  <text x="135" y="248" text-anchor="middle">unsafe-fast (opt-in)</text>
-  <text class="ts" x="135" y="264" text-anchor="middle">no entries yet</text>
+  <rect class="k-os" x="240" y="228" width="160" height="44" rx="6"/>
+  <text x="320" y="248" text-anchor="middle">rustix 1.1</text>
+  <text class="ts" x="320" y="264" text-anchor="middle">descriptor calls, epoll</text>
+  <rect class="k-os" x="420" y="228" width="160" height="44" rx="6"/>
+  <text x="500" y="248" text-anchor="middle">nix 0.31</text>
+  <text class="ts" x="500" y="264" text-anchor="middle">process-level calls</text>
+  <rect class="k-os" x="600" y="228" width="160" height="44" rx="6"/>
+  <text x="680" y="248" text-anchor="middle">corosensei 0.3.4</text>
+  <text class="ts" x="680" y="264" text-anchor="middle">stack switch</text>
+  <rect class="k-os" x="780" y="228" width="160" height="44" rx="6"/>
+  <text x="860" y="248" text-anchor="middle">signal-hook 0.3</text>
+  <text class="ts" x="860" y="264" text-anchor="middle">signal delivery</text>
+  <rect class="k-os" x="960" y="228" width="170" height="44" rx="6"/>
+  <text x="1045" y="248" text-anchor="middle">dns-lookup 2.1.1</text>
+  <text class="ts" x="1045" y="264" text-anchor="middle">getaddrinfo, getnameinfo</text>
+
+  <rect class="k-none plan" x="40" y="228" width="180" height="44" rx="6"/>
+  <text x="130" y="248" text-anchor="middle">unsafe-fast (opt-in)</text>
+  <text class="ts" x="130" y="264" text-anchor="middle">no entries yet</text>
 
   <rect class="k-os" x="20" y="300" width="16" height="14" rx="2"/><text class="ts" x="42" y="312">vetted crate</text>
   <rect class="k-none plan" x="140" y="300" width="16" height="14" rx="2"/><text class="ts" x="162" y="312">empty</text>
 </svg>
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
-The owner approved nix, rustix, corosensei and signal-hook (its safe API only).
+The owner approved nix, rustix, corosensei, signal-hook (its safe API only) and dns-lookup (for <code>net</code> only).
 leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegation of dependency decisions (2026-10-04).</figcaption>
 </figure>
 <ul>
@@ -116,6 +128,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
+  <li><strong><code>net</code>.</strong> Turns on <code>io</code> and <code>sched</code>.
+    Its sockets use the net features of rustix and nix.
+    Its name lookups call glibc through dns-lookup, pinned at 2.1.1.
+    <a href="../UNSAFE.md">UNSAFE.md</a> records the audit of that crate's <code>unsafe</code> code.</li>
   <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
     It may enable a faster <code>unsafe</code> version of a function.
     That version must have the same behaviour as the safe one, a written proof in <a href="../UNSAFE.md">UNSAFE.md</a>, and Miri checks.
@@ -252,6 +268,7 @@ Text and unbounded bytes go straight into the glue's own storage.</figcaption>
     The crate builds on the Rust toolchains of both translators.</li>
   <li>Cargo.lock is committed.
     <code>io</code> builds with <code>cargo build --offline --locked --features io</code>, from cargo's local registry cache.
+    The same command builds <code>sched</code> and <code>net</code>.
     Nothing is vendored.</li>
   <li>A new dependency needs a check against leanrs's offline registry.
     A new crate that wraps <code>unsafe</code> needs the owner's decision.</li>

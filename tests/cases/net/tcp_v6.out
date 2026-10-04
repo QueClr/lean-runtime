@@ -1,0 +1,8 @@
+server: v6 ::1, port chosen true
+client peer: v6 ::1, port matches true
+client name: v6 ::1
+accepted peer: v6 ::1, is the client true
+server got over6
+client got back
+then end of file: true
+server still there: true

@@ -83,9 +83,10 @@
 //! `SqHead`, `SqTail`, `CachedSqHead`, `CqHead`, `CqTail` and `CachedCqTail`
 //! 2 (0 here), and that thread is a task of its own. Here the epoll
 //! descriptor lists the polling ring and what the scheduler's event loop
-//! registers (the signal pipe once a signal watcher listens), never the
-//! eventfd: registering a readable descriptor that nothing drains would
-//! wake the loop for good. The polling ring's watch never fires: nothing is
+//! registers (the signal pipe once a signal watcher listens), and the
+//! eventfd only while a DNS lookup of `net` is pending (its helpers wake the
+//! loop through it, and the loop drains it): registering a readable
+//! descriptor that nothing drains would wake the loop for good. The polling ring's watch never fires: nothing is
 //! submitted to it, so it has no completion.
 //!
 //! Source: lean2rr's `runtime/leanrt/src/rt.rs` (`reserve_libuv_descriptors`,
@@ -145,7 +146,8 @@ struct Descriptors {
     /// (`sched::uv`; docs/sched.md, "Std.Internal.UV").
     #[cfg_attr(not(feature = "sched"), allow(dead_code))]
     signal_pipe: (OwnedFd, OwnedFd),
-    _eventfd: OwnedFd,
+    #[cfg_attr(not(feature = "net"), allow(dead_code))]
+    eventfd: OwnedFd,
 }
 
 static DESCRIPTORS: OnceLock<Result<Descriptors, StartupFailure>> = OnceLock::new();
@@ -192,6 +194,17 @@ pub(crate) fn claim_signal_pipe() -> Option<(BorrowedFd<'static>, BorrowedFd<'st
     }
 }
 
+/// The loop's async eventfd (`loop->async_io_watcher`), once
+/// [`open_native_descriptors`] has opened it: libuv's thread pool wakes the
+/// loop through it, and so do `net`'s DNS helpers.
+#[cfg(feature = "net")]
+pub(crate) fn loop_eventfd() -> Option<BorrowedFd<'static>> {
+    match DESCRIPTORS.get() {
+        Some(Ok(d)) => Some(d.eventfd.as_fd()),
+        _ => None,
+    }
+}
+
 fn open_all() -> Result<Descriptors, StartupFailure> {
     let cloexec = epoll::CreateFlags::CLOEXEC;
     let epoll = epoll::create(cloexec).map_err(|_| StartupFailure::LoopInit)?;
@@ -222,7 +235,7 @@ fn open_all() -> Result<Descriptors, StartupFailure> {
         _rings: rings,
         _lock_pipe: lock_pipe,
         signal_pipe,
-        _eventfd: eventfd,
+        eventfd,
     })
 }
 

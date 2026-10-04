@@ -1,0 +1,10 @@
+id = "tcp_shutdown_fail_leak"
+area = "net"
+lean_version = "4.34.0"
+source = "LB-25 (the net-1 judge; probe X_Mirrored shutleak)"
+streams = "separate"
+deviations = { lean2rr = "LB-25", leanrs = "LB-25" }
+native = { stdout = "leaked 64 file descriptors\n", stderr = "", code = "0" }
+# `expected` is the correct outcome (the judge's draft LB-25); native's,
+# recorded over 5 runs, is `native`: every socket with a failed shutdown
+# stays open.

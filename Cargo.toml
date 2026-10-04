@@ -35,6 +35,9 @@ nix = { version = "0.31", optional = true, default-features = false, features = 
 io-uring = { version = "=0.7.13", optional = true, default-features = false, features = ["io_safety"] }
 corosensei = { version = "0.3.4", optional = true }
 signal-hook = { version = "0.3.18", optional = true, default-features = false }
+# `net` only: glibc's getaddrinfo and getnameinfo with libuv's hints (approved
+# 2026-10-04, pinned exactly; its unsafe is audited in UNSAFE.md).
+dns-lookup = { version = "=2.1.1", optional = true, default-features = false }
 
 [features]
 default = []
@@ -42,6 +45,9 @@ default = []
 io = ["dep:rustix", "dep:nix", "dep:io-uring"]
 # The deferred task scheduler, promises and Std.Sync.
 sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
+# Networking (Std.Internal.UV.TCP/UDP/DNS, Std.Net.interfaceAddresses) on the
+# scheduler's event loop: an optional module a translator admits per program.
+net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
 # docs/development.md). The default build is unsafe-free.
 unsafe-fast = []

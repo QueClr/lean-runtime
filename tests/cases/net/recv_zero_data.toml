@@ -1,0 +1,5 @@
+id = "recv_zero_data"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe R_Recv0 (data), l2r-scratch/compare/shared-runtime/judge/net1/LB-26-draft.md"
+streams = "separate"

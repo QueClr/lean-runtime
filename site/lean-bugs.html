@@ -15,6 +15,7 @@
     <a href="semantics.html">semantics</a>
     <a href="io.html">io</a>
     <a href="sched.html">sched</a>
+    <a href="net.html">net</a>
     <a href="testing.html">Testing</a>
     <a href="lean-bugs.html" aria-current="page">Lean bugs</a>
     <a href="status.html">Status</a>
@@ -109,6 +110,20 @@ leanrs's judge confirmed it on 2026-10-04; its case is <code>uvloop/signal_faile
 <tr id="lb-20"><td>LB-20</td><td>A <code>sync</code> dependent of a one-shot timer's or signal watcher's promise that stops or cancels it frees it while the program holds it.
 The next use crashes with SIGSEGV.</td><td>The handle is finished before its promise resolves, so the dependent's <code>stop</code> or <code>cancel</code> acts on a finished handle (<a href="sched.html#uv">sched</a>).
 A judge confirmed it on 2026-10-04; its cases are <code>uvloop/*_in_sync_dependent</code>.</td></tr>
+<tr id="lb-21"><td>LB-21</td><td>A second <code>accept</code> while one is pending fails, but keeps the event loop locked.
+After that, no loop callback runs, and every wait on the network hangs.</td><td>The second <code>accept</code> fails with the same error, and the loop goes on.</td></tr>
+<tr id="lb-22"><td>LB-22</td><td><code>setMembership</code> and <code>setMulticastInterface</code> abort (status 134) when an IPv6 address has 16 or more characters as text.</td><td>The call goes on, as for a short address.</td></tr>
+<tr id="lb-23"><td>LB-23</td><td><code>keepAlive</code> with a delay of 0 fails with <code>operation not permitted</code>.</td><td>It fails with <code>invalid argument</code>, as Lean's documentation says.</td></tr>
+<tr id="lb-24"><td>LB-24</td><td>A UDP <code>cancelRecv</code> keeps the socket and its descriptor open until the process ends.</td><td>The socket closes when the program drops it.</td></tr>
+<tr id="lb-25"><td>LB-25</td><td>A TCP <code>shutdown</code> that fails keeps the socket and its descriptor open until the process ends.</td><td>The socket closes when the program drops it.</td></tr>
+<tr id="lb-26"><td>LB-26</td><td><code>recv? 0</code> at the end of the stream fails with <code>no buffer space available</code>.</td><td>It gives <code>none</code>, as Lean's documentation says.
+With unread bytes, it keeps native's error.</td></tr>
+<tr id="lb-27"><td>LB-27</td><td>A name lookup that ends while the process exits can crash it (SIGSEGV), in about two runs of five.</td><td>The lookup's result is dropped, and the process exits normally.</td></tr>
+<tr id="lb-28"><td>LB-28</td><td>A <code>shutdown</code> made while the <code>connect</code> is still pending, with nothing to write, never happens.
+Its promise never resolves, and the peer never reads the end of the stream.</td><td>The shutdown happens when the connect succeeds.
+If the connect fails, the shutdown fails with <code>operation canceled</code>.</td></tr>
+<tr><td colspan="3">The lean2rr-side judge confirmed LB-21 to LB-28 on 2026-10-04, in batch <code>net-1</code>.
+Their cases are in <code>net/</code> (<a href="net.html#bugs">net</a>).</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

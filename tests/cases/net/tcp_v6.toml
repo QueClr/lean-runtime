@@ -1,0 +1,6 @@
+id = "tcp_v6"
+area = "net"
+lean_version = "4.34.0"
+source = "net-1 (Std.Internal.UV.TCP over IPv6; the host's loopback has ::1)"
+streams = "separate"
+# Depends on the host: IPv6 on the loopback interface (::1).

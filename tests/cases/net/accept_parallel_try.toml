@@ -1,0 +1,5 @@
+id = "accept_parallel_try"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe A_Accept (control of LB-21: tryAccept unlocks), l2r-scratch/compare/shared-runtime/judge/net1"
+streams = "separate"

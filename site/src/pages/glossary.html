@@ -53,6 +53,10 @@ See <a href="status.html#coverage">Status</a>.</dd>
 O-numbers are the owner's decisions.
 Q-numbers are the agreed answers to the open questions of the shared-runtime proposal.</dd>
 
+<dt id="g-delayed-error">Delayed error</dt>
+<dd>An error that libuv keeps on a socket and reports at the next call, not at the call that caused it.
+Example: <code>bind</code> to an address in use succeeds, and the next <code>listen</code> reports <code>EADDRINUSE</code> (<a href="net.html">net</a>).</dd>
+
 <dt id="g-deferred">Deferred task</dt>
 <dd>A task that does not run when it is made.
 It runs later, at the first of a few fixed points, for example when its value is needed.
@@ -65,6 +69,10 @@ For a translator's own deviation, the expected output stays native's, and the de
 When native's outcome is a Lean bug, the case expects the correct outcome and keeps native's beside it, in its <code>native</code> field.
 A row for a lifted limit does the same with the definition's result.
 leanrs names its deviations DV<i>n</i>; lean2rr lists them in section 10 of its translation plan.</dd>
+
+<dt id="g-dns-helper">DNS helper threads</dt>
+<dd>The two threads that <code>net</code> starts at the first name lookup.
+They only call glibc's lookup functions and pass plain data back to the event loop (<a href="net.html#dns">net</a>).</dd>
 
 <dt id="g-dv">DV<i>n</i></dt>
 <dd>leanrs's id for a deviation.
@@ -120,6 +128,10 @@ Every switch between contexts goes through it.</dd>
 <dd>Lean's message for a failure of the runtime itself, for example <code>INTERNAL PANIC: out of memory</code>.
 The process then ends, with status 1 (or an abort under <code>LEAN_ABORT_ON_PANIC</code>).
 A Lean <code>panic!</code> is different: it prints a message and the program goes on.</dd>
+
+<dt id="g-io-feed">io feed</dt>
+<dd>libuv's way to run a socket's callback at the loop's next turn, for example after a write that finished at once.
+Here it is a timer of the event loop that is due at once (<a href="net.html#model">net</a>).</dd>
 
 <dt id="g-io-need">IO need</dt>
 <dd>The mark of a pure task that an IO task waits for, directly or through other pure tasks.

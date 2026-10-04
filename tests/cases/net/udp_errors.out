@@ -1,0 +1,29 @@
+second recv: connection already in progress (error code: 114)
+waitReadable while receiving: connection already in progress (error code: 114)
+cancelled recv resolved: false
+empty array: ok, then ok
+empty datagram: ok, then ok, then 0 bytes  from 127.0.0.1
+three buffers, one datagram: ok, then ok, then 4 bytes abcd from 127.0.0.1
+a datagram over 65507 bytes: ok, then resource exhausted (error code: 90, message too long)
+send to a closed port: ok, then ok
+recv after it: ok, then no such thing (error code: 111, connection refused)
+TTL 255: ok
+TTL 256: invalid argument (error code: 22, invalid argument)
+TTL 2^31: invalid argument (error code: 22, invalid argument)
+multicast TTL 0: ok
+multicast TTL 256: invalid argument (error code: 22, invalid argument)
+multicast loop: ok
+multicast interface: ok
+multicast interface IPv6 on an IPv4 socket: unsupported operation (error code: 92, protocol not available)
+membership 2: invalid argument (error code: 22, invalid argument)
+leave a group never joined: unsupported operation (error code: 99, address not available)
+leave with an IPv6 interface: invalid argument (error code: 22, invalid argument)
+IPv6 group on an IPv4 socket: unsupported operation (error code: 92, protocol not available)
+IPv6 TTL: ok
+IPv6 multicast TTL: ok
+IPv6 multicast loop: ok
+IPv6 multicast interface: ok
+IPv6 leave a group never joined: unsupported operation (error code: 99, address not available)
+IPv6 group with an IPv4 interface: invalid argument (error code: 22, invalid argument)
+IPv6 datagram to itself: ok, then ok, then 3 bytes six from ::1
+sockets kept: true true

@@ -1,0 +1,124 @@
+<h1>The net module</h1>
+<p class="lead"><code>net</code> (feature <code>net</code>) is Lean 4.34.0's network externs: TCP and UDP sockets, name lookups and interface addresses.
+It runs on the scheduler's <a href="sched.html#sched-io">event loop</a>.</p>
+
+<div class="note"><p>The module came with batch <code>net-1</code>.
+The feature <code>net</code> also turns on <code>io</code> and <code>sched</code>.
+A translator admits the module for each program that uses the network.</p></div>
+
+<div class="toc"><ul>
+  <li><a href="#what">What it covers</a></li>
+  <li><a href="#model">The model</a></li>
+  <li><a href="#glue">What the glue does</a></li>
+  <li><a href="#dns">Name lookups</a></li>
+  <li><a href="#behaviour">What a program sees</a></li>
+  <li><a href="#bugs">Native bugs it does not copy</a></li>
+  <li><a href="#limits">Limits</a></li>
+</ul></div>
+
+<h2 id="what">What it covers</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>Lean</th><th>Native code</th><th>Here</th></tr></thead>
+<tbody>
+<tr><td><code>Std.Internal.UV.TCP.Socket</code></td><td>16 externs, <code>tcp.cpp</code></td><td><a href="repo:src/net/tcp.rs">tcp.rs</a></td></tr>
+<tr><td><code>Std.Internal.UV.UDP.Socket</code></td><td>15 externs, <code>udp.cpp</code></td><td><a href="repo:src/net/udp.rs">udp.rs</a></td></tr>
+<tr><td><code>Std.Internal.UV.DNS</code></td><td>2 externs, <code>dns.cpp</code></td><td><a href="repo:src/net/dns.rs">dns.rs</a></td></tr>
+<tr><td><code>Std.Net.interfaceAddresses</code></td><td>1 extern, <code>net_addr.cpp</code></td><td><a href="repo:src/net/iface.rs">iface.rs</a></td></tr>
+</tbody></table></div>
+<p><code>Std.Async.TCP</code>, <code>UDP</code> and <code>DNS</code> are Lean code over these externs.
+A translator compiles them like any other Lean code.</p>
+
+<h2 id="model">The model</h2>
+<p>Natively, one thread runs libuv's loop for the whole program.
+An extern starts an operation and returns a promise.
+Later, the loop thread finishes the operation and resolves the promise.</p>
+<p>Here, each socket copies the state of one libuv handle:</p>
+<ul>
+  <li>libuv's flags: readable, writable, bound, shut down, end of file;</li>
+  <li>its queues of writes, and its connect and shutdown requests;</li>
+  <li>the promises that Lean's object keeps.</li>
+</ul>
+<p>The system calls are libuv's, in libuv's order.
+When libuv makes a call in the calling thread, the extern makes it.
+Examples: <code>bind</code>, <code>listen</code>, and the first write of a <code>send</code>.
+When libuv's loop thread makes a call, a callback on the scheduler's loop context makes it.
+Examples: reads, the rest of a write, <code>accept4</code>.</p>
+<p>The callbacks resolve the promises on the loop context.
+So the waiting tasks wake there, as natively on the loop thread.</p>
+<p>Example: a client sends 16 MiB to a server that waits before it reads.</p>
+<ol>
+  <li>The <code>send</code> writes the part that the socket accepts, and queues the rest.</li>
+  <li>A <code>shutdown</code> stops new sends at once, and waits for the queue.</li>
+  <li>The server reads. The loop sees that the socket is writable and writes the next part.</li>
+  <li>When the queue is empty, the loop shuts down the write side and resolves both promises.</li>
+</ol>
+
+<h2 id="glue">What the glue does</h2>
+<ul>
+  <li><strong>Promises.</strong> An operation takes a closure that holds the translator's promise.
+    The crate calls the closure with the result, or drops it when Lean cancels the operation.</li>
+  <li><strong>Data.</strong> A <code>send</code> keeps a view of the translator's buffers until the write is done.
+    Nothing is copied.</li>
+  <li><strong>Buffers.</strong> A receive calls back to the translator to allocate its <code>ByteArray</code>, where native allocates it.
+    The bytes go straight into it.</li>
+  <li><strong>Lifetime.</strong> A socket closes when the translator drops its last handle.
+    A pending operation keeps the socket open until it ends, as natively.</li>
+</ul>
+
+<h2 id="dns">Name lookups</h2>
+<p>libuv runs name lookups on its thread pool.
+Here, two helper threads call glibc's <code>getaddrinfo</code> and <code>getnameinfo</code> through the dns-lookup crate.
+The first lookup starts them.</p>
+<ul>
+  <li>The threads get plain data and send back plain data.
+    No Lean value goes to another thread.</li>
+  <li>They wake the loop through the loop's eventfd.
+    The loop context then resolves the promise.</li>
+  <li>They are not Lean-visible parallelism: they only wait in the C library.</li>
+  <li>At exit, the program waits for the lookups that run, as natively.
+    It drops their results.</li>
+</ul>
+<p>The hints are libuv's: socket type 0 and protocol 0.
+So glibc gives one entry for each socket type.
+For example, <code>localhost</code> with an empty service gives 127.0.0.1 three times.</p>
+
+<h2 id="behaviour">What a program sees</h2>
+<ul>
+  <li>A new socket has no descriptor until <code>bind</code>, <code>connect</code> or <code>listen</code>.
+    Before that, the name queries and <code>send</code> fail with <code>EBADF</code>.</li>
+  <li><code>bind</code> sets <code>SO_REUSEADDR</code>.
+    An address in use is reported by the next <code>listen</code> or <code>connect</code>, not by <code>bind</code>.</li>
+  <li>One receive at a time on a socket.
+    A second one fails with <code>EALREADY</code>.</li>
+  <li>A UDP datagram larger than the buffer is cut to the buffer's size.</li>
+  <li>The errors have native's texts, for example <code>connection refused</code> with code 111.</li>
+</ul>
+
+<h2 id="bugs">Native bugs it does not copy</h2>
+<p>Eight native bugs are recorded as <a href="lean-bugs.html">Lean bugs</a> LB-21 to LB-28.
+Each has a case that expects the correct result.</p>
+<ul>
+  <li>A second <code>accept</code> keeps the native event loop locked (LB-21).</li>
+  <li>A long IPv6 multicast address aborts the native process (LB-22).</li>
+  <li><code>keepAlive</code> with a delay of 0 gives the wrong error (LB-23).</li>
+  <li>Two failures leak a socket (LB-24, LB-25).</li>
+  <li><code>recv? 0</code> at the end of the stream gives an error, not <code>none</code> (LB-26).</li>
+  <li>A name lookup that ends during the exit can crash native (LB-27).</li>
+  <li>A <code>shutdown</code> during a <code>connect</code> never happens natively (LB-28).</li>
+</ul>
+
+<h2 id="limits">Limits</h2>
+<ul>
+  <li>Native's loop thread runs as soon as a socket is ready.
+    Here, the loop runs when the program waits, sleeps or reaches a polling point.
+    A program that only computes delays the callbacks.</li>
+  <li>Two lookup threads, where libuv's pool runs at most two slow jobs at a time.</li>
+  <li>The tests use the loopback interface only.
+    The DNS case uses <code>localhost</code> and numeric hosts, so it depends on the host's <code>/etc/hosts</code>.</li>
+</ul>
+
+<p class="more">Detail: <a href="repo:docs/net.md">docs/net.md</a>, and <a href="repo:src/net/mod.rs">src/net/</a>:
+<a href="repo:src/net/tcp.rs">tcp.rs</a>, <a href="repo:src/net/udp.rs">udp.rs</a>, <a href="repo:src/net/dns.rs">dns.rs</a> and <a href="repo:src/net/iface.rs">iface.rs</a>.
+The audit of dns-lookup is in <a href="repo:UNSAFE.md">UNSAFE.md</a>.
+The program cases are in <a href="repo:tests/cases/README.md">tests/cases/</a> <code>net/</code>.
+Their Rust twins are in <a href="repo:tests/sched-driver/src/netcases.rs">tests/sched-driver</a>.</p>

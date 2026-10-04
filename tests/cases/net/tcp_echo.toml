@@ -1,0 +1,5 @@
+id = "tcp_echo"
+area = "net"
+lean_version = "4.34.0"
+source = "net-1 (Std.Internal.UV.TCP); lean2rr tests/runtime/RtTcp.lean"
+streams = "separate"

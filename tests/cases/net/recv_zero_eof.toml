@@ -1,0 +1,10 @@
+id = "recv_zero_eof"
+area = "net"
+lean_version = "4.34.0"
+source = "the net-1 judge's probe R_Recv0 (eof), l2r-scratch/compare/shared-runtime/judge/net1/LB-26-draft.md"
+streams = "separate"
+deviations = { lean2rr = "LB-26", leanrs = "LB-26" }
+native = { stdout = "recv? 0: error resource exhausted (error code: 105, no buffer space available)\nrecv? 16: ok none\nrecv? 0: error resource exhausted (error code: 105, no buffer space available)\n", stderr = "", code = "0" }
+# `expected` is the correct outcome (the judge's draft LB-26: Lean's
+# docstring says `none` at the end of the stream); native's, recorded over
+# 5 runs, is `native`.
