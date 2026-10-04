@@ -17,6 +17,7 @@
 use lean_runtime::io::cfile::CFile;
 use lean_runtime::io::FsMode;
 use std::ffi::{c_char, c_int, c_long, c_void, CString};
+use std::mem::MaybeUninit;
 use std::os::fd::{IntoRawFd, OwnedFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
@@ -152,12 +153,44 @@ impl Drop for Glibc {
 /// The model's operations, with the same result shapes.
 struct Model(CFile);
 
+/// `read_uninit` into bytes that hold a sentinel, so that every element is
+/// initialized and reading them back is sound; the bytes past the count read
+/// must still hold it.
+fn read_uninit(f: &mut CFile, n: usize) -> Result<Vec<u8>, i32> {
+    let mut v = vec![MaybeUninit::new(0xA5u8); n];
+    let got = f.read_uninit(&mut v)?;
+    // SAFETY: every element was initialized with the sentinel above.
+    let bytes: Vec<u8> = v.iter().map(|b| unsafe { b.assume_init() }).collect();
+    assert!(
+        bytes[got..].iter().all(|&b| b == 0xA5),
+        "read_uninit wrote past its count"
+    );
+    Ok(bytes[..got].to_vec())
+}
+
+/// `read_vec` appending to a `Vec` that already holds a prefix.
+fn read_vec(f: &mut CFile, n: usize) -> Result<Vec<u8>, i32> {
+    let mut v = b"pre".to_vec();
+    let got = f.read_vec(n, &mut v)?;
+    assert_eq!(v.len(), 3 + got);
+    assert_eq!(&v[..3], b"pre");
+    Ok(v[3..].to_vec())
+}
+
 impl Model {
+    /// `read n` through the three entry points in turn (by `n % 3`), which
+    /// must behave alike.
     fn read(&mut self, n: usize) -> Result<Vec<u8>, i32> {
-        let mut v = vec![0u8; n];
-        let got = self.0.read(&mut v)?;
-        v.truncate(got);
-        Ok(v)
+        match n % 3 {
+            0 => {
+                let mut v = vec![0u8; n];
+                let got = self.0.read(&mut v)?;
+                v.truncate(got);
+                Ok(v)
+            }
+            1 => read_uninit(&mut self.0, n),
+            _ => read_vec(&mut self.0, n),
+        }
     }
     fn get_line(&mut self) -> Result<Vec<u8>, i32> {
         let mut l = Vec::new();
@@ -366,6 +399,47 @@ fn run_pipe_case(seed: u64, steps: usize) {
         let ctx = format!("pipe seed {seed} step {step} op {op}");
         assert_eq!(ra, rb, "result differs: {ctx}");
         assert_eq!(g.is_eof(), m.0.is_eof(), "feof differs: {ctx}");
+    }
+}
+
+/// The three read entry points on the same file and on pipes, at sizes that
+/// take every path of `xsgetn`: copies only, a direct read that reaches the
+/// end of the request (`read_vec` reads into the spare capacity), a direct
+/// read followed by a refill, and end of file.
+#[test]
+fn read_entry_points_agree() {
+    let data: Vec<u8> = (0..50_000u32).map(|i| (i * 7 + i / 300) as u8).collect();
+    let p = std::env::temp_dir().join(format!("lean-runtime-read-variants-{}", std::process::id()));
+    std::fs::write(&p, &data).unwrap();
+    let sizes = [5usize, 4096, 4096 + 17, 3, 8192, 20_000, 1, 30_000, 7];
+    let open = || CFile::fdopen(open_mode(p.to_str().unwrap(), FsMode::Read), FsMode::Read);
+    let mut a = open();
+    let mut b = open();
+    let mut c = open();
+    let mut at = 0;
+    for &n in &sizes {
+        let mut v = vec![0u8; n];
+        let got = a.read(&mut v).unwrap();
+        v.truncate(got);
+        assert_eq!(v, data[at..(at + n).min(data.len())], "read {n} at {at}");
+        assert_eq!(
+            read_uninit(&mut b, n).unwrap(),
+            v,
+            "read_uninit {n} at {at}"
+        );
+        assert_eq!(read_vec(&mut c, n).unwrap(), v, "read_vec {n} at {at}");
+        at += got;
+    }
+    let _ = std::fs::remove_file(&p);
+    for &n in &sizes {
+        let mut a = CFile::fdopen(pipe_with(&data[..40_000]), FsMode::Read);
+        let mut b = CFile::fdopen(pipe_with(&data[..40_000]), FsMode::Read);
+        let mut c = CFile::fdopen(pipe_with(&data[..40_000]), FsMode::Read);
+        let mut v = vec![0u8; n];
+        let got = a.read(&mut v).unwrap();
+        v.truncate(got);
+        assert_eq!(read_uninit(&mut b, n).unwrap(), v, "pipe read_uninit {n}");
+        assert_eq!(read_vec(&mut c, n).unwrap(), v, "pipe read_vec {n}");
     }
 }
 

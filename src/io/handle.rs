@@ -25,6 +25,7 @@ use super::error::{IoError, ENOMEM, EWOULDBLOCK};
 use super::{sys, ByteSink};
 use rustix::fd::OwnedFd;
 use rustix::fs::{FlockOperation, OFlags};
+use std::mem::MaybeUninit;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 /// Lean's `IO.FS.Mode` (`Init/System/IO.lean`), its constructors in Lean's
@@ -265,6 +266,30 @@ impl Handle {
             return Ok(0);
         }
         self.file().read(out).map_err(os)
+    }
+
+    /// [`Handle::read`] into uninitialized memory: the `n` bytes of the
+    /// translator's new `ByteArray`, allocated (after [`check_read_size`]) as
+    /// Lean allocates it, without a zero pass. The count read; `out[..count]`
+    /// is initialized.
+    #[inline]
+    pub fn read_uninit(&self, out: &mut [MaybeUninit<u8>]) -> Result<usize, IoError> {
+        if out.is_empty() {
+            return Ok(0);
+        }
+        self.file().read_uninit(out).map_err(os)
+    }
+
+    /// [`Handle::read`] of up to `n` bytes appended to `out`, a translator's
+    /// `Vec`-based `ByteArray` (call [`check_read_size`] first): no zero pass
+    /// but where a direct read stops short of the `n` bytes' end
+    /// ([`CFile::read_vec`]). The count read.
+    #[inline]
+    pub fn read_vec(&self, n: usize, out: &mut Vec<u8>) -> Result<usize, IoError> {
+        if n == 0 {
+            return Ok(0);
+        }
+        self.file().read_vec(n, out).map_err(os)
     }
 
     /// `Handle.getLine` (`lean_io_prim_handle_get_line`): the bytes up to and

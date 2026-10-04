@@ -11,6 +11,7 @@
 use super::error::{set_errno, IoError, EINTR, ENOMEM};
 use super::handle::sarray_would_overflow;
 use super::ByteSink;
+use std::mem::MaybeUninit;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 /// `IO.getEnv` (`lean_io_getenv`, glibc's `getenv`): a name holding a NUL
@@ -98,17 +99,33 @@ fn open_urandom() -> Result<std::fs::File, IoError> {
 /// until `out` is full, `EINTR` retried, another error reported without a
 /// file name.
 pub fn get_random_bytes(out: &mut [u8]) -> Result<(), IoError> {
-    use std::io::Read;
-    if out.is_empty() {
+    fill_random(out.len(), |f, done| rustix::io::read(f, &mut out[done..]))
+}
+
+/// [`get_random_bytes`] into uninitialized memory (the translator's new
+/// `ByteArray`, not zeroed); on `Ok` all of `out` is initialized.
+pub fn get_random_bytes_uninit(out: &mut [MaybeUninit<u8>]) -> Result<(), IoError> {
+    fill_random(out.len(), |f, done| {
+        rustix::io::read(f, &mut out[done..]).map(|(init, _)| init.len())
+    })
+}
+
+/// The loop of `lean_io_get_random_bytes`: `read` from `done` on until `n`
+/// bytes are in.
+fn fill_random(
+    n: usize,
+    mut read: impl FnMut(&std::fs::File, usize) -> rustix::io::Result<usize>,
+) -> Result<(), IoError> {
+    if n == 0 {
         return Ok(());
     }
-    let mut f = open_urandom()?;
+    let f = open_urandom()?;
     let mut done = 0;
-    while done < out.len() {
-        match f.read(&mut out[done..]) {
-            Ok(n) => done += n,
+    while done < n {
+        match read(&f, done) {
+            Ok(got) => done += got,
             Err(e) => {
-                let code = e.raw_os_error().unwrap_or(0);
+                let code = e.raw_os_error();
                 if code != EINTR {
                     set_errno(code);
                     return Err(IoError::decode_io_error(code, None));

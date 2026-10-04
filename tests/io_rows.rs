@@ -1351,6 +1351,21 @@ fn io_get_random_bytes() {
     );
 }
 
+/// `get_random_bytes_uninit` fills all of its uninitialized bytes.
+#[test]
+fn io_get_random_bytes_uninit() {
+    use std::mem::MaybeUninit;
+    let mut v = vec![MaybeUninit::new(0u8); 4096];
+    env::get_random_bytes_uninit(&mut v).unwrap();
+    // SAFETY: every element was initialized above, and again by the call.
+    let bytes: Vec<u8> = v.iter().map(|b| unsafe { b.assume_init() }).collect();
+    assert!(
+        bytes.iter().filter(|&&b| b == 0).count() < 64,
+        "the bytes look unwritten"
+    );
+    env::get_random_bytes_uninit(&mut []).unwrap();
+}
+
 #[test]
 fn io_get_pid() {
     assert_eq!(env::get_pid(), std::process::id());

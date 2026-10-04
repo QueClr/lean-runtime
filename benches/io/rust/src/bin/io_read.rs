@@ -1,7 +1,7 @@
 //! `Handle.read k` of 1 to 64 bytes (chosen by the LCG) from a 1 MiB file, rewinding at its end:
 //! the copy out of glibc's buffer, one `read` per buffer, and a new byte array of `k` bytes per call
-//! (Lean allocates it before `fread`; a translator allocates its own). The native twin is
-//! `benches/io/native/Bench/IoRead.lean`.
+//! (Lean allocates it before `fread`; a translator allocates its own: here a `Vec` filled by
+//! `read_vec`, with no zero pass). The native twin is `benches/io/native/Bench/IoRead.lean`.
 
 use lean_runtime::io::handle::check_read_size;
 use lean_runtime::io::{FsMode, Handle};
@@ -25,9 +25,8 @@ fn kernel(inp: &Input, n: u64) -> u64 {
         x = step(x);
         let k = 1 + (x >> 58) as usize;
         check_read_size(k).unwrap();
-        let mut b = vec![0u8; k];
-        let got = inp.h.read(&mut b).unwrap();
-        b.truncate(got);
+        let mut b = Vec::new();
+        let got = inp.h.read_vec(k, &mut b).unwrap();
         if got < k {
             inp.h.rewind().unwrap();
         }

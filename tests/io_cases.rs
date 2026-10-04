@@ -45,11 +45,11 @@ fn open(path: &str, mode: FsMode) -> R<Handle> {
     Handle::open(path.as_bytes(), mode)
 }
 
+/// `Handle.read n` as a translator whose `ByteArray` is a `Vec` makes it.
 fn read(h: &Handle, n: usize) -> R<Vec<u8>> {
     lean_runtime::io::handle::check_read_size(n)?;
-    let mut v = vec![0u8; n];
-    let got = h.read(&mut v)?;
-    v.truncate(got);
+    let mut v = Vec::new();
+    h.read_vec(n, &mut v)?;
     Ok(v)
 }
 

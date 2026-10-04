@@ -35,9 +35,10 @@
 
 use super::error::{errno, set_errno, EAGAIN, EBADF, EINVAL, EPIPE, ESPIPE};
 use super::handle::FsMode;
-use super::sys::Fd;
+use super::sys::{Fd, ReadDest, VecDest};
 use super::ByteSink;
 use rustix::fd::OwnedFd;
+use std::mem::MaybeUninit;
 
 /// `_IO_UNBUFFERED`.
 const UNBUFFERED: u32 = 0x2;
@@ -534,12 +535,12 @@ impl CFile {
         c as i32
     }
 
-    /// `_IO_file_xsgetn`: up to `out.len()` bytes into `out`, the count read.
-    /// Requests of at least a buffer are read directly into `out`, in whole
-    /// blocks, after the buffer state is reset; LB-02: pending output is
+    /// `_IO_file_xsgetn`: up to `out.wanted()` bytes into `out`, the count
+    /// read. Requests of at least a buffer are read directly into `out`, in
+    /// whole blocks, after the buffer state is reset; LB-02: pending output is
     /// written first.
-    fn xsgetn(&mut self, out: &mut [u8]) -> usize {
-        let n = out.len();
+    fn xsgetn<D: ReadDest + ?Sized>(&mut self, out: &mut D) -> usize {
+        let n = out.wanted();
         let mut got = 0;
         if !self.has_buf {
             self.doallocbuf();
@@ -548,13 +549,13 @@ impl CFile {
             let want = n - got;
             let have = self.re - self.rp;
             if want <= have {
-                out[got..].copy_from_slice(&self.buf[self.rp..self.rp + want]);
+                out.put(got, &self.buf[self.rp..self.rp + want]);
                 self.rp += want;
                 got = n;
                 break;
             }
             if have > 0 {
-                out[got..got + have].copy_from_slice(&self.buf[self.rp..self.re]);
+                out.put(got, &self.buf[self.rp..self.re]);
                 got += have;
                 self.rp += have;
             }
@@ -578,7 +579,7 @@ impl CFile {
             if block >= 128 {
                 count -= want % block;
             }
-            match self.fd.read(&mut out[got..got + count]) {
+            match out.read(&self.fd, got, count) {
                 Ok(0) => {
                     self.flags |= EOF_SEEN;
                     break;
@@ -795,7 +796,30 @@ impl CFile {
     /// a success; with none, end of file clears both indicators (`clearerr`)
     /// and gives 0, otherwise it is `Err(errno)`. `n = 0` touches nothing.
     pub fn read(&mut self, out: &mut [u8]) -> Result<usize, i32> {
-        if out.is_empty() {
+        self.fread(out)
+    }
+
+    /// [`CFile::read`] into uninitialized memory (a translator's new
+    /// `ByteArray`, allocated as Lean allocates it, not zeroed): the count
+    /// read; `out[..count]` is initialized, the rest untouched.
+    pub fn read_uninit(&mut self, out: &mut [MaybeUninit<u8>]) -> Result<usize, i32> {
+        self.fread(out)
+    }
+
+    /// [`CFile::read`] of up to `n` bytes appended to `out`, which first gets
+    /// room for `n` (`reserve_exact`, the array Lean allocates); the count
+    /// read. The bytes copied out of the stream's buffer are appended with no
+    /// zero pass; a direct read (a buffer or more) goes into the spare
+    /// capacity with no zero pass when it reaches the end of the `n` bytes,
+    /// and into zeroed bytes otherwise (see `sys::VecDest`).
+    pub fn read_vec(&mut self, n: usize, out: &mut Vec<u8>) -> Result<usize, i32> {
+        out.reserve_exact(n);
+        let start = out.len();
+        self.fread(&mut VecDest { v: out, start, n })
+    }
+
+    fn fread<D: ReadDest + ?Sized>(&mut self, out: &mut D) -> Result<usize, i32> {
+        if out.wanted() == 0 {
             return Ok(0);
         }
         self.used = true;

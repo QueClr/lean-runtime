@@ -24,9 +24,12 @@
 //! header, then the bytes); leanrs keeps `Vec<u8>` and its `Str`. So that
 //! neither translator has to copy bulk data between its objects and this
 //! crate:
-//! - **reads write into the caller's storage**: `read n` fills a `&mut [u8]`
-//!   of `n` bytes that the caller allocated in its own object and returns the
-//!   count ([`Handle::read`]); an unbounded result (`getLine`, a path, an
+//! - **reads write into the caller's storage**: `read n` fills the `n` bytes
+//!   the caller allocated in its own object and returns the count: as
+//!   uninitialized memory with no zero pass ([`Handle::read_uninit`], over
+//!   rustix's reads into `MaybeUninit` and `write_copy_of_slice`), as a
+//!   `Vec`'s spare capacity ([`Handle::read_vec`]), or as initialized bytes
+//!   ([`Handle::read`]); an unbounded result (`getLine`, a path, an
 //!   environment value, a directory entry's name) is appended to a
 //!   [`ByteSink`] the caller implements on its own object;
 //! - **writes take views** (`&[u8]`), never ownership;
