@@ -108,3 +108,18 @@ fn open_list_order_and_close() {
     }
     assert_eq!(got, b"pending");
 }
+
+/// glibc's `_IO_file_doallocate`: `st_blksize` only when positive and below
+/// `BUFSIZ` (8192). From leanrs's `block.rs` test.
+#[test]
+fn buffer_size_follows_filedoalloc() {
+    assert_eq!(buffer_size(0), 8192);
+    assert_eq!(buffer_size(-1), 8192);
+    assert_eq!(buffer_size(512), 512);
+    assert_eq!(buffer_size(4096), 4096);
+    assert_eq!(buffer_size(8191), 8191);
+    assert_eq!(buffer_size(8192), 8192);
+    assert_eq!(buffer_size(65536), 8192);
+    assert_eq!(buffer_size(4 << 20), 8192);
+    assert_eq!(buffer_size(i64::MAX), 8192);
+}

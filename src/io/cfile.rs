@@ -64,6 +64,18 @@ const SEEK_END: i32 = 2;
 /// glibc's `BUFSIZ`.
 const BUFSIZ: usize = 8192;
 
+/// A stream's buffer size from its descriptor's `st_blksize`, as glibc's
+/// `_IO_file_doallocate` (`libio/filedoalloc.c`) computes it: `BUFSIZ`, or
+/// `st_blksize` when `0 < st_blksize < BUFSIZ`. From leanrs's
+/// `rt/leanrs_rt/src/io/block.rs`.
+pub fn buffer_size(blksize: i64) -> usize {
+    if blksize > 0 && blksize < BUFSIZ as i64 {
+        blksize as usize
+    } else {
+        BUFSIZ
+    }
+}
+
 /// One glibc `FILE` (see the module comment).
 #[derive(Debug)]
 pub struct CFile {
@@ -220,10 +232,7 @@ impl CFile {
                     self.flags |= LINE_BUF;
                 }
             }
-            let b = st.st_blksize;
-            if b > 0 && (b as u64) < BUFSIZ as u64 {
-                size = b as usize;
-            }
+            size = buffer_size(st.st_blksize as i64);
         }
         self.buf = vec![0u8; size];
         self.has_buf = true;
