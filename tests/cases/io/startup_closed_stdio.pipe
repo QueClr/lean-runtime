@@ -1,0 +1,1 @@
+run() { echo "== $1"; rm -f r.txt; eval "\"\$BIN\" $ARGS $2"; echo "exit $?"; cat r.txt; }; run "none closed" "</dev/null"; run "stdin" "<&-"; run "stdout" "</dev/null >&-"; run "stderr" "</dev/null 2>&-"; run "stdin stdout" "<&- >&-"; run "stdin stderr" "<&- 2>&-"; run "stdout stderr" "</dev/null >&- 2>&-"; run "all" "<&- >&- 2>&-"

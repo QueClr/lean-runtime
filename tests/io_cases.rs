@@ -14,7 +14,11 @@
 //! not in the tree is skipped by the checker.
 //!
 //! The binary runs without libtest (`harness = false`): as a twin it writes
-//! only what the program writes.
+//! only what the program writes. It is each case's twin when started under
+//! the case's name (the checker runs symbolic links named after the cases),
+//! and then, as a translator's ELF constructor does, opens native Lean's
+//! startup descriptors (`io::startup`) before Rust's runtime starts, so that
+//! closed standard descriptors are taken as natively.
 
 use lean_runtime::io::{exit, fs as lfs, FsMode, Handle, IoError};
 
@@ -425,6 +429,68 @@ fn error_without_file_name(args: &[String]) -> R<()> {
     println("after")
 }
 
+fn startup_fd_limit(args: &[String]) -> R<()> {
+    let mut fds: Vec<u64> = Vec::new();
+    lfs::read_dir(b"/proc/self/fd", |n| {
+        if let Some(v) = std::str::from_utf8(n).ok().and_then(|t| t.parse().ok()) {
+            fds.push(v)
+        }
+    })?;
+    fds.sort();
+    let list: Vec<String> = fds.iter().map(|n| n.to_string()).collect();
+    println(&format!("open at startup: #[{}]", list.join(", ")))?;
+    let mut hs = Vec::new();
+    let mut err = "limit not reached".to_owned();
+    for _ in 0..nat(&args[1]) {
+        match open(&args[0], FsMode::Read) {
+            Ok(h) => hs.push(h),
+            Err(e) => {
+                err = to_string(&e);
+                break;
+            }
+        }
+    }
+    println(&format!("opened {} more, then: {err}", hs.len()))
+}
+
+fn startup_closed_stdio(args: &[String]) -> R<()> {
+    let report = open(&args[0], FsMode::Write)?;
+    let n = nat(&args[1]);
+    let mut fds: Vec<u64> = Vec::new();
+    lfs::read_dir(b"/proc/self/fd", |name| {
+        if let Some(v) = std::str::from_utf8(name).ok().and_then(|t| t.parse().ok()) {
+            fds.push(v)
+        }
+    })?;
+    fds.sort();
+    let list: Vec<String> = fds.iter().map(|n| n.to_string()).collect();
+    let try_io = |r: R<String>| r.unwrap_or_else(|e| format!("error: {}", to_string(&e)));
+    let (stdin, stdout, stderr) = (Handle::stdin(), Handle::stdout(), Handle::stderr());
+    let r1 = try_io(get_line(&stdin).map(|l| format!("stdin getLine: {}", quote(&l))));
+    let r2 = try_io(read(&stdin, 5).map(|b| format!("stdin read: {}", b.len())));
+    let r3 = try_io(
+        print("out\n")
+            .and_then(|()| stdout.flush())
+            .map(|()| "stdout: ok".to_owned()),
+    );
+    let r4 = try_io(
+        stderr
+            .put_str(b"err\n")
+            .and_then(|()| stderr.flush())
+            .map(|()| "stderr: ok".to_owned()),
+    );
+    let r5 = try_io(read(&stdout, 5).map(|b| format!("stdout read: {}", b.len())));
+    let r6 = try_io(read(&stdout, n).map(|b| format!("stdout read {n}: {}", b.len())));
+    let r7 = try_io(read(&stderr, n).map(|b| format!("stderr read {n}: {}", b.len())));
+    report.put_str(
+        format!(
+            "fds #[{}]\n{r1}\n{r2}\n{r3}\n{r4}\n{r5}\n{r6}\n{r7}\n",
+            list.join(", ")
+        )
+        .as_bytes(),
+    )
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -444,16 +510,45 @@ const TWINS: &[(&str, Twin)] = &[
     ("rewind_serves_buffer", rewind_serves_buffer),
     ("read_after_write", read_after_write),
     ("error_without_file_name", error_without_file_name),
+    ("startup_fd_limit", startup_fd_limit),
+    ("startup_closed_stdio", startup_closed_stdio),
 ];
 
+/// The twin named by `argv[0]`'s file name, if any.
+fn twin_name(argv0: &[u8]) -> Option<&'static str> {
+    let base = argv0.rsplit(|&b| b == b'/').next().unwrap_or(argv0);
+    TWINS.iter().map(|(n, _)| *n).find(|n| n.as_bytes() == base)
+}
+
+/// The translator's ELF constructor: native Lean's startup descriptors,
+/// opened before Rust's runtime replaces closed standard descriptors with
+/// `/dev/null`, when this binary runs as a twin (`argv[0]` from
+/// `/proc/self/cmdline`: std's own arguments may not be set up yet). Not
+/// under Miri, which runs no file system calls in isolation.
+#[cfg(not(miri))]
+extern "C" fn startup() {
+    let Ok(cmdline) = std::fs::read("/proc/self/cmdline") else {
+        return;
+    };
+    let argv0 = cmdline.split(|&b| b == 0).next().unwrap_or(&[]);
+    if twin_name(argv0).is_some() {
+        if let Err(f) = lean_runtime::io::startup::open_native_descriptors() {
+            lean_runtime::io::startup::fail_as_native(f);
+        }
+    }
+}
+
+#[cfg(not(miri))]
+#[used]
+#[link_section = ".init_array"]
+static STARTUP: extern "C" fn() = startup;
+
 fn main() {
-    if let Ok(id) = std::env::var("LEAN_RUNTIME_TWIN") {
+    use std::os::unix::ffi::OsStrExt;
+    let argv0 = std::env::args_os().next().unwrap_or_default();
+    if let Some(id) = twin_name(argv0.as_bytes()) {
         let args: Vec<String> = std::env::args().skip(1).collect();
-        let twin = TWINS
-            .iter()
-            .find(|(n, _)| *n == id)
-            .unwrap_or_else(|| panic!("no twin {id}"))
-            .1;
+        let twin = TWINS.iter().find(|(n, _)| *n == id).unwrap().1;
         finish(twin(&args));
     }
     if cfg!(miri) {
@@ -464,17 +559,7 @@ fn main() {
     let dir = std::env::temp_dir().join(format!("lean-runtime-twins-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for (id, _) in TWINS {
-        let w = dir.join(id);
-        std::fs::write(
-            &w,
-            format!(
-                "#!/bin/sh\nLEAN_RUNTIME_TWIN={id} exec '{}' \"$@\"\n",
-                exe.display()
-            ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&w, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&exe, dir.join(id)).unwrap();
     }
     let status = std::process::Command::new("python3")
         .arg(format!("{root}/scripts/cases.py"))

@@ -13,6 +13,7 @@
 //! | [`fs`] | the file system: directories, metadata, `realPath`, removal, renaming, links, permissions, the working directory |
 //! | [`env`] | `IO.getEnv`, `IO.appPath`, the process id, random bytes, the monotonic clock, `IO.sleep` |
 //! | [`debug`] | the IO parts of `dbgTrace` and `dbgSleep`, and the runtime's own standard-error lines |
+//! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors |
 //!
 //! The second io batch adds processes, `Std.Time`, temporary files, the
 //! `Std.Internal.UV.System` queries and the redirection of the standard
@@ -61,6 +62,7 @@ pub mod error;
 pub mod exit;
 pub mod fs;
 pub mod handle;
+pub mod startup;
 mod sys;
 
 pub use error::IoError;

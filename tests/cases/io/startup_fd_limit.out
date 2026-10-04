@@ -1,0 +1,9 @@
+open at startup: #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+opened 53 more, then: resource exhausted (error code: 24, too many open files)
+  file: /dev/null
+open at startup: #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+opened 54 more, then: resource exhausted (error code: 24, too many open files)
+  file: /dev/null
+open at startup: #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+opened 55 more, then: resource exhausted (error code: 24, too many open files)
+  file: /dev/null

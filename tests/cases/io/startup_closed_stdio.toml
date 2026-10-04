@@ -1,0 +1,8 @@
+id = "startup_closed_stdio"
+area = "io"
+lean_version = "4.34.0"
+source = "leanrs step-1 finding A821 (option C); LB-10 (followed as native); lean2rr tests/runtime/RtClosedStreams.lean"
+streams = "separate"
+# Host-dependent: recorded where libuv 1.48 makes its two io_uring rings
+# (Linux 5.13 or later, io_uring allowed); elsewhere the descriptor counts
+# differ by two.

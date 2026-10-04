@@ -19,8 +19,8 @@ path = "src/lib.rs"
 # --offline --locked --features io`; `cargo fetch --locked` once fills the
 # cache).
 [dependencies]
-rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "fs", "stdio", "termios", "time"] }
-nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "process"] }
+rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "stdio", "system", "termios", "time"] }
+nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "process", "signal"] }
 
 [features]
 default = []

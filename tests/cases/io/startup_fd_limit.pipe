@@ -1,0 +1,1 @@
+ulimit -n 64; $BIN $ARGS; $BIN $ARGS <&-; UV_USE_IO_URING=0 $BIN $ARGS

@@ -1,0 +1,84 @@
+== none closed
+out
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+stdin getLine: ""
+stdin read: 0
+stdout: ok
+stderr: ok
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 9, bad file descriptor)
+== stdin
+out
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+stdout: ok
+stderr: ok
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 9, bad file descriptor)
+== stdout
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+stdin getLine: ""
+stdin read: 0
+error: invalid argument (error code: 22, invalid argument)
+stderr: ok
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 9, bad file descriptor)
+== stderr
+out
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+stdin getLine: ""
+stdin read: 0
+stdout: ok
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 22, invalid argument)
+== stdin stdout
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+stderr: ok
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 9, bad file descriptor)
+== stdin stderr
+out
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+stdout: ok
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 22, invalid argument)
+== stdout stderr
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+stdin getLine: ""
+stdin read: 0
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+== all
+exit 0
+fds #[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 9, bad file descriptor)
+error: invalid argument (error code: 22, invalid argument)
+error: invalid argument (error code: 22, invalid argument)
