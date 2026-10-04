@@ -1,0 +1,1148 @@
+# Row cases of area `net` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/net/net.rows.toml`.
+# The address types have no `Repr`: a parsed address is shown as its octets or
+# segments (an `Array UInt8` or `Array UInt16`), a text as Lean's `repr` of it.
+
+[[row]]
+id = "net/pton_v4.0"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4"']
+expected = "some #[1, 2, 3, 4]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.1"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"0.0.0.0"']
+expected = "some #[0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.2"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"255.255.255.255"']
+expected = "some #[255, 255, 255, 255]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.3"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"127.0.0.1"']
+expected = "some #[127, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.4"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"256.1.1.1"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.5"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.256"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.6"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"999.1.1.1"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.7"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"01.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.8"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.04"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.9"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"00.0.0.0"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.10"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"0.0.0.00"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.11"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.12"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4."']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.13"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4.5"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.14"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['".1.2.3"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.15"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1..2.3"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.16"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2..3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.17"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['""']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.18"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"."']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.19"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.20"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['" 1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.21"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4 "']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.22"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4x"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.23"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"0x1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.24"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.-1"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.25"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"+1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.26"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"１.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.27"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4\x00"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.28"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2\x00.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.29"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4%eth0"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.30"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"::ffff:1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.31"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4/24"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.32"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"10.0.0.10"']
+expected = "some #[10, 0, 0, 10]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.33"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"100.200.250.255"']
+expected = "some #[100, 200, 250, 255]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v4.34"
+area = "net"
+fn = "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)"
+args = ['"1.2.3.4\n"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.ofString (lean_uv_pton_v4, libuv 1.48.0 inet_pton4): bounds, leading zeros, missing and extra parts, other characters, NUL, a zone"
+
+[[row]]
+id = "net/pton_v6.0"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.1"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.2"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1::"']
+expected = "some #[1, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.3"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1::1"']
+expected = "some #[1, 0, 0, 0, 0, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.4"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['":"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.5"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['":::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.6"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:::2"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.7"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.8"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1::2::3"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.9"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:1.2.3.4"']
+expected = "some #[0, 0, 0, 0, 0, 65535, 258, 772]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.10"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1.2.3.4"']
+expected = "some #[0, 0, 0, 0, 0, 0, 258, 772]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.11"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.12"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:8"']
+expected = "some #[1, 2, 3, 4, 5, 6, 7, 8]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.13"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:8:9"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.14"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.15"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7::"']
+expected = "some #[1, 2, 3, 4, 5, 6, 7, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.16"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1:2:3:4:5:6:7"']
+expected = "some #[0, 1, 2, 3, 4, 5, 6, 7]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.17"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1:2:3:4:5:6:7:8"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.18"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:8::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.19"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4::5:6:7:8"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.20"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"fe80::1%eth0"']
+expected = "some #[65152, 0, 0, 0, 0, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.21"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"fe80::1%"']
+expected = "some #[65152, 0, 0, 0, 0, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.22"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"%eth0"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.23"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::%"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.24"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::%%x"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.25"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1::%25"']
+expected = "some #[1, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.26"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"ABCD:ef01::FfFf"']
+expected = "some #[43981, 61185, 0, 0, 0, 0, 0, 65535]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.27"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"12345::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.28"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"00000::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.29"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"0000:0000:0000:0000:0000:0000:0000:0001"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.30"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:1.2.3.4"']
+expected = "some #[1, 2, 3, 4, 5, 6, 258, 772]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.31"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.32"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:1.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.33"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:1.2.3"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.34"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:01.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.35"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:1.2.3.4:5"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.36"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:1.2.3.4.5"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.37"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:256.2.3.4"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.38"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1.2.3.4%z"']
+expected = "some #[0, 0, 0, 0, 0, 0, 258, 772]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.39"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.40"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['":1"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.41"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1::2:"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.42"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['":1::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.43"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['""']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.44"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"g::"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.45"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['" ::1"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.46"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1 "']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.47"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1\x00"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.48"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"fe80::1%eth0\x00"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.49"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:8%"']
+expected = "some #[1, 2, 3, 4, 5, 6, 7, 8]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.50"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"0:0:0:0:0:0:0:0"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.51"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::0.0.0.0"']
+expected = "some #[0, 0, 0, 0, 0, 0, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.52"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"0000:0000:0000:0000:0000:0000:255.255.255.255"']
+expected = "some #[0, 0, 0, 0, 0, 0, 65535, 65535]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.53"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"0000:0000:0000:0000:0000:0000:255.255.255.255%zone"']
+expected = "some #[0, 0, 0, 0, 0, 0, 65535, 65535]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.54"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"00000:0000:0000:0000:0000:0000:255.255.255.255%zone"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.55"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"2001:db8::1"']
+expected = "some #[8193, 3512, 0, 0, 0, 0, 0, 1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.56"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::ffff:0:0"']
+expected = "some #[0, 0, 0, 0, 0, 65535, 0, 0]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.57"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"::1.2.3.4:5"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.58"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:8:"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/pton_v6.59"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:"']
+expected = "none"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.ofString (lean_uv_pton_v6, libuv 1.48.0 uv_inet_pton and inet_pton6): '::' in every place, group counts, digits per group, IPv4 tails, zones, NUL"
+
+[[row]]
+id = "net/ntop_v4.0"
+area = "net"
+fn = "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString"
+args = ["0", "0", "0", "0"]
+expected = '"0.0.0.0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.toString (lean_uv_ntop_v4, libuv 1.48.0 inet_ntop4)"
+
+[[row]]
+id = "net/ntop_v4.1"
+area = "net"
+fn = "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString"
+args = ["255", "255", "255", "255"]
+expected = '"255.255.255.255"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.toString (lean_uv_ntop_v4, libuv 1.48.0 inet_ntop4)"
+
+[[row]]
+id = "net/ntop_v4.2"
+area = "net"
+fn = "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString"
+args = ["1", "2", "3", "4"]
+expected = '"1.2.3.4"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.toString (lean_uv_ntop_v4, libuv 1.48.0 inet_ntop4)"
+
+[[row]]
+id = "net/ntop_v4.3"
+area = "net"
+fn = "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString"
+args = ["10", "0", "0", "1"]
+expected = '"10.0.0.1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.toString (lean_uv_ntop_v4, libuv 1.48.0 inet_ntop4)"
+
+[[row]]
+id = "net/ntop_v4.4"
+area = "net"
+fn = "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString"
+args = ["100", "9", "10", "99"]
+expected = '"100.9.10.99"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.toString (lean_uv_ntop_v4, libuv 1.48.0 inet_ntop4)"
+
+[[row]]
+id = "net/ntop_v4.5"
+area = "net"
+fn = "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString"
+args = ["127", "0", "0", "1"]
+expected = '"127.0.0.1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv4Addr.toString (lean_uv_ntop_v4, libuv 1.48.0 inet_ntop4)"
+
+[[row]]
+id = "net/ntop_v6.0"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"]
+expected = '"::"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.1"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x1"]
+expected = '"::1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.2"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x1", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"]
+expected = '"1::"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.3"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0xffff", "0x102", "0x304"]
+expected = '"::ffff:1.2.3.4"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.4"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x102", "0x304"]
+expected = '"::1.2.3.4"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.5"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x1", "0x0"]
+expected = '"::0.1.0.0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.6"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x2"]
+expected = '"::2"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.7"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x102"]
+expected = '"::102"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.8"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0xffff", "0x0", "0x0"]
+expected = '"::ffff:0.0.0.0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.9"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0xfffe", "0x102", "0x304"]
+expected = '"::fffe:102:304"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.10"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x1", "0xffff", "0x1", "0x2"]
+expected = '"::1:ffff:1:2"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.11"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0xffff", "0xffff", "0xffff"]
+expected = '"::ffff:255.255.255.255"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.12"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x1", "0x0", "0x0", "0x2", "0x0", "0x0", "0x0", "0x3"]
+expected = '"1:0:0:2::3"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.13"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x1", "0x0", "0x0", "0x2", "0x0", "0x0", "0x3", "0x4"]
+expected = '"1::2:0:0:3:4"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.14"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x1", "0x0", "0x2", "0x0", "0x3", "0x0", "0x4", "0x0"]
+expected = '"1:0:2:0:3:0:4:0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.15"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0xffff", "0xffff", "0xffff", "0xffff", "0xffff", "0xffff", "0xffff", "0xffff"]
+expected = '"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.16"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0xabcd", "0xef01", "0x2345", "0x6789", "0xabcd", "0xef01", "0x2345", "0x6789"]
+expected = '"abcd:ef01:2345:6789:abcd:ef01:2345:6789"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.17"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]
+expected = '"0:0:1::"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.18"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x2001", "0xdb8", "0x0", "0x0", "0x0", "0x0", "0x0", "0x1"]
+expected = '"2001:db8::1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.19"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"]
+expected = '"0:1::"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.20"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0xfe80", "0x0", "0x0", "0x0", "0x202", "0xb3ff", "0xfe1e", "0x8329"]
+expected = '"fe80::202:b3ff:fe1e:8329"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.21"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x1", "0x2", "0x3", "0x4", "0x5", "0x6", "0x7", "0x8"]
+expected = '"1:2:3:4:5:6:7:8"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.22"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x0", "0x0", "0x0", "0x0", "0x0", "0xffff", "0x0", "0x1"]
+expected = '"::ffff:0.0.0.1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.23"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x1", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x1"]
+expected = '"1::1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/ntop_v6.24"
+area = "net"
+fn = "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString"
+args = ["0x10", "0x100", "0x1000", "0x0", "0x0", "0x0", "0x0", "0xf"]
+expected = '"10:100:1000::f"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: IPv6Addr.toString (lean_uv_ntop_v6, libuv 1.48.0 inet_ntop6): the longest zero run and its ties, runs of one, leading and trailing runs, the IPv4 tails (six zero groups, five and ffff) and their neighbours, lowercase hex"
+
+[[row]]
+id = "net/pton_v6.60"
+area = "net"
+fn = "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)"
+args = ['"1:2:3:4:5:6:7:8:9:a"']
+expected = "none"
+lean_version = "4.34.0"
+source = "leanrs review of semantics-3 (note B): a ninth group followed by ':', which reaches inet_pton6's bound check in the ':' arm"

@@ -33,10 +33,12 @@ Nothing here owns or allocates a Lean value.</p>
   <li><a href="#fixed">Fixed-width integers</a></li>
   <li><a href="#floats">Float, Float32 and libm</a></li>
   <li><a href="#strings">Strings and UTF-8 positions</a></li>
+  <li><a href="#net">IP addresses</a></li>
   <li><a href="#hash">Hashing</a></li>
   <li><a href="#arrays">Arrays</a></li>
   <li><a href="#panics">Panics</a></li>
   <li><a href="#text">Text output</a></li>
+  <li><a href="#toolchain">Toolchain facts</a></li>
 </ul></div>
 
 <p>Every public function names two things in its doc comment:</p>
@@ -213,8 +215,10 @@ So no backend gets a request above its limit, and both translators end the same 
 <h3>The exceptions</h3>
 <ul>
   <li><strong>Ports.</strong> Rust's <code>cbrt</code> and <code>atanh</code> (and their <code>f32</code> forms) are not glibc's algorithms.
-    lean-runtime has ports of glibc 2.39's aarch64 code for them.
-    The ports exist only on aarch64 Linux with glibc.</li>
+    lean-runtime has ports of glibc 2.39's code for them.
+    <code>cbrt</code> and <code>cbrtf</code> give the results of glibc's aarch64 build on every target.
+    <code>atanh</code> and <code>atanhf</code> use glibc's formula over the platform's <code>log1p</code>.
+    On other platforms, the results can differ from native Lean on that platform, by the owner's choice of one algorithm.</li>
   <li><strong>Constant folding (why <code>black_box</code>).</strong> LLVM computes a libm call with constant operands at compile time.
     Its result can differ from glibc's in the last bit.
     For example, LLVM folds <code>exp2(x)</code> as <code>pow(2, x)</code>, and it rewrites <code>pow(x, 2.0)</code> as <code>x * x</code>.
@@ -236,7 +240,31 @@ So no backend gets a request above its limit, and both translators end the same 
   <li>Results are plain data: a <code>u32</code> character, a <code>u64</code> position, a byte <code>Range</code>.
     The caller builds its own string from a range.</li>
   <li>The functions: <code>get</code>, <code>next</code>, <code>prev</code>, <code>atEnd</code>, <code>isValid</code>, <code>extract</code>, the byte-order comparisons, and others.</li>
+  <li><code>String.Pos.Raw.set</code> (also <code>String.Pos.set</code> and <code>String.set</code>) returns a change, not a string.
+    The change gives the byte range of the old character and the bytes of the new one.
+    At an invalid position, there is no change, and the caller keeps its string without a copy.
+    On a unique string, the glue applies the change in place.
+    When both characters have the same size, <code>write_in_place</code> stores the new one.
+    Otherwise the glue moves the tail of the string, if the block has room.</li>
+  <li><code>ByteArray.validateUTF8</code> accepts exactly the well-formed UTF-8 of the Unicode standard, as Lean's C validator does.
+    It rejects overlong forms, surrogates and values above U+10FFFF.</li>
   <li><code>Substring.Raw</code>'s externs are Lean code, so they are not here.</li>
+</ul>
+
+<h2 id="net">IP addresses</h2>
+<p><code>Std.Net.Addr</code> converts IP addresses to text and back.
+These functions need no event loop, so they are in <code>semantics</code>.</p>
+<ul>
+  <li>Natively, the C functions call libuv 1.48's own parser and formatter (<code>src/inet.c</code>), not glibc's.
+    lean-runtime has ports of that code.</li>
+  <li><code>IPv4Addr.ofString</code> accepts four decimal parts from 0 to 255, with no leading zero.</li>
+  <li><code>IPv6Addr.ofString</code> accepts up to eight groups of hex digits, one <code>::</code>, and an IPv4 address at the end.
+    It drops a zone after <code>%</code>, as libuv does.</li>
+  <li>A string with a NUL byte gives <code>none</code>: Lean's C checks this first.</li>
+  <li><code>IPv6Addr.toString</code> writes lowercase hex and replaces the first longest run of two or more zero groups with <code>::</code>.
+    It writes <code>::ffff:1.2.3.4</code> and <code>::1.2.3.4</code> with an IPv4 tail, as libuv does.</li>
+  <li>An address is plain data: four octets or eight 16-bit groups.
+    The text goes into a <code>fmt::Write</code>.</li>
 </ul>
 
 <h2 id="hash">Hashing</h2>
@@ -278,7 +306,18 @@ Each translator prints with its own streams and ends its own process.</p>
   <li>The rest of <code>Repr</code> and <code>ToString</code> (structures, lists, <code>Format</code>) stays Lean code that the translators compile.</li>
 </ul>
 
-<p class="more">Detail: the module docs in <a href="../src/semantics/mod.rs">src/semantics/</a>: <a href="../src/semantics/array.rs">array.rs</a>, <a href="../src/semantics/bignum.rs">bignum.rs</a>, <a href="../src/semantics/float.rs">float.rs</a>, <a href="../src/semantics/float32.rs">float32.rs</a>, <a href="../src/semantics/hash.rs">hash.rs</a>, <a href="../src/semantics/int.rs">int.rs</a>, <a href="../src/semantics/libm.rs">libm.rs</a>, <a href="../src/semantics/nat.rs">nat.rs</a>, <a href="../src/semantics/panic.rs">panic.rs</a>, <a href="../src/semantics/repr.rs">repr.rs</a>, <a href="../src/semantics/sint.rs">sint.rs</a>, <a href="../src/semantics/string.rs">string.rs</a>, <a href="../src/semantics/uint.rs">uint.rs</a>.</p>
+<h2 id="toolchain">Toolchain facts</h2>
+<p>Three Lean functions report facts about the Lean build, not about the program.
+lean-runtime holds them as constants, with the values that native Lean 4.34.0 reports.</p>
+<ul>
+  <li><code>Lean.githash</code>: the commit of the <code>v4.34.0</code> tag.</li>
+  <li><code>Lean.version.specialDesc</code>: empty, because 4.34.0 is a release.</li>
+  <li><code>System.Platform.target</code>: the target triple, <code>aarch64-unknown-linux-gnu</code> on the pinned host.
+    Native Lean on another platform reports that platform's triple.
+    So lean-runtime builds the triple from the target that the program is built for.</li>
+</ul>
+
+<p class="more">Detail: the module docs in <a href="../src/semantics/mod.rs">src/semantics/</a>: <a href="../src/semantics/array.rs">array.rs</a>, <a href="../src/semantics/bignum.rs">bignum.rs</a>, <a href="../src/semantics/float.rs">float.rs</a>, <a href="../src/semantics/float32.rs">float32.rs</a>, <a href="../src/semantics/hash.rs">hash.rs</a>, <a href="../src/semantics/int.rs">int.rs</a>, <a href="../src/semantics/libm.rs">libm.rs</a>, <a href="../src/semantics/nat.rs">nat.rs</a>, <a href="../src/semantics/net.rs">net.rs</a>, <a href="../src/semantics/panic.rs">panic.rs</a>, <a href="../src/semantics/repr.rs">repr.rs</a>, <a href="../src/semantics/sint.rs">sint.rs</a>, <a href="../src/semantics/string.rs">string.rs</a>, <a href="../src/semantics/toolchain.rs">toolchain.rs</a>, <a href="../src/semantics/uint.rs">uint.rs</a>.</p>
 </main>
 <footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
 Written about 80% to ASD-STE100 (Simplified Technical English).

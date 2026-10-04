@@ -105,8 +105,11 @@ Text and unbounded bytes go straight into the glue's own storage.</figcaption>
   <li>The crate assumes a 64-bit platform.
     The expected values come from aarch64 Linux with glibc 2.39.</li>
   <li><code>io</code> compiles only on Linux, aarch64 and x86-64, because it models glibc.</li>
-  <li>The libm ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> exist only on aarch64 Linux with glibc.
-    Elsewhere, code that calls them does not compile until a port for that platform exists.</li>
+  <li>The libm ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and <code>atanhf</code> compile on every target.
+    <code>cbrt</code> and <code>cbrtf</code> give the results of glibc 2.39's aarch64 build everywhere.
+    <code>atanh</code> and <code>atanhf</code> use glibc's formula over the platform's <code>log1p</code>.
+    On other platforms, the results can differ from native Lean on that platform.
+    The owner chose one algorithm for every target.</li>
 </ul>
 
 <p class="more">Detail: <a href="repo:README.md">README.md</a>, <a href="repo:CONTRIBUTING.md">CONTRIBUTING.md</a> ("Code", "Builds", "Dependencies"), <a href="repo:Cargo.toml">Cargo.toml</a>, <a href="repo:src/lib.rs">src/lib.rs</a>, <a href="repo:src/io/mod.rs">src/io/mod.rs</a> ("no bulk copies").</p>

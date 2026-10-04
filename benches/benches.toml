@@ -1679,3 +1679,43 @@ name = "repr_string_quote"
 function = "repr::string_quote"
 comparable = true
 note = "Lean code natively (small strings and appends); the Rust twin formats on the stack and makes one new string object, its characters counted; 16 strings of 30 to 60 bytes with escapes"
+
+[[bench]]
+name = "string_utf8_set"
+function = "string::utf8_set"
+comparable = true
+note = "the string is updated in place where it can be on both sides (Lean's is unique after its first copy of the input): Lean's C in place for an ASCII character over an ASCII one, else a copy into a new string; the Rust twin's glue in place for a character of the same size (Utf8Set::write_in_place), else one new block; any position up to two past the end, characters of 1 to 4 bytes"
+
+[[bench]]
+name = "string_validate_utf8"
+function = "string::validate_utf8"
+comparable = true
+note = "896 bytes of valid UTF-8 (characters of 1 to 4 bytes); the operand passes through black_box on the Rust side"
+
+[[bench]]
+name = "net_pton_v4"
+function = "net::pton_v4"
+comparable = false
+reason = "Lean's API allocates the `some` and the address's array of boxed numbers; the crate returns plain data, and a translator's cost depends on its representation of the result"
+o12 = "by inspection: the crate does strictly less work than C here (Lean allocates or reads a cached count), so the speed floor holds"
+note = "16 texts, valid and not; Lean's Array.get! retains and releases the string it reads, the Rust side borrows it"
+
+[[bench]]
+name = "net_pton_v6"
+function = "net::pton_v6"
+comparable = false
+reason = "Lean's API allocates the `some` and the address's array of boxed numbers; the crate returns plain data, and a translator's cost depends on its representation of the result"
+o12 = "by inspection: the crate does strictly less work than C here (Lean allocates or reads a cached count), so the speed floor holds"
+note = "16 texts, valid and not; Lean's Array.get! retains and releases the string it reads, the Rust side borrows it"
+
+[[bench]]
+name = "net_ntop_v4"
+function = "net::ntop_v4"
+comparable = true
+note = "16 addresses built before the timed region; Lean's Array.get! retains and releases the address it reads; the result is one new string object (the Rust twin formats on the stack; Lean's C formats with snprintf and makes the string with lean_mk_string)"
+
+[[bench]]
+name = "net_ntop_v6"
+function = "net::ntop_v6"
+comparable = true
+note = "16 addresses built before the timed region; Lean's Array.get! retains and releases the address it reads; the result is one new string object (the Rust twin formats on the stack; Lean's C formats with snprintf and makes the string with lean_mk_string)"

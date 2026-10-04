@@ -117,3 +117,25 @@ Smaller asymmetries that remain are noted in each pair's `note`:
   `nat_check_result_bits`, the size test of a big `pow` or `shiftl` result,
   which native has no counterpart for (it refuses an exponent of 2^32 or
   more instead).
+
+## The string and address pairs (semantics batch 3)
+
+- **`string_utf8_set`** carries the string through the loop, as the array
+  pairs do: Lean's copy of the input is made at the first update and is
+  unique afterwards. Lean's C updates in place only for an ASCII character
+  over an ASCII one and otherwise copies into a new string; the Rust twin's
+  glue writes in place whenever the new character has the old one's size
+  (`Utf8Set::same_size`, then `write_in_place`) and otherwise makes one new
+  block. Positions run
+  up to two past the end of the original string, so some calls leave the
+  string unchanged.
+- **`string_validate_utf8`** validates the 896 bytes of the mixed string;
+  the operand passes through `black_box` on the Rust side.
+- **`net_pton_v4`, `net_pton_v6`** parse 16 texts, valid and not. They are
+  marked `comparable = false`: Lean's API allocates the `some` and the
+  address's array of boxed numbers, where the crate returns plain data.
+- **`net_ntop_v4`, `net_ntop_v6`** format 16 addresses built before the
+  timed region. Natively `snprintf` formats them and `lean_mk_string`
+  measures and checks the text; the Rust twin formats on the stack and makes
+  one new string object.
+- **Not timed:** `semantics::toolchain` (constants).

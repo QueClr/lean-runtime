@@ -18,7 +18,7 @@ values.
 
 | In this crate | In each translator's own glue |
 |---|---|
-| `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules | The representation of Lean values (`Nat` words, strings, arrays, user types) |
+| `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
 | `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error` | The memory protocol: reference counting, ownership, freeing |
 | `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
 
@@ -32,7 +32,9 @@ translator can wrap them without converting values.
 libm rows, the fixed-width integer rows and the `String` position functions
 (batch 1), and the `Nat`/`Int` rules over the big-number traits of
 `semantics::bignum`, the array edge rules, the panic texts and exit
-statuses, and the text of leaf values (batch 2), checked by the rows in
+statuses, and the text of leaf values (batch 2), and `String.Pos.Raw.set`,
+`ByteArray.validateUTF8`, the toolchain's build facts and the text forms of
+IP addresses (batch 3), checked by the rows in
 `tests/cases/*/*.rows.toml`
 (expected values from native Lean 4.34.0, `scripts/gen_rows.py`), with one
 micro-benchmark per public function and its native-Lean twin in `benches/`
@@ -67,9 +69,10 @@ that order. See `CONTRIBUTING.md`.
   faster implementations with the same behaviour (see `UNSAFE.md`).
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
-  on). The ports of glibc's `cbrt`, `cbrtf`, `atanh` and `atanhf` exist only
-  on aarch64 Linux with glibc (target_env = "gnu"); elsewhere their callers fail to compile until a port for
-  that platform is added.
+  on). The ports of glibc's `cbrt` and `cbrtf` give glibc 2.39's aarch64
+  results on every target; `atanh` and `atanhf` are glibc's formula over
+  the platform's `log1p`. Off aarch64 Linux, the four can differ from that
+  platform's native Lean (one algorithm everywhere, by the owner's choice).
 - Every bug or disagreement found in either translator's runtime becomes a
   test case in `tests/cases/`.
 - Each translator pins this crate by commit and upgrades only after its own

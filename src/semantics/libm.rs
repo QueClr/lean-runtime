@@ -27,18 +27,18 @@
 //! every function gives the same bits on constant and on opaque operands.
 //!
 //! Platform: the rows of `tests/cases/libm/` are glibc 2.39's results on
-//! aarch64 Linux, the host both translators run on. The ports `cbrt`,
-//! `cbrtf`, `atanh` and `atanhf` reproduce glibc's aarch64 build (fused
-//! multiply-adds where it fuses) and are defined only on aarch64 Linux: on
-//! another target their callers fail to compile until a port for it is added
-//! and checked against that platform's native Lean.
+//! aarch64 Linux, the host both translators run on. On every target, `cbrt`
+//! and `cbrtf` give that build's results (its fused steps are `mul_add`),
+//! and `atanh` and `atanhf` are glibc's formula over the platform's
+//! `log1p`/`log1pf`. Off aarch64 Linux, the four can differ from that
+//! platform's native Lean: the owner chose one algorithm everywhere.
 //!
 //! Source: leanrs_rt `src/libm.rs` (the `f32` functions), `src/float.rs`
 //! (`cbrt`, `atanh`, `pow`) and `src/float32.rs` (`cbrt`, `atanh`); the plain
 //! `f64` functions are new, as the methods leanrs's generated code calls.
-//! lean2rr's leanrt calls glibc's `cbrt`, `acosh`, `asinh`, `atanh` (and
-//! `f32` twins) through FFI (`src/float.rs`), which this crate cannot do
-//! without `unsafe`.
+//! lean2rr's leanrt called glibc's `cbrt`, `acosh`, `asinh` and `atanh` (and
+//! their `f32` twins) through FFI, which this crate cannot do without
+//! `unsafe`; lean2rr now calls this crate.
 
 use core::hint::black_box;
 
@@ -107,7 +107,6 @@ const CBRT_FACTOR: [f64; 5] = [1.0 / SQR_CBRT2, 1.0 / CBRT2, 1.0, CBRT2, SQR_CBR
 /// and differs from glibc's on about half of all inputs.
 ///
 /// Source: leanrs_rt `src/float.rs` (`cbrt`), unchanged.
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 #[inline]
 pub fn cbrt(x: f64) -> f64 {
     let (xm, xe) = frexp_i32(x.abs());
@@ -127,11 +126,10 @@ pub fn cbrt(x: f64) -> f64 {
 }
 
 /// `Float.atanh` (extern `atanh`): glibc's `sysdeps/ieee754/dbl-64/e_atanh.c`
-/// over `log1p` (`f64::ln_1p`, which calls glibc's `log1p`). Rust's
+/// over the platform's `log1p` (`f64::ln_1p`; glibc's on Linux). Rust's
 /// `f64::atanh` is a different formula.
 ///
 /// Source: leanrs_rt `src/float.rs` (`atanh`), unchanged.
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 #[inline]
 pub fn atanh(x: f64) -> f64 {
     let xa = x.abs();
@@ -223,7 +221,6 @@ pub fn powf(x: f32, y: f32) -> f32 {
 /// correctly rounded and differs.
 ///
 /// Source: leanrs_rt `src/float32.rs` (`cbrt`), unchanged.
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 #[inline]
 pub fn cbrtf(x: f32) -> f32 {
     let x = black_box(x);
@@ -241,11 +238,11 @@ pub fn cbrtf(x: f32) -> f32 {
 }
 
 /// `Float32.atanh` (extern `atanhf`): glibc 2.39's
-/// `sysdeps/ieee754/flt-32/e_atanhf.c` over `log1pf` (`f32::ln_1p`, which
-/// calls glibc's `log1pf`). Rust's `f32::atanh` is a different formula.
+/// `sysdeps/ieee754/flt-32/e_atanhf.c` over the platform's `log1pf`
+/// (`f32::ln_1p`; glibc's on Linux). Rust's `f32::atanh` is a different
+/// formula.
 ///
 /// Source: leanrs_rt `src/float32.rs` (`atanh`), unchanged.
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 #[inline]
 pub fn atanhf(x: f32) -> f32 {
     let x = black_box(x);

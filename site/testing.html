@@ -119,7 +119,7 @@ Rows are <code>[[row]]</code> tables in <code>tests/cases/&lt;area&gt;/&lt;area&
     It runs <code>scripts/oracle</code>, a Lean program built natively with Lean 4.34.0.</li>
   <li><code>tests/rows.rs</code> and <code>tests/rows2.rs</code> run every row against the crate.
     Each <code>Nat</code> and <code>Int</code> row runs under four representations, so every word path and every slow path meets every value.</li>
-  <li>There are 5172 rows in 11 areas.</li>
+  <li>There are 5467 rows in 13 areas.</li>
 </ul>
 <div class="rule">
 <p><strong>Inputs come from argv or stdin.</strong>
@@ -221,7 +221,7 @@ The pairs exist; nothing is timed yet.</p>
   <li><strong>The same work on both sides.</strong> The Rust side also does the glue's work, for example boxed <code>Nat</code> words and new string objects.</li>
   <li><strong>No folding.</strong> Only N, the number of iterations, comes from argv.
     The operands come from a fixed-seed generator and pass through an opaque sink (<code>black_box</code>, <code>Bench.pin</code>).</li>
-  <li><strong>Counts:</strong> 307 pairs for <code>semantics</code> (6 of them not comparable) and 7 for <code>io</code>.</li>
+  <li><strong>Counts:</strong> 313 pairs for <code>semantics</code> (8 of them not comparable) and 7 for <code>io</code>.</li>
   <li><code>scripts/check_benches.sh</code> builds both sides and compares the checksums.
     It times nothing.</li>
   <li><strong>Timing</strong> follows a fixed protocol: a host lock, one quiet core, nine alternating pairs, the median, and the peak memory beside it.

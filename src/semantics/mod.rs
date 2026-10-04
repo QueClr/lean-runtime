@@ -1,8 +1,10 @@
 //! Lean's runtime semantics on views and plain data: hashing, float
 //! formatting and conversions, the libm rows, the fixed-width integer rows,
-//! the string-position algorithms on UTF-8 bytes, the `Nat`/`Int` rules over
-//! the big-number traits each translator implements (`bignum`), array edge
-//! rules, panic texts and exit statuses, and the text of leaf values. Nothing
+//! the string-position algorithms on UTF-8 bytes (with `String.Pos.Raw.set`
+//! and `ByteArray.validateUTF8`), the `Nat`/`Int` rules over the big-number
+//! traits each translator implements (`bignum`), array edge rules, panic
+//! texts and exit statuses, the text of leaf values, the text forms of IP
+//! addresses (`net`) and the toolchain's build facts (`toolchain`). Nothing
 //! here owns or allocates a Lean value; text goes into a caller-supplied
 //! `fmt::Write`.
 //!
@@ -19,10 +21,11 @@
 //! Platform pin: the expected values are native Lean 4.34.0 on aarch64 Linux
 //! with glibc 2.39, the host both translators run on. `libm` calls the
 //! platform's libm, so it matches native Lean wherever that libm is the same
-//! glibc; its ports of glibc's `cbrt`, `cbrtf`, `atanh` and `atanhf` reproduce
-//! glibc 2.39's aarch64 build and are defined only on aarch64 Linux with glibc (target_env = "gnu"). On
-//! another target, code that calls them fails to compile until a port for
-//! that platform is added and checked against its native Lean.
+//! glibc. Its ports `cbrt` and `cbrtf` give glibc 2.39's aarch64 results on
+//! every target, and `atanh` and `atanhf` are glibc's formula over the
+//! platform's `log1p`; off aarch64 Linux the four can differ from that
+//! platform's native Lean (`libm`'s module doc).
+//! `toolchain::PLATFORM_TARGET` is the build target's triple.
 
 pub mod array;
 pub mod bignum;
@@ -32,10 +35,12 @@ pub mod hash;
 pub mod int;
 pub mod libm;
 pub mod nat;
+pub mod net;
 pub mod panic;
 pub mod repr;
 pub mod sint;
 pub mod string;
+pub mod toolchain;
 pub mod uint;
 
 const _: () = assert!(

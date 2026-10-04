@@ -3334,3 +3334,1488 @@ args = ['"a€😀é"', "⟨1⟩", "⟨18446744073709551615⟩"]
 expected = '"€😀é"'
 lean_version = "4.34.0"
 source = "lean-runtime review RS1-09 (b), RS1-08: the largest position a u64 holds, 2^64 - 1"
+
+[[row]]
+id = "string/set.mixed.0.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'Z'"]
+expected = '"Z€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.1"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'\\x00'"]
+expected = '"\x00€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.2"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'\\x7f'"]
+expected = '"\x7f€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.3"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'\\u0080'"]
+expected = '"€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'ß'"]
+expected = '"ß€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.5"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'߿'"]
+expected = '"߿€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.6"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'ࠀ'"]
+expected = '"ࠀ€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.7"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'€'"]
+expected = '"€€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'\\uffff'"]
+expected = '"￿€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.9"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'𐀀'"]
+expected = '"𐀀€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.10"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'😀'"]
+expected = '"😀€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.0.11"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨0⟩", "'􏿿'"]
+expected = '"􏿿€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'Z'"]
+expected = '"aZ😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.1"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'\\x00'"]
+expected = '"a\x00😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.2"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'\\x7f'"]
+expected = '"a\x7f😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.3"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'\\u0080'"]
+expected = '"a😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'ß'"]
+expected = '"aß😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.5"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'߿'"]
+expected = '"a߿😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.6"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'ࠀ'"]
+expected = '"aࠀ😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.7"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'€'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'\\uffff'"]
+expected = '"a￿😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.9"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'𐀀'"]
+expected = '"a𐀀😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.10"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'😀'"]
+expected = '"a😀😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.1.11"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨1⟩", "'􏿿'"]
+expected = '"a􏿿😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.2.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨2⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.2.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨2⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.2.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨2⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.3.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨3⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.3.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨3⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.3.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨3⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'Z'"]
+expected = '"a€Zé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.1"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'\\x00'"]
+expected = '"a€\x00é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.2"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'\\x7f'"]
+expected = '"a€\x7fé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.3"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'\\u0080'"]
+expected = '"a€é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'ß'"]
+expected = '"a€ßé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.5"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'߿'"]
+expected = '"a€߿é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.6"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'ࠀ'"]
+expected = '"a€ࠀé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.7"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'€'"]
+expected = '"a€€é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'\\uffff'"]
+expected = '"a€￿é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.9"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'𐀀'"]
+expected = '"a€𐀀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.10"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'😀'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.4.11"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨4⟩", "'􏿿'"]
+expected = '"a€􏿿é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.5.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨5⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.5.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨5⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.5.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨5⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.6.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨6⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.6.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨6⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.6.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨6⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.7.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨7⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.7.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨7⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.7.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨7⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'Z'"]
+expected = '"a€😀Z"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.1"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'\\x00'"]
+expected = '"a€😀\x00"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.2"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'\\x7f'"]
+expected = '"a€😀\x7f"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.3"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'\\u0080'"]
+expected = '"a€😀"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'ß'"]
+expected = '"a€😀ß"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.5"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'߿'"]
+expected = '"a€😀߿"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.6"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'ࠀ'"]
+expected = '"a€😀ࠀ"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.7"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'€'"]
+expected = '"a€😀€"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'\\uffff'"]
+expected = '"a€😀￿"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.9"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'𐀀'"]
+expected = '"a€😀𐀀"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.10"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'😀'"]
+expected = '"a€😀😀"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.8.11"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨8⟩", "'􏿿'"]
+expected = '"a€😀􏿿"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.9.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨9⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.9.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨9⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.9.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨9⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.10.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨10⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.10.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨10⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.10.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨10⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.11.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨11⟩", "'Z'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.11.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨11⟩", "'ß'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.mixed.11.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a€😀é"', "⟨11⟩", "'\\uffff'"]
+expected = '"a€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.big.9223372036854775807"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abc"', "⟨9223372036854775807⟩", "'Z'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.big.9223372036854775808"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abc"', "⟨9223372036854775808⟩", "'Z'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.big.18446744073709551615"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abc"', "⟨18446744073709551615⟩", "'Z'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.big.18446744073709551616"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abc"', "⟨18446744073709551616⟩", "'Z'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set (lean_string_utf8_set) at every byte position of a string with 1- to 4-byte characters, past the end, big positions, with characters of each UTF-8 size"
+
+[[row]]
+id = "string/set.example.0"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abc"', "⟨1⟩", "'B'"]
+expected = '"aBc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.1"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abc"', "⟨3⟩", "'D'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.2"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"L∃∀N"', "⟨4⟩", "'X'"]
+expected = '"L∃XN"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.3"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"L∃∀N"', "⟨2⟩", "'X'"]
+expected = '"L∃∀N"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.4"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"L∃∀N"', "⟨1⟩", "'X'"]
+expected = '"LX∀N"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.5"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['""', "⟨0⟩", "'x'"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.6"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['""', "⟨1⟩", "'x'"]
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.7"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"ab😀"', "⟨2⟩", "'c'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.8"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"ab😀"', "⟨2⟩", "'é'"]
+expected = '"abé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.9"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abé"', "⟨2⟩", "'😀'"]
+expected = '"ab😀"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.10"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"abé"', "⟨3⟩", "'😀'"]
+expected = '"abé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/set.example.11"
+area = "string"
+fn = "String.Pos.Raw.set"
+args = ['"a"', "⟨0⟩", "'a'"]
+expected = '"a"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.Raw.set, the examples of Init/Data/String/Modify.lean, the empty string, a character at the end"
+
+[[row]]
+id = "string/pos_set.0"
+area = "string"
+fn = "String.Pos.set"
+args = ['"abc"', "⟨1⟩", "'B'"]
+expected = '"aBc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/pos_set.1"
+area = "string"
+fn = "String.Pos.set"
+args = ['"L∃∀N"', "⟨4⟩", "'X'"]
+expected = '"L∃XN"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/pos_set.2"
+area = "string"
+fn = "String.Pos.set"
+args = ['"a€😀é"', "⟨4⟩", "'x'"]
+expected = '"a€xé"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/pos_set.3"
+area = "string"
+fn = "String.Pos.set"
+args = ['"a€😀é"', "⟨0⟩", "'😀'"]
+expected = '"😀€😀é"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/string_set.0"
+area = "string"
+fn = "String.set"
+args = ['"abc"', "⟨1⟩", "'B'"]
+expected = '"aBc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/string_set.1"
+area = "string"
+fn = "String.set"
+args = ['"abc"', "⟨3⟩", "'D'"]
+expected = '"abc"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/string_set.2"
+area = "string"
+fn = "String.set"
+args = ['"L∃∀N"', "⟨2⟩", "'X'"]
+expected = '"L∃∀N"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/string_set.3"
+area = "string"
+fn = "String.set"
+args = ['"a€😀é"', "⟨8⟩", "'€'"]
+expected = '"a€😀€"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: String.Pos.set and the deprecated String.set, the same extern (lean_string_utf8_set)"
+
+[[row]]
+id = "string/validate_utf8.0"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.1"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x00])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.2"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x41])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.3"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x7f])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.4"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.5"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xbf])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.6"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc0])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.7"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc1])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.8"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc2])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.9"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf5])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.10"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf8])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.11"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xfe])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.12"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xff])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.13"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc0, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.14"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc1, 0xbf])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.15"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc2, 0x80])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.16"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xdf, 0xbf])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.17"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc2, 0x41])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.18"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc2, 0xc0])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.19"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc2, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.20"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.21"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0, 0x9f, 0xbf])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.22"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0, 0xa0, 0x80])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.23"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xed, 0x9f, 0xbf])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.24"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xed, 0xa0, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.25"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xed, 0xbf, 0xbf])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.26"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xee, 0x80, 0x80])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.27"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xef, 0xbf, 0xbe])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.28"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xef, 0xbf, 0xbf])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.29"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0, 0xa0])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.30"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.31"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0, 0xa0, 0x41])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.32"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xe0, 0x41, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.33"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x80, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.34"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x8f, 0xbf, 0xbf])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.35"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x90, 0x80, 0x80])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.36"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf4, 0x8f, 0xbf, 0xbf])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.37"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf4, 0x90, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.38"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf5, 0x80, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.39"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf7, 0xbf, 0xbf, 0xbf])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.40"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x90, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.41"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x90])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.42"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x90, 0x80, 0x41])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.43"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf0, 0x41, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.44"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf8, 0x88, 0x80, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.45"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xfc, 0x84, 0x80, 0x80, 0x80, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.46"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xed, 0xa0, 0xbd, 0xed, 0xb8, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.47"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0xe2, 0x82, 0xac, 0xf0, 0x9f, 0x98, 0x80, 0xc3, 0xa9])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.48"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.49"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x80, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.50"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc3, 0xa9, 0xed, 0xa0, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.51"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xf4, 0x8f, 0xbf, 0xbf, 0x61])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.52"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.53"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.54"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.55"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.56"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.57"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.58"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.59"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.60"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.61"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.62"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.63"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.64"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.65"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.66"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x80])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.67"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3])"]
+expected = "false"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"
+
+[[row]]
+id = "string/validate_utf8.68"
+area = "string"
+fn = "ByteArray.validateUTF8"
+args = ["(ByteArray.mk #[0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0x61, 0xc3, 0xa9])"]
+expected = "true"
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: ByteArray.validateUTF8 (lean_string_validate_utf8) at every boundary: lead bytes, truncation, overlong forms, surrogates, U+10FFFF, 5- and 6-byte forms, invalid bytes after a long ASCII prefix"

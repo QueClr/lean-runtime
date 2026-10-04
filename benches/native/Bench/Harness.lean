@@ -1,3 +1,5 @@
+import Std.Net.Addr
+
 /-
 The harness of lean-runtime's native micro-benchmarks (`benches/README.md`): what every
 `Bench/<Name>.lean` shares with its Rust twin in `benches/rust/` (the LCG, the inputs, the
@@ -142,6 +144,38 @@ def charOperands : Array Char :=
 def quoteStrings : Array String :=
   (List.range 16).toArray.map fun k =>
     s!"item {k}: \"q\" \\ tab\there\n" ++ String.join (List.replicate k "é")
+
+/-- 16 IPv4 texts, valid and not. -/
+def ipv4Texts : Array String :=
+  #["192.168.1.1", "10.0.0.255", "127.0.0.1", "255.255.255.255", "0.0.0.0", "8.8.8.8",
+    "172.16.254.3", "100.64.0.1", "256.1.1.1", "1.2.3", "01.2.3.4", "1.2.3.4.5", "abc", "",
+    "203.0.113.77", "198.51.100.24"]
+
+/-- 16 IPv6 texts, valid and not. -/
+def ipv6Texts : Array String :=
+  #["::", "::1", "fe80::1", "2001:db8::1", "2001:db8:85a3::8a2e:370:7334",
+    "::ffff:192.0.2.128", "1:2:3:4:5:6:7:8", "fe80::1%eth0",
+    "2001:0db8:0000:0000:0000:ff00:0042:8329", "1::2::3", "12345::", ":::", "::ffff:1.2.3",
+    "ABCD:EF01:2345:6789:ABCD:EF01:2345:6789", "64:ff9b::192.0.2.33", "ff02::fb"]
+
+/-- 16 IPv4 addresses. -/
+def ipv4Addrs : Array Std.Net.IPv4Addr :=
+  #[.ofParts 192 168 1 1, .ofParts 10 0 0 255, .ofParts 127 0 0 1, .ofParts 255 255 255 255,
+    .ofParts 0 0 0 0, .ofParts 8 8 8 8, .ofParts 172 16 254 3, .ofParts 100 64 0 1,
+    .ofParts 1 2 3 4, .ofParts 203 0 113 77, .ofParts 198 51 100 24, .ofParts 224 0 0 251,
+    .ofParts 169 254 10 20, .ofParts 9 99 199 255, .ofParts 1 0 0 1, .ofParts 100 100 100 100]
+
+/-- 16 IPv6 addresses (zero runs of each length and place, IPv4 tails). -/
+def ipv6Addrs : Array Std.Net.IPv6Addr :=
+  #[.ofParts 0 0 0 0 0 0 0 0, .ofParts 0 0 0 0 0 0 0 1, .ofParts 0xfe80 0 0 0 0 0 0 1,
+    .ofParts 0x2001 0xdb8 0 0 0 0 0 1, .ofParts 0x2001 0xdb8 0x85a3 0 0 0x8a2e 0x370 0x7334,
+    .ofParts 0 0 0 0 0 0xffff 0xc000 0x280, .ofParts 1 2 3 4 5 6 7 8,
+    .ofParts 0x2001 0xdb8 0 0 0 0xff00 0x42 0x8329,
+    .ofParts 0xabcd 0xef01 0x2345 0x6789 0xabcd 0xef01 0x2345 0x6789,
+    .ofParts 0x64 0xff9b 0 0 0 0 0xc000 0x221, .ofParts 0xff02 0 0 0 0 0 0 0xfb,
+    .ofParts 0 0 0 0 0 0 0x102 0x304, .ofParts 1 0 0 2 0 0 0 3, .ofParts 1 0 2 0 3 0 4 0,
+    .ofParts 0xffff 0xffff 0xffff 0xffff 0xffff 0xffff 0xffff 0xffff,
+    .ofParts 0xfe80 0 0 0 0x202 0xb3ff 0xfe1e 0x8329]
 
 /-! ## Running -/
 

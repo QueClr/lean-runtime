@@ -1,7 +1,7 @@
 //! Runs every row of `tests/cases/<area>/<area>.rows.toml` (expected values
 //! from native Lean 4.34.0, see `tests/cases/README.md`) against the crate,
-//! for the areas hash, float, libm, uint, sint and string (`tests/rows2.rs`
-//! runs the others).
+//! for the areas hash, float, libm, uint, sint, string, net and toolchain
+//! (`tests/rows2.rs` runs the others).
 //!
 //! Each Lean function maps to the crate's function plus the small amount of
 //! glue a translator writes around it: `Nat`/`Int` arguments reduced to the
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use common::{Toml, Value};
-use lean_runtime::semantics::{float, float32, hash, libm, sint, string, uint};
+use lean_runtime::semantics::{float, float32, hash, libm, net, sint, string, toolchain, uint};
 
 mod common;
 
@@ -28,6 +28,7 @@ enum Arg {
     Bytes(Vec<u8>),
     F64(f64),
     F32(f32),
+    Char(char),
     /// `((s.toSlice.drop d).dropEnd e)`
     Slice(String, usize, usize),
 }
@@ -57,12 +58,18 @@ fn parse_nat(text: &str) -> Option<(u128, usize)> {
 
 /// A Lean string literal at the start of `text`: the string and its length.
 fn parse_string_literal(text: &str) -> Result<(String, usize), String> {
+    parse_literal(text, '"')
+}
+
+/// A Lean string or character literal at the start of `text` (after its
+/// opening `quote`): the text and the literal's length.
+fn parse_literal(text: &str, quote: char) -> Result<(String, usize), String> {
     let mut chars = text.char_indices();
-    assert_eq!(chars.next().map(|c| c.1), Some('"'));
+    assert_eq!(chars.next().map(|c| c.1), Some(quote));
     let mut out = String::new();
     while let Some((i, c)) = chars.next() {
         match c {
-            '"' => return Ok((out, i + 1)),
+            c if c == quote => return Ok((out, i + c.len_utf8())),
             '\\' => {
                 let (_, e) = chars.next().ok_or("unterminated escape")?;
                 let hex = |chars: &mut std::str::CharIndices, n: usize| -> Result<char, String> {
@@ -142,6 +149,14 @@ fn parse_arg(term: &str, float_bits: &mut std::vec::IntoIter<String>) -> Result<
     };
     if t.starts_with('"') {
         return whole(parse_string_literal(t).map(|(s, n)| (Arg::Str(s), n)));
+    }
+    if t.starts_with('\'') {
+        let (s, n) = parse_literal(t, '\'')?;
+        let mut cs = s.chars();
+        return match (cs.next(), cs.next()) {
+            (Some(c), None) => whole(Ok((Arg::Char(c), n))),
+            _ => Err(format!("one character: {t}")),
+        };
     }
     if let Some(rest) = t.strip_prefix("((") {
         let (s, n) = parse_string_literal(rest)?;
@@ -335,6 +350,13 @@ fn f32a(a: &Arg) -> f32 {
     }
 }
 
+fn chr(a: &Arg) -> u32 {
+    match a {
+        Arg::Char(c) => *c as u32,
+        _ => panic!("expected a Char, got {a:?}"),
+    }
+}
+
 fn bytes(a: &Arg) -> &[u8] {
     match a {
         Arg::Str(s) => s.as_bytes(),
@@ -426,6 +448,8 @@ fn registry() -> Registry {
     uint_fns(&mut r);
     sint_fns(&mut r);
     string_fns(&mut r);
+    net_fns(&mut r);
+    toolchain_fns(&mut r);
     r
 }
 
@@ -540,15 +564,10 @@ fn libm_fns(r: &mut Registry) {
         "sqrt" => libm::sqrt, libm::sqrtf; "tan" => libm::tan, libm::tanf;
         "tanh" => libm::tanh, libm::tanhf;
     }
-    // glibc's ports exist on aarch64 Linux only (semantics::libm); elsewhere their rows fail
-    // with "no glue".
-    #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
-    {
-        r.add("Float.cbrt", |a| fret(libm::cbrt(f64a(&a[0]))));
-        r.add("Float32.cbrt", |a| gret(libm::cbrtf(f32a(&a[0]))));
-        r.add("Float.atanh", |a| fret(libm::atanh(f64a(&a[0]))));
-        r.add("Float32.atanh", |a| gret(libm::atanhf(f32a(&a[0]))));
-    }
+    r.add("Float.cbrt", |a| fret(libm::cbrt(f64a(&a[0]))));
+    r.add("Float32.cbrt", |a| gret(libm::cbrtf(f32a(&a[0]))));
+    r.add("Float.atanh", |a| fret(libm::atanh(f64a(&a[0]))));
+    r.add("Float32.atanh", |a| gret(libm::atanhf(f32a(&a[0]))));
     r.add("Float.atan2", |a| {
         fret(libm::atan2(f64a(&a[0]), f64a(&a[1])))
     });
@@ -785,6 +804,85 @@ fn string_fns(r: &mut Registry) {
     r.add("String.Slice.instDecidableLt", |a| {
         string::lt(slice(&a[0]), slice(&a[1])).to_string()
     });
+    // `String.Pos.set`'s position is valid by proof; all three are one extern.
+    for name in ["String.Pos.Raw.set", "String.Pos.set", "String.set"] {
+        r.add(name, |a| {
+            let s = bytes(&a[0]);
+            match string::utf8_set(s, pos_sat(&a[1]), chr(&a[2])) {
+                None => str_repr(s),
+                // a unique string's path
+                Some(change) if change.same_size() => {
+                    let mut v = s.to_vec();
+                    change.write_in_place(&mut v);
+                    str_repr(&v)
+                }
+                Some(change) => {
+                    let mut v = Vec::with_capacity(change.result_size(s.len()));
+                    v.extend_from_slice(&s[..change.start]);
+                    v.extend_from_slice(change.new_bytes());
+                    v.extend_from_slice(&s[change.end..]);
+                    str_repr(&v)
+                }
+            }
+        });
+    }
+    r.add("ByteArray.validateUTF8", |a| {
+        string::validate_utf8(bytes(&a[0])).to_string()
+    });
+}
+
+/// An `Array UInt8`/`Array UInt16`'s `repr`: `#[1, 2]`.
+fn array_repr<T: ToString>(xs: &[T]) -> String {
+    let items: Vec<String> = xs.iter().map(T::to_string).collect();
+    format!("#[{}]", items.join(", "))
+}
+
+fn option_repr(x: Option<String>) -> String {
+    match x {
+        Some(v) => format!("some {v}"),
+        None => "none".to_string(),
+    }
+}
+
+fn net_fns(r: &mut Registry) {
+    r.add(
+        "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)",
+        |a| option_repr(net::pton_v4(bytes(&a[0])).map(|o| array_repr(&o))),
+    );
+    r.add(
+        "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)",
+        |a| option_repr(net::pton_v6(bytes(&a[0])).map(|w| array_repr(&w))),
+    );
+    r.add(
+        "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString",
+        |a| {
+            let o: [u8; 4] = std::array::from_fn(|k| nat_low64(&a[k]) as u8);
+            let mut s = String::new();
+            net::ntop_v4(o, &mut s).unwrap();
+            str_repr(s.as_bytes())
+        },
+    );
+    r.add(
+        "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString",
+        |a| {
+            let w: [u16; 8] = std::array::from_fn(|k| nat_low64(&a[k]) as u16);
+            let mut s = String::new();
+            net::ntop_v6(w, &mut s).unwrap();
+            str_repr(s.as_bytes())
+        },
+    );
+}
+
+fn toolchain_fns(r: &mut Registry) {
+    r.add("Lean.getGithash", |_| {
+        str_repr(toolchain::GITHASH.as_bytes())
+    });
+    r.add("System.Platform.getTarget", |_| {
+        str_repr(toolchain::PLATFORM_TARGET.as_bytes())
+    });
+    r.add("Lean.version.getSpecialDesc", |_| {
+        str_repr(toolchain::SPECIAL_DESC.as_bytes())
+    });
 }
 
 // ------------------------------------------------------------------ the tests
@@ -872,4 +970,19 @@ fn sint_rows() {
 #[test]
 fn string_rows() {
     run("string", include_str!("cases/string/string.rows.toml"));
+}
+
+#[test]
+fn net_rows() {
+    run("net", include_str!("cases/net/net.rows.toml"));
+}
+
+/// The toolchain's facts as native Lean 4.34.0 reports them on the pinned host
+/// (`semantics::toolchain`).
+#[test]
+fn toolchain_rows() {
+    run(
+        "toolchain",
+        include_str!("cases/toolchain/toolchain.rows.toml"),
+    );
 }

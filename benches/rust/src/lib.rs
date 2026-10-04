@@ -642,6 +642,81 @@ pub fn get_string(ss: &[String], j: u64) -> &str {
     }
 }
 
+/// 16 IPv4 texts, valid and not, as `Bench.ipv4Texts`.
+pub fn ipv4_texts() -> Vec<String> {
+    [
+        "192.168.1.1", "10.0.0.255", "127.0.0.1", "255.255.255.255", "0.0.0.0", "8.8.8.8",
+        "172.16.254.3", "100.64.0.1", "256.1.1.1", "1.2.3", "01.2.3.4", "1.2.3.4.5", "abc", "",
+        "203.0.113.77", "198.51.100.24",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// 16 IPv6 texts, valid and not, as `Bench.ipv6Texts`.
+pub fn ipv6_texts() -> Vec<String> {
+    [
+        "::", "::1", "fe80::1", "2001:db8::1", "2001:db8:85a3::8a2e:370:7334",
+        "::ffff:192.0.2.128", "1:2:3:4:5:6:7:8", "fe80::1%eth0",
+        "2001:0db8:0000:0000:0000:ff00:0042:8329", "1::2::3", "12345::", ":::", "::ffff:1.2.3",
+        "ABCD:EF01:2345:6789:ABCD:EF01:2345:6789", "64:ff9b::192.0.2.33", "ff02::fb",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// 16 IPv4 addresses, as `Bench.ipv4Addrs`.
+pub fn ipv4_addrs() -> Vec<[u8; 4]> {
+    vec![
+        [192, 168, 1, 1], [10, 0, 0, 255], [127, 0, 0, 1], [255, 255, 255, 255], [0, 0, 0, 0],
+        [8, 8, 8, 8], [172, 16, 254, 3], [100, 64, 0, 1], [1, 2, 3, 4], [203, 0, 113, 77],
+        [198, 51, 100, 24], [224, 0, 0, 251], [169, 254, 10, 20], [9, 99, 199, 255], [1, 0, 0, 1],
+        [100, 100, 100, 100],
+    ]
+}
+
+/// 16 IPv6 addresses (zero runs of each length and place, IPv4 tails), as `Bench.ipv6Addrs`.
+pub fn ipv6_addrs() -> Vec<[u16; 8]> {
+    vec![
+        [0; 8],
+        [0, 0, 0, 0, 0, 0, 0, 1],
+        [0xfe80, 0, 0, 0, 0, 0, 0, 1],
+        [0x2001, 0xdb8, 0, 0, 0, 0, 0, 1],
+        [0x2001, 0xdb8, 0x85a3, 0, 0, 0x8a2e, 0x370, 0x7334],
+        [0, 0, 0, 0, 0, 0xffff, 0xc000, 0x280],
+        [1, 2, 3, 4, 5, 6, 7, 8],
+        [0x2001, 0xdb8, 0, 0, 0, 0xff00, 0x42, 0x8329],
+        [0xabcd, 0xef01, 0x2345, 0x6789, 0xabcd, 0xef01, 0x2345, 0x6789],
+        [0x64, 0xff9b, 0, 0, 0, 0, 0xc000, 0x221],
+        [0xff02, 0, 0, 0, 0, 0, 0, 0xfb],
+        [0, 0, 0, 0, 0, 0, 0x102, 0x304],
+        [1, 0, 0, 2, 0, 0, 0, 3],
+        [1, 0, 2, 0, 3, 0, 4, 0],
+        [0xffff; 8],
+        [0xfe80, 0, 0, 0, 0x202, 0xb3ff, 0xfe1e, 0x8329],
+    ]
+}
+
+/// The address at index `j` (`Array.get!`: the default, 0.0.0.0, out of range).
+#[inline(always)]
+pub fn get_ipv4(xs: &[[u8; 4]], j: u64) -> [u8; 4] {
+    match xs.get(j as usize) {
+        Some(&a) => a,
+        None => [0; 4],
+    }
+}
+
+/// The address at index `j` (`Array.get!`: the default, `::`, out of range).
+#[inline(always)]
+pub fn get_ipv6(xs: &[[u16; 8]], j: u64) -> [u16; 8] {
+    match xs.get(j as usize) {
+        Some(&a) => a,
+        None => [0; 8],
+    }
+}
+
 // ---------------------------------------------------------------- running
 
 /// Runs one benchmark: N from the single argument, the input built before the first clock read,

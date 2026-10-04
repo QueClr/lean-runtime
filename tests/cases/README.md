@@ -69,7 +69,8 @@ stdin (`--check` only compares; `--toolchain v4.34.0-rc1` compares against
 another version). `tests/rows.rs` runs every row against the crate. The
 argument terms it reads:
 - numerals (`7`, `0xff`), negative ones in parentheses (`(-128)`), string
-  literals, positions `⟨5⟩`, `(ByteArray.mk #[1, 2])` and slices
+  literals, character literals (`'é'`, Lean escapes: `'\x00'`), positions
+  `⟨5⟩`, `(ByteArray.mk #[1, 2])` and slices
   `(("héllo".toSlice.drop 1).dropEnd 0)`; a fixed-width integer argument is
   the numeral's value in that type, as in Lean;
 - a `Float`/`Float32` argument is a Lean term (`0.7`, `(-0.0)`,

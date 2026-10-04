@@ -766,6 +766,70 @@ add("repr_string_quote", "repr::string_quote", QSTRS,
     note=TEXT_NOTE + "; 16 strings of 30 to 60 bytes with escapes")
 
 
+# ---------------------------------------------------------------- string, net (semantics batch 3)
+
+SET_CHAR_R = "(match (x >> 8) & 3 { 0 => 'x', 1 => 'é', 2 => '€', _ => '😀' } as u32)"
+SET_CHAR_L = "(match (x >>> 8) &&& 3 with | 0 => 'x' | 1 => 'é' | 2 => '€' | _ => '😀')"
+add("string_utf8_set", "string::utf8_set", pos_input("any"),
+    "{ let k = (x >> 40) & 511; st.len() as u64 + if k < st.len() as u64 "
+    "{ u64::from(string::get_byte_fast(&st, k)) } else { 0 } }",
+    "(st.utf8ByteSize.toUInt64 + (let p : String.Pos.Raw := ⟨((x >>> 40) &&& 511).toNat⟩; "
+    "if h : p < st.rawEndPos then (String.getUTF8Byte st p h).toUInt64 else 0))",
+    note="the string is updated in place where it can be on both sides (Lean's is unique after "
+         "its first copy of the input): Lean's C in place for an ASCII character over an ASCII "
+         "one, else a copy into a new string; the Rust twin's glue in place for a character of the "
+         "same size (Utf8Set::write_in_place), else one new block; any position up to two past "
+         "the end, characters of 1 to 4 bytes",
+    state=("s.to_vec()",
+           f"if let Some(ch) = string::utf8_set(&st, nat_unbox(get_word(ps, x >> 52)), {SET_CHAR_R}) "
+           "{ if ch.same_size() { ch.write_in_place(&mut st); } else { "
+           "let mut v = Vec::with_capacity(ch.result_size(st.len()) + 1); "
+           "v.extend_from_slice(&st[..ch.start]); v.extend_from_slice(ch.new_bytes()); "
+           "v.extend_from_slice(&st[ch.end..]); st = v; } }",
+           "String", "inp.s", f"String.Pos.Raw.set st {LP} {SET_CHAR_L}"))
+add("string_validate_utf8", "string::validate_utf8", BYTES,
+    "string::validate_utf8(black_box(b)) as u64", "(if ByteArray.validateUTF8 inp then 1 else 0)",
+    note="896 bytes of valid UTF-8 (characters of 1 to 4 bytes); the operand passes through "
+         "black_box on the Rust side")
+
+IP4T = ("Vec<String>", "ipv4_texts()", "let ss = &inp[..];", "Array String", "pure ipv4Texts")
+IP6T = ("Vec<String>", "ipv6_texts()", "let ss = &inp[..];", "Array String", "pure ipv6Texts")
+IP4A = ("Vec<[u8; 4]>", "ipv4_addrs()", "let xs = &inp[..];", "Array Std.Net.IPv4Addr",
+        "pure ipv4Addrs")
+IP6A = ("Vec<[u16; 8]>", "ipv6_addrs()", "let xs = &inp[..];", "Array Std.Net.IPv6Addr",
+        "pure ipv6Addrs")
+PTON_REASON = ("Lean's API allocates the `some` and the address's array of boxed numbers; the "
+               "crate returns plain data, and a translator's cost depends on its representation of "
+               "the result")
+IP_NOTE = ("16 texts, valid and not; Lean's Array.get! retains and releases the string it reads, "
+           "the Rust side borrows it")
+add("net_pton_v4", "net::pton_v4", IP4T,
+    "match net::pton_v4(get_str(ss, x >> 60)) { Some(o) => u64::from(u32::from_be_bytes(o)), "
+    "None => 1 << 40 }",
+    "(match Std.Net.IPv4Addr.ofString inp[(x >>> 60).toNat]! with "
+    "| some a => (a.octets[0].toUInt64 <<< 24) ||| (a.octets[1].toUInt64 <<< 16) ||| "
+    "(a.octets[2].toUInt64 <<< 8) ||| a.octets[3].toUInt64 | none => 1099511627776)",
+    comparable=False, reason=PTON_REASON, o12=O12_LESS, note=IP_NOTE)
+add("net_pton_v6", "net::pton_v6", IP6T,
+    "match net::pton_v6(get_str(ss, x >> 60)) { Some(w) => w.iter().fold(0u64, |a, &s| "
+    "a.rotate_left(16) ^ u64::from(s)), None => 1 << 40 }",
+    "(match Std.Net.IPv6Addr.ofString inp[(x >>> 60).toNat]! with "
+    "| some a => a.segments.foldl (fun acc s => ((acc <<< 16) ||| (acc >>> 48)) ^^^ s.toUInt64) 0 "
+    "| none => 1099511627776)",
+    comparable=False, reason=PTON_REASON, o12=O12_LESS, note=IP_NOTE)
+NTOP_NOTE = ("16 addresses built before the timed region; Lean's Array.get! retains and releases "
+             "the address it reads; the result is one new string object (the Rust twin formats on "
+             "the stack; Lean's C formats with snprintf and makes the string with lean_mk_string)")
+add("net_ntop_v4", "net::ntop_v4", IP4A,
+    "{ let mut b = StackBuf::new(); let _ = net::ntop_v4(get_ipv4(xs, x >> 60), &mut b); "
+    "make_ascii_string(b.as_bytes()).byte_size() }",
+    "(Std.Net.IPv4Addr.toString inp[(x >>> 60).toNat]!).utf8ByteSize.toUInt64", note=NTOP_NOTE)
+add("net_ntop_v6", "net::ntop_v6", IP6A,
+    "{ let mut b = StackBuf::new(); let _ = net::ntop_v6(get_ipv6(xs, x >> 60), &mut b); "
+    "make_ascii_string(b.as_bytes()).byte_size() }",
+    "(Std.Net.IPv6Addr.toString inp[(x >>> 60).toNat]!).utf8ByteSize.toUInt64", note=NTOP_NOTE)
+
+
 # ---------------------------------------------------------------- writers
 
 

@@ -1,0 +1,31 @@
+# Row cases of area `toolchain` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/toolchain/toolchain.rows.toml`.
+# String results are shown as Lean's `repr` (quoted) of the text.
+
+[[row]]
+id = "toolchain/getGithash"
+area = "toolchain"
+fn = "Lean.getGithash"
+args = []
+expected = '"293d5d0c0c3f3dded4688b3ccd6a33939ac5102b"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: the toolchain's build facts, as native Lean 4.34.0 reports them on aarch64 Linux"
+
+[[row]]
+id = "toolchain/getTarget"
+area = "toolchain"
+fn = "System.Platform.getTarget"
+args = []
+expected = '"aarch64-unknown-linux-gnu"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: the toolchain's build facts, as native Lean 4.34.0 reports them on aarch64 Linux"
+
+[[row]]
+id = "toolchain/getSpecialDesc"
+area = "toolchain"
+fn = "Lean.version.getSpecialDesc"
+args = []
+expected = '""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 3: the toolchain's build facts, as native Lean 4.34.0 reports them on aarch64 Linux"

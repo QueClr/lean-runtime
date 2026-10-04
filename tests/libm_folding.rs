@@ -369,7 +369,6 @@ unary!(
         867343.4271756546_f64
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     atanh,
     libm::atanh,
@@ -422,7 +421,6 @@ unary!(
         -0.2012424523039118_f64
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     cbrt,
     libm::cbrt,
@@ -1715,7 +1713,6 @@ unary!(
         -390023.031_f32
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     atanhf,
     libm::atanhf,
@@ -1768,7 +1765,6 @@ unary!(
         -0.785994589_f32
     ]
 );
-#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
 unary!(
     cbrtf,
     libm::cbrtf,

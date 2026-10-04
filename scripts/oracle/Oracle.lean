@@ -1,3 +1,5 @@
+import Std.Net.Addr
+
 /-
 The row oracle of lean-runtime: a native Lean 4.34.0 program that evaluates
 the functions of `tests/cases/*.rows` on inputs read from stdin, so that no
@@ -392,6 +394,10 @@ def runSInt (fn : String) (a : List Arg) : IO (Option String) := do
   | "ISize.toInt64", [x] => return r (ISize.toInt64 (← isz x))
   | _, _ => return none
 
+set_option linter.deprecated false in
+/-- `String.set`, deprecated in 4.34.0 for `String.Pos.Raw.set` (the same extern). -/
+def stringSet (s : String) (p : String.Pos.Raw) (c : Char) : String := String.set s p c
+
 def runString (fn : String) (a : List Arg) : IO (Option String) := do
   match fn, a with
   | "String.hash", [s] => return r (String.hash (← strA s))
@@ -452,6 +458,15 @@ def runString (fn : String) (a : List Arg) : IO (Option String) := do
   | "String.decidableLT", [s1, s2] => return r (decide ((← strA s1) < (← strA s2)))
   | "String.compare", [s1, s2] => return r (String.compare (← strA s1) (← strA s2))
   | "String.Slice.instDecidableLt", [l1, l2] => return r (decide ((← sliceA l1) < (← sliceA l2)))
+  | "String.Pos.Raw.set", [s, p, c] => return r (String.Pos.Raw.set (← strA s) (← posA p) (← chrA c))
+  | "String.set", [s, p, c] => return r (stringSet (← strA s) (← posA p) (← chrA c))
+  | "String.Pos.set", [s, p, c] =>
+    let s ← strA s
+    let c ← chrA c
+    match s.pos? (← posA p) with
+    | some q => if h : q ≠ s.endPos then return r (q.set c h) else return unreachable
+    | none => return unreachable
+  | "ByteArray.validateUTF8", [b] => return r (ByteArray.validateUTF8 (← bytesA b))
   | _, _ => return none
 
 def sorryNat (_ : Unit) : Nat := sorry
@@ -550,6 +565,31 @@ def runRepr (fn : String) (a : List Arg) : IO (Option String) := do
   | "Unit.repr", [] => return r (repr ()).pretty
   | _, _ => return none
 
+/-- The build facts of the toolchain (`lean.h`, `src/runtime/platform.cpp`). -/
+def runToolchain (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "Lean.getGithash", [] => return r (Lean.getGithash ())
+  | "System.Platform.getTarget", [] => return r (System.Platform.getTarget ())
+  | "Lean.version.getSpecialDesc", [] => return r (Lean.version.getSpecialDesc ())
+  | _, _ => return none
+
+/-- The text functions of `Std.Net.Addr` (`src/runtime/uv/net_addr.cpp`, over libuv's
+`uv_inet_pton`/`uv_inet_ntop`). The address types have no `Repr`: a parsed address is shown
+as its octets or segments. -/
+def runNet (fn : String) (a : List Arg) : IO (Option String) := do
+  match fn, a with
+  | "fun s => (Std.Net.IPv4Addr.ofString s).map (·.octets.toArray)", [s] =>
+    return r ((Std.Net.IPv4Addr.ofString (← strA s)).map (·.octets.toArray))
+  | "fun s => (Std.Net.IPv6Addr.ofString s).map (·.segments.toArray)", [s] =>
+    return r ((Std.Net.IPv6Addr.ofString (← strA s)).map (·.segments.toArray))
+  | "fun a b c d => (Std.Net.IPv4Addr.ofParts a b c d).toString", [a, b, c, d] =>
+    return r (Std.Net.IPv4Addr.ofParts (← u8 a) (← u8 b) (← u8 c) (← u8 d)).toString
+  | "fun a b c d e f g h => (Std.Net.IPv6Addr.ofParts a b c d e f g h).toString",
+    [a, b, c, d, e, f, g, h] =>
+    return r (Std.Net.IPv6Addr.ofParts (← u16 a) (← u16 b) (← u16 c) (← u16 d) (← u16 e)
+      (← u16 f) (← u16 g) (← u16 h)).toString
+  | _, _ => return none
+
 def runFn (fn : String) (args : List Arg) : IO String := do
   if let some out ← runFloat fn args then return out
   if let some out ← runLibm fn args then return out
@@ -561,6 +601,8 @@ def runFn (fn : String) (args : List Arg) : IO String := do
   if let some out ← runArray fn args then return out
   if let some out ← runPanic fn args then return out
   if let some out ← runRepr fn args then return out
+  if let some out ← runToolchain fn args then return out
+  if let some out ← runNet fn args then return out
   fail s!"unknown function or arity: {fn} ({args.length} arguments)"
 
 def runLine (line : String) : IO String := do

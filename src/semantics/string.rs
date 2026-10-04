@@ -1,6 +1,8 @@
-//! Lean 4.34.0's `String` position functions and byte-order comparisons, on
-//! the string's UTF-8 bytes (without C's terminating NUL) and plain positions.
-//! The C sources are `include/lean/lean.h` and `src/runtime/object.cpp`.
+//! Lean 4.34.0's `String` position functions, `String.Pos.Raw.set`,
+//! `ByteArray.validateUTF8` and the byte-order comparisons, on the string's
+//! UTF-8 bytes (without C's terminating NUL) and plain positions. The C
+//! sources are `include/lean/lean.h`, `src/runtime/object.cpp` and
+//! `src/runtime/utf8.cpp`.
 //!
 //! A `String.Pos.Raw` is a `Nat` byte offset. Lean's C handles a position
 //! below 2^63 as a scalar and a bigger one as a big number, which is always
@@ -16,8 +18,9 @@
 //!
 //! The functions follow the C code on any bytes, but a Lean `String` is always
 //! valid UTF-8, and the tests only use valid strings. Results are plain data:
-//! a `u32` character, a `u64` position, a byte `Range`; the caller builds its
-//! own string from a range.
+//! a `u32` character, a `u64` position, a byte `Range`, or the change
+//! `utf8_set` describes (`Utf8Set`); the caller builds its own string from a
+//! range or applies the change to its own string.
 //!
 //! The `Substring.Raw` externs of 4.34.0 (`lean_substring_*`) are Lean code
 //! (`@[export]` definitions), not C, so they are not here. `String.Slice`'s C
@@ -27,7 +30,8 @@
 //! Source: lean2rr leanrt `src/string.rs` (the decoder, `next`, `prev`,
 //! `is_valid_pos`: already on `&[u8]` and closest to the C code), adapted;
 //! leanrs_rt `src/str.rs` for `extract`, `memcmp` and the comparisons,
-//! adapted from its `Str`/`Nat` to views.
+//! adapted from its `Str`/`Nat` to views; lean2rr leanrt `src/string.rs`
+//! (`set`) for `utf8_set`, restated as a change.
 
 use core::cmp::Ordering;
 use core::ops::Range;
@@ -374,6 +378,205 @@ pub fn memcmp(lhs: &[u8], rhs: &[u8], lstart: u64, rstart: u64, len: u64) -> boo
     }
 }
 
+/// The change `String.Pos.Raw.set` makes (`lean_string_utf8_set`): the bytes
+/// `start..end`, one character, become `new_bytes()`, the new character's
+/// UTF-8 encoding. The character count stays the same (C keeps
+/// `lean_string_len`).
+///
+/// How a glue applies it (the result is the same each way):
+/// - a unique string with `same_size()`: `write_in_place`;
+/// - a unique string otherwise: in place too, if its block has room for
+///   `result_size` bytes: move the tail `s[end..]` to `start +
+///   new_bytes().len()`, then write `new_bytes()` at `start`;
+/// - a shared string: a new string from `s[..start]`, `new_bytes()` and
+///   `s[end..]` (`result_size` bytes).
+///
+/// C updates in place only when both characters are ASCII and the string is
+/// unique, and otherwise copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Utf8Set {
+    /// The position: the first byte of the replaced character.
+    pub start: usize,
+    /// The end of the replaced character: `start` plus the size its lead byte
+    /// gives, at most the string's size (C's `std::string::replace` clamps
+    /// the count the same way).
+    pub end: usize,
+    bytes: [u8; 4],
+    len: u8,
+}
+
+impl Utf8Set {
+    /// The new character's bytes: 1 to 4.
+    ///
+    /// Source: new.
+    #[inline]
+    pub fn new_bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+
+    /// `new_bytes()` as a `&str`, for a glue whose string type takes text:
+    /// `None` only when the character was not a scalar value, which a Lean
+    /// `Char` always is.
+    ///
+    /// Source: new.
+    #[inline]
+    pub fn new_str(&self) -> Option<&str> {
+        core::str::from_utf8(self.new_bytes()).ok()
+    }
+
+    /// Writes the new character over the old one in `s`, the bytes of the
+    /// string the change was made for, when `same_size()` (the caller's
+    /// test; a debug build asserts it). One store of the character's width,
+    /// with no length-dependent copy: a single byte for ASCII over ASCII, the
+    /// most frequent case. Without `same_size()` the result is not the
+    /// string Lean makes (wrong bytes, never undefined behaviour), and a
+    /// write past the end of `s` panics.
+    ///
+    /// Source: new (review RS3-02: `copy_from_slice` of `new_bytes()` was a
+    /// `memcpy` call even for one byte).
+    #[inline]
+    pub fn write_in_place(&self, s: &mut [u8]) {
+        debug_assert!(self.same_size(), "Utf8Set::write_in_place: sizes differ");
+        let (i, b) = (self.start, &self.bytes);
+        match self.len {
+            1 => s[i] = b[0],
+            2 => s[i..i + 2].copy_from_slice(&b[..2]),
+            3 => s[i..i + 3].copy_from_slice(&b[..3]),
+            _ => s[i..i + 4].copy_from_slice(b),
+        }
+    }
+
+    /// `start..end`, the replaced character's bytes.
+    ///
+    /// Source: new.
+    #[inline]
+    pub fn old_range(&self) -> Range<usize> {
+        self.start..self.end
+    }
+
+    /// Whether the new character has the old one's byte size, so that a
+    /// unique string can be updated in place.
+    ///
+    /// Source: new.
+    #[inline]
+    pub fn same_size(&self) -> bool {
+        self.end - self.start == usize::from(self.len)
+    }
+
+    /// The byte size of the result, for the string of `size` bytes the change
+    /// was made for.
+    ///
+    /// Source: new.
+    #[inline]
+    pub fn result_size(&self, size: usize) -> usize {
+        size - (self.end - self.start) + usize::from(self.len)
+    }
+}
+
+/// `push_unicode_scalar` (`src/runtime/utf8.cpp`): the UTF-8 bytes of `code`
+/// in `d`, and their number. As in C, a value of 0x10000 or more takes four
+/// bytes, masked (a `Char` is always a scalar value, so the masks change
+/// nothing in Lean).
+#[inline]
+fn push_unicode_scalar(code: u32, d: &mut [u8; 4]) -> u8 {
+    if code < 0x80 {
+        d[0] = code as u8;
+        1
+    } else if code < 0x800 {
+        d[0] = (code >> 6 & 0x1F) as u8 | 0xC0;
+        d[1] = (code & 0x3F) as u8 | 0x80;
+        2
+    } else if code < 0x10000 {
+        d[0] = (code >> 12 & 0x0F) as u8 | 0xE0;
+        d[1] = (code >> 6 & 0x3F) as u8 | 0x80;
+        d[2] = (code & 0x3F) as u8 | 0x80;
+        3
+    } else {
+        d[0] = (code >> 18 & 0x07) as u8 | 0xF0;
+        d[1] = (code >> 12 & 0x3F) as u8 | 0x80;
+        d[2] = (code >> 6 & 0x3F) as u8 | 0x80;
+        d[3] = (code & 0x3F) as u8 | 0x80;
+        4
+    }
+}
+
+/// `String.Pos.Raw.set`, `String.Pos.set` and `String.set`
+/// (`lean_string_utf8_set`, `src/runtime/object.cpp`): the change that
+/// replaces the character at `pos` with `c`, or `None` where Lean returns
+/// the string unchanged: `pos` at or past the end, a big position (passed as
+/// `u64::MAX`, see the module doc), and `pos` in the middle of a character.
+/// `String.Pos.set`'s proofs keep `pos` on a character before the end.
+///
+/// Nothing is allocated: on `None` the caller returns its string as it is;
+/// otherwise it applies the `Utf8Set`.
+///
+/// Source: lean2rr leanrt `src/string.rs` (`set`, `set_slow`), adapted to
+/// return the change instead of updating its own string; the encoder is
+/// C's `push_unicode_scalar`. ASCII over ASCII inline, the other lead bytes
+/// and characters out of line (`set_cold`), as `utf8_next` (review RS3-02).
+#[inline]
+pub fn utf8_set(s: &[u8], pos: u64, c: u32) -> Option<Utf8Set> {
+    let start = pos as usize;
+    let &lead = s.get(start)?;
+    if lead < 0x80 && c < 0x80 {
+        // C's in-place case: one ASCII byte for another.
+        return Some(Utf8Set {
+            start,
+            end: start + 1,
+            bytes: [c as u8, 0, 0, 0],
+            len: 1,
+        });
+    }
+    set_cold(s.len(), start, lead, c)
+}
+
+/// `utf8_set` where the old or the new character is not ASCII: the old
+/// character's size from its lead byte (`get_utf8_char_size_at`; `None` for
+/// a continuation byte or `0xF8`..`0xFF`, which `is_utf8_first_byte`
+/// rejects) and the new one's bytes.
+#[cold]
+#[inline(never)]
+fn set_cold(size: usize, start: usize, lead: u8, c: u32) -> Option<Utf8Set> {
+    let old = match lead.leading_ones() {
+        0 => 1,
+        n @ 2..=4 => n as usize,
+        _ => return None,
+    };
+    let mut bytes = [0; 4];
+    let len = push_unicode_scalar(c, &mut bytes);
+    Some(Utf8Set {
+        start,
+        end: (start + old).min(size),
+        bytes,
+        len,
+    })
+}
+
+/// `ByteArray.validateUTF8` (`lean_string_validate_utf8`,
+/// `src/runtime/object.cpp`, over `validate_utf8` of `src/runtime/utf8.cpp`):
+/// whether the bytes are UTF-8. C's validator accepts exactly the
+/// well-formed UTF-8 of the Unicode standard (Table 3-7), which is what
+/// `core::str::from_utf8` accepts:
+/// - a lead byte `0xxxxxxx`, `110xxxxx`, `1110xxxx` or `11110xxx`, followed by
+///   0, 1, 2 or 3 bytes `10xxxxxx`, all present; a continuation byte or
+///   `0xF8`..`0xFF` as a lead byte is rejected;
+/// - no overlong form: a 2-byte value below 0x80, a 3-byte one below 0x800
+///   and a 4-byte one below 0x10000 are rejected (so `0xC0` and `0xC1` never
+///   start a valid sequence);
+/// - no surrogate (U+D800..U+DFFF, so no CESU-8) and nothing above U+10FFFF
+///   (`0xF4 0x90`.. and the leads `0xF5`..`0xF7`).
+///
+/// The unit test `validate_utf8_matches_c` compares the two on every lead
+/// byte and first continuation byte, with every kind of later byte.
+///
+/// Source: leanrs_rt `src/str.rs` (`validate_utf8`) and lean2rr leanrt
+/// `src/string.rs` (`validate`), the same call. `core::str::from_utf8`
+/// checks ASCII a word at a time, where C goes byte by byte.
+#[inline]
+pub fn validate_utf8(b: &[u8]) -> bool {
+    core::str::from_utf8(b).is_ok()
+}
+
 /// `String.decLt` and `String.Slice`'s `<` (`lean_string_dec_lt`, which is
 /// `lean_string_lt`, and `lean_slice_dec_lt`, `src/runtime/object.cpp`): the
 /// byte-lexicographic order (`memcmp` of the common prefix, then the
@@ -407,5 +610,168 @@ mod tests {
     fn const_count() {
         assert_eq!(LITERAL, 4);
         assert_eq!(LITERAL, utf8_strlen("a€😀é".as_bytes()));
+    }
+
+    /// `validate_utf8_one` of `src/runtime/utf8.cpp` (4.34.0), line by line.
+    fn c_validate_one(s: &[u8], pos: &mut usize) -> bool {
+        let size = s.len();
+        let c = u32::from(s[*pos]);
+        let at = |k: usize| u32::from(s[*pos + k]);
+        if c & 0x80 == 0 {
+            *pos += 1;
+        } else if c & 0xe0 == 0xc0 {
+            if *pos + 1 >= size {
+                return false;
+            }
+            let c1 = at(1);
+            if c1 & 0xc0 != 0x80 {
+                return false;
+            }
+            if ((c & 0x1f) << 6) | (c1 & 0x3f) < 0x80 {
+                return false;
+            }
+            *pos += 2;
+        } else if c & 0xf0 == 0xe0 {
+            if *pos + 2 >= size {
+                return false;
+            }
+            let (c1, c2) = (at(1), at(2));
+            if c1 & 0xc0 != 0x80 || c2 & 0xc0 != 0x80 {
+                return false;
+            }
+            let r = ((c & 0x0f) << 12) | ((c1 & 0x3f) << 6) | (c2 & 0x3f);
+            if r < 0x800 || (0xD800..=0xDFFF).contains(&r) {
+                return false;
+            }
+            *pos += 3;
+        } else if c & 0xf8 == 0xf0 {
+            if *pos + 3 >= size {
+                return false;
+            }
+            let (c1, c2, c3) = (at(1), at(2), at(3));
+            if c1 & 0xc0 != 0x80 || c2 & 0xc0 != 0x80 || c3 & 0xc0 != 0x80 {
+                return false;
+            }
+            let r = ((c & 0x07) << 18) | ((c1 & 0x3f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f);
+            if !(0x10000..=0x10FFFF).contains(&r) {
+                return false;
+            }
+            *pos += 4;
+        } else {
+            return false;
+        }
+        true
+    }
+
+    fn c_validate(s: &[u8]) -> bool {
+        let mut pos = 0;
+        while pos < s.len() {
+            if !c_validate_one(s, &mut pos) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// `validate_utf8` against C's validator: every string of one and two
+    /// bytes, and every lead byte and first continuation byte followed by
+    /// one or two bytes of each kind. A third or fourth byte matters only
+    /// through whether it is a continuation byte (the value bounds C checks,
+    /// 0x800, U+D800..U+DFFF, 0x10000 and 0x110000, are multiples of 0x40,
+    /// so the first two bytes decide them), or as the start of the next
+    /// character.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn validate_utf8_matches_c() {
+        let kinds = [
+            0x00, 0x41, 0x7F, 0x80, 0xBF, 0xC0, 0xC2, 0xE0, 0xED, 0xF0, 0xF4, 0xFF,
+        ];
+        for a in 0..=255u8 {
+            assert_eq!(validate_utf8(&[a]), c_validate(&[a]), "{a:02x}");
+            for b in 0..=255u8 {
+                assert_eq!(
+                    validate_utf8(&[a, b]),
+                    c_validate(&[a, b]),
+                    "{a:02x} {b:02x}"
+                );
+                for &c in &kinds {
+                    let s = [a, b, c];
+                    assert_eq!(validate_utf8(&s), c_validate(&s), "{s:02x?}");
+                    for &d in &kinds {
+                        let s = [a, b, c, d];
+                        assert_eq!(validate_utf8(&s), c_validate(&s), "{s:02x?}");
+                    }
+                }
+            }
+        }
+        // past the word-at-a-time ASCII prefix of `from_utf8`
+        let mut long = [b'a'; 40];
+        for i in 0..long.len() {
+            for bad in [0x80, 0xC0, 0xF8] {
+                long[i] = bad;
+                assert_eq!(validate_utf8(&long), c_validate(&long), "{i} {bad:02x}");
+                long[i] = b'a';
+            }
+        }
+    }
+
+    /// `utf8_set` applied as a glue applies it, against the Lean definition
+    /// (`Pos.Raw.utf8SetAux`: the character that starts at the position is
+    /// replaced; the string is unchanged at any other position).
+    #[test]
+    fn set_matches_definition() {
+        let s = "a€😀é\u{7ff}\u{800}\u{ffff}\u{10000}";
+        let chars = [
+            'b',
+            '\u{80}',
+            '\u{7ff}',
+            '\u{800}',
+            '\u{ffff}',
+            '\u{10000}',
+            '\u{10ffff}',
+        ];
+        for pos in 0..=s.len() as u64 + 1 {
+            for &c in &chars {
+                let want: String = if s.is_char_boundary(pos as usize) && (pos as usize) < s.len() {
+                    let mut t = String::from(&s[..pos as usize]);
+                    t.push(c);
+                    let rest = &s[pos as usize..];
+                    t.push_str(&rest[rest.chars().next().map_or(0, char::len_utf8)..]);
+                    t
+                } else {
+                    s.to_string()
+                };
+                let got = match utf8_set(s.as_bytes(), pos, c as u32) {
+                    None => s.as_bytes().to_vec(),
+                    Some(p) => {
+                        let mut v = Vec::with_capacity(p.result_size(s.len()));
+                        v.extend_from_slice(&s.as_bytes()[..p.start]);
+                        v.extend_from_slice(p.new_bytes());
+                        v.extend_from_slice(&s.as_bytes()[p.end..]);
+                        assert_eq!(v.len(), p.result_size(s.len()));
+                        assert_eq!(p.same_size(), p.old_range().len() == c.len_utf8());
+                        assert_eq!(p.new_str(), Some(c.encode_utf8(&mut [0; 4]) as &str));
+                        if p.same_size() {
+                            let mut w = s.as_bytes().to_vec();
+                            p.write_in_place(&mut w);
+                            assert_eq!(w, v);
+                        }
+                        v
+                    }
+                };
+                assert_eq!(got, want.as_bytes(), "{pos} {c:?}");
+                assert_eq!(utf8_strlen(&got), utf8_strlen(s.as_bytes()));
+            }
+        }
+        assert_eq!(utf8_set(s.as_bytes(), u64::MAX, 'x' as u32), None);
+        // A lead byte whose character is cut off by the end: the change ends
+        // at the end, as C's `std::string::replace` clamps its count.
+        let cut = b"a\xe2\x82";
+        let p = utf8_set(cut, 1, 'x' as u32).unwrap();
+        assert_eq!(p.old_range(), 1..3);
+        let mut v = cut[..p.start].to_vec();
+        v.extend_from_slice(p.new_bytes());
+        v.extend_from_slice(&cut[p.end..]);
+        assert_eq!(v, b"ax");
     }
 }
