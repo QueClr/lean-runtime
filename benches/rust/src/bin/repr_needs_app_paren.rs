@@ -25,7 +25,7 @@ fn kernel(inp: &(), n: u64) -> u64 {
             let mut b = StackBuf::new();
             let _ = int::write_decimal(&i, &mut b);
             b.as_bytes().len() as u64
-                + 2 * repr::needs_app_paren(i.is_neg(), (x >> 4) as u32 & 2047) as u64
+                + 2 * repr::needs_app_paren(i.is_neg(), (x >> 4) & 2047) as u64
         });
     }
     acc

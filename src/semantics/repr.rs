@@ -18,7 +18,7 @@ use core::fmt;
 
 /// Lean's `max_prec` (1024): `Repr.addAppParen` parenthesizes at this
 /// precedence or above.
-pub const MAX_PREC: u32 = 1024;
+pub const MAX_PREC: u64 = 1024;
 
 /// The two-digit groups 00..99, for `decimal_u64`.
 const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
@@ -27,15 +27,17 @@ const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
 6061626364656667686970717273747576777879\
 8081828384858687888990919293949596979899";
 
-/// The decimal digits of `n`, written at the end of `buf`, as a `&str`
+/// The decimal digits of `n`, written at the end of `buf`, as bytes
 /// (`std::to_string` in `lean_string_of_usize`). Two digits per step, as
-/// libc++'s `to_chars` and Rust's own formatter do.
+/// libc++'s `to_chars` and Rust's own formatter do. A glue that copies bytes
+/// into its own string takes these directly; `decimal_u64` gives a `&str`.
 ///
 /// Source: leanrs_rt `src/nat.rs` (`decimal_u64`), returning the digits in
 /// the caller's buffer instead of a `String`, and rewritten with two digits
-/// per step (one per step was half the speed of C's).
+/// per step (one per step was half the speed of C's); bytes on review
+/// RS2-10.
 #[inline]
-pub fn decimal_u64(mut n: u64, buf: &mut [u8; 20]) -> &str {
+pub fn decimal_u64_bytes(mut n: u64, buf: &mut [u8; 20]) -> &[u8] {
     let mut i = buf.len();
     while n >= 100 {
         let d = (n % 100) as usize * 2;
@@ -51,8 +53,17 @@ pub fn decimal_u64(mut n: u64, buf: &mut [u8; 20]) -> &str {
         i -= 1;
         buf[i] = b'0' + n as u8;
     }
-    // The bytes are ASCII digits.
-    match core::str::from_utf8(&buf[i..]) {
+    &buf[i..]
+}
+
+/// `decimal_u64_bytes` as a `&str`, for a `fmt::Write` (the ASCII check is
+/// the price of staying safe; a glue that copies bytes skips it with
+/// `decimal_u64_bytes`).
+///
+/// Source: leanrs_rt `src/nat.rs` (`decimal_u64`).
+#[inline]
+pub fn decimal_u64(n: u64, buf: &mut [u8; 20]) -> &str {
+    match core::str::from_utf8(decimal_u64_bytes(n, buf)) {
         Ok(s) => s,
         Err(_) => unreachable!("decimal digits are ASCII"),
     }
@@ -70,11 +81,14 @@ pub fn usize_repr<W: fmt::Write + ?Sized>(n: u64, out: &mut W) -> fmt::Result {
 
 /// `Repr.addAppParen`'s test for a value that needs parentheses only when
 /// negative (`instReprInt`, `instReprFloat`, the `IntN` instances): `true`
-/// when the text goes in parentheses.
+/// when the text goes in parentheses. The precedence is a `Nat`: a
+/// translator passes a big one saturated to `u64::MAX`
+/// (`nat::Nat::to_u64_saturating`), which is at least `MAX_PREC` as the
+/// `Nat` is (review RS2-09).
 ///
 /// Source: leanrs_rt `src/fmt.rs` (`add_app_paren`), as a test.
 #[inline]
-pub fn needs_app_paren(negative: bool, prec: u32) -> bool {
+pub fn needs_app_paren(negative: bool, prec: u64) -> bool {
     negative && prec >= MAX_PREC
 }
 
@@ -185,6 +199,7 @@ mod tests {
             10u64.pow(19) - 1,
         ] {
             assert_eq!(decimal_u64(n, &mut [0; 20]), n.to_string());
+            assert_eq!(decimal_u64_bytes(n, &mut [0; 20]), n.to_string().as_bytes());
         }
         assert_eq!(quote('a'), "'a'");
         assert_eq!(quote('\''), "'\\''");
@@ -197,5 +212,6 @@ mod tests {
         assert_eq!(s, "\"it's \\\"x\\\"\\n\"");
         assert!(needs_app_paren(true, MAX_PREC) && !needs_app_paren(true, MAX_PREC - 1));
         assert!(!needs_app_paren(false, MAX_PREC));
+        assert!(needs_app_paren(true, u64::MAX));
     }
 }

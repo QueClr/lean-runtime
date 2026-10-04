@@ -726,6 +726,13 @@ add("repr_decimal_u64", "repr::decimal_u64", NONE,
     f".byte_size() }}",
     f"(Nat.repr {ln_('a63')}).utf8ByteSize.toUInt64",
     note="values of 2^62 or so (lean_string_of_usize); one new string object on both sides")
+add("repr_decimal_u64_bytes", "repr::decimal_u64_bytes", NONE,
+    f"{{ let mut buf = [0u8; 20]; "
+    f"make_ascii_string(repr::decimal_u64_bytes(nat_unbox({NW['a63'][0]}), &mut buf))"
+    f".byte_size() }}",
+    f"(Nat.repr {ln_('a63')}).utf8ByteSize.toUInt64",
+    note="values of 2^62 or so (lean_string_of_usize); one new string object on both sides, "
+         "the digits copied as bytes (no UTF-8 check)")
 add("repr_usize_repr", "repr::usize_repr", NONE,
     "{ let mut b = StackBuf::new(); let _ = repr::usize_repr(x, &mut b); "
     "make_ascii_string(b.as_bytes()).byte_size() }",
@@ -737,7 +744,7 @@ add("repr_bool_text", "repr::bool_text", NONE, "repr::bool_text(x & 1 == 1).len(
 add("repr_needs_app_paren", "repr::needs_app_paren, int::write_decimal", NONE,
     f"{{ let i = {ri('a29')}; let mut b = StackBuf::new(); let _ = int::write_decimal(&i, &mut b); "
     f"b.as_bytes().len() as u64 + 2 * repr::needs_app_paren(i.is_neg(), "
-    f"(x >> 4) as u32 & 2047) as u64 }}",
+    f"(x >> 4) & 2047) as u64 }}",
     f"(reprPrec {li('a29')} ((x >>> 4) &&& 2047).toNat).pretty.utf8ByteSize.toUInt64",
     comparable=False,
     reason="Repr.addAppParen builds a Format (a tree the program renders later); the crate only "

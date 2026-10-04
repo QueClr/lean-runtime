@@ -1632,6 +1632,12 @@ comparable = true
 note = "values of 2^62 or so (lean_string_of_usize); one new string object on both sides"
 
 [[bench]]
+name = "repr_decimal_u64_bytes"
+function = "repr::decimal_u64_bytes"
+comparable = true
+note = "values of 2^62 or so (lean_string_of_usize); one new string object on both sides, the digits copied as bytes (no UTF-8 check)"
+
+[[bench]]
 name = "repr_usize_repr"
 function = "repr::usize_repr"
 comparable = true

@@ -778,7 +778,7 @@ fn repr_fns(r: &mut Registry) {
     r.add("Int.repr", |a, rp, _| str_repr(&int_text(&int(&a[0], rp))));
     r.add("Int.reprPrec", |a, rp, _| {
         let i = int(&a[0], rp);
-        let prec = nat_value(&a[1]).to_u64().unwrap() as u32;
+        let prec = nat(&a[1], rp).to_u64_saturating();
         let t = int_text(&i);
         str_repr(&if repr::needs_app_paren(i.is_neg(), prec) {
             format!("({t})")
