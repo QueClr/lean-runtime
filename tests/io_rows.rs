@@ -984,6 +984,85 @@ fn io_real_path() {
     );
 }
 
+/// In a child (it changes its working directory): `realPath "."` in a
+/// directory whose path is 4095 bytes long resolves; one byte longer, glibc's
+/// `realpath` into Lean's `PATH_MAX` buffer fails, and Lean reports
+/// `mk_file_not_found_error` (io-2's case `uvsys/cwd_long`, recorded on native
+/// 4.34.0, shows the same for 4096 and 4297 bytes).
+#[test]
+fn io_real_path_length_cap() {
+    if let Some(d) = child_case() {
+        lfs::set_current_dir(d.as_bytes()).unwrap();
+        let mut cur = process_current_dir().unwrap().len();
+        // components of 200 bytes, then a last one that ends at 4095 or 4096
+        let mut k = 0;
+        while 4095 - cur > 250 {
+            let c = format!("{k:03}{}", "d".repeat(197));
+            lfs::create_dir(c.as_bytes()).unwrap();
+            lfs::set_current_dir(c.as_bytes()).unwrap();
+            cur += 1 + c.len();
+            k += 1;
+        }
+        let mut lines = Vec::new();
+        for len in [4095, 4096] {
+            let c = "e".repeat(len - cur - 1);
+            lfs::create_dir(c.as_bytes()).unwrap();
+            lfs::set_current_dir(c.as_bytes()).unwrap();
+            let cwd = process_current_dir().map(|p| p.len());
+            lines.push(r(&format!("{len}"), real_path(b"."), |t| {
+                format!("{} bytes, cwd {cwd:?}", t.len())
+            }));
+            lfs::set_current_dir(b"..").unwrap();
+        }
+        report(&lines);
+    }
+    let d = setup("real_path_cap");
+    let out = child("io_real_path_length_cap", &d, |_| {});
+    assert_eq!(
+        results(&out),
+        [
+            "4095: ok 4095 bytes, cwd Ok(4095)".to_owned(),
+            r#"4096: err NoFileOrDirectory(".", 2, "")"#.to_owned(),
+        ],
+        "child stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Every `realpath` failure is `mk_file_not_found_error`, code 2 and no
+/// details, whatever the `errno`: `ELOOP`, `EACCES` (unless the tests run as
+/// root), `ENOTDIR`, `ENOENT`; the NUL check comes first.
+#[test]
+fn io_real_path_errors_are_file_not_found() {
+    let d = setup("real_path_errors");
+    let nf = |p: &str| IoError::NoFileOrDirectory(p.to_owned(), 2, String::new());
+    std::os::unix::fs::symlink("b", p(&d, "a")).unwrap();
+    std::os::unix::fs::symlink("a", p(&d, "b")).unwrap();
+    assert_eq!(real_path(p(&d, "a").as_bytes()), Err(nf(&p(&d, "a"))));
+    assert_eq!(
+        real_path(p(&d, "full/f/g").as_bytes()),
+        Err(nf(&p(&d, "full/f/g")))
+    );
+    assert_eq!(
+        real_path(p(&d, "missing").as_bytes()),
+        Err(nf(&p(&d, "missing")))
+    );
+    assert_eq!(
+        real_path(b"a\0/missing"),
+        Err(IoError::embedded_nul(b"a\0/missing"))
+    );
+    fs::create_dir(p(&d, "locked")).unwrap();
+    fs::write(p(&d, "locked/x"), "x").unwrap();
+    fs::set_permissions(p(&d, "locked"), fs::Permissions::from_mode(0o000)).unwrap();
+    let denied = fs::metadata(p(&d, "locked/x"))
+        .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
+    let got = real_path(p(&d, "locked/x").as_bytes());
+    fs::set_permissions(p(&d, "locked"), fs::Permissions::from_mode(0o755)).unwrap();
+    if denied {
+        assert_eq!(got, Err(nf(&p(&d, "locked/x"))));
+    }
+}
+
 #[test]
 fn io_metadata() {
     let d = setup("metadata");

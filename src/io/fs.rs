@@ -20,7 +20,7 @@
 //! buffers, `setCurrentDir`'s C string, `getCurrentDir` without a file name).
 
 use super::env::PATH_MAX;
-use super::error::{set_errno, IoError, ERANGE};
+use super::error::{set_errno, IoError, ENAMETOOLONG, ERANGE};
 use super::ByteSink;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
@@ -128,14 +128,25 @@ pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
     std::fs::set_permissions(c_path(p)?, std::fs::Permissions::from_mode(mode)).map_err(c_err(p))
 }
 
-/// `IO.FS.realPath` (`lean_io_realpath`, `realpath` into a `PATH_MAX`
-/// buffer), appended to `out`; any failure is `mk_file_not_found_error`
-/// (`noFileOrDirectory path 2 ""`).
+/// `IO.FS.realPath` (`lean_io_realpath`), appended to `out`. A path holding a
+/// NUL byte is `mk_embedded_nul_error` first. Then Lean calls `realpath(path,
+/// buffer)` with a `PATH_MAX` buffer: glibc (`stdlib/canonicalize.c`) fails
+/// with `ENAMETOOLONG` when the result and its NUL exceed `PATH_MAX`, so a
+/// resolved path of 4096 bytes or more fails (POSIX allows it; Lean's docs
+/// tie `realPath` to POSIX `realpath`). `std::fs::canonicalize` runs the same
+/// resolution without a buffer, so the length is checked here. Every failure,
+/// whatever the `errno` (`ENOENT`, `EACCES`, `ELOOP`, `ENOTDIR`,
+/// `ENAMETOOLONG`, ...), is `mk_file_not_found_error`: `noFileOrDirectory path
+/// 2 ""`.
 pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoError> {
     match std::fs::canonicalize(c_path(p)?) {
-        Ok(r) => {
+        Ok(r) if r.as_os_str().len() < PATH_MAX => {
             out.extend_from_slice(r.as_os_str().as_bytes());
             Ok(())
+        }
+        Ok(_) => {
+            set_errno(ENAMETOOLONG);
+            Err(IoError::file_not_found(p))
         }
         Err(e) => {
             code(&e);
