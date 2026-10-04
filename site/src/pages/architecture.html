@@ -26,12 +26,13 @@ Each translator's glue connects its own values to the crate.</p>
 {{svg:arch-features}}
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
-The owner approved nix, rustix, corosensei and signal-hook (its safe API only).</figcaption>
+The owner approved nix, rustix, corosensei and signal-hook (its safe API only).
+leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegation of dependency decisions (2026-10-04).</figcaption>
 </figure>
 <ul>
   <li><strong>Default.</strong> <code>semantics</code> only.
     No dependencies, so a plain <code>rustc --crate-type rlib</code> build works (one translator does not use cargo).</li>
-  <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix.
+  <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix, and the io_uring rings at startup through io-uring.
     These crates hold the <code>unsafe</code> code.
     The one exception is a <a href="glossary.html#g-quirk">native quirk</a> with no safe route, in a file of its own.
     <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).</li>

@@ -5,7 +5,8 @@ source = "lean-runtime quirks-1 review round 3 (leanrs): a launch through the dy
 streams = "separate"
 deviations = { leanrs = "DV2", lean_runtime = "LQ1-01" }
 # LQ1-01 (judged, leanrs's review of quirks-1): started through the dynamic loader, the shared
-# runtime keeps no arguments' memory (its constructor cannot tell the program's executable from the
-# loader without new unsafe code), so setProcessTitle fails with ENOBUFS (title_via_loader.alt1.*).
+# runtime keeps no arguments' memory (its constructor takes the loader's code for the program's;
+# telling them apart is not worth the complexity for this rare launch mode), so setProcessTitle fails
+# with ENOBUFS (title_via_loader.alt1.*).
 # A rare launch mode; natively the title is written. leanrs DV2: setProcessTitle refused at
 # translation until it adopts quirks. Neither names a Lean bug, so native's outcome passes too.

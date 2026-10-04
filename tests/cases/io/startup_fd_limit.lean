@@ -3,8 +3,12 @@
 -- and how many files a program can open before `EMFILE`. .pipe runs it under
 -- `ulimit -n 64`, then again with stdin closed (the epoll descriptor takes
 -- number 0), then with `UV_USE_IO_URING=0`, which makes libuv skip both
--- rings. The path and the cap come from argv (from lean2rr's
--- tests/runtime/RtFdLimit.lean).
+-- rings. Then the boundary, where no descriptor is left once libuv's are
+-- open (`ulimit -n 11`; 10 with stdin closed; 9 with `UV_USE_IO_URING=0`):
+-- Init's module initializer `IO.stdGenRef` (Init/Data/Random.lean) cannot
+-- open `/dev/urandom` for `IO.getRandomBytes`, and the program ends with
+-- that uncaught error, status 1, before `main`. The path and the cap come
+-- from argv (from lean2rr's tests/runtime/RtFdLimit.lean).
 
 def openUntilFull (path : String) : Nat → Array IO.FS.Handle → IO (Array IO.FS.Handle × String)
   | 0, acc => return (acc, "limit not reached")

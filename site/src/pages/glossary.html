@@ -4,7 +4,8 @@
 <dl class="gloss">
 <dt id="g-a821">A821</dt>
 <dd>The id of the finding about the descriptors that native Lean opens before <code>main</code>.
-Option C is the chosen design: the same descriptors through rustix, with epoll descriptors in place of the io_uring rings.
+Option C was the first design: the same descriptors through rustix, with epoll descriptors in place of the io_uring rings.
+Since quirks-2 the rings are real, made with the io-uring crate.
 See <a href="io.html#startup">io</a>.</dd>
 
 <dt id="g-batch">Batch</dt>
@@ -202,9 +203,10 @@ Its first resolution stores the value.</dd>
 Rows are in <code>tests/cases/&lt;area&gt;/&lt;area&gt;.rows.toml</code>.
 See <a href="testing.html#rows">Testing</a>.</dd>
 
-<dt id="g-rustix">rustix, nix</dt>
+<dt id="g-rustix">rustix, nix, io-uring</dt>
 <dd>Vetted Rust crates for system calls.
-They hold the <code>unsafe</code> code, so <code>io</code> stays free of it.</dd>
+They hold the <code>unsafe</code> code, so <code>io</code> stays free of it, but for one <a href="#g-quirk">native quirk</a>.
+io-uring makes the io_uring rings that libuv opens at startup.</dd>
 
 <dt id="g-sched-io">sched-io</dt>
 <dd>The batch of cooperative blocking IO and the event loop.

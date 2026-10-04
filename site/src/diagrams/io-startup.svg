@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-labelledby="io3-t io3-d">
   <title id="io3-t">The descriptors open before main</title>
-  <desc id="io3-d">Row one, with io_uring: 0 to 2 are the standard streams, 3 is epoll, 4 and 5 are the two rings (epoll stand-ins here), 6 and 7 are the signal lock pipe with one byte written, 8 and 9 are the non-blocking signal pipe, 10 is an eventfd. Row two, without io_uring: 3 epoll, 4 and 5 the lock pipe, 6 and 7 the signal pipe, 8 the eventfd. Row three, stdin closed: epoll takes descriptor 0.</desc>
+  <desc id="io3-d">Row one, with io_uring: 0 to 2 are the standard streams, 3 is epoll, 4 and 5 are the two io_uring rings, 6 and 7 are the signal lock pipe with one byte written, 8 and 9 are the non-blocking signal pipe, 10 is an eventfd. Row two, without io_uring: 3 epoll, 4 and 5 the lock pipe, 6 and 7 the signal pipe, 8 the eventfd. Row three, stdin closed: epoll takes descriptor 0.</desc>
   <text class="tb" x="20" y="26">With the io_uring rings: descriptors 3 to 10</text>
   <g>
     <rect class="k-none" x="20" y="36" width="68" height="52" rx="4"/><text class="tc" x="54" y="54" text-anchor="middle">0</text><text class="ts" x="54" y="76" text-anchor="middle">stdin</text>
     <rect class="k-none" x="94" y="36" width="68" height="52" rx="4"/><text class="tc" x="128" y="54" text-anchor="middle">1</text><text class="ts" x="128" y="76" text-anchor="middle">stdout</text>
     <rect class="k-none" x="168" y="36" width="68" height="52" rx="4"/><text class="tc" x="202" y="54" text-anchor="middle">2</text><text class="ts" x="202" y="76" text-anchor="middle">stderr</text>
     <rect class="k-rt" x="242" y="36" width="68" height="52" rx="4"/><text class="tc" x="276" y="54" text-anchor="middle">3</text><text class="ts" x="276" y="76" text-anchor="middle">epoll</text>
-    <rect class="k-rt plan" x="316" y="36" width="68" height="52" rx="4"/><text class="tc" x="350" y="54" text-anchor="middle">4</text><text class="ts" x="350" y="76" text-anchor="middle">ring 1</text>
-    <rect class="k-rt plan" x="390" y="36" width="68" height="52" rx="4"/><text class="tc" x="424" y="54" text-anchor="middle">5</text><text class="ts" x="424" y="76" text-anchor="middle">ring 2</text>
+    <rect class="k-rt" x="316" y="36" width="68" height="52" rx="4"/><text class="tc" x="350" y="54" text-anchor="middle">4</text><text class="ts" x="350" y="76" text-anchor="middle">ring 1</text>
+    <rect class="k-rt" x="390" y="36" width="68" height="52" rx="4"/><text class="tc" x="424" y="54" text-anchor="middle">5</text><text class="ts" x="424" y="76" text-anchor="middle">ring 2</text>
     <rect class="k-rt" x="464" y="36" width="68" height="52" rx="4"/><text class="tc" x="498" y="54" text-anchor="middle">6</text><text class="ts" x="498" y="76" text-anchor="middle">lock r</text>
     <rect class="k-rt" x="538" y="36" width="68" height="52" rx="4"/><text class="tc" x="572" y="54" text-anchor="middle">7</text><text class="ts" x="572" y="76" text-anchor="middle">lock w</text>
     <rect class="k-rt" x="612" y="36" width="68" height="52" rx="4"/><text class="tc" x="646" y="54" text-anchor="middle">8</text><text class="ts" x="646" y="76" text-anchor="middle">signal r</text>
@@ -32,10 +32,10 @@
     <rect class="k-rt" x="20" y="236" width="68" height="52" rx="4"/><text class="tc" x="54" y="254" text-anchor="middle">0</text><text class="ts" x="54" y="276" text-anchor="middle">epoll</text>
     <rect class="k-none" x="94" y="236" width="68" height="52" rx="4"/><text class="tc" x="128" y="254" text-anchor="middle">1</text><text class="ts" x="128" y="276" text-anchor="middle">stdout</text>
     <rect class="k-none" x="168" y="236" width="68" height="52" rx="4"/><text class="tc" x="202" y="254" text-anchor="middle">2</text><text class="ts" x="202" y="276" text-anchor="middle">stderr</text>
-    <rect class="k-rt plan" x="242" y="236" width="68" height="52" rx="4"/><text class="tc" x="276" y="254" text-anchor="middle">3</text><text class="ts" x="276" y="276" text-anchor="middle">ring 1</text>
-    <rect class="k-rt plan" x="316" y="236" width="68" height="52" rx="4"/><text class="tc" x="350" y="254" text-anchor="middle">4</text><text class="ts" x="350" y="276" text-anchor="middle">ring 2</text>
+    <rect class="k-rt" x="242" y="236" width="68" height="52" rx="4"/><text class="tc" x="276" y="254" text-anchor="middle">3</text><text class="ts" x="276" y="276" text-anchor="middle">ring 1</text>
+    <rect class="k-rt" x="316" y="236" width="68" height="52" rx="4"/><text class="tc" x="350" y="254" text-anchor="middle">4</text><text class="ts" x="350" y="276" text-anchor="middle">ring 2</text>
     <text class="ts" x="400" y="258">5 to 9: lock pipe, signal pipe, eventfd.</text>
     <text class="ts" x="400" y="276">Reading "stdin" now reads epoll: EINVAL.</text>
   </g>
-  <rect class="k-rt plan" x="20" y="306" width="16" height="14" rx="2"/><text class="ts" x="42" y="318">an io_uring ring natively; an epoll descriptor stands in for it here</text>
+  <text class="ts" x="20" y="318">Rings 1 and 2: the polling ring (64 entries, a kernel thread) and the control ring (256 entries).</text>
 </svg>

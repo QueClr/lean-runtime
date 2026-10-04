@@ -1,0 +1,24 @@
+3: not a ring
+4: ring, SqMask 0x3f, CqMask 0x7f, polling thread true, own inode true
+5: ring, SqMask 0xff, CqMask 0x1ff, polling thread false, own inode true
+6: not a ring
+7: not a ring
+8: not a ring
+9: not a ring
+10: eventfd, shares the epoll descriptor's inode true
+the epoll descriptor watches 4: true
+an io_uring kernel thread among the tasks: true
+io_uring mappings in /proc/self/maps: 4
+args: 0
+3: not a ring
+4: not a ring
+5: not a ring
+6: not a ring
+7: not a ring
+8: eventfd, shares the epoll descriptor's inode true
+9: closed
+10: closed
+the epoll descriptor watches 4: false
+an io_uring kernel thread among the tasks: false
+io_uring mappings in /proc/self/maps: 0
+args: 0

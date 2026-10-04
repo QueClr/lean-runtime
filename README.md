@@ -56,7 +56,9 @@ A small `io` batch, `quirks-1`, adds `IO.initializing` and `allocprof`,
 and makes `setProcessTitle` write the title into the arguments' memory, so
 `/proc/self/cmdline` shows it as natively. That write is the crate's first
 `unsafe` item, a native quirk in `src/io/argv_title.rs` (`UNSAFE.md`,
-`docs/native-quirks.md`).
+`docs/native-quirks.md`). The next, `quirks-2`, makes the two io_uring
+rings among the startup descriptors real rings, made and mapped as libuv
+makes them, through the io-uring crate, in place of epoll stand-ins.
 
 `sched` has its first batch (feature `sched`): deferred tasks on corosensei
 contexts, the yield points, promises, `Std.Sync`'s primitives and Lean's
@@ -96,7 +98,7 @@ that order. See `docs/development.md`, the rules for implementors.
   test suite passes.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
-  `io` uses rustix and nix, and `sched` corosensei, rustix and signal-hook, pinned by `Cargo.lock`
+  `io` uses rustix, nix and io-uring, and `sched` corosensei, rustix and signal-hook, pinned by `Cargo.lock`
   and built offline from cargo's local registry cache.
 
 Bugs in Lean's own runtime that both translators deliberately do not reproduce, each verified first, are listed in `docs/lean-bugs.md`.

@@ -14,16 +14,17 @@ path = "src/lib.rs"
 # itself stays free of `unsafe` (except the native quirks of UNSAFE.md: so
 # far `io`'s write of the process title into the arguments' memory):
 # - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
-#   the scheduling priority) and nix (process-level libc calls: posix_spawn,
+#   the scheduling priority), nix (process-level libc calls: posix_spawn,
 #   unshare, poll, the password and group databases, getrusage,
-#   gethostname);
+#   gethostname) and io-uring (the two rings libuv makes at startup; pinned
+#   exactly, with only `io_safety`, which adds no crate);
 # - `sched`: corosensei (decisions Q5 and O2), with its default features
 #   (mmap'd stacks with a guard page, and unwinding across the switch),
 #   rustix (the event loop's epoll and poll; sched-io), and signal-hook (the
 #   `Std.Internal.UV.Signal` watchers: its safe flag, self-pipe and
 #   conditional default actions; accepted by the owner, 2026-10-04).
 # The requirements are carets compatible with leanrs's offline registry (nix
-# 0.31.3, rustix 1.1.4, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
+# 0.31.3, rustix 1.1.4, io-uring 0.7.13, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
 # uses; leanrs resolves them in its own workspace. lean-runtime's own builds
 # and lean2rr's use Cargo.lock and cargo's local registry cache, offline
 # (`cargo build --offline --locked --features io,sched`; `cargo fetch
@@ -31,13 +32,14 @@ path = "src/lib.rs"
 [dependencies]
 rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "process", "stdio", "system", "termios", "time"] }
 nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "hostname", "poll", "process", "resource", "sched", "signal", "user"] }
+io-uring = { version = "=0.7.13", optional = true, default-features = false, features = ["io_safety"] }
 corosensei = { version = "0.3.4", optional = true }
 signal-hook = { version = "0.3.18", optional = true, default-features = false }
 
 [features]
 default = []
 # OS-level IO mirroring Lean's C runtime (files, handles, standard streams).
-io = ["dep:rustix", "dep:nix"]
+io = ["dep:rustix", "dep:nix", "dep:io-uring"]
 # The deferred task scheduler, promises and Std.Sync.
 sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and

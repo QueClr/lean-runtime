@@ -46,6 +46,48 @@ There are two kinds of entry:
 
 There are no entries yet.
 
+## `unsafe` in dependencies
+
+The crate's `unsafe` beyond this file's entries is in vetted dependencies:
+rustix and nix (system calls, feature `io`), corosensei (stack switching,
+`sched`) and signal-hook (signal handlers, its safe API only, `sched`),
+approved by the owner; and io-uring, accepted by leanrs's shared-runtime
+coordinator under the owner's delegation of dependency decisions
+(2026-10-04).
+
+### io-uring 0.7.13 (tokio-rs), feature `io`
+
+Pinned exactly (`=0.7.13`), with only `io_safety` (std's `OwnedFd` and
+`AsFd`; no other crate), accepted by leanrs's shared-runtime coordinator
+under the owner's delegation of dependency decisions (2026-10-04). Its
+dependencies are bitflags, cfg-if and libc, all already in `Cargo.lock`
+(its optional `sc`, for direct system calls, is not enabled).
+`io::startup` uses it for the two rings libuv 1.48 makes at startup, and
+calls only safe functions. Audit of what they do (io-uring's `src/lib.rs`,
+`src/util.rs`, `src/sys/mod.rs`):
+- `IoUring::builder()` starts from zeroed `io_uring_params` with the flags of
+  the default entry types, which are none; `setup_sqpoll(10)` sets
+  `IORING_SETUP_SQPOLL` and `sq_thread_idle = 10`. Nothing else is set, so
+  the parameters are libuv's `uv__iou_init`'s: never `ATTACH_WQ`,
+  `NO_MMAP`, `REGISTERED_FD_ONLY`, `SQ_AFF` or `CQSIZE`.
+- `build(entries)` calls `io_uring_setup` through `libc::syscall` with a
+  pointer to that struct (a `repr(C)` mirror of the kernel's), wraps the
+  descriptor in an `OwnedFd`, and maps the rings as libuv does (`mmap`,
+  `PROT_READ | PROT_WRITE`, `MAP_SHARED | MAP_POPULATE`: one map for the
+  submission and completion rings with `IORING_FEAT_SINGLE_MMAP`, one for
+  the submission entries). The mappings live as long as the `IoUring`;
+  its `Drop` unmaps them, then closes the descriptor. The crate keeps the
+  rings in a `static`, so neither happens.
+- `params().is_feature_resource_tagging()`, `is_feature_single_mmap()`,
+  `is_feature_nodrop()` read the features the kernel returned, for libuv's
+  check; `as_fd()` lends the descriptor to rustix's safe `epoll::add`.
+
+Nothing submits to the rings, registers with them, or reads their memory.
+Checked natively: case `io/startup_rings` (the rings' `/proc/self/fdinfo`
+lines, their inodes, the four `anon_inode:[io_uring]` mappings, the polling
+thread) and the descriptor numbers in `io/startup_fd_limit` and
+`io/startup_closed_stdio`.
+
 ## `unsafe` in the tests
 
 Some test files, which are not part of the library, use `unsafe` for test

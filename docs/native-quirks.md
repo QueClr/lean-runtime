@@ -92,8 +92,10 @@ The case `uvsys/title_cmdline` records this natively,
   program's own code reads as a library's. Natively the generated `main`
   hands its arguments to `lean_setup_args` and the title is written. This
   is a judged deviation of the shared runtime, **LQ1-01** (leanrs's review
-  of quirks-1): telling that launch apart would need new `unsafe` code
-  (`getauxval`), for a rare launch mode. Case `uvsys/title_via_loader`
+  of quirks-1): telling that launch apart is possible in safe code (read
+  the ELF header of the file mapped at `start_code` and see whether it is
+  the program's `PT_INTERP`), but not worth the complexity for this rare
+  launch mode. Case `uvsys/title_via_loader`
   (native's outcome, and ours as `alt1`).
 - **The checks.** In the program's executable, `setup_args` keeps nothing,
   and the title is modelled from `std::env::args_os` without writing (the

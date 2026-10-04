@@ -2,7 +2,9 @@
 //! (but `borrow_with_ref_struct`, which tests only what a translator
 //! generates; see its `.toml`) has a twin here, a Rust function making the same calls through
 //! `lean_runtime::io` as the case's Lean program makes through Lean's
-//! runtime, with the little a translator's glue adds (`IO.println` is one
+//! runtime, with the little a translator's glue adds (Init's one module
+//! initializer that reaches the runtime, `IO.stdGenRef`'s 8 random bytes,
+//! before the twin; `IO.println` is one
 //! `putStr` of the line and `\n`; `IO.FS.readFile` and `writeFile` are their
 //! Lean definitions; an uncaught error is `show_error` of `IO.Error.toString`
 //! and exit status 1; a handle is dropped after its last use, as Lean frees
@@ -661,6 +663,77 @@ fn allocprof(args: &[String]) -> R<()> {
     }
 }
 
+/// The case `io/startup_rings`: the io_uring rings among the startup
+/// descriptors, by their `/proc/self/fdinfo` lines, and the polling ring's
+/// kernel thread.
+fn startup_rings(args: &[String]) -> R<()> {
+    // `field`: the value after the first `:` of the line whose key is
+    // `key`, spaces and tabs removed
+    let field = |info: &str, key: &str| -> Option<String> {
+        info.split('\n').find_map(|l| {
+            let (k, rest) = l.split_once(':').unwrap_or((l, ""));
+            (k == key).then(|| rest.chars().filter(|&c| c != ' ' && c != '\t').collect())
+        })
+    };
+    let infos: Vec<(u32, Option<String>)> = (3..=10)
+        .map(|fd| (fd, read_file(&format!("/proc/self/fdinfo/{fd}")).ok()))
+        .collect();
+    let info = |fd: u32| {
+        infos
+            .iter()
+            .find(|(n, _)| *n == fd)
+            .and_then(|(_, i)| i.clone())
+    };
+    let ino = |fd: u32| info(fd).and_then(|i| field(&i, "ino"));
+    for (fd, i) in &infos {
+        let Some(i) = i else {
+            println(&format!("{fd}: closed"))?;
+            continue;
+        };
+        match (field(i, "SqMask"), field(i, "CqMask"), field(i, "SqThread")) {
+            (Some(sq), Some(cq), Some(th)) => println(&format!(
+                "{fd}: ring, SqMask {sq}, CqMask {cq}, polling thread {}, own inode {}",
+                th != "-1",
+                ino(*fd) != ino(3)
+            ))?,
+            _ if field(i, "eventfd-count").is_some() => println(&format!(
+                "{fd}: eventfd, shares the epoll descriptor's inode {}",
+                ino(*fd) == ino(3)
+            ))?,
+            _ => println(&format!("{fd}: not a ring"))?,
+        }
+    }
+    let watched = info(3).is_some_and(|i| {
+        i.split('\n').any(|l| {
+            l.starts_with("tfd:") && l.split(' ').filter(|w| !w.is_empty()).nth(1) == Some("4")
+        })
+    });
+    println(&format!("the epoll descriptor watches 4: {watched}"))?;
+    let mut tasks = Vec::new();
+    lfs::read_dir(b"/proc/self/task", |n| {
+        tasks.push(String::from_utf8_lossy(n).into_owned())
+    })?;
+    let mut poller = false;
+    for t in tasks {
+        let stat = read_file(&format!("/proc/self/task/{t}/stat"))?;
+        let after_name = stat.rsplit(')').next().unwrap_or("");
+        let flags = after_name.split(' ').filter(|f| !f.is_empty()).nth(6);
+        if flags.and_then(|f| f.parse::<u64>().ok()).unwrap_or(0) & 0x10 != 0 {
+            poller = true;
+        }
+    }
+    println(&format!(
+        "an io_uring kernel thread among the tasks: {poller}"
+    ))?;
+    let maps = read_file("/proc/self/maps")?;
+    let mapped = maps
+        .split('\n')
+        .filter(|l| l.contains("[io_uring]"))
+        .count();
+    println(&format!("io_uring mappings in /proc/self/maps: {mapped}"))?;
+    println(&format!("args: {}", args.len()))
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -689,6 +762,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("handle_release_order", handle_release_order),
     ("initializing", initializing),
     ("allocprof", allocprof),
+    ("startup_rings", startup_rings),
 ];
 
 /// The twin named by `argv[0]`'s file name, if any.
@@ -725,6 +799,15 @@ fn main() {
     let argv0 = std::env::args_os().next().unwrap_or_default();
     if let Some(id) = twin_name(argv0.as_bytes()) {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        // Init's module initializer that reaches the runtime before `main`,
+        // which a translator runs as every program's: `IO.stdGenRef`
+        // (Init/Data/Random.lean) reads 8 bytes with `IO.getRandomBytes`,
+        // which opens `/dev/urandom`; with no descriptor left it fails, and
+        // the program ends with the uncaught error (case
+        // `startup_fd_limit`, its `ulimit -n 11` run)
+        if let Err(e) = env::get_random_bytes(&mut [0; 8]) {
+            finish(Err(e));
+        }
         let twin = TWINS.iter().find(|(n, _)| *n == id).unwrap().1;
         finish(twin(&args));
     }

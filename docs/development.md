@@ -21,14 +21,14 @@ once.
 
 - **No `unsafe` in the default build.**
   Anything that needs `unsafe` comes from a vetted external crate: `nix` or
-  `rustix` for system calls, corosensei for task switching, signal-hook
-  (its safe API only) for signal handlers. What no crate
-  offers safely stays in each translator's glue, behind a contract the
-  crate states and upholds: so far `sched::Glue::suspend` (one dereference
-  of a coroutine's yielder) and the SIGSEGV handler of Lean's stack-overflow
-  report (`docs/sched.md`). The crate root denies `unsafe_code`
-  (`#![deny(unsafe_code)]`), and forbids it in a build with neither `io`
-  nor `unsafe-fast`.
+  `rustix` for system calls, io-uring for the startup rings, corosensei for
+  task switching, signal-hook (its safe API only) for signal handlers. What
+  no crate offers safely stays in each translator's glue, behind a
+  contract the crate states and upholds: so far `sched::Glue::suspend`
+  (one dereference of a coroutine's yielder) and the SIGSEGV handler of
+  Lean's stack-overflow report (`docs/sched.md`). The crate root denies
+  `unsafe_code` (`#![deny(unsafe_code)]`), and forbids it in a build with
+  neither `io` nor `unsafe-fast`.
 - **Native quirks.** A native behaviour that no safe API can reproduce, and
   that each glue would otherwise write on its own, may be written with
   `unsafe` in the crate (owner, 2026-10-04), in the build of the feature
@@ -73,7 +73,10 @@ once.
   `Cargo.lock`), with only the features the crate uses. Before adding a
   dependency, or a feature that pulls in more crates, ask leanrs to check it
   against their registry; a new crate that wraps `unsafe` needs the owner's
-  decision (nix, rustix, corosensei and signal-hook are approved).
+  decision (nix, rustix, corosensei and signal-hook are approved;
+  io-uring 0.7.13, pinned exactly, for the startup rings, was accepted by
+  leanrs's shared-runtime coordinator under the owner's delegation of
+  dependency decisions (2026-10-04)).
 
 ## Tests
 

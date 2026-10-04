@@ -1,0 +1,1 @@
+$BIN; UV_USE_IO_URING=0 $BIN

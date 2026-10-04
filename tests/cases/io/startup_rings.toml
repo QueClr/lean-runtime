@@ -1,0 +1,11 @@
+id = "startup_rings"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime quirks-2: libuv 1.48 linux.c uv__iou_init, uv__platform_loop_init; finding A821 (what option C did not reproduce)"
+streams = "separate"
+# Host-dependent: recorded on Linux 7.0 (aarch64), where libuv 1.48 makes its two
+# io_uring rings (Linux 5.13 or later, io_uring allowed), /proc/self/fdinfo shows
+# SqMask, CqMask and SqThread (Linux 5.16 or later, about), and each ring has an
+# inode of its own (anonymous inodes of their own, recent kernels). On another
+# host native and a translation agree with each other but maybe not with this
+# recording (review RQ2-08).

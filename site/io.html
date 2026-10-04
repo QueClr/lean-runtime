@@ -24,7 +24,7 @@
 <main>
 <h1>The io module</h1>
 <p class="lead"><code>io</code> (feature <code>io</code>) does what Lean 4.34.0's <code>io.cpp</code> and <code>process.cpp</code> do.
-It is safe Rust over std, rustix and nix, except one <a href="glossary.html#g-quirk">native quirk</a> (<a href="#title">the process title</a>).
+It is safe Rust over std, rustix, nix and io-uring, except one <a href="glossary.html#g-quirk">native quirk</a> (<a href="#title">the process title</a>).
 It copies the behaviour of glibc where a Lean program can see it.</p>
 
 <div class="toc"><ul>
@@ -55,7 +55,7 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
 <tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
 <tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>main (io-2)</td></tr>
-<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: the crate's one <code>unsafe</code> file, for a native quirk.</td><td>main (quirks-1)</td></tr>
+<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: an <code>unsafe</code> file, for a native quirk.</td><td>main (quirks-1)</td></tr>
 </tbody></table></div>
 
 <h2 id="layers">The layers of a handle call</h2>
@@ -263,19 +263,19 @@ A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the par
 libuv 1.48.0 opens up to eight descriptors, close-on-exec, at the lowest free numbers.
 A program can see them: they decide which <code>open</code> fails first under a descriptor limit, and what a closed standard descriptor becomes.
 lean-runtime opens the same descriptors, with the same numbers, in the same order.
-Two epoll descriptors stand in for the io_uring rings (A821, option C).</p>
+The two io_uring rings are real rings, made as libuv makes them.</p>
 <figure class="fig">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" role="img" aria-labelledby="io3-t io3-d">
   <title id="io3-t">The descriptors open before main</title>
-  <desc id="io3-d">Row one, with io_uring: 0 to 2 are the standard streams, 3 is epoll, 4 and 5 are the two rings (epoll stand-ins here), 6 and 7 are the signal lock pipe with one byte written, 8 and 9 are the non-blocking signal pipe, 10 is an eventfd. Row two, without io_uring: 3 epoll, 4 and 5 the lock pipe, 6 and 7 the signal pipe, 8 the eventfd. Row three, stdin closed: epoll takes descriptor 0.</desc>
+  <desc id="io3-d">Row one, with io_uring: 0 to 2 are the standard streams, 3 is epoll, 4 and 5 are the two io_uring rings, 6 and 7 are the signal lock pipe with one byte written, 8 and 9 are the non-blocking signal pipe, 10 is an eventfd. Row two, without io_uring: 3 epoll, 4 and 5 the lock pipe, 6 and 7 the signal pipe, 8 the eventfd. Row three, stdin closed: epoll takes descriptor 0.</desc>
   <text class="tb" x="20" y="26">With the io_uring rings: descriptors 3 to 10</text>
   <g>
     <rect class="k-none" x="20" y="36" width="68" height="52" rx="4"/><text class="tc" x="54" y="54" text-anchor="middle">0</text><text class="ts" x="54" y="76" text-anchor="middle">stdin</text>
     <rect class="k-none" x="94" y="36" width="68" height="52" rx="4"/><text class="tc" x="128" y="54" text-anchor="middle">1</text><text class="ts" x="128" y="76" text-anchor="middle">stdout</text>
     <rect class="k-none" x="168" y="36" width="68" height="52" rx="4"/><text class="tc" x="202" y="54" text-anchor="middle">2</text><text class="ts" x="202" y="76" text-anchor="middle">stderr</text>
     <rect class="k-rt" x="242" y="36" width="68" height="52" rx="4"/><text class="tc" x="276" y="54" text-anchor="middle">3</text><text class="ts" x="276" y="76" text-anchor="middle">epoll</text>
-    <rect class="k-rt plan" x="316" y="36" width="68" height="52" rx="4"/><text class="tc" x="350" y="54" text-anchor="middle">4</text><text class="ts" x="350" y="76" text-anchor="middle">ring 1</text>
-    <rect class="k-rt plan" x="390" y="36" width="68" height="52" rx="4"/><text class="tc" x="424" y="54" text-anchor="middle">5</text><text class="ts" x="424" y="76" text-anchor="middle">ring 2</text>
+    <rect class="k-rt" x="316" y="36" width="68" height="52" rx="4"/><text class="tc" x="350" y="54" text-anchor="middle">4</text><text class="ts" x="350" y="76" text-anchor="middle">ring 1</text>
+    <rect class="k-rt" x="390" y="36" width="68" height="52" rx="4"/><text class="tc" x="424" y="54" text-anchor="middle">5</text><text class="ts" x="424" y="76" text-anchor="middle">ring 2</text>
     <rect class="k-rt" x="464" y="36" width="68" height="52" rx="4"/><text class="tc" x="498" y="54" text-anchor="middle">6</text><text class="ts" x="498" y="76" text-anchor="middle">lock r</text>
     <rect class="k-rt" x="538" y="36" width="68" height="52" rx="4"/><text class="tc" x="572" y="54" text-anchor="middle">7</text><text class="ts" x="572" y="76" text-anchor="middle">lock w</text>
     <rect class="k-rt" x="612" y="36" width="68" height="52" rx="4"/><text class="tc" x="646" y="54" text-anchor="middle">8</text><text class="ts" x="646" y="76" text-anchor="middle">signal r</text>
@@ -299,26 +299,29 @@ Two epoll descriptors stand in for the io_uring rings (A821, option C).</p>
     <rect class="k-rt" x="20" y="236" width="68" height="52" rx="4"/><text class="tc" x="54" y="254" text-anchor="middle">0</text><text class="ts" x="54" y="276" text-anchor="middle">epoll</text>
     <rect class="k-none" x="94" y="236" width="68" height="52" rx="4"/><text class="tc" x="128" y="254" text-anchor="middle">1</text><text class="ts" x="128" y="276" text-anchor="middle">stdout</text>
     <rect class="k-none" x="168" y="236" width="68" height="52" rx="4"/><text class="tc" x="202" y="254" text-anchor="middle">2</text><text class="ts" x="202" y="276" text-anchor="middle">stderr</text>
-    <rect class="k-rt plan" x="242" y="236" width="68" height="52" rx="4"/><text class="tc" x="276" y="254" text-anchor="middle">3</text><text class="ts" x="276" y="276" text-anchor="middle">ring 1</text>
-    <rect class="k-rt plan" x="316" y="236" width="68" height="52" rx="4"/><text class="tc" x="350" y="254" text-anchor="middle">4</text><text class="ts" x="350" y="276" text-anchor="middle">ring 2</text>
+    <rect class="k-rt" x="242" y="236" width="68" height="52" rx="4"/><text class="tc" x="276" y="254" text-anchor="middle">3</text><text class="ts" x="276" y="276" text-anchor="middle">ring 1</text>
+    <rect class="k-rt" x="316" y="236" width="68" height="52" rx="4"/><text class="tc" x="350" y="254" text-anchor="middle">4</text><text class="ts" x="350" y="276" text-anchor="middle">ring 2</text>
     <text class="ts" x="400" y="258">5 to 9: lock pipe, signal pipe, eventfd.</text>
     <text class="ts" x="400" y="276">Reading "stdin" now reads epoll: EINVAL.</text>
   </g>
-  <rect class="k-rt plan" x="20" y="306" width="16" height="14" rx="2"/><text class="ts" x="42" y="318">an io_uring ring natively; an epoll descriptor stands in for it here</text>
+  <text class="ts" x="20" y="318">Rings 1 and 2: the polling ring (64 entries, a kernel thread) and the control ring (256 entries).</text>
 </svg>
 <figcaption>Figure 3. The startup descriptors.
 "lock" is the pipe that locks signal handling (one byte is written into it).
 "signal" is the loop's non-blocking signal pipe.</figcaption>
 </figure>
 <ul>
-  <li>libuv decides whether to make the two io_uring rings.
-    The crate predicts that decision as libuv 1.48.0 makes it, and also reads <code>kernel.io_uring_disabled</code>.</li>
-  <li>No safe API makes a ring without a new crate.
-    rustix's <code>io_uring_setup</code> is <code>unsafe</code> (checked again on 2026-10-04), and nix and std have none.
-    So two more epoll descriptors stand in for the rings.
-    Reads and writes on both kinds fail alike, with <code>EINVAL</code>.</li>
-  <li>Two things differ: the metadata of <code>/proc/self/fd/N</code>, and the ring's kernel thread in <code>/proc/self/task</code>.</li>
-  <li>Known gaps: a seccomp filter that refuses io_uring, and <code>io_uring_disabled = 1</code> in a user namespace.</li>
+  <li>libuv decides whether to try the rings: Linux 5.10.186 or later, or as <code>UV_USE_IO_URING</code> says.
+    The crate makes the same decision.</li>
+  <li>Then the kernel decides whether each ring exists.
+    The crate makes the same <code>io_uring_setup</code> calls and keeps a ring only with the features that libuv needs.
+    So a disabled io_uring, a seccomp filter or an old kernel leaves no ring, as natively.</li>
+  <li>The io-uring crate makes the rings, with libuv's parameters, and maps their memory as libuv does.
+    The crate uses only its safe functions (<a href="../UNSAFE.md">UNSAFE.md</a> has an audit).</li>
+  <li>So the ring's inode, its <code>/proc/self/fdinfo</code> lines, its four <code>/proc/self/maps</code> lines and its kernel thread (<code>iou-sqp-&lt;pid&gt;</code>) are native's.
+    The epoll descriptor watches the polling ring, as natively.</li>
+  <li>One thing still differs.
+    Native's loop thread starts the loop: its first round adds the signal pipe and the eventfd to epoll, through the control ring.</li>
   <li><strong>Glue duty.</strong> The descriptors must open before Rust's runtime starts, because Rust puts <code>/dev/null</code> on closed standard descriptors.
     So each translator's glue calls <code>open_native_descriptors</code> from an ELF constructor.
     That needs <code>#[link_section]</code>, which <code>deny(unsafe_code)</code> refuses in the crate.</li>
@@ -344,7 +347,7 @@ So <code>/proc/self/cmdline</code> and <code>ps</code> show the title.</p>
 std returns copies of the arguments.
 The <code>prctl</code> calls that move the kernel's view are <code>unsafe</code> too: one needs a privilege, and the other resets the whole memory map.
 Writing <code>/proc/self/mem</code> would hide the same write from the compiler.
-So <code>io::argv_title</code> does it with <code>unsafe</code> code: the crate's one <a href="glossary.html#g-quirk">native quirk</a>.</p>
+So <code>io::argv_title</code> does it with <code>unsafe</code> code: a <a href="glossary.html#g-quirk">native quirk</a>.</p>
 <ul>
   <li>The file has its own ELF constructor, so no glue takes part.
     glibc calls it with <code>main</code>'s <code>argc</code> and <code>argv</code>, before <code>main</code> (glibc only: musl passes no arguments).</li>

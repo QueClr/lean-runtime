@@ -301,7 +301,8 @@ fn in_main_executable(code: usize) -> Option<bool> {
 }
 
 /// `start_code` and `end_code` of a `/proc/<pid>/stat` line (fields 26 and
-/// 27); `None` when they are missing or hidden (shown as 0).
+/// 27); `None` when they are missing, or hidden from a reader without
+/// permission (the kernel then shows both as 1: an empty span).
 fn code_span_of(stat: &[u8]) -> Option<(usize, usize)> {
     let (start, end) = (stat_field(stat, 26)?, stat_field(stat, 27)?);
     (start < end).then_some((start, end))

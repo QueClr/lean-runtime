@@ -1,6 +1,6 @@
 <h1>The io module</h1>
 <p class="lead"><code>io</code> (feature <code>io</code>) does what Lean 4.34.0's <code>io.cpp</code> and <code>process.cpp</code> do.
-It is safe Rust over std, rustix and nix, except one <a href="glossary.html#g-quirk">native quirk</a> (<a href="#title">the process title</a>).
+It is safe Rust over std, rustix, nix and io-uring, except one <a href="glossary.html#g-quirk">native quirk</a> (<a href="#title">the process title</a>).
 It copies the behaviour of glibc where a Lean program can see it.</p>
 
 <div class="toc"><ul>
@@ -31,7 +31,7 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
 <tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
 <tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>main (io-2)</td></tr>
-<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: the crate's one <code>unsafe</code> file, for a native quirk.</td><td>main (quirks-1)</td></tr>
+<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: an <code>unsafe</code> file, for a native quirk.</td><td>main (quirks-1)</td></tr>
 </tbody></table></div>
 
 <h2 id="layers">The layers of a handle call</h2>
@@ -165,7 +165,7 @@ A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the par
 libuv 1.48.0 opens up to eight descriptors, close-on-exec, at the lowest free numbers.
 A program can see them: they decide which <code>open</code> fails first under a descriptor limit, and what a closed standard descriptor becomes.
 lean-runtime opens the same descriptors, with the same numbers, in the same order.
-Two epoll descriptors stand in for the io_uring rings (A821, option C).</p>
+The two io_uring rings are real rings, made as libuv makes them.</p>
 <figure class="fig">
 {{svg:io-startup}}
 <figcaption>Figure 3. The startup descriptors.
@@ -173,14 +173,17 @@ Two epoll descriptors stand in for the io_uring rings (A821, option C).</p>
 "signal" is the loop's non-blocking signal pipe.</figcaption>
 </figure>
 <ul>
-  <li>libuv decides whether to make the two io_uring rings.
-    The crate predicts that decision as libuv 1.48.0 makes it, and also reads <code>kernel.io_uring_disabled</code>.</li>
-  <li>No safe API makes a ring without a new crate.
-    rustix's <code>io_uring_setup</code> is <code>unsafe</code> (checked again on 2026-10-04), and nix and std have none.
-    So two more epoll descriptors stand in for the rings.
-    Reads and writes on both kinds fail alike, with <code>EINVAL</code>.</li>
-  <li>Two things differ: the metadata of <code>/proc/self/fd/N</code>, and the ring's kernel thread in <code>/proc/self/task</code>.</li>
-  <li>Known gaps: a seccomp filter that refuses io_uring, and <code>io_uring_disabled = 1</code> in a user namespace.</li>
+  <li>libuv decides whether to try the rings: Linux 5.10.186 or later, or as <code>UV_USE_IO_URING</code> says.
+    The crate makes the same decision.</li>
+  <li>Then the kernel decides whether each ring exists.
+    The crate makes the same <code>io_uring_setup</code> calls and keeps a ring only with the features that libuv needs.
+    So a disabled io_uring, a seccomp filter or an old kernel leaves no ring, as natively.</li>
+  <li>The io-uring crate makes the rings, with libuv's parameters, and maps their memory as libuv does.
+    The crate uses only its safe functions (<a href="repo:UNSAFE.md">UNSAFE.md</a> has an audit).</li>
+  <li>So the ring's inode, its <code>/proc/self/fdinfo</code> lines, its four <code>/proc/self/maps</code> lines and its kernel thread (<code>iou-sqp-&lt;pid&gt;</code>) are native's.
+    The epoll descriptor watches the polling ring, as natively.</li>
+  <li>One thing still differs.
+    Native's loop thread starts the loop: its first round adds the signal pipe and the eventfd to epoll, through the control ring.</li>
   <li><strong>Glue duty.</strong> The descriptors must open before Rust's runtime starts, because Rust puts <code>/dev/null</code> on closed standard descriptors.
     So each translator's glue calls <code>open_native_descriptors</code> from an ELF constructor.
     That needs <code>#[link_section]</code>, which <code>deny(unsafe_code)</code> refuses in the crate.</li>
@@ -206,7 +209,7 @@ So <code>/proc/self/cmdline</code> and <code>ps</code> show the title.</p>
 std returns copies of the arguments.
 The <code>prctl</code> calls that move the kernel's view are <code>unsafe</code> too: one needs a privilege, and the other resets the whole memory map.
 Writing <code>/proc/self/mem</code> would hide the same write from the compiler.
-So <code>io::argv_title</code> does it with <code>unsafe</code> code: the crate's one <a href="glossary.html#g-quirk">native quirk</a>.</p>
+So <code>io::argv_title</code> does it with <code>unsafe</code> code: a <a href="glossary.html#g-quirk">native quirk</a>.</p>
 <ul>
   <li>The file has its own ELF constructor, so no glue takes part.
     glibc calls it with <code>main</code>'s <code>argc</code> and <code>argv</code>, before <code>main</code> (glibc only: musl passes no arguments).</li>

@@ -1,5 +1,5 @@
 //! OS-level IO mirroring Lean 4.34.0's C runtime (`src/runtime/io.cpp`,
-//! `process.cpp`), in safe Rust over std, rustix and nix, except
+//! `process.cpp`), in safe Rust over std, rustix, nix and io-uring, except
 //! [`argv_title`]: the one native quirk no safe API can reproduce, in a file
 //! of its own (`UNSAFE.md`).
 //!
