@@ -52,6 +52,12 @@ It returns its own argument, and the ref keeps that object with one reference co
 The process can use freed memory, or crash.</td><td>A <code>swap</code> waits for the holder's store, then returns the ref's previous value.
 (Upstream fixed it in Lean 4.35.0-rc1, issue #14584.)
 A judge confirmed it on 2026-10-04.</td></tr>
+<tr id="lb-19"><td>LB-19</td><td>After a failed <code>Signal.next</code>, <code>cancel</code> or <code>stop</code> frees the watcher while the program still holds it.
+The next <code>next</code> crashes with SIGSEGV.</td><td>The second <code>next</code> fails with <code>EINVAL</code> again, and nothing is freed early (<a href="sched.html#uv">sched</a>).
+leanrs's judge confirmed it on 2026-10-04; its case is <code>uvloop/signal_failed_next</code>.</td></tr>
+<tr id="lb-20"><td>LB-20</td><td>A <code>sync</code> dependent of a one-shot timer's or signal watcher's promise that stops or cancels it frees it while the program holds it.
+The next use crashes with SIGSEGV.</td><td>The handle is finished before its promise resolves, so the dependent's <code>stop</code> or <code>cancel</code> acts on a finished handle (<a href="sched.html#uv">sched</a>).
+A judge confirmed it on 2026-10-04; its cases are <code>uvloop/*_in_sync_dependent</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

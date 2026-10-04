@@ -1,0 +1,4 @@
+first watcher got some 17
+a child exited with no watcher
+the new watcher saw the earlier signal: false
+the new watcher got some 17

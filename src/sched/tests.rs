@@ -597,15 +597,15 @@ fn an_effect_point_lets_a_stale_task_go_first() {
     assert_eq!(entries(&l), ["queued 6 ms ago", "fresh", "queued now"]);
 }
 
-/// A glue whose `idle` hook blocks, which the hub forbids (it runs on
+/// A glue whose `switched` hook blocks, which the hub forbids (it runs on
 /// `main`'s stack; docs/sched.md, S4).
-struct BlockingIdle;
+struct BlockingSwitch;
 
-impl Glue for BlockingIdle {
+impl Glue for BlockingSwitch {
     fn suspend(&self, _: Suspend<'_>) {
         panic!("the crate's unit tests never suspend a context");
     }
-    fn idle(&self, _: Option<std::time::Instant>) {
+    fn switched(&self, _: CtxId, _: CtxId) {
         block_sync();
     }
 }
@@ -617,9 +617,11 @@ impl Glue for BlockingIdle {
 fn a_hub_hook_cannot_block() {
     const CHILD: &str = "LEAN_RUNTIME_TEST_BLOCKING_HOOK";
     if std::env::var_os(CHILD).is_some() {
-        start_with(Rc::new(BlockingIdle), 1, 1 << 20);
-        // `main` waits for a promise no one resolves: the hub has nothing to
-        // run and no sleeper, so it waits in `idle`, which tries to block.
+        start_with(Rc::new(BlockingSwitch), 1, 1 << 20);
+        // `main` waits for a promise no one resolves: the hub starts the
+        // queued task on a context of its own, and `switched`, run before it
+        // resumes that context, tries to block.
+        let _t = spawn(Box::new(|| Outcome::Done), 9, true);
         let p = promise_new().unwrap();
         wait(p);
         unreachable!();
@@ -866,4 +868,230 @@ fn a_caught_panic_in_a_sync_dependent_ends_its_walk() {
     need_ok();
     wait(other);
     assert_eq!(entries(&l), ["t", "other"]);
+}
+
+// ---------------------------------------------------------------------------
+// The event loop (sched-io). Its callbacks run on the loop context, a
+// context of its own that never suspends here.
+
+/// A promise that `main` waits for, a callback resolving it, and the count
+/// of its calls.
+type Waitable = (TaskId, Rc<dyn Fn()>, Rc<Cell<u32>>);
+
+fn waitable() -> Waitable {
+    let p = promise_new().unwrap();
+    let n = Rc::new(Cell::new(0));
+    let n2 = n.clone();
+    let cb: Rc<dyn Fn()> = Rc::new(move || {
+        n2.set(n2.get() + 1);
+        resolve(p, || {});
+    });
+    (p, cb, n)
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_timer_runs_on_the_loop_context_when_due() {
+    start_test(2);
+    let (p, cb, n) = waitable();
+    let t0 = std::time::Instant::now();
+    timer_start(t0 + std::time::Duration::from_millis(30), cb);
+    assert!(
+        io_cooperative(),
+        "a pending timer: blocking calls cooperate"
+    );
+    // `main` blocks: the hub waits until the timer is due, then the loop
+    // context runs its callback, which resolves the promise.
+    wait(p);
+    assert!(t0.elapsed() >= std::time::Duration::from_millis(30));
+    assert_eq!(n.get(), 1);
+    assert!(
+        !io_cooperative(),
+        "nothing left: blocking calls are plain again"
+    );
+    finish();
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn timers_run_in_deadline_order_and_a_stopped_one_never_runs() {
+    start_test(2);
+    let l = log();
+    let t0 = std::time::Instant::now();
+    let at = |ms| t0 + std::time::Duration::from_millis(ms);
+    let push = |s: &'static str| -> Rc<dyn Fn()> {
+        let l = l.clone();
+        Rc::new(move || l.borrow_mut().push(s.to_string()))
+    };
+    timer_start(at(20), push("20 first"));
+    let stopped = timer_start(at(10), push("stopped"));
+    timer_start(at(5), push("5"));
+    timer_start(at(20), push("20 second"));
+    let (p, cb, _) = waitable();
+    timer_start(at(40), cb);
+    assert!(timer_stop(stopped));
+    assert!(!timer_stop(stopped));
+    wait(p);
+    assert_eq!(entries(&l), ["5", "20 first", "20 second"]);
+    finish();
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_watch_runs_when_its_descriptor_is_readable() {
+    start_test(2);
+    let (r, w) = rustix::pipe::pipe().unwrap();
+    let r = Rc::new(r);
+    let p = promise_new().unwrap();
+    let seen = Rc::new(Cell::new(Ready::default()));
+    let s2 = seen.clone();
+    let id = watch(
+        r.clone(),
+        Interest::READ,
+        Rc::new(move |ready| {
+            s2.set(ready);
+            resolve(p, || {});
+        }),
+    )
+    .unwrap();
+    // one watch per descriptor
+    assert!(watch(r.clone(), Interest::READ, Rc::new(|_| {})).is_err());
+    rustix::io::write(&w, b"x").unwrap();
+    wait(p);
+    assert!(seen.get().read);
+    unwatch(id);
+    assert!(!io_cooperative());
+    // the reactor let go of its clone (and the refused watch's)
+    assert_eq!(Rc::strong_count(&r), 1);
+    finish();
+}
+
+/// The watch's id, set once `watch` has returned, for its own callback.
+type IdCell = Rc<Cell<Option<WatchId>>>;
+
+/// A watch may end itself from its callback: it is not armed again, and the
+/// reactor lets go of the descriptor at once (net-1's guarantees 1 and 2).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_watch_unwatched_in_its_callback_lets_go_at_once() {
+    start_test(2);
+    let (r, w) = rustix::pipe::pipe().unwrap();
+    let r = Rc::new(r);
+    let weak = Rc::downgrade(&r);
+    let p = promise_new().unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let after_unwatch = Rc::new(Cell::new(usize::MAX));
+    let id: IdCell = Rc::default();
+    let (c2, a2, id2) = (calls.clone(), after_unwatch.clone(), id.clone());
+    let wid = watch(
+        r.clone(),
+        Interest::READ,
+        Rc::new(move |_| {
+            c2.set(c2.get() + 1);
+            unwatch(id2.get().unwrap());
+            // only the test's own reference is left
+            a2.set(weak.strong_count());
+            resolve(p, || {});
+        }),
+    )
+    .unwrap();
+    id.set(Some(wid));
+    rustix::io::write(&w, b"x").unwrap();
+    wait(p);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(after_unwatch.get(), 1);
+    // still readable, but no longer watched: nothing is registered, and a
+    // sleep (with a timer to make the loop look) calls nothing
+    assert!(!io_cooperative());
+    let (q, cb, _) = waitable();
+    timer_start(
+        std::time::Instant::now() + std::time::Duration::from_millis(20),
+        cb,
+    );
+    wait(q);
+    assert_eq!(calls.get(), 1);
+    // the program drops its descriptor too: it is the last owner, so the
+    // descriptor closes at once (`OwnedFd`'s drop)
+    let weak = Rc::downgrade(&r);
+    drop(r);
+    assert!(weak.upgrade().is_none());
+    drop(w);
+    finish();
+}
+
+/// A watch modified from its callback is armed again with the new interest
+/// (net-1's guarantee 1); a hang-up counts as ready for a read (guarantee
+/// 3).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_watch_modified_in_its_callback_is_armed_with_the_new_interest() {
+    start_test(2);
+    let (a, b) = std::os::unix::net::UnixStream::pair().unwrap();
+    let a = Rc::new(a);
+    let p = promise_new().unwrap();
+    let seen: Rc<RefCell<Vec<Ready>>> = Rc::default();
+    let id: IdCell = Rc::default();
+    let (s2, id2) = (seen.clone(), id.clone());
+    let wid = watch(
+        a.clone(),
+        Interest::READ,
+        Rc::new(move |ready| {
+            s2.borrow_mut().push(ready);
+            let id = id2.get().unwrap();
+            if s2.borrow().len() == 1 {
+                // not read: still readable, but now watched for writing
+                watch_modify(id, Interest::WRITE).unwrap();
+            } else {
+                unwatch(id);
+                resolve(p, || {});
+            }
+        }),
+    )
+    .unwrap();
+    id.set(Some(wid));
+    use std::io::Write;
+    (&b).write_all(b"x").unwrap();
+    wait(p);
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 2);
+    assert!(seen[0].read);
+    assert!(seen[1].write);
+    drop(seen);
+    // an end of file: POLLIN|POLLHUP
+    let (r, w) = rustix::pipe::pipe().unwrap();
+    let p = promise_new().unwrap();
+    let got = Rc::new(Cell::new(Ready::default()));
+    let g2 = got.clone();
+    let wid = watch(
+        r,
+        Interest::READ,
+        Rc::new(move |ready| {
+            g2.set(ready);
+            resolve(p, || {});
+        }),
+    )
+    .unwrap();
+    drop(w);
+    wait(p);
+    unwatch(wid);
+    assert!(got.get().read && got.get().hangup);
+    finish();
+}
+
+#[test]
+fn poll_fds_without_tasks_is_poll() {
+    use rustix::fd::AsFd;
+    let (r, w) = rustix::pipe::pipe().unwrap();
+    let mut it = [
+        PollItem::new(r.as_fd(), Interest::READ),
+        PollItem::new(w.as_fd(), Interest::WRITE),
+    ];
+    assert!(!io_cooperative());
+    assert_eq!(
+        poll_fds(&mut it, Some(std::time::Duration::ZERO)).unwrap(),
+        1
+    );
+    assert!(!it[0].ready.read && it[1].ready.write);
+    rustix::io::write(&w, b"x").unwrap();
+    assert!(wait_fd(r.as_fd(), Interest::READ).unwrap().read);
 }

@@ -1,0 +1,6 @@
+dependent ran: ok
+first promise resolved: true
+next: true
+next: true
+next: true
+done

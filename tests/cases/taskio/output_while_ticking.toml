@@ -1,0 +1,5 @@
+id = "output_while_ticking"
+area = "taskio"
+lean_version = "4.34.0"
+source = "sched-io (IO.Process.output in main while a task runs; the twin calls the runtime's output override)"
+streams = "separate"

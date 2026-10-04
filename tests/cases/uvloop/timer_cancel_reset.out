@@ -1,0 +1,6 @@
+one-shot: cancelled promise resolved: false
+one-shot: next after cancel resolves some ()
+repeating: cancelled promise resolved: false
+repeating: next after cancel resolves some ()
+reset: resolved before the moved deadline: false
+reset: resolves some () after at least 600 ms: true

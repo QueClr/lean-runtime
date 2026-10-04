@@ -10,6 +10,7 @@ translators. It is lean2rr's model (its `leanrt`: `sched.rs`, `task.rs`,
 
 This file covers:
 - the model;
+- blocking IO and the event loop (sched-io);
 - what a translator's glue writes;
 - why the glue's one `unsafe` step is sound, and the checklist for glue
   authors;
@@ -26,13 +27,18 @@ This file covers:
 | `src/sched/mod.rs` | The public API, `start`, `ref_read`, the low-level waits |
 | `src/sched/task.rs` | Tasks: queues, dependents, walks, queries, cancellation, promises, the final run, the yield points |
 | `src/sched/ctx.rs` | Contexts: corosensei coroutines, the hub, the `Glue` trait, the running stack's bounds |
+| `src/sched/reactor.rs` | The event loop (sched-io): descriptors and timers on epoll, the cooperative `poll_fds`, the loop context and its callbacks |
+| `src/sched/uv.rs` | `Std.Internal.UV`'s loop, timers and signals on the event loop |
 | `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
-| `tests/sched-driver/` | Every case of `tests/cases/tasks`, `tests/cases/sync` and `tests/cases/refs` as a Rust program over `sched`, with the glue a translator writes |
+| `src/io/coop.rs` | sched-io in the io layer (features `io` and `sched`): the cooperative reads, writes, `flock` and `waitpid`, and the stream locks |
+| `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included) |
 
-`sched` depends on corosensei 0.3.4 and is built with cargo, offline, from
-the committed `Cargo.lock` (`cargo build --offline --locked --features
-sched`; docs/development.md, "Builds").
+`sched` depends on corosensei 0.3.4, rustix 1.1 (the event loop's epoll
+and poll) and signal-hook 0.3.18 (the signal watchers' delivery; its safe
+API only), and is built with cargo, offline, from the committed
+`Cargo.lock` (`cargo build --offline --locked --features sched`;
+docs/development.md, "Builds").
 
 ## The model
 
@@ -45,10 +51,11 @@ needed. So a task is *deferred*: it runs at the first of these points.
   on the stack of whoever needs it, as a worker would while the caller
   waits. A task whose sources are still pending first runs that chain, from
   its deepest end, one task after the other.
-- **The running code blocks.** A sleep, a lock, a promise, or a task running
-  elsewhere blocks it, and one of the task manager's workers is free
-  (`LEAN_NUM_THREADS`, or the number of online processors). The task then
-  starts on a *context* of its own.
+- **The running code blocks.** A sleep, a lock, a promise, a task running
+  elsewhere, or a read, write or wait that would block in the kernel
+  ("Blocking IO and the event loop") blocks it, and one of the task
+  manager's workers is free (`LEAN_NUM_THREADS`, or the number of online
+  processors). The task then starts on a *context* of its own.
 - **An effect point.** At an output, a flush, a process spawn or an exit,
   a task queued 5 ms ago or more (`STALE`) goes first, as natively its
   worker would have run it by then.
@@ -68,12 +75,15 @@ are asymmetric (a coroutine suspends to whoever resumed it). So every
 switch goes through `main`'s stack. When `main`'s context blocks, it runs
 the *hub*, which resumes the contexts that can go on, one at a time; a
 context that blocks suspends back to the hub. The hub picks, in this order:
-1. a context that can go on, in the order they became able to;
+1. a context that can go on, in the order they became able to (the event
+   loop's due timers and ready descriptors are looked at first, and wake
+   theirs);
 2. a queued task, on a new context, if a worker is free;
 3. a pure task a worker has started (below), when nothing else will ever
-   happen;
-4. otherwise it waits for the earliest sleeper, or forever (a deadlocked
-   native program waits forever too).
+   happen (no sleeper, timer or registered descriptor);
+4. otherwise it waits in the event loop: in `epoll_wait` until a registered
+   descriptor is ready or the earliest sleeper or timer is due, or forever
+   (a deadlocked native program waits forever too).
 
 **Dependents.** When a task finishes, its dependents are walked from the
 newest, as Lean's `handle_finished` walks them. A `sync` dependent (or one
@@ -201,6 +211,357 @@ while !(← IO.hasFinished t) do IO.sleep 5
 `polling_with_sleeps_runs_a_pure_task_after_two` (`src/sched/tests.rs`)
 records the three answers. No recorded case polls a pure task this way.
 
+## Blocking IO and the event loop (sched-io)
+
+Natively a read of an empty pipe, a write into a full one, `flock` and
+`waitpid` block only the thread that makes them; the program's other
+threads go on. On one thread such a call would stop every context. Example:
+`IO.Process.output` reads the child's standard output on a dedicated task
+while `main` reads its standard error. If the child writes more than a pipe
+holds (64 KiB) to its standard output first, `main` blocks in its read, the
+task never runs, the child blocks on its full pipe, and the program hangs
+where native finishes (leanrs's review of sched-1, item 1; case
+`taskio/output_big_stdout`).
+
+**When a call cooperates.** A blocking call cooperates when
+`io_cooperative()` is true: the task manager runs, and another context
+exists, a task is queued, a started pure task waits for an IO task, or the
+event loop has a descriptor, a timer or a due callback, and the thread is
+not in a no-suspend scope (item 11 of "The glue"). Otherwise it is the
+plain system call, as before, and costs nothing more:
+- `coop_possible()`, one relaxed load of a process-wide flag, is false
+  until the first task, promise, timer or watch: a program without any
+  pays one load per stream lock and per system call (the speed floor O12);
+- after that, the check is a borrow of the thread's scheduler and a few
+  comparisons, once per system call that may block.
+
+**What a cooperating call does** (`src/io/coop.rs`). It first waits for its
+descriptor with `poll_fds`, so the other contexts run meanwhile, and then
+makes the same system call, which no longer blocks. So its bytes and its
+errors are the blocking call's; only the interleaving changes, to one that
+native's threads allow.
+- **Reads** (`read(2)` of a pipe, a FIFO, a socket, a terminal, a child's
+  standard output) wait until the descriptor is readable. A read of the
+  controlling terminal while the process's group is not its foreground
+  group (`tcgetpgrp` against `getpgrp`) stays plain, so it gets `SIGTTIN`
+  (or `EIO`) at once, as natively (review RSIO-08).
+- **Writes** depend on the descriptor:
+  - pipes and sockets: `pwritev2(RWF_NOWAIT)`, which writes what fits; on
+    `EAGAIN` they wait until the descriptor is writable;
+  - FIFOs (the kernel has no `RWF_NOWAIT` for them: `EOPNOTSUPP`, probed on
+    Linux 7.0): they wait until writable, then write at most `PIPE_BUF`
+    bytes, which a writable FIFO always takes. The byte stream is the
+    blocking path's; the sizes of the `write(2)` calls may differ (a write
+    of more than `PIPE_BUF` bytes to a pipe is not atomic natively either);
+  - terminals and other character devices: they wait until writable, then
+    make one `write(2)` of the whole rest, atomic against other writers as
+    natively (the tty layer's write lock; review RSIO-05). A terminal is
+    writable once fewer than 256 bytes wait in its output (`WAKEUP_CHARS`),
+    so the write can still block the thread until the terminal drains, as
+    natively the writing thread blocks.
+- **`Handle.lock`** retries `flock` with `LOCK_NB`. An unlock or a close in
+  this process wakes the waiters at once; another process's unlock is seen
+  within 1 to 16 ms (the retry doubles from 1 ms).
+- **`Child.wait`** waits until the child's pidfd (`pidfd_open`) is readable,
+  which it is once the child has exited; where `pidfd_open` fails, it looks
+  again every 1 to 16 ms. `waitid(WNOWAIT)` looks without reaping, so the
+  `waitpid` that follows gives the status, or `ECHILD` for a pid that is no
+  child, as without the wait.
+- **The runtime's `IO.Process.output`** waits for both pipes with
+  `poll_fds` before its `poll(2)` and its reads.
+
+Regular files, block devices and directories never block (natively they
+never give `EAGAIN` either), so their calls stay plain. So do descriptors
+already in non-blocking mode, whose `EAGAIN` is the result (the standard
+input of a child that could not start, `fdopen_bounded_pipe`). Each stream
+finds out which it is once, with `fstat` and `F_GETFL`, the first time a
+cooperating call needs it; the modelled `errno` is not touched.
+
+**Stream locks.** A stream's `FILE` lock (a `std::sync::Mutex`) stays held
+across such a wait, as glibc's lock stays held while its thread blocks in
+`read(2)`. Another context that wants the same stream must then wait for it
+cooperatively: a plain `Mutex::lock` from the same thread would deadlock.
+So, once `coop_possible()`:
+- every stream lock is taken through `io::coop::lock`, which records it in
+  the running context's list (`HELD`, a thread-local);
+- every context switch, whatever its reason (an IO wait, a promise, a
+  sleep, a yield point; `switch_away`), moves the suspending context's
+  locks to `OWNED`, under its id, and gives them back when it goes on
+  (review RSIO-01: a lock held across any wait is covered, not only the io
+  layer's own waits);
+- a context that finds a stream locked by a suspended context of this
+  thread waits for it (`block_sync`), and the guard's drop wakes it;
+- a stream held by another OS thread is waited for with the plain
+  `Mutex::lock`, as before.
+
+A lock taken before the program's first task, promise, timer or watch is
+not recorded (no cost before then), so a guard (`Handle::file()`) taken
+then and held across the first task's creation and a later switch is the
+one case another context cannot wait for.
+
+So a task blocked writing to a full standard output (a slow reader at the
+other end of the pipe) keeps standard output, and `main`'s next `println`
+waits for it, as natively; so does the exit's flush (`_IO_flush_all` waits
+for each stream's lock).
+
+**The event loop** (`src/sched/reactor.rs`). It is the scheduler's own, one
+per scheduler (per thread):
+- **Descriptors.** `poll_fds(items, timeout)` is `poll(2)` for the calling
+  context: it registers each descriptor with the loop's epoll instance, the
+  context blocks (`Wait::Io`), and the loop wakes it when epoll reports one
+  ready (level-triggered; an error or a hang-up counts). The epoll instance
+  is native's own libuv loop descriptor when the glue has opened native's
+  startup descriptors (`io::startup`), so the process has the same
+  descriptors as natively; otherwise the loop makes one.
+- **Timers and watches.** `timer_start(deadline, callback)` and
+  `watch(fd, interest, callback)` run their callback on the *loop context*:
+  a context of its own, as libuv's loop thread is a thread of its own,
+  started when a callback is due and ended when none is left. A callback
+  may block (a promise's `sync` dependent runs there); what becomes due
+  meanwhile runs after it, in order, as on libuv's one thread. Due timers
+  run in deadline order, then in start order.
+- **The watch API** (review RSIO-02, and net-1's three guarantees):
+  - `watch(fd, interest, callback) -> WatchId`, where `fd: impl AsFd +
+    'static` (a clone of the glue's `Rc<OwnedFd>`): the reactor keeps it
+    until `unwatch`, so the descriptor stays open and its registration can
+    always be changed or deleted. One watch per descriptor (`EEXIST`).
+  - Level-triggered, and out of epoll's set from the moment a call is
+    queued until it returns: a callback that blocks while its descriptor
+    stays ready does not make the hub spin, and the next call is queued
+    only once the descriptor is seen ready again after the return.
+  - Right before a queued call runs, `poll(2)` checks the descriptor for
+    the watch's current interest; `POLLERR` and `POLLHUP` count as ready
+    (a failed connect shows as `POLLERR|POLLHUP`, an end of file as
+    `POLLIN|POLLHUP`). A call whose descriptor is no longer ready is
+    skipped, and the watch is armed again.
+  - `watch_modify(id, interest)` and `unwatch(id)` may be called from
+    anywhere, the watch's own callback included. A modify there sets the
+    interest it is armed with when the call returns. An unwatch there ends
+    it: it is not armed again, and a queued call does not run.
+  - `unwatch` lets go of the descriptor and the callback before it returns
+    (a running callback keeps only its own reference to itself), so a
+    descriptor the program no longer holds closes right there, as native's
+    finalizer closes a socket, and its port can be bound again at once.
+- **When it looks.** The hub, when no context can run, waits in
+  `epoll_wait` until a descriptor is ready or the earliest sleeper or timer
+  is due. Each step of the hub, each polling point and each effect point
+  looks without waiting: due timers always, the descriptors at most once a
+  millisecond. A context woken by the loop is an ordinary context able to
+  run: at an effect point it goes first only once it has been able to run
+  for 5 ms (`STALE`), as for any other.
+
+Example (`taskio/task_reads_main_writes`): `main` writes 200 000 bytes to
+`cat`'s input while a task reads `cat`'s output.
+1. `main`'s write fills `cat`'s input pipe: `pwritev2` gives `EAGAIN`, and
+   `main` blocks on the descriptor.
+2. The hub starts the queued task on a context; it reads `cat`'s output
+   until the pipe is empty, then blocks on it in turn.
+3. `cat` drains its input; epoll reports `main`'s descriptor writable and
+   `main` goes on, and so on, until `main` closes the pipe.
+
+The cases of `tests/cases/taskio` check it (each recorded natively, 5 runs,
+with a twin in `tests/sched-driver`):
+
+| Case | What blocks | Without sched-io |
+|---|---|---|
+| `output_big_stdout` | `IO.Process.output` (Lean's definition), 300 000 bytes on the child's stdout before its stderr | hangs |
+| `output_both_overflow` | the same, 100 000 bytes on each pipe in turn, 4 times | hangs |
+| `output_while_ticking` | the runtime's `output` in `main` while a task prints every 50 ms | the task's lines come after the output |
+| `task_reads_main_writes` | a task reading `cat`'s output while `main` writes to its input | hangs |
+| `wait_in_task` | `Child.wait` in a task while another prints every 50 ms | the wait's line comes first |
+
+The io cases with tasks run through the driver too: `io/lock_blocked` and
+`io/lock_exit` (a task waiting in `flock`; without sched-io both hang) and
+`io/lock_during_read` (a task blocked reading a pipe while `main` takes a
+`flock`; without sched-io the thread waits 2 s in the read, and the effect
+rule still prints `main`'s line first).
+
+### `Std.Internal.UV`: the loop, timers and signals
+
+`src/sched/uv.rs` has the externs of `Std.Internal.UV.Loop`, `Timer` and
+`Signal` (Lean's `src/runtime/uv/event_loop.cpp`, `timer.cpp`, `signal.cpp`,
+over libuv 1.48). Natively a dedicated thread runs libuv's loop, and a
+timer or a signal watcher resolves its Lean promise from there. Here its
+callback runs on the loop context, so the promise's waiters wake and its
+`sync` dependents run on a context of its own, as natively on a thread of
+its own.
+
+- **Every extern catches the loop up first** (review RSIOB-04). Natively
+  each extern takes the loop's lock (`event_loop_lock`), which makes the
+  loop thread finish its current iteration: the timers due and the signals
+  that arrived are handled before the extern acts. Here each extern
+  (`reactor::catch_up`) looks at the loop at once (the descriptors too,
+  without the millisecond's throttle) and lets the loop context run one
+  iteration, however much keeps becoming due (review RSIOB-13), as long as
+  it can go on (not when it waits in a callback, not in a no-suspend
+  scope). From the loop context itself it does nothing: natively the loop
+  thread already holds its lock, which is recursive, so a callback's `sync`
+  dependent calling an extern runs no iteration. The yield lets every
+  context able to run go first, not only the loop's, so each extern is a
+  scheduling point for all of them, an order native's threads allow too
+  (RSIOB-14). Cases `uvloop/timer_due_stop` (a one-shot timer due during a
+  computation, then `stop`: its promise holds `()`),
+  `uvloop/signal_cancel_restart` (a signal during a computation, then
+  `cancel` and `next`, as `Std.Async`'s signal selector does: the resolved
+  promise) and `uvloop/timer_catchup_bound` (a 1 ms repeating timer whose
+  ticks' `sync` dependents compute and re-subscribe: `Timer.mk` from `main`
+  returns at once, with generous bounds for a loaded host).
+- **`Loop.configure`** succeeds and changes nothing (natively it turns on
+  libuv's idle-time metrics, which nothing in Lean reads, and blocks
+  `SIGPROF` in the loop thread while it polls; here the loop polls on the
+  program's own thread, whose `SIGPROF` must stay deliverable).
+  **`Loop.alive`** is true: native's loop always has its async handle.
+- **Timers** follow `timer.cpp`'s state machine (initial, running,
+  finished), each with its promise (`m_promise`):
+  - one-shot: `next` starts the timer, and its promise resolves `timeout` ms
+    later; later `next`s give that promise;
+  - repeating: the first `next` gives a promise that resolves at once (the
+    0th multiple), then each tick resolves the current promise, and `next`
+    gives a new one once it has resolved. libuv starts the next period
+    before the callback, from the time it fires. A repeating timer with
+    timeout 0 ticks once (libuv's repeat 0 means no repeat), as natively;
+  - `reset` moves a running timer's next resolution to `timeout` ms from
+    now; `cancel` drops the promise (a one-shot timer becomes initial
+    again); `stop` drops it (a finished timer's too, as timer.cpp 243-246)
+    and finishes the timer. After `stop`, `next` gives a new promise that
+    nothing resolves (it reads `none` once the program drops it).
+- **Signals** follow `signal.cpp`'s: Lean's signal numbers (its table;
+  others become 0, which `next` refuses with `UV_EINVAL`, leaving the
+  watcher running with a promise that never resolves, as natively), one-shot
+  and repeating watchers, the promise resolved with the signal's number.
+- **A one-shot timer or watcher finishes before its promise resolves**
+  (LB-20): its `sync` dependents see a finished handle, as every later
+  dependent does, so their `stop` or `cancel` acts as on a finished handle.
+  libuv still calls a watcher back before it stops listening (RSIOB-11): a
+  one-shot watcher started by a `sync` dependent of another's promise finds
+  that one still listening, so the handler is not registered again after
+  `SA_RESETHAND`, and the next signal takes the default action (case
+  `uvloop/signal_rearm_in_sync_dependent`, status 138; with an async
+  dependent, `signal_rearm_in_async_dependent`, the new watcher gets it).
+
+**Signal delivery** uses signal-hook's safe API only (review RSIOB-05):
+- A signal's handlers are installed at its first watcher and never taken
+  back (signal-hook cannot restore a disposition). They run in the order
+  they were registered:
+  1. `flag::register` sets the signal's `arrived` flag;
+  2. `low_level::pipe::register_raw` writes a byte into the loop's signal
+     pipe (the flag first, so a reader woken by the byte finds it set);
+  3. the conditional default action (`flag::register_conditional_default`),
+     which runs the signal's default action while no watcher listens
+     (natively libuv restores `SIG_DFL` when the last watcher stops): after
+     `stop`, SIGUSR1 ends the program again (status 138), and SIGCHLD is
+     ignored again;
+  4. while every listener of the signal is one-shot, a second
+     `flag::register` that sets the default's flag at each signal: libuv's
+     `SA_RESETHAND` for one-shot watchers, so a second signal takes the
+     default action before the loop has delivered the first (RSIOB-02, =
+     leanrs's R1). It is registered and unregistered
+     (`low_level::unregister`) as `uv__signal_start` and `uv__signal_stop`
+     re-register libuv's handler: when the first watcher starts, when a
+     repeating one joins one-shot ones, when only one-shot ones remain, and
+     when none is left.
+- **The signal pipe** is native's own, from `io::startup` (made at startup,
+  as libuv makes it in `uv__process_init`), when the glue opened native's
+  startup descriptors: a watcher then opens no descriptor, and the pipe's
+  type and numbers are native's (case `uvloop/signal_fds`). Without them,
+  the first watcher makes a pipe of its own; if it cannot (`EMFILE`), that
+  watcher's `next` fails, and the next watcher tries again (RSIOB-16).
+  **The pipe's duty:** its
+  descriptors live in a static the crate owns, for the life of the
+  process: never closed, `dup2`'d over or reused, and its write end is never
+  unregistered. signal-hook's handlers write to it by number, so a wrong
+  descriptor is no undefined behaviour, but would corrupt whatever the
+  number names. `register_raw` sets `O_NONBLOCK` on the write end, which
+  native's pipe has too.
+- **The loop** watches the pipe's read end. Its call drains the pipe until
+  `EAGAIN`, then takes each signal's `arrived` flag and delivers the
+  signals that came, in signal-number order, to this thread's watchers of
+  each: repeating ones first, then in creation order, as libuv's signal
+  tree orders them (RSIOB-08; case `uvloop/signal_order`). Occurrences of
+  one signal between two calls are one delivery, where libuv makes one per
+  occurrence (its pipe carries one message per occurrence and watcher); a
+  repeating watcher's promise takes one value either way.
+- **A signal that came while no watcher of it listened is no watcher's**:
+  its flag is cleared when the signal's first watcher starts (RSIOB-03;
+  cases `uvloop/signal_stale`, `signal_stale_deferred`).
+- **At exit** the thread's watcher list is forgotten, not dropped: a
+  watcher still listening holds a promise whose release would run its
+  `sync` dependents inside the thread's destruction (RSIOB-01; case
+  `uvloop/exit_listening`, status 0, nothing runs, as natively).
+
+Deviations, by the safe API's limits (recorded as lean-runtime's own; no
+Lean bug):
+- **SIGIO** (RSIOB-06): signal-hook's table lacks its default action
+  (terminate). After its last watcher stops, SIGIO makes the program exit
+  with status 157 (`flag::register_conditional_shutdown`), where natively
+  the signal kills it: `$?` and `IO.Process.wait` give 157 both ways; only
+  `WIFSIGNALED` (and a core dump, which SIGIO's default does not make)
+  tell them apart (case `uvloop/signal_sigio_default`: native's
+  `returncode -29`, and lean-runtime's `returncode 157` as `alt1`).
+- **SIGTSTP, SIGTTIN, SIGTTOU** (RSIOB-07): after their last watcher stops,
+  signal-hook's default action stops the process with SIGSTOP, where
+  natively the signal itself stops it (`WSTOPSIG` 19, not 20, 21 or 22),
+  and SIGSTOP stops it even in an orphaned process group, where the kernel
+  discards the three. No safe route restores their disposition. No case
+  (a stopped process).
+- the reset of a one-shot watcher's handler happens in the handler, where
+  the kernel's `SA_RESETHAND` resets the disposition before the handler
+  runs: the same outcome for a second signal (case
+  `uvloop/signal_oneshot_twice`: two SIGUSR1 50 ms apart while `main`
+  computes without a yield point, status 138).
+
+**The loop holds a running handle**, as natively `lean_inc(obj)`: a
+running timer or a listening watcher fires even if the program dropped it.
+The promises are the translator's (`LoopPromise`: `is_resolved`,
+`resolve`); a handle keeps a clone, and dropping the last clone resolves
+the promise with `none`, as `deactivate_promise`. So the cases keep a
+promise alive while they check that it has not resolved: compiled Lean
+releases a promise right after its last use (the C of
+`uvloop/timer_cancel_reset` releases it before `IO.hasFinished`), and a
+promise only the program holds then resolves with `none`.
+
+**Lean bugs** (`docs/lean-bugs.md`):
+- **LB-19**: native's failed `next` releases the watcher once too often,
+  and a later `cancel` or `stop` frees it while the program holds it; the
+  next `next` crashes (SIGSEGV). Here a failed `next` leaves the watcher
+  running with its promise, as natively, but with no extra reference:
+  `cancel` makes it initial, and the next `next` fails with `EINVAL` again
+  (case `uvloop/signal_failed_next`, native's crash in its `native` field).
+- **LB-20**: natively a one-shot timer or watcher is still running while
+  its promise's `sync` dependents run (handle_timer_event and
+  handle_signal_event resolve before they finish the handle), so a
+  dependent's `stop` or `cancel` releases the handle, and the callback
+  releases it again: the next use crashes. Here the handle is finished
+  first (above). Cases `uvloop/timer_stop_in_sync_dependent`,
+  `timer_cancel_in_sync_dependent`, `signal_stop_in_sync_dependent`,
+  `signal_cancel_in_sync_dependent` (the correct outcome is native's own
+  for the same program with `sync := false`).
+
+Cases `tests/cases/uvloop` (recorded natively, 5 runs, with twins in the
+driver): `loop_configure`, `timer_oneshot`, `timer_repeating`,
+`timer_cancel_reset`, `timer_due_stop`, `timer_catchup_bound`,
+`signal_rearm_in_sync_dependent`, `signal_rearm_in_async_dependent`,
+`signal_usr1` (SIGUSR1 sent by
+`kill`, a child, to the program: one-shot, repeating, `cancel`, an unknown
+number, and status 138 after `stop`), `signal_stale`,
+`signal_stale_deferred`, `signal_oneshot_twice`, `signal_cancel_restart`,
+`signal_order`, `signal_fds`, `exit_listening`, `signal_sigio_default`,
+and the Lean-bug cases above. A case whose native program computes while a
+signal or a timer comes (`timer_due_stop`, `signal_cancel_restart`) takes
+two arguments: the native busy loop's length (about 1 or 2 s natively), and
+the twin's spin, in milliseconds.
+
+**For glue authors.** The translator's external objects hold a
+`uv::Timer<P>` or `uv::Signal<P>`, where `P` is its counted promise
+reference implementing `uv::LoopPromise`; the externs are one call each:
+`lean_uv_timer_mk` is `Timer::new(timeout, repeating)`, `lean_uv_timer_next`
+is `t.next(|| new_promise())`, then `reset`, `stop`, `cancel`;
+`lean_uv_signal_mk` is `Signal::new(signum, repeating)`, then `next`,
+`stop` and `cancel`; `lean_uv_event_loop_configure` and
+`lean_uv_event_loop_alive` are `uv::loop_configure` and `uv::loop_alive`. A
+failure is a libuv error code, which the glue turns into Lean's error with
+`io::IoError::decode_uv_error(code, None)` (`lean_decode_uv_error`).
+
 ## The glue
 
 A translator writes this glue around the crate. `tests/sched-driver/src/`
@@ -217,11 +578,12 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    - `switched(from, to)`: each thread's current standard streams
      (`IO.setStdout` & co.);
    - `task_begin` and `task_end`: a task on a thread of its own starts with
-     the process's streams;
-   - `idle(deadline)`: an event loop, later; by default a sleep.
+     the process's streams.
 
-   `switched` and `idle` run on `main`'s stack, inside the hub: they must
-   not block or yield, and the scheduler panics if they try.
+   `switched` runs on `main`'s stack, inside the hub: it must not block or
+   yield, and the scheduler panics if it tries. When nothing can run, the
+   hub waits in the scheduler's own event loop; the glue has no hook there
+   (sched-io removed sched-1's `Glue::idle`).
 2. **Lifecycle.**
    - Run the module initializers. Tasks run at once then, as natively.
    - `sched::start(glue)` on the thread that runs `main`
@@ -342,6 +704,67 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
      then reports an overflow of a std thread's stack as it does without
      the glue.
 
+9. **Blocking IO** needs nothing from the glue when it goes through the
+   crate's `io` (handles, processes): it cooperates by itself. A stream's
+   `StreamGuard` (`Handle::file()`) may be held across any wait: every
+   switch records it as held by the suspended context, and another context
+   that wants the stream waits for it (review RSIO-01; the one exception is
+   a guard taken before the program's first task, promise, timer or watch,
+   "Stream locks" above). A blocking call the glue makes on its own (user C
+   code over a descriptor, a translator's own IO) waits first with
+   `sched::wait_fd(fd, interest)` or `sched::poll_fds(items, timeout)`,
+   which are plain `poll(2)` when `io_cooperative()` is false; any state of
+   its own that another context may need, it releases first.
+10. **The event loop's callbacks** (the UV externs, the network):
+    `timer_start(deadline, callback)` and `timer_stop`, and `watch(fd,
+    interest, callback)`, `watch_modify(id, interest)` and `unwatch(id)`
+    ("The watch API" above). The callbacks run on the loop context and may
+    resolve promises (`resolve`), whose `sync` dependents run there. The
+    glue gives `watch` its own reference to the descriptor (a clone of its
+    `Rc<OwnedFd>`), which the reactor holds until `unwatch`.
+11. **Free and drop paths: the no-suspend scope.** Dropping a handle's
+    last reference closes its stream, and the flush of its pending output
+    may wait for a full pipe: a cooperative write would suspend the
+    context right there, inside the translator's free (review RSIO-03), and
+    lean2rr's runtime must never suspend inside a free. Both translators
+    mark their free and drop paths (leanrs: every walk of its drop
+    worklist) with `sched::enter_no_suspend()` and `leave_no_suspend()`, or
+    the guard `sched::no_suspend()`: a thread-local counter, nestable, with
+    no lock and no allocation, read only where a cooperative call would
+    wait. In the scope:
+    - **a dropped stream's flush never waits** (review RSIO-09): it writes
+      what the descriptor takes without blocking (`pwritev2(RWF_NOWAIT)`
+      for pipes and sockets; `PIPE_BUF` bytes to a FIFO, or the whole rest
+      to a terminal, once `poll(2)` says it is writable). If the descriptor
+      would block, the stream is set aside, its pending bytes intact, and
+      flushed and closed when the outermost scope ends (the
+      `leave_no_suspend` that brings the depth to 0), where the flush may
+      wait cooperatively; the exit's flush (`io::exit::exit_flush`) closes
+      the streams still set aside. So a pipe whose reader is a task of the
+      same program gets every byte, as natively. Streams of regular files
+      flush as usual;
+    - the io layer's other waits are plain system calls that block the
+      thread;
+    - a stream that a suspended context holds, needed in the scope, is a
+      panic with the reason, not a silent deadlock;
+    - the scheduler's own waits (a promise, a sleep, a `Std.Sync` lock) are
+      not affected, and a context that waits inside its scope does not put
+      the others in it: every switch sets the depth aside and gives it back
+      when the context goes on (review RSIO-10).
+
+    **The end of the outermost scope may suspend** (review RSIO-14): the
+    `leave_no_suspend` (or the guard's drop) that brings the depth to 0
+    flushes and closes the streams set aside, and that flush may wait
+    cooperatively. So a translator ends its outermost scope only where the
+    context may suspend: after its free or drop walk, never inside it.
+
+    **Promise walks and `sync` dependents run outside the scope.** Dropping
+    the last reference to an unresolved promise resolves it
+    (`deactivate_promise`), and the walk runs its `sync` dependents, user
+    code that may do IO and wait. A translator resolves dropped promises
+    (`sched::resolve`) after its drop walk has left the scope, so that this
+    code runs with the cooperative IO it would have anywhere else.
+
 ## Why `Glue::suspend` is sound
 
 This section is self-contained: with it and the crate's source
@@ -388,11 +811,11 @@ Each invariant names the code that establishes it.
   field `Ctx::yielder` (`src/sched/ctx.rs`), private to that file. It is
   written in exactly three places:
   - `Ctx::new` makes it null, for `main`'s context (`Contexts::new`) and for
-    each new worker context (`Sched::start_worker`, before its coroutine
-    first runs);
-  - the coroutine's function, built in `Sched::start_worker`, stores `y` as
-    its first statement, before it calls `worker_main` (the only code that
-    runs tasks on the context);
+    each new context (`Sched::start_context`, called by `start_worker` and
+    by the event loop's `ev_start_loop`, before its coroutine first runs);
+  - the coroutine's function, built in `Sched::start_context`, stores `y`
+    as its first statement, before it calls its entry, `worker_main` or the
+    event loop's `loop_main` (the only code that runs on the context);
   - `Sched::after_resume`: when the coroutine has returned, the field is set
     back to null, the stack goes back to the pool, and the slot is freed.
 
@@ -433,7 +856,9 @@ Each invariant names the code that establishes it.
   pointer is the running coroutine's own, and the call is made from that
   coroutine's stack: P1 and P2 hold.
 - **S4. Hooks run on `main`'s stack and cannot switch.** The hub runs
-  `Glue::switched` and `Glue::idle` on `main`'s stack, inside `hub_hook`.
+  `Glue::switched` on `main`'s stack, inside `hub_hook`. Its wait when
+  nothing can run (`reactor::idle`, the event loop's `epoll_wait` or a
+  sleep) calls no glue code and never blocks a context.
   `block` and `yield_now`, the only callers of `switch_away`, first assert
   that no hub hook is running (`not_in_hub_hook`). So no hook can reach
   `switch_away`, whatever it calls. The refusal is a panic in a hook, so
@@ -530,7 +955,7 @@ Each invariant names the code that establishes it.
     queued, `sync` ones included, and run later as other tasks do. Test:
     `a_caught_panic_in_a_sync_dependent_ends_its_walk`.
 
-  A panic in a hub hook (`switched`, `idle`) cannot go on: it would unwind
+  A panic in a hub hook (`switched`) cannot go on: it would unwind
   `hub` with a context half switched. `hub_hook` aborts the process
   instead, after Rust's message.
 - **S7. The pointer is not used after the coroutine's function returns.**
@@ -553,8 +978,7 @@ Each invariant names the code that establishes it.
 
   A blocking call from a foreign stack would run while `cur` names a
   context whose stack is not the current one, which breaks P2.
-- **`switched` and `idle` do not block or yield** (S4 enforces it with a
-  panic).
+- **`switched` does not block or yield** (S4 enforces it with a panic).
 
 ### Checklist for glue authors
 
@@ -562,8 +986,7 @@ Each invariant names the code that establishes it.
 2. No other code reads `s.yielder()`, and the `Suspend` value is not kept.
 3. No scheduler function is called from a signal handler, another thread,
    or a stack the translator switched to itself.
-4. `switched` and `idle` only save and restore state, or wait without the
-   scheduler.
+4. `switched` only saves and restores state.
 5. `start` is called on the thread that runs `main`, and every later call
    is made on that thread.
 6. A `TaskId` is passed to the scheduler only while the glue's own slot for
@@ -587,12 +1010,15 @@ argument is checked by:
   - `not_in_hub_hook` refuses a switch from a hub hook (S4);
   - corosensei refuses to resume a completed coroutine.
 - **The driver's integration tests** (`tests/sched-driver`), on real
-  hardware: the 32 program cases of `tasks/` and `sync/`, a panic test,
+  hardware: the program cases of `tasks/`, `sync/`, `refs/`, `taskio/`
+  and `uvloop/` and the io cases with tasks, the review regression
+  programs (`rsio_*`), a panic test,
   and leanrs's three adversarial checks (`adv_*`: blocking during
   unwinding, a second panic there, `process::exit` from a context), in
   debug and release builds, on both toolchains (`scripts/check.sh`). Every
   case with contention suspends: the mutex and condition-variable cases,
-  the promise waits, the sleeping tasks of `sync_dependent_order`. The
+  the promise waits, the sleeping tasks of `sync_dependent_order`, and
+  every IO wait of the sched-io cases (from a context and from `main`). The
   panic test unwinds from a context into `main` (S6). A wrong pointer there
   would crash or corrupt the output, which is compared byte for byte with
   native Lean's.
@@ -605,7 +1031,8 @@ argument is checked by:
   ```
   All 34 of the driver's tests passed at d0d6a0d (2026-10-04, after the
   third review of sched-1; 31 of 31 at 089fbc4 by its reviewer); the three
-  cases added in the fourth review have not run under it yet. Leak
+  cases added in the fourth review and sched-io's fourteen have not run
+  under it yet. Leak
   detection is off because the driver's glue leaks its 64 KiB alternate
   signal stack on purpose; that leak was the only report.
 
@@ -653,7 +1080,7 @@ fine, but need to be documented well".
 | Stacks reserved with `MAP_NORESERVE`, released with `madvise` when pooled | corosensei's `mmap(PROT_NONE)` and `mprotect`; up to 8 pooled stacks keep their touched pages | No `unsafe` in the crate (see the checklist) |
 | `checkCanceled`, clock and ref reads do not yield | They are polling points; ref reads only with `set_ref_read_yields` | Decisions Q5 refinement B |
 | Walks of promises dropped inside a Reussir free (`later`) | None: a translator resolves promises where its values are dropped | Reussir's free stack |
-| The event loop (`net`) | Not yet: `Glue::idle` is where it plugs in | Batch scope |
+| The event loop (`net`) | The scheduler's own (`src/sched/reactor.rs`, sched-io): epoll, timers and watches; blocking IO cooperates | The glue has no hook; the network builds on it |
 | `persist` (the walk of `lean_mark_persistent`) | Not yet | Batch scope |
 
 Lean's panic for `Task.get` inside a `sync := true` task, which lean2rr does
@@ -664,17 +1091,25 @@ The limits of one thread (lean2rr plan §10, "Tasks") hold here too:
 - a context that computes without blocking or a yield point delays the
   others;
 - `IO.waitAny` does not pick the fastest of several running tasks;
-- **a blocking system call blocks the whole thread.** A read, a write or a
-  wait for a child process that blocks in the kernel stops every context,
-  not only the one that made it. Example: `IO.Process.output` of a child
-  that writes more than 64 KiB to stdout reads its stderr on `main` while
-  a task reads its stdout. `main` blocks in the stderr read, the stdout
-  task never runs, the child blocks on its full stdout pipe, and the
-  program hangs where native finishes. Until a later batch makes IO
-  cooperative (nonblocking attempts, the descriptor registered on `EAGAIN`,
-  and `Glue::idle` polling the registered descriptors and timers), a
-  translator that admits processes or blocking reads along with tasks has
-  this limit (leanrs's review of sched-1, item 1).
+- reads, writes, `flock` and `waitpid` cooperate (sched-io, "Blocking IO
+  and the event loop"), but a few blocking calls still block the whole
+  thread:
+  - `open(2)` of a FIFO waits for its other end (natively the opening
+    thread waits): a FIFO whose two ends are opened by two tasks of one
+    program hangs here;
+  - a translator's own blocking calls outside the crate, unless its glue
+    waits with `poll_fds` first;
+  - a read of a descriptor that another process reads too can find its
+    data gone between the readiness and the `read(2)`, and then blocks, as
+    every reader natively would;
+- where cooperation cannot see an event, it looks again: another process's
+  `flock` release within 16 ms, a child without a pidfd within 16 ms;
+- a write to a terminal is one `write(2)` once it is writable (256 bytes
+  free), so it can block the thread until the terminal drains, as natively
+  the writing thread blocks;
+- in a no-suspend scope (item 11 of "The glue") every io wait blocks the
+  thread, but for a dropped stream's flush, which is set aside until the
+  scope ends.
 
 ## The checklist of decisions Q5
 
@@ -744,6 +1179,12 @@ real threads.
   from a process-wide counter, times 2^32, plus the depth of nested tasks
   on it. They stay unique across threads, and neither wrap nor run into
   each other (review RS1S-07).
+- The event loop (sched-io): each scheduler has its own registrations,
+  timers and loop context; the first takes native's libuv epoll descriptor,
+  later ones make their own. The io layer's stream-lock lists (`HELD`,
+  `OWNED`) are thread-locals, and a stream that another thread holds is
+  waited for with the plain lock. `coop_possible` is process-wide, as a
+  property of the program.
 
 `set_ref_read_yields` is process-wide on purpose: it is a property of the
 program.
@@ -822,3 +1263,16 @@ None of these has been timed.
 - **Memory.** A pooled stack keeps every page it touched (no `madvise`
   without `unsafe`); up to 8 are kept. A deep recursion in a task leaves
   that much RSS behind, as a native worker thread's stack would.
+- **sched-io.** Before the first task, promise, timer or watch: one relaxed
+  load per stream lock and per system call that may block. After it: per
+  stream lock, a push and a pop of a thread-local list; per such system
+  call, the `io_cooperative` check (a borrow and a few comparisons, and a
+  thread-local read of the no-suspend depth), and,
+  when it cooperates, a `poll(2)` before each read, `pwritev2` instead of
+  `write(2)`, and two `epoll_ctl` per wait that blocks. While the loop has
+  a registration or a timer, every polling and effect point takes its slow
+  path, and looks at the descriptors at most once a millisecond. Every
+  context switch moves the running context's stream locks aside and back
+  (two thread-local accesses; nothing to move when it holds none). A
+  watch's call costs two `epoll_ctl` (out of the set, then back) and one
+  `poll(2)` (the check before the call).

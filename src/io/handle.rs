@@ -70,10 +70,83 @@ pub(crate) static STDIN: Mutex<CFile> = Mutex::new(CFile::std(0));
 pub(crate) static STDOUT: Mutex<CFile> = Mutex::new(CFile::std(1));
 pub(crate) static STDERR: Mutex<CFile> = Mutex::new(CFile::std(2));
 
+/// A stream's lock, held (`flockfile`): the stream's `FILE`, through
+/// `Deref`. Taken even if a panic poisoned it. In a program with tasks
+/// (feature `sched`) the lock is taken cooperatively and released with a
+/// wake-up of whoever waits for it (`io::coop`, "Stream locks").
+#[derive(Debug)]
+pub struct StreamGuard<'a> {
+    g: MutexGuard<'a, CFile>,
+    /// The stream's key when taken through `coop::lock` (0: a plain lock).
+    #[cfg(feature = "sched")]
+    key: usize,
+}
+
+impl<'a> StreamGuard<'a> {
+    #[inline]
+    pub(crate) fn plain(g: MutexGuard<'a, CFile>) -> StreamGuard<'a> {
+        StreamGuard {
+            g,
+            #[cfg(feature = "sched")]
+            key: 0,
+        }
+    }
+
+    #[cfg(feature = "sched")]
+    pub(crate) fn tracked(g: MutexGuard<'a, CFile>, key: usize) -> StreamGuard<'a> {
+        StreamGuard { g, key }
+    }
+}
+
+impl std::ops::Deref for StreamGuard<'_> {
+    type Target = CFile;
+    #[inline]
+    fn deref(&self) -> &CFile {
+        &self.g
+    }
+}
+
+impl std::ops::DerefMut for StreamGuard<'_> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut CFile {
+        &mut self.g
+    }
+}
+
+#[cfg(feature = "sched")]
+impl Drop for StreamGuard<'_> {
+    #[inline]
+    fn drop(&mut self) {
+        // The waiters are woken before `g` unlocks, which is fine: waking
+        // switches nothing, and `g` drops right after this.
+        if self.key != 0 {
+            super::coop::released(self.key);
+        }
+    }
+}
+
 /// A stream's lock, taken even if a panic poisoned it.
 #[inline]
-pub(crate) fn lock(m: &Mutex<CFile>) -> MutexGuard<'_, CFile> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
+pub(crate) fn lock(m: &Mutex<CFile>) -> StreamGuard<'_> {
+    #[cfg(feature = "sched")]
+    if crate::sched::coop_possible() {
+        return super::coop::lock(m);
+    }
+    StreamGuard::plain(m.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// A stream's lock if no one holds it.
+#[inline]
+pub(crate) fn try_lock(m: &Mutex<CFile>) -> Option<StreamGuard<'_>> {
+    #[cfg(feature = "sched")]
+    if crate::sched::coop_possible() {
+        return super::coop::try_lock(m);
+    }
+    match m.try_lock() {
+        Ok(g) => Some(StreamGuard::plain(g)),
+        Err(std::sync::TryLockError::Poisoned(p)) => Some(StreamGuard::plain(p.into_inner())),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
 }
 
 /// An open file: its `FILE`, closed when the last `Handle` goes away (and
@@ -97,10 +170,21 @@ static OPEN: Mutex<Vec<Arc<FileStream>>> = Mutex::new(Vec::new());
 
 impl Drop for FileStream {
     fn drop(&mut self) {
-        self.file
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner)
-            .close();
+        let file = self.file.get_mut().unwrap_or_else(PoisonError::into_inner);
+        // In a no-suspend scope (a translator's drop path), a flush that
+        // would wait for a pipe this program drains is set aside until the
+        // scope ends (review RSIO-09).
+        #[cfg(feature = "sched")]
+        if crate::sched::coop_possible() && crate::sched::in_no_suspend() && !file.flush_nowait() {
+            super::coop::defer_close(std::mem::replace(file, CFile::closed()));
+            return;
+        }
+        file.close();
+        // Closing the descriptor released its `flock` lock, if any.
+        #[cfg(feature = "sched")]
+        if crate::sched::coop_possible() {
+            super::coop::flock_released();
+        }
     }
 }
 
@@ -285,9 +369,13 @@ impl Handle {
     /// closes only when its open file goes away (the last clone of the
     /// `Handle` dropped), never through the guard: the file keeps a shared
     /// clone of the descriptor for the calls made without the stream's lock
-    /// (review RIO1-11).
+    /// (review RIO1-11). In a program with tasks (feature `sched`), the guard
+    /// may be held across any wait: every context switch records it as held
+    /// by the suspended context, and another context that wants the stream
+    /// waits for it. The exception is a guard taken before the program's
+    /// first task, promise, timer or watch (docs/sched.md, "Stream locks").
     #[inline]
-    pub fn file(&self) -> MutexGuard<'_, CFile> {
+    pub fn file(&self) -> StreamGuard<'_> {
         match &self.0 {
             Repr::Std(n) => lock(std_stream(*n)),
             Repr::File(f) => lock(&f.file),
@@ -407,7 +495,16 @@ impl Handle {
     /// on while a task waits in `flock`, and `flock` does not wait for them
     /// (review RIO1-01).
     fn flock(&self, op: FlockOperation) -> Result<(), i32> {
-        self.fileno().flock(op)
+        let fd = self.fileno();
+        // In a program with tasks, a wait for the lock lets the others run
+        // (sched-io).
+        #[cfg(feature = "sched")]
+        if crate::sched::coop_possible() {
+            if let Some(r) = super::coop::flock(&fd, op) {
+                return r;
+            }
+        }
+        fd.flock(op)
     }
 
     /// `fileno(fp)`, without the stream's lock: a standard descriptor, or
@@ -448,6 +545,11 @@ impl Handle {
     /// `Handle.unlock` (`lean_io_prim_handle_unlock`, `flock` with
     /// `LOCK_UN`).
     pub fn unlock(&self) -> Result<(), IoError> {
-        self.flock(FlockOperation::Unlock).map_err(os)
+        let r = self.flock(FlockOperation::Unlock).map_err(os);
+        #[cfg(feature = "sched")]
+        if crate::sched::coop_possible() {
+            super::coop::flock_released();
+        }
+        r
     }
 }

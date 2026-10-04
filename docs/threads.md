@@ -247,7 +247,7 @@ The single-thread files do not change. Threads mode is new code in
 | Contexts | `Contexts`: coroutines, the hub, `cur`, `CtxId`, the stack pool (`ctx.rs`) | None. Each OS thread has a thread-local stack of its running tasks |
 | Waiters | `cell_waiters`, `progress_waiters`, listed by `CtxId` | Condition variables: a task finished (every waiter checks again), the queue, quiescence |
 | Jobs | `Box<dyn FnOnce() -> Outcome>` | `Box<dyn FnOnce() -> Outcome + Send>` |
-| Glue | `Rc<dyn Glue>`: `suspend`, `switched`, `idle`, `task_begin`, `task_end` | `Arc<dyn mt::Glue>`, `Send + Sync`: `thread_start`, `thread_end`, `task_begin`, `task_end` |
+| Glue | `Rc<dyn Glue>`: `suspend`, `switched`, `task_begin`, `task_end` (sched-io removed `idle`: the hub waits in the scheduler's event loop) | `Arc<dyn mt::Glue>`, `Send + Sync`: `thread_start`, `thread_end`, `task_begin`, `task_end` |
 | `Std.Sync` | State in a `RefCell`, waiters by `CtxId` (`sync.rs`) | State in a `Mutex`, and a `Condvar` per object |
 | Streams | io's thread-local slots, swapped per context (`streams.rs`, `swap_context`) | The same slots, now one set per real thread |
 | Stack bounds | `running_stack()`, per context | Not needed; the glue records each thread's guard |
@@ -546,9 +546,18 @@ per call); if it works, the common case, nothing changes. The real fix stays
 the one `process.rs` names, `posix_spawn_file_actions_addchdir_np`, which
 nix does not wrap and the crate cannot call without `unsafe`.
 
-**IO under threads.** sched-io's cooperative path (a nonblocking attempt,
-the descriptor registered on `EAGAIN`, `Glue::idle` polling it) is for the
-single-thread scheduler only. In threads mode every call takes the plain
+**Signals under threads.** `sched::uv`'s signal delivery keeps each
+signal's `arrived` flag process-wide, while the watcher lists are per
+thread (one per scheduler): with schedulers on two threads, a signal would
+reach only the thread whose loop takes the flag first (review RSIOB-15).
+Threads mode routes signals instead: one delivery for the process, which
+hands each signal to the watchers of every thread, as libuv's one loop
+does.
+
+**IO under threads.** sched-io's cooperative path (a wait for the
+descriptor in the scheduler's event loop, `reactor::poll_fds`, then the same
+system call; the stream locks parked at every switch; the no-suspend scope)
+is for the single-thread scheduler only. In threads mode every call takes the plain
 blocking path, which blocks its own thread, as natively. The choice is a
 compile-time `cfg` on the feature `threads`, not a branch per call, so a
 build without the feature is unchanged (2.5).

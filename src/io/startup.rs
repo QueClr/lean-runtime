@@ -11,7 +11,8 @@
 //!    features libuv needs (`uv__iou_init`);
 //! 3. the blocking pipe that locks signal handling, with one byte written
 //!    into it (`uv__signal_global_once_init`);
-//! 4. the loop's non-blocking signal pipe (`uv__process_init`);
+//! 4. the loop's non-blocking signal pipe (`uv__process_init`), through
+//!    which `sched::uv`'s signal watchers are woken, as libuv's are;
 //! 5. an eventfd, non-blocking (the loop's async handle).
 //!
 //! Before `main`, a native Lean program also ignores `SIGPIPE`
@@ -45,7 +46,14 @@
 //!   own inode, timestamped when it was made; an epoll descriptor shares the
 //!   anonymous inode, timestamped at boot;
 //! - `/proc/self/task` lists the ring's kernel thread (`iou-sqp-<pid>`)
-//!   natively, not here.
+//!   natively, not here;
+//! - natively libuv's loop thread runs its first iteration at startup, which
+//!   adds the signal pipe and the eventfd to the epoll descriptor (two
+//!   `EPOLL_CTL` submissions on the control ring), so
+//!   `/proc/self/fdinfo/<epoll>` lists them from the start; here the epoll
+//!   descriptor lists what the scheduler's event loop registers (the signal
+//!   pipe once a signal watcher listens), never the eventfd: registering a
+//!   readable descriptor that nothing drains would wake the loop for good.
 //!
 //! Whether libuv makes the rings is decided as libuv 1.48.0 decides it
 //! ([`io_uring_rings_expected`]), plus what makes `io_uring_setup` fail on
@@ -64,7 +72,9 @@
 //! 1.48.0 does not (`UV_USE_IO_URING=0` gives 6 descriptors natively).
 
 use rustix::event::{epoll, eventfd, EventfdFlags};
-use rustix::fd::{AsFd, BorrowedFd, OwnedFd};
+use rustix::fd::OwnedFd;
+#[cfg(feature = "sched")]
+use rustix::fd::{AsFd, BorrowedFd};
 use rustix::pipe::{pipe_with, PipeFlags};
 use std::sync::OnceLock;
 
@@ -84,9 +94,14 @@ pub enum StartupFailure {
 /// them.
 #[derive(Debug)]
 struct Descriptors {
-    _epoll: OwnedFd,
+    #[cfg_attr(not(feature = "sched"), allow(dead_code))]
+    epoll: OwnedFd,
     _rings: Vec<OwnedFd>,
     _lock_pipe: (OwnedFd, OwnedFd),
+    /// Kept open for the life of the process, never closed, `dup2`'d over or
+    /// reused: signal-hook's handlers write to its write end by number
+    /// (`sched::uv`; docs/sched.md, "Std.Internal.UV").
+    #[cfg_attr(not(feature = "sched"), allow(dead_code))]
     signal_pipe: (OwnedFd, OwnedFd),
     _eventfd: OwnedFd,
 }
@@ -103,11 +118,34 @@ pub fn open_native_descriptors() -> Result<(), StartupFailure> {
     }
 }
 
-/// The read and write ends of the loop's signal pipe, for signal watchers,
-/// once [`open_native_descriptors`] has opened them.
-pub fn signal_pipe() -> Option<(BorrowedFd<'static>, BorrowedFd<'static>)> {
+/// libuv's loop descriptor (an epoll instance), for the scheduler's event
+/// loop (`sched`'s reactor), once [`open_native_descriptors`] has opened
+/// it: the first caller gets it, so one scheduler registers its descriptors
+/// there, as libuv's one loop does; later callers make their own.
+#[cfg(feature = "sched")]
+pub(crate) fn claim_loop_epoll() -> Option<BorrowedFd<'static>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static CLAIMED: AtomicBool = AtomicBool::new(false);
     match DESCRIPTORS.get() {
-        Some(Ok(d)) => Some((d.signal_pipe.0.as_fd(), d.signal_pipe.1.as_fd())),
+        Some(Ok(d)) if !CLAIMED.swap(true, Ordering::Relaxed) => Some(d.epoll.as_fd()),
+        _ => None,
+    }
+}
+
+/// The read and write ends of the loop's signal pipe, for `sched::uv`'s
+/// signal watchers, once [`open_native_descriptors`] has opened them: the
+/// first caller gets them, as `claim_loop_epoll`, so the watchers open no
+/// descriptor of their own, as natively (review RSIOB-05). The pipe lives
+/// in this module's static for the life of the process: the claimer may
+/// register its write end with signal handlers by number.
+#[cfg(feature = "sched")]
+pub(crate) fn claim_signal_pipe() -> Option<(BorrowedFd<'static>, BorrowedFd<'static>)> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static CLAIMED: AtomicBool = AtomicBool::new(false);
+    match DESCRIPTORS.get() {
+        Some(Ok(d)) if !CLAIMED.swap(true, Ordering::Relaxed) => {
+            Some((d.signal_pipe.0.as_fd(), d.signal_pipe.1.as_fd()))
+        }
         _ => None,
     }
 }
@@ -132,7 +170,7 @@ fn open_all() -> Result<Descriptors, StartupFailure> {
     let eventfd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)
         .map_err(|_| StartupFailure::LoopInit)?;
     Ok(Descriptors {
-        _epoll: epoll,
+        epoll,
         _rings: rings,
         _lock_pipe: lock_pipe,
         signal_pipe,

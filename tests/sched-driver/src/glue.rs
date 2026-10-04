@@ -2,9 +2,8 @@
 //! can be: the suspend step (its one `unsafe` block), Lean's stack-overflow
 //! report for the scheduler's contexts, and the program's entry and exit.
 
+use lean_runtime::io::{exit, Handle};
 use lean_runtime::sched::{self, CtxId, Glue, Suspend};
-use std::cell::RefCell;
-use std::io::Write;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -24,36 +23,26 @@ impl Glue for DriverGlue {
 }
 
 // ---------------------------------------------------------------------------
-// Standard streams: stdout fully buffered (a pipe, as in the case runner),
-// stderr unbuffered, as glibc's FILEs.
+// Standard streams: the crate's glibc `FILE` model (`lean_runtime::io`):
+// stdout fully buffered on the case runner's pipe, stderr unbuffered.
 
-thread_local! {
-    static STDOUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-}
-
-const BUFSIZ: usize = 4096;
-
-/// `IO.println`: an effect point, then glibc's buffered `fwrite`.
+/// `IO.println`: an effect point, then one `putStr` of the line and `\n` on
+/// stdout (Lean's `putStrLn`).
 pub fn println(s: &str) {
     sched::effect();
-    STDOUT.with(|b| {
-        let mut b = b.borrow_mut();
-        b.extend_from_slice(s.as_bytes());
-        b.push(b'\n');
-        if b.len() >= BUFSIZ {
-            let _ = std::io::stdout().write_all(&b);
-            let _ = std::io::stdout().flush();
-            b.clear();
-        }
-    });
+    let mut l = String::with_capacity(s.len() + 1);
+    l.push_str(s);
+    l.push('\n');
+    let _ = Handle::stdout().put_str(l.as_bytes());
 }
 
-/// `IO.eprintln`: an effect point, then an unbuffered write.
+/// `IO.eprintln`: an effect point, then one `putStr` on stderr.
 pub fn eprintln(s: &str) {
     sched::effect();
-    let mut e = std::io::stderr();
-    let _ = e.write_all(s.as_bytes());
-    let _ = e.write_all(b"\n");
+    let mut l = String::with_capacity(s.len() + 1);
+    l.push_str(s);
+    l.push('\n');
+    let _ = Handle::stderr().put_str(l.as_bytes());
 }
 
 /// A Lean panic's message (`lean_panic`, with `LEAN_BACKTRACE=0`): printed
@@ -64,27 +53,16 @@ pub fn lean_panic(msg: &str) {
 }
 
 /// `IO.Process.exit` (`lean_io_exit`): an effect point, then C's `exit`,
-/// which flushes the standard streams but neither finalizes the task manager
-/// nor waits for any task.
+/// which flushes the streams but neither finalizes the task manager nor
+/// waits for any task.
 pub fn process_exit(code: u8) -> ! {
     sched::effect();
-    flush_stdout();
-    std::process::exit(code as i32)
-}
-
-fn flush_stdout() {
-    STDOUT.with(|b| {
-        let mut b = b.borrow_mut();
-        let _ = std::io::stdout().write_all(&b);
-        let _ = std::io::stdout().flush();
-        b.clear();
-    });
+    exit::exit(code as i32)
 }
 
 /// Lean's generated `main`: the initializers, `lean_init_task_manager`,
 /// `main`, `lean_finalize_task_manager` (the final run, `sched::finish`),
-/// then the flush of the standard streams at `exit` (decisions Q5
-/// refinement A).
+/// then the flush of the streams at `exit` (decisions Q5 refinement A).
 pub fn run(init: impl FnOnce(), main: impl FnOnce(&[String]) -> u32, args: &[String]) -> ! {
     install_stack_overflow_handler();
     init();
@@ -93,9 +71,24 @@ pub fn run(init: impl FnOnce(), main: impl FnOnce(&[String]) -> u32, args: &[Str
     sched::set_ref_read_yields(true);
     let code = main(args);
     sched::finish();
-    flush_stdout();
-    std::process::exit(code as i32)
+    exit::exit(code as i32)
 }
+
+// ---------------------------------------------------------------------------
+// Native Lean's startup descriptors (libuv's loop: `io::startup`), opened by
+// an ELF constructor before Rust's runtime puts `/dev/null` in the place of
+// closed standard descriptors, as a translator's glue does; the event loop
+// and the signal watchers use them, as natively.
+
+extern "C" fn open_startup_descriptors() {
+    if let Err(f) = lean_runtime::io::startup::open_native_descriptors() {
+        lean_runtime::io::startup::fail_as_native(f);
+    }
+}
+
+#[used]
+#[link_section = ".init_array"]
+static STARTUP: extern "C" fn() = open_startup_descriptors;
 
 // ---------------------------------------------------------------------------
 // Lean's stack-overflow report (`src/runtime/stack_overflow.cpp`): a fault

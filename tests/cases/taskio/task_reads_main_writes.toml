@@ -1,0 +1,5 @@
+id = "task_reads_main_writes"
+area = "taskio"
+lean_version = "4.34.0"
+source = "sched-io acceptance (a task blocked reading a pipe while main writes to it)"
+streams = "separate"

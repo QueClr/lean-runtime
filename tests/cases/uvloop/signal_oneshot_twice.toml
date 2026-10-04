@@ -1,0 +1,7 @@
+id = "signal_oneshot_twice"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "leanrs's review of sched-io Part B (R1: libuv's SA_RESETHAND for one-shot watchers)"
+streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs: DV2 until it adopts sched/ (it refuses Std.Internal.UV's timers and signals at translation, so it has no executable for uvloop's cases).

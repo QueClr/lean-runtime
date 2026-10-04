@@ -72,9 +72,10 @@ impl std::ops::IndexMut<CtxId> for Vec<Ctx> {
 ///
 /// Every method is called with no borrow of the scheduler's state held, so
 /// it may call the scheduler's functions, with two exceptions: `suspend`
-/// must do nothing but suspend, and `switched` and `idle`, which the hub
-/// runs on `main`'s stack, must not call one that may block or yield (the
-/// scheduler panics if they do).
+/// must do nothing but suspend, and `switched`, which the hub runs on
+/// `main`'s stack, must not call one that may block or yield (the scheduler
+/// panics if it does). When nothing can run, the hub waits in the
+/// scheduler's own event loop (`reactor::idle`), not in the glue.
 pub trait Glue {
     /// Suspend the running context: call `(*s.yielder()).suspend(())`, and
     /// return when that returns (the hub has resumed the context).
@@ -108,19 +109,6 @@ pub trait Glue {
     /// returned, or a Rust panic unwinds its run. In the last case it runs
     /// during the unwinding, where a panic aborts the process.
     fn task_end(&self, _own_thread: bool) {}
-
-    /// Nothing can go on until `deadline` (a sleeper's), or ever (`None`):
-    /// wait. The scheduler looks again when this returns (an event loop may
-    /// return early, having made a context able to go on). By default, a
-    /// sleep, or a wait forever as a deadlocked native program does. Runs on
-    /// `main`'s stack, in the hub: it must not block or yield. A panic in it
-    /// aborts the process.
-    fn idle(&self, deadline: Option<Instant>) {
-        match deadline {
-            Some(d) => std::thread::sleep(d.saturating_duration_since(Instant::now())),
-            None => super::hang_thread(),
-        }
-    }
 }
 
 /// The running context's yielder, handed to `Glue::suspend`. Only the
@@ -155,8 +143,21 @@ pub(crate) enum Wait {
     Sync,
     /// A sleep until the deadline.
     Sleep(Instant),
+    /// Descriptors registered with the loop (`reactor::poll_fds`), until one is
+    /// ready or the deadline.
+    Io(Option<Instant>),
     /// Nothing: a context that waits forever.
     Forever,
+}
+
+impl Wait {
+    /// When a sleeper's wait ends by itself.
+    pub(crate) fn deadline(self) -> Option<Instant> {
+        match self {
+            Wait::Sleep(d) | Wait::Io(Some(d)) => Some(d),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -435,7 +436,7 @@ impl Sched {
         match w {
             Wait::Cell(i, g) => self.cx.cell_waiters.entry((i, g)).or_default().push(c),
             Wait::Progress | Wait::FinalRun => self.cx.progress_waiters.push(c),
-            Wait::Sleep(d) => self.cx.sleepers.push((d, c)),
+            Wait::Sleep(d) | Wait::Io(Some(d)) => self.cx.sleepers.push((d, c)),
             _ => {}
         }
     }
@@ -452,7 +453,7 @@ impl Sched {
         while i < self.cx.sleepers.len() {
             let (d, c) = self.cx.sleepers[i];
             let x = &self.cx.ctxs[c];
-            if x.status != Status::Blocked || x.wait != Wait::Sleep(d) {
+            if x.status != Status::Blocked || x.wait.deadline() != Some(d) {
                 self.cx.sleepers.swap_remove(i);
                 continue;
             }
@@ -476,11 +477,19 @@ impl Sched {
         self.cx
             .sleepers
             .iter()
-            .any(|&(d, c)| d <= now && self.cx.ctxs[c].wait == Wait::Sleep(d))
+            .any(|&(d, c)| d <= now && self.cx.ctxs[c].wait.deadline() == Some(d))
     }
 
     /// Start entry `e` (generation `g`) on a new worker context, able to run.
     pub(crate) fn start_worker(&mut self, e: u32, g: u32) -> CtxId {
+        let id = self.start_context(worker_main);
+        self.cx.ctxs[id].preselect = Some((e, g));
+        id
+    }
+
+    /// A new context running `entry` (a worker's, or the event loop's),
+    /// able to run.
+    pub(crate) fn start_context(&mut self, entry: fn()) -> CtxId {
         let size = self.cx.stack_size;
         let stack = match self.cx.stacks.pop() {
             Some(st) => st,
@@ -503,14 +512,14 @@ impl Sched {
             // context runs.
             let p: *const Yielder = y;
             with(|s| s.cx.ctxs[id].yielder = p);
-            worker_main();
+            entry();
+            with(|s| s.die());
         });
         let tb = NEXT_THREAD.fetch_add(1, Ordering::Relaxed) << 32;
         let mut x = Ctx::new(tb);
         x.co = Some(co);
         x.bounds = Some(bounds);
         x.stack_size = size;
-        x.preselect = Some((e, g));
         self.cx.ctxs[id] = x;
         self.cx.workers += 1;
         self.cx.runnable.push_back(id);
@@ -531,7 +540,11 @@ impl Sched {
     /// The hub's next step (lean2rr's `schedule`).
     fn hub_step(&mut self) -> HubStep {
         loop {
-            let next_deadline = self.promote_sleepers(Instant::now());
+            let now = Instant::now();
+            let next_deadline = self.promote_sleepers(now);
+            // The event loop: due timers, ready descriptors (sched-io).
+            self.ev_check(now, false);
+            self.ev_start_loop();
             if let Some(n) = self.cx.runnable.pop_front() {
                 if self.cx.ctxs[n].status != Status::Runnable {
                     continue;
@@ -550,9 +563,14 @@ impl Sched {
                 self.start_worker(e, g);
                 continue;
             }
-            // Nothing will ever wake up by itself: run what tasks a worker has
-            // started without running them yet (pure ones, `task::pick`).
-            if next_deadline.is_none() {
+            let next_deadline = match (next_deadline, self.ev.next_timer()) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            // Nothing will ever wake up by itself (no sleeper, timer or
+            // registered descriptor): run what tasks a worker has started
+            // without running them yet (pure ones, `task::pick`).
+            if next_deadline.is_none() && !self.ev.has_regs() {
                 if let Some((e, g)) = self.last_resort() {
                     self.start_worker(e, g);
                     continue;
@@ -611,7 +629,7 @@ enum HubStep {
 }
 
 thread_local! {
-    /// The hub is running a glue hook (`switched`, `idle`): no context may
+    /// The hub is running a glue hook (`switched`): no context may
     /// block or yield now (`switch_away`), since the code runs on `main`'s
     /// stack whatever context is about to run (docs/sched.md, S4).
     static IN_HUB_HOOK: Cell<bool> = const { Cell::new(false) };
@@ -621,7 +639,7 @@ thread_local! {
 fn not_in_hub_hook() {
     assert!(
         !IN_HUB_HOOK.with(Cell::get),
-        "lean-runtime: a glue hook called by the hub (`switched`, `idle`) must not block or yield"
+        "lean-runtime: a glue hook called by the hub (`switched`) must not block or yield"
     );
 }
 
@@ -635,7 +653,7 @@ fn hub_hook(f: impl FnOnce()) {
         fn drop(&mut self) {
             use std::io::Write;
             let _ = std::io::stderr().write_all(
-                b"lean-runtime: a panic in a glue hook run by the hub (`switched`, `idle`); aborting\n",
+                b"lean-runtime: a panic in a glue hook run by the hub (`switched`); aborting\n",
             );
             std::process::abort();
         }
@@ -671,10 +689,7 @@ fn hub() {
                 with(|s| s.after_resume(n, &mut co.0, ended));
                 hub_hook(|| g.switched(n, MAIN));
             }
-            HubStep::Idle(d) => {
-                let g = glue();
-                hub_hook(|| g.idle(d));
-            }
+            HubStep::Idle(d) => super::reactor::idle(d),
         }
     }
 }
@@ -761,6 +776,16 @@ pub(crate) fn yield_now() {
 /// Let the hub run other contexts: on `main`'s context, run it; on another
 /// one, suspend through the glue with that context's own yielder `y` (S3).
 fn switch_away(cur: CtxId, y: *const Yielder) {
+    // The io layer's stream locks the context holds are recorded as held by
+    // a suspended context while others run, whatever the reason of the
+    // switch, so that another context that wants one waits for it (review
+    // RSIO-01); they are the running context's again when it goes on (also
+    // when a panic unwinds through here).
+    #[cfg(feature = "io")]
+    let _held = crate::io::coop::park(cur);
+    // So is its no-suspend depth: a context that waits inside a scope does
+    // not put the others in it (review RSIO-10).
+    let _depth = super::reactor::park_no_suspend();
     if cur == MAIN {
         hub();
     } else {
@@ -795,7 +820,6 @@ fn worker_main() {
             break;
         }
     }
-    with(|s| s.die());
 }
 
 /// Creating a context's stack failed: natively `lthread` throws

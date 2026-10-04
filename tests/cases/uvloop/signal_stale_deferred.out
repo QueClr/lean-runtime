@@ -1,0 +1,3 @@
+first watcher got some 17
+a child exited with no SIGCHLD watcher
+the new SIGCHLD watcher saw the earlier signal: false

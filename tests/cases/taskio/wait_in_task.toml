@@ -1,0 +1,5 @@
+id = "wait_in_task"
+area = "taskio"
+lean_version = "4.34.0"
+source = "sched-io acceptance (IO.Process.wait in one task while another task runs)"
+streams = "separate"

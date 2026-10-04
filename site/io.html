@@ -191,6 +191,10 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
   <li>The crate keeps a list of open handles in glibc's order, for the exit.
     The list holds each file by a strong reference, and lets it go when the file's last handle goes away.</li>
   <li><code>lock</code>, <code>tryLock</code> and <code>unlock</code> wait in <code>flock</code> without the stream's lock, as native does.</li>
+  <li>In a program with tasks, a call that would block lets the other tasks run while it waits.
+    Examples: a read of an empty pipe, a write into a full one, <code>flock</code>.</li>
+  <li>A task blocked in a read keeps its stream's lock.
+    Another task that wants the stream waits for it without blocking the thread (<a href="sched.html#sched-io">sched-io</a>, <a href="../src/io/coop.rs">src/io/coop.rs</a>).</li>
 </ul>
 
 <h2 id="errors">Errors</h2>
@@ -234,6 +238,7 @@ It then does what the forked child does before <code>execvp</code>:</p>
 </ul>
 <p><code>wait</code>, <code>tryWait</code> and <code>kill</code> follow <code>process.cpp</code>.
 <code>IO.Process.output</code> reads both pipes with <code>poll</code>.
+In a program with tasks, <code>wait</code> and <code>output</code> let the other tasks run while they wait (<a href="sched.html#sched-io">sched-io</a>).
 Three <a href="lean-bugs.html#confirmed">Lean bugs</a> are not copied.
 <code>takeStdin</code> keeps the <code>setsid</code> flag (LB-14).
 A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the parent, so nothing leaks (LB-15), and its failure is an error (LB-17).</p>

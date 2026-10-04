@@ -1,0 +1,7 @@
+ticker: 0
+ticker: 1
+ticker: 2
+ticker: 3
+ticker: 4
+output: 2 "out\n" "err\n"
+done

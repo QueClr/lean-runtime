@@ -21,7 +21,8 @@ once.
 
 - **No `unsafe` in the default build** (`#![forbid(unsafe_code)]`).
   Anything that needs `unsafe` comes from a vetted external crate: `nix` or
-  `rustix` for system calls, corosensei for task switching. What no crate
+  `rustix` for system calls, corosensei for task switching, signal-hook
+  (its safe API only) for signal handlers. What no crate
   offers safely stays in each translator's glue, behind a contract the
   crate states and upholds: so far `sched::Glue::suspend` (one dereference
   of a coroutine's yielder) and the SIGSEGV handler of Lean's stack-overflow
@@ -49,7 +50,7 @@ once.
   no dependencies, and a plain `rustc --crate-type rlib` build of it must
   work (one translator does not use cargo for it). `io` depends on rustix
   and nix, whose build scripts plain rustc cannot run, and `sched` on
-  corosensei, so they are built with cargo: `cargo build --offline --locked
+  corosensei, rustix and signal-hook, so they are built with cargo: `cargo build --offline --locked
   --features io,sched` works from a clean checkout, the versions pinned by
   the committed `Cargo.lock` and the crates taken from cargo's local
   registry cache (`cargo fetch --locked` fills it once; `scripts/check.sh`
@@ -59,7 +60,7 @@ once.
   `Cargo.lock`), with only the features the crate uses. Before adding a
   dependency, or a feature that pulls in more crates, ask leanrs to check it
   against their registry; a new crate that wraps `unsafe` needs the owner's
-  decision (nix, rustix and corosensei are approved).
+  decision (nix, rustix, corosensei and signal-hook are approved).
 
 ## Tests
 

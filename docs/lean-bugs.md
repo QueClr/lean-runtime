@@ -159,6 +159,32 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Upstream | Known and fixed: lean4 issue #14584, PR #14585 (merged 2026-08-12), first released in v4.35.0-rc1; not in v4.34.0 or v4.34.1. Analysis: leanprover/stref-veil (F1, F2). Related: PR #14775 (LB-01) |
 | Verdict | lean2rr-side judge, 2026-10-04 (judge refs2, JR-2) |
 
+### LB-19: Signal: over-release after a failed `next`, use-after-free
+
+| Field | Content |
+|---|---|
+| Summary | When `Signal.next` cannot start its watcher (a signal number Lean's table does not know, `UV_EINVAL`), the watcher object is released once too often; a later `cancel` or `stop` releases it again while the program holds it, and the next use touches freed memory |
+| Where | `src/runtime/uv/signal.cpp`: `setup_signal` takes a reference for the loop, `lean_inc(obj)` (148), and on `uv_signal_start` failure gives it back with `lean_dec(obj)` and `lean_dec(promise)` (166-168), while `m_state` stays `SIGNAL_STATE_RUNNING` (145) with `m_promise` set. A later `lean_uv_signal_stop` (244) or `lean_uv_signal_cancel` (272) sees a running watcher and does `lean_dec(obj)` again: the count reaches 0 while the program holds the object, and the finalizer runs (`uv_close`, `free`) |
+| Why it is a bug | A use-after-free: a crash (or silent corruption) from safe Lean code calling the documented API in order |
+| Native repro | `Signal.mk 99 false`; `next` fails with `EINVAL`; `cancel`; `next` again: SIGSEGV (status 139) in 5 of 5 runs (leanrs: gdb shows `uv_signal_start` called from `lean_uv_signal_next` on the freed handle), and the program's buffered stdout is lost. The `stop` variant over-releases silently (the small-object allocator hides it). Case: `uvloop/signal_failed_next` |
+| Our behaviour | The failed `next` leaves the watcher running with its promise, as natively, but holds no extra reference to give back: `cancel` makes it initial again, the second `next` fails with `EINVAL` again, and `stop` ends it (`sched::uv::Signal`) |
+| Translators | Both through `sched::uv` (lean2rr: plan §10; leanrs: DV2 for now (UV timers and signals refused at translation until leanrs adopts sched)) |
+| Upstream | Not reported (owner: record only) |
+| Verdict | leanrs-side judge (review of sched-io Part B), 2026-10-04 |
+
+### LB-20: stopping or cancelling a one-shot timer or signal from a `sync` dependent of its promise frees it while it is in use
+
+| Field | Content |
+|---|---|
+| Summary | A `(sync := true)` dependent (`IO.mapTask`, `IO.bindTask`, `Task.map`/`bind`, …) of a one-shot `Timer`'s or `Signal`'s promise that calls `stop` or `cancel` on that timer or signal makes the runtime give back the event loop's reference twice; the handle is freed while the program still holds it, and the next use (or the exit) crashes with SIGSEGV |
+| Where | `src/runtime/uv/timer.cpp` `handle_timer_event` (47-75): resolves the promise (65) and only then sets `TIMER_STATE_FINISHED` (70) and gives back the loop's reference (`lean_dec(obj)`, 73). Resolving runs the dependent inline: `lean_promise_resolve` (object.cpp 1333-1335) → `task_manager::resolve` → `resolve_core` (927-935) → `handle_finished` (937-952) → `enqueue_core` (789-796): `LEAN_SYNC_PRIO` → `run_task` on the calling thread. The callback runs on the loop thread with the loop mutex held (event_loop.cpp 87-93); the mutex is recursive (60), so the dependent's `stop`/`cancel` gets it at once, sees the timer still `RUNNING`, and gives back the same reference (`lean_uv_timer_stop` 255, `lean_uv_timer_cancel` 283). Signals: `handle_signal_event` (signal.cpp 45-67: resolve 58, `FINISHED` 63, `lean_dec(obj)` 65) with `lean_uv_signal_stop` (244) and `lean_uv_signal_cancel` (272) |
+| Why it is a bug | A use-after-free crash from documented operations. Std/Internal/UV/Timer.lean 47-51 and Signal.lean 49-53: for a one-shot handle, "After this `IO.Promise` is resolved the `Timer` [`Signal`] is finished"; `stop`/`cancel` (Timer.lean 77-93, Signal.lean 70-87) are defined in every state, no-ops on a finished handle. `Task.map`'s documentation (Init/Core.lean 697-699) allows `sync := true` when "executing `f` is cheap and non-blocking", which `stop`/`cancel` are. Every dependent runs after the resolution, so by the documented state model it sees a finished handle; with `sync := false` it does, natively and deterministically. Upstream fixed the cross-thread form of the same double release in PR #14793 (issue #14776, "libuv locking issues"), whose comments note that `(sync := true)` continuations run inline from these paths; `handle_timer_event` and `handle_signal_event` on master still release unconditionally after resolving |
+| Native repro | One-shot timer (10 ms) or SIGUSR1 watcher; `IO.mapTask (sync := true)` on its first promise calls `stop` or `cancel`; after `IO.wait` on the dependent, `next` on the handle: SIGSEGV 139, every run, for all four combinations. With `sync := false`: `next: true` ×3, exit 0. Cases: `uvloop/timer_stop_in_sync_dependent`, `uvloop/timer_cancel_in_sync_dependent`, `uvloop/signal_stop_in_sync_dependent`, `uvloop/signal_cancel_in_sync_dependent` (the judge's `LB20_Probe.lean`; `native` holds the crash) |
+| Our behaviour | The one-shot handle is finished, and the loop's reference given back once, as part of the event that resolves its promise, before the promise resolves; a dependent (sync or not) sees a finished handle, so `stop`/`cancel` act as on a finished handle in 4.34.0 (timer `stop` still drops the stored promise, timer.cpp 243-246; `cancel` and signal `stop`/`cancel` do nothing). The program sees what native's `sync := false` run shows (`sched::uv`) |
+| Translators | Both through `sched::uv` (lean2rr: plan §10, "Runtime"; leanrs: DV2 for now (UV timers and signals refused at translation until leanrs adopts sched)) |
+| Upstream | Not reported (owner: record only); present on master (the cross-thread form fixed by #14793) |
+| Verdict | lean2rr-side judge, 2026-10-04 (review of sched-io Part B, RSIOB-09) |
+
 ## Limits
 
 Implementation caps where Lean's definition has a value but the runtime

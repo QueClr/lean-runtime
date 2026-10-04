@@ -4,3 +4,6 @@ lean_version = "4.34.0"
 source = "review round 4 of lean-runtime sched-1 (probe TaskWaitsOwnDep.lean), 2026-10-04"
 streams = "separate"
 expect = { hang = 3 }
+# The task sleeps 20 ms, `main` 500 ms (50 ms before 2026-10-04): with 50,
+# a host at load 56 started the task more than 30 ms late once, so `main`'s
+# line came first, an order native's threads allow under the same delay.

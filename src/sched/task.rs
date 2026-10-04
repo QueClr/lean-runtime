@@ -378,6 +378,9 @@ impl Sched {
     }
 
     fn alloc(&mut self, job: Option<Job>, flags: u32, prio: u8) -> u32 {
+        // From the first task or promise on, blocking calls may have to let
+        // other contexts run (sched-io).
+        super::reactor::coop_on();
         let t = &mut self.tk;
         t.serial = t.serial.wrapping_add(1);
         if t.serial == 0 {
@@ -941,6 +944,11 @@ impl Sched {
 
     pub(crate) fn has_queued(&mut self) -> bool {
         self.first_queued().is_some()
+    }
+
+    /// A started pure task an IO task waits for is due to run (`picked_io`).
+    pub(crate) fn picked_io_pending(&self) -> bool {
+        !self.tk.picked_io.is_empty()
     }
 
     /// The queued task the scheduler can start now on a new context, if a
@@ -1765,11 +1773,17 @@ pub fn finish() {
 pub fn poll() {
     let go = with(|s| {
         if !s.tk.started
-            || (s.cx.sleepers.is_empty() && s.cx.runnable.is_empty() && !s.worker_busy())
+            || (s.cx.sleepers.is_empty()
+                && s.cx.runnable.is_empty()
+                && !s.worker_busy()
+                && !s.ev.active())
         {
             return false;
         }
-        s.promote_sleepers(Instant::now());
+        let now = Instant::now();
+        s.promote_sleepers(now);
+        s.ev_check(now, false);
+        s.ev_start_loop();
         if s.cx.runnable.is_empty() {
             if let Some((e, g)) = s.startable(Gate::Any) {
                 s.start_worker(e, g);
@@ -1792,7 +1806,11 @@ pub fn poll() {
 /// tasks, and let go first only what is due or able to run for a while.
 pub fn effect() {
     let slow = with(|s| {
-        s.tk.started && (!s.cx.sleepers.is_empty() || !s.cx.runnable.is_empty() || s.worker_busy())
+        s.tk.started
+            && (!s.cx.sleepers.is_empty()
+                || !s.cx.runnable.is_empty()
+                || s.worker_busy()
+                || s.ev.active())
     });
     if slow {
         effect_slow();
@@ -1813,6 +1831,11 @@ fn effect_slow() {
                 s.promote_sleepers(now);
                 go = true;
             }
+            // The event loop: what became ready or due runs as natively on
+            // its thread (a context woken now goes first only once it has
+            // been able to run for `STALE`, below).
+            s.ev_check(now, false);
+            s.ev_start_loop();
             if s.cx.runnable.iter().any(|&c| {
                 let x = &s.cx.ctxs[c];
                 (round > 0 && !x.at_effect) || now.saturating_duration_since(x.ready) >= STALE
@@ -1867,7 +1890,8 @@ pub fn sleep_ms(ms: u32) {
 /// meanwhile; without anything else to do, a plain sleep.
 fn sleep_for(d: Duration) {
     let alone = with(|s| {
-        !s.tk.started || (s.cx.live() == 1 && !s.has_queued() && s.tk.picked_io.is_empty())
+        !s.tk.started
+            || (s.cx.live() == 1 && !s.has_queued() && s.tk.picked_io.is_empty() && !s.ev.active())
     });
     if alone {
         std::thread::sleep(d);
@@ -1886,6 +1910,8 @@ fn zero_sleep() {
         }
         let now = Instant::now();
         s.promote_sleepers(now);
+        s.ev_check(now, true);
+        s.ev_start_loop();
         if !s.tk.shutting_down {
             if let Some((e, g)) = now
                 .checked_sub(WORKER_LATENCY)

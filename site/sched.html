@@ -29,7 +29,7 @@ Tasks are <a href="glossary.html#g-deferred">deferred</a> and run as coroutines.
 <div class="note"><p>The scheduler came with batch <code>sched-1</code>.
 The task model is a decision of 2026-10-03 (Q5).
 It has deferred tasks, polling yield points and Lean's exit behaviour, and it switches stacks through corosensei.
-Neither translator adopts <code>sched</code> before <a href="#sched-io">sched-io</a> lands.</p></div>
+Batch <a href="#sched-io">sched-io</a> adds cooperative blocking IO and the event loop.</p></div>
 
 <div class="toc"><ul>
   <li><a href="#model">The model</a></li>
@@ -39,6 +39,7 @@ Neither translator adopts <code>sched</code> before <a href="#sched-io">sched-io
   <li><a href="#yield">Yield points</a></li>
   <li><a href="#sync">Promises and Std.Sync</a></li>
   <li><a href="#exit">Exit</a></li>
+  <li><a href="#sched-io">Blocking IO and the event loop</a></li>
   <li><a href="#suspend">The unsafe steps in the glue</a></li>
   <li><a href="#limits">Limits of one thread</a></li>
   <li><a href="#plans">Plans</a></li>
@@ -52,7 +53,7 @@ It must finish the task before the task's value is needed.
 <p>A task runs at the first of these points:</p>
 <ul>
   <li><strong>It is needed.</strong> <code>Task.get</code> or <code>IO.wait</code> runs it at once, on the stack of the code that needs it.</li>
-  <li><strong>The running code blocks</strong> (a sleep, a lock, a promise) and a worker is free.
+  <li><strong>The running code blocks</strong> (a sleep, a lock, a promise, a read of an empty pipe) and a worker is free.
     The task then starts on a <a href="glossary.html#g-context">context</a> of its own.
     The number of workers is <code>LEAN_NUM_THREADS</code>, or the number of online processors.</li>
   <li><strong>An <a href="glossary.html#g-yield-point">effect point</a>.</strong> At an output, a flush, a process spawn or an exit, a task queued 5 ms ago or more goes first.
@@ -77,7 +78,8 @@ It must finish the task before the task's value is needed.
   <li>a context that can go on, in the order the contexts became able to;</li>
   <li>a queued task, on a new context, if a worker is free;</li>
   <li>a pure task that is marked started, when nothing else will happen;</li>
-  <li>else, it waits for the earliest sleeper, or forever (a deadlocked native program also waits forever).</li>
+  <li>else, it waits in the <a href="#loop">event loop</a>: until a descriptor is ready or the earliest sleeper or timer is due.
+    With none of these, it waits forever (a deadlocked native program also waits forever).</li>
 </ol>
 <figure class="fig">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 520" role="img" aria-labelledby="sc1-t sc1-d">
@@ -268,6 +270,62 @@ A task whose dependency never finishes, such as an unresolved promise, is not wa
 Natively it is lost once no pool worker is left (<a href="lean-bugs.html#lb-13">LB-13</a>).</p>
 <p><code>IO.Process.exit</code>, also from a task, exits at once: no task is waited for.</p>
 
+<h2 id="sched-io">Blocking IO and the event loop</h2>
+<p>Natively, a read of an empty pipe blocks only its own thread.
+The program's other threads go on.
+On one thread, the same read would stop every context.
+Batch sched-io (2026-10-04) makes such calls cooperate.</p>
+<ul>
+  <li><strong>When.</strong> A blocking call cooperates when other contexts exist, a task is queued, or the event loop has a descriptor or a timer.
+    Otherwise it is the plain system call, as before.
+    A program without tasks pays one load of a flag per call.</li>
+  <li><strong>Reads</strong> of pipes, FIFOs, sockets and terminals wait until the descriptor is readable, and let the other contexts run.
+    Then they make the same <code>read(2)</code>, which no longer blocks.</li>
+  <li><strong>Writes</strong> to pipes and sockets try <code>pwritev2</code> with <code>RWF_NOWAIT</code>, which writes what fits.
+    On <code>EAGAIN</code> they wait until the descriptor is writable.
+    A write to a terminal waits until it is writable, then writes the whole rest at once, as natively.</li>
+  <li><strong><code>Handle.lock</code></strong> retries <code>flock</code> without blocking.
+    <strong><code>Child.wait</code></strong> waits for the child's pidfd.</li>
+  <li><strong>The same bytes and errors.</strong> Each call is the blocking call, made once it no longer blocks.
+    Only the interleaving changes, to one that native's threads also allow.</li>
+  <li><strong>Regular files</strong> never block, so their calls stay plain, as natively.</li>
+  <li><strong>Stream locks.</strong> A task blocked in a read keeps its stream's lock, as glibc does.
+    Another context that wants the stream waits for it without blocking the thread.
+    This holds for a lock held across any wait.</li>
+  <li><strong>Free and drop paths.</strong> Both translators mark them with a no-suspend scope.
+    In the scope, the io calls never suspend the context.
+    A dropped stream whose pipe is full is flushed when the scope ends.</li>
+</ul>
+<h3 id="loop">The event loop</h3>
+<ul>
+  <li>The scheduler's own, in <a href="../src/sched/reactor.rs">src/sched/reactor.rs</a>.
+    It registers descriptors with epoll, native's own libuv loop descriptor when the glue opened it.</li>
+  <li><code>poll_fds</code> is <code>poll(2)</code> for a context: the context blocks, and the loop wakes it.</li>
+  <li><code>timer_start</code> and <code>watch</code> run a callback on the <em>loop context</em>, a context of its own, as libuv's loop thread is a thread of its own.</li>
+  <li>A watch holds its descriptor until <code>unwatch</code>.
+    While its call is queued or running, the watch is out of epoll's set.
+    So a callback that blocks does not make the hub spin.</li>
+  <li>The hub waits in <code>epoll_wait</code> when nothing can run.
+    The polling and effect points look without waiting, at most once a millisecond.</li>
+</ul>
+<h3 id="uv">Std.Internal.UV: the loop, timers and signals</h3>
+<ul>
+  <li><a href="../src/sched/uv.rs">src/sched/uv.rs</a> has the externs of <code>Std.Internal.UV.Loop</code>, <code>Timer</code> and <code>Signal</code>.</li>
+  <li>A timer or a signal watcher resolves its promise on the loop context.
+    So the promise's <code>sync</code> dependents run on a context of its own, as natively on libuv's thread.</li>
+  <li>Timers and watchers follow Lean's state machines: one-shot and repeating, <code>next</code>, <code>reset</code>, <code>cancel</code> and <code>stop</code>.</li>
+  <li>Every extern first lets the loop run what is due, as native's loop lock does.</li>
+  <li>Signals use signal-hook's safe API: flags, native's own signal pipe that the loop watches, and a conditional default action.
+    When no watcher listens, a signal has its default action again, as natively.
+    A second signal to a one-shot watcher takes the default action too, as libuv's reset handler does.</li>
+  <li>Recorded deviations: SIGIO ends the program with status 157 instead of its signal.
+    SIGTSTP, SIGTTIN and SIGTTOU stop it with SIGSTOP.</li>
+  <li><code>Loop.alive</code> is true, and <code>Loop.configure</code> changes nothing a program can see.</li>
+</ul>
+<p>The cases in <code>tests/cases/taskio/</code> hang or misorder without sched-io.
+Examples: <code>IO.Process.output</code> of a child that writes 300 000 bytes to stdout, and a task that reads <code>cat</code>'s output while <code>main</code> writes to it.
+The cases in <code>tests/cases/uvloop/</code> check the timers and signals; one sends SIGUSR1 to the program itself.</p>
+
 <h2 id="suspend">The unsafe steps in the glue</h2>
 <p>lean-runtime stays <code>forbid(unsafe_code)</code>.
 Two steps remain that safe code cannot do, so each translator's glue does them.
@@ -301,23 +359,12 @@ The scheduler publishes the running context's stack bounds for that handler.</p>
 <ul>
   <li>A context that computes without a block or a yield point delays the others.</li>
   <li><code>IO.waitAny</code> does not pick the fastest of several running tasks.</li>
-  <li>A blocking read on a pipe blocks the one thread, so every context waits.
-    <a href="#sched-io">sched-io</a> addresses this.</li>
+  <li>A few blocking calls still block the one thread: <code>open(2)</code> of a FIFO, and a translator's own calls outside the crate.
+    Its glue avoids the latter by waiting first, with <code>poll_fds</code>.</li>
+  <li>Another process's <code>flock</code> release is seen within 16 ms, not at once.</li>
 </ul>
 
 <h2 id="plans">Plans</h2>
-<h3 id="sched-io">sched-io: cooperative blocking IO</h3>
-<p>Agreed by both projects (2026-10-03).
-It is its own batch, the next one for <code>sched</code>.
-Neither translator adopts <code>sched</code> before it lands.</p>
-<ul>
-  <li>When tasks exist, reads and writes on pipes, FIFOs and child stdio are tried without blocking.
-    So is <code>child.wait</code>, through a pidfd.</li>
-  <li>On <code>EAGAIN</code>, the context registers its descriptor and yields.</li>
-  <li><code>Glue::idle</code> polls every registered descriptor and timer.</li>
-  <li>This is native's behaviour, where these calls block only their own thread.
-    It also fixes a known deadlock: an <code>IO.Process.output</code> child that writes more than 64 KiB to stdout.</li>
-</ul>
 <h3 id="threads">Toward real threads</h3>
 <p>Decision (2026-10-03): "parallelism will be supported, not the focus now".
 The model stays single-threaded, but avoids choices that block real threads.</p>
@@ -345,8 +392,8 @@ The timing session will measure:</p>
 </ul>
 
 <p class="more">Detail: <a href="../docs/sched.md">docs/sched.md</a>, and <a href="../src/sched/mod.rs">src/sched/</a>:
-<a href="../src/sched/task.rs">task.rs</a>, <a href="../src/sched/ctx.rs">ctx.rs</a>, <a href="../src/sched/env.rs">env.rs</a> and <a href="../src/sched/sync.rs">sync.rs</a>.
-The program cases are in <a href="../tests/cases/README.md">tests/cases/</a> <code>tasks/</code> and <code>sync/</code>.
+<a href="../src/sched/task.rs">task.rs</a>, <a href="../src/sched/ctx.rs">ctx.rs</a>, <a href="../src/sched/reactor.rs">reactor.rs</a>, <a href="../src/sched/uv.rs">uv.rs</a>, <a href="../src/sched/env.rs">env.rs</a> and <a href="../src/sched/sync.rs">sync.rs</a>; io's side is <a href="../src/io/coop.rs">src/io/coop.rs</a>.
+The program cases are in <a href="../tests/cases/README.md">tests/cases/</a> <code>tasks/</code>, <code>sync/</code>, <code>taskio/</code> and <code>uvloop/</code>.
 Their Rust twins are in <a href="../tests/sched-driver/src/cases.rs">tests/sched-driver</a>.</p>
 </main>
 <footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.

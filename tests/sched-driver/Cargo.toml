@@ -2,11 +2,11 @@
 name = "sched-driver"
 version = "0.1.0"
 edition = "2021"
-description = "Rust-level ports of tests/cases/tasks, run through lean-runtime's scheduler with a translator-like glue"
+description = "Rust-level ports of tests/cases/{tasks,sync,taskio} (and io's cases with tasks), run through lean-runtime's scheduler and io with a translator-like glue"
 publish = false
 
 [dependencies]
-lean-runtime = { path = "../..", features = ["sched"] }
+lean-runtime = { path = "../..", features = ["sched", "io"] }
 # The glue's SIGSEGV handler and stack-overflow report (as a translator's).
 libc = "0.2.159"
 # Only for `--features asan`: corosensei's fiber annotations, so that

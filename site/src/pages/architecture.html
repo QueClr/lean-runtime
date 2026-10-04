@@ -26,7 +26,7 @@ Each translator's glue connects its own values to the crate.</p>
 {{svg:arch-features}}
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
-The owner approved nix, rustix and corosensei.</figcaption>
+The owner approved nix, rustix, corosensei and signal-hook (its safe API only).</figcaption>
 </figure>
 <ul>
   <li><strong>Default.</strong> <code>semantics</code> only.
@@ -34,6 +34,7 @@ The owner approved nix, rustix and corosensei.</figcaption>
   <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix.
     These crates hold the <code>unsafe</code> code, so lean-runtime itself stays free of it.</li>
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
+    Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
   <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
     It may enable a faster <code>unsafe</code> version of a function.

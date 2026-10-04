@@ -1,0 +1,3 @@
+code 3 stdout 300000 stderr 1000
+stdout "a\na\n" ... "a\na\n"
+stderr "b\nb\n" ... "b\nb\n"

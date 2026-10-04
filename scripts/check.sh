@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks run before every commit: the site's pages up to date
 # (site/build.py --check); build, test and clippy on the Rust toolchains both
-# translators use, in every feature configuration; the task, sync and refs
-# cases' Rust ports over `sched` (tests/sched-driver); fmt; the plain-rustc
+# translators use, in every feature configuration; the Rust ports of the
+# task, sync, refs, taskio and uvloop cases and of the io cases with tasks,
+# over `sched` and `io` (tests/sched-driver); fmt; the plain-rustc
 # build of the dependency-free configuration, which one translator builds
 # without cargo; `sched`'s offline build from Cargo.lock; and, only with
 # LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
@@ -69,8 +70,9 @@ for tc in "${TOOLCHAINS[@]}"; do
   rm -rf "$out"
   echo "== $tc cargo build --offline --locked --features io,sched"
   capped cargo +"$tc" build --offline --locked --quiet --features io,sched
-  # The cases of tests/cases/{tasks,sync,refs} as Rust programs over
-  # `sched`, with a translator's glue, compared with the cases' outcomes.
+  # The cases of tests/cases/{tasks,sync,refs,taskio,uvloop} and the io
+  # cases with tasks as Rust programs over `sched` and `io`, with a
+  # translator's glue, compared with the cases' outcomes.
   echo "== $tc test sched-driver"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --offline --locked --quiet -p sched-driver
   echo "== $tc release test sched-driver"

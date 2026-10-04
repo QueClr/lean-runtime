@@ -1,0 +1,1 @@
+python3 -c "import subprocess, sys; r = subprocess.run(sys.argv[1:]); print(\"returncode\", r.returncode)" $BIN $ARGS

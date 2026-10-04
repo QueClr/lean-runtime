@@ -83,6 +83,22 @@
 //! `lean_runtime::io` nor end the process (see [`ByteSink`]). `Handle::lock`
 //! and friends wait in `flock` without holding the stream's lock, as native
 //! takes no `FILE` lock for them.
+//!
+//! # Blocking calls in programs with tasks (sched-io)
+//!
+//! With the feature `sched`, a call that may block in the kernel (a read of
+//! a pipe, a FIFO, a socket or a terminal, a write into one, `Handle.lock`,
+//! `Child.wait`, `IO.Process.output`'s waits) lets the scheduler's other
+//! contexts run while it waits, as natively only its own thread waits; the
+//! system call that follows is the same, so its bytes and errors are the
+//! blocking call's. The stream locks are then taken cooperatively: a task
+//! blocked in a read keeps its stream, and another context that wants it
+//! waits for it without blocking the thread ([`StreamGuard`]). Regular
+//! files, a program that has created no task, promise, timer or watch, and
+//! a no-suspend scope (`sched::enter_no_suspend`, the translators' free and
+//! drop paths) keep the plain calls. The module `coop` (private) has the rules;
+//! `docs/sched.md`, "Blocking IO and the event loop", the design and the
+//! cases.
 
 #[cfg(not(all(
     target_os = "linux",
@@ -94,6 +110,8 @@ compile_error!(
 );
 
 pub mod cfile;
+#[cfg(feature = "sched")]
+pub(crate) mod coop;
 pub mod debug;
 pub mod env;
 pub mod environ;
@@ -110,7 +128,7 @@ pub mod time;
 pub mod uvsys;
 
 pub use error::IoError;
-pub use handle::{FsMode, Handle};
+pub use handle::{FsMode, Handle, StreamGuard};
 
 /// A growable byte buffer a translator implements on its own object, so that
 /// an unbounded result is written straight into it (see the module comment).

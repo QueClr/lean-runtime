@@ -1,5 +1,6 @@
 //! Runs the Rust port (`sched-cases ID`) of every case of
-//! `tests/cases/{tasks,sync,refs}` as `scripts/cases.py check` runs a
+//! `tests/cases/{tasks,sync,refs,taskio}`, and of the cases of
+//! `tests/cases/io` that create tasks, as `scripts/cases.py check` runs a
 //! translator's executable, and compares its stdout, stderr and exit code
 //! with the case's expected ones: native's, or the correct ones where native
 //! has a Lean bug (LB-01, LB-13), or a recorded alternative of a
@@ -7,36 +8,49 @@
 //! - arguments from `ID.args`, an empty environment plus `LEAN_BACKTRACE=0`
 //!   and `ID.env`, a fresh working directory, stdin from `/dev/null`;
 //! - stdout and stderr as pipes (merged into one with `streams = "merged"`);
-//! - `expect = { hang = N }`: the output seen in N seconds, code `timeout`.
+//! - `expect = { hang = N }`: the output seen in N seconds, code `timeout`;
+//! - `ID.pipe`: the bash line run with `pipefail` instead of the executable,
+//!   with `$BIN` (the executable and the case's id), `$ARGS` and
+//!   `PATH=/usr/bin:/bin`.
 //!
 //! That is how `scripts/cases.py check` runs a case and what it accepts
 //! (the expected files, then the alternatives `ID.altK.*`), for the fields
 //! these areas use, but for stdin (`cases.py` gives an empty pipe, which
 //! reads as end of file at once, as `/dev/null` does). A case with what this
-//! runner does not implement (`.stdin`, `.pipe`, `.files/`, `normalize`)
-//! fails here instead of being compared differently.
+//! runner does not implement (`.stdin`, `.files/`, `normalize`) fails here
+//! instead of being compared differently.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The areas whose cases run through `sched`.
-const AREAS: &[&str] = &["tasks", "sync", "refs"];
+/// The areas whose cases all run through `sched`.
+const AREAS: &[&str] = &["tasks", "sync", "refs", "taskio", "uvloop"];
+
+/// The cases of `tests/cases/io` that create tasks, which run through
+/// `sched` too.
+const IO_WITH_TASKS: &[&str] = &["lock_blocked", "lock_exit", "lock_during_read"];
 
 fn cases_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../cases")
 }
 
+/// The directory of case `id`, if it is a case (the driver's own programs,
+/// `rust_panic_in_task` and the `adv_*` checks, are not).
+fn find_case_dir(id: &str) -> Option<PathBuf> {
+    if IO_WITH_TASKS.contains(&id) {
+        return Some(cases_root().join("io"));
+    }
+    AREAS
+        .iter()
+        .map(|a| cases_root().join(a))
+        .find(|d| d.join(format!("{id}.lean")).exists())
+}
+
 /// The directory of case `id`.
 fn case_dir(id: &str) -> PathBuf {
-    for a in AREAS {
-        let d = cases_root().join(a);
-        if d.join(format!("{id}.lean")).exists() {
-            return d;
-        }
-    }
-    panic!("no case {id} in {AREAS:?}")
+    find_case_dir(id).unwrap_or_else(|| panic!("no case {id} in {AREAS:?}"))
 }
 
 struct Outcome {
@@ -79,7 +93,7 @@ fn meta(id: &str) -> (Option<u64>, bool) {
 
 fn run(id: &str) -> Outcome {
     let dir = case_dir(id);
-    for f in [".stdin", ".pipe", ".files"] {
+    for f in [".stdin", ".files"] {
         assert!(
             !dir.join(format!("{id}{f}")).exists(),
             "{id}: this runner does not implement {f} (scripts/cases.py does)"
@@ -118,14 +132,34 @@ fn run_with(
 ) -> Outcome {
     let cwd = std::env::temp_dir().join(format!("sched-driver-{}-{id}", std::process::id()));
     std::fs::create_dir_all(&cwd).unwrap();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_sched-cases"));
-    cmd.arg(id)
-        .args(args)
-        .env_clear()
+    let exe = env!("CARGO_BIN_EXE_sched-cases");
+    // `ID.pipe`: a bash line run with pipefail instead of the executable,
+    // with `$BIN` (here the executable and the case's id) and `$ARGS`, as
+    // `scripts/cases.py` runs it.
+    let pipe =
+        find_case_dir(id).and_then(|d| std::fs::read_to_string(d.join(format!("{id}.pipe"))).ok());
+    let mut cmd = match &pipe {
+        Some(line) => {
+            let mut c = Command::new("/bin/bash");
+            c.args(["-o", "pipefail", "-c", line.trim()]);
+            c
+        }
+        None => {
+            let mut c = Command::new(exe);
+            c.arg(id).args(args);
+            c
+        }
+    };
+    cmd.env_clear()
         .env("LEAN_BACKTRACE", "0")
         .envs(env.iter().cloned())
         .current_dir(&cwd)
         .stdin(Stdio::null());
+    if pipe.is_some() {
+        cmd.env("BIN", format!("{exe} {id}"))
+            .env("ARGS", args.join(" "))
+            .env("PATH", "/usr/bin:/bin");
+    }
     // An AddressSanitizer run (`--features asan`) passes its options on.
     if let Ok(v) = std::env::var("ASAN_OPTIONS") {
         cmd.env("ASAN_OPTIONS", v);
@@ -298,6 +332,144 @@ fn adv_exit_from_task() {
     assert!(got.out.is_empty());
 }
 
+// The regression programs of sched-io's reviews (src/review.rs).
+
+fn out_of(o: &Outcome) -> String {
+    String::from_utf8_lossy(&o.out).into_owned()
+}
+
+/// RSIO-01: a stream lock held across `wait_fd` is waited for by `main`.
+#[test]
+fn rsio_poll_fds_with_stream_lock() {
+    let got = run_with("rsio_poll_fds_with_stream_lock", &[], &[], Some(10), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "main: printed\n");
+    assert_eq!(
+        err_of(&got),
+        "main: printing\ntask: waited holding stdout\nmain: done\n"
+    );
+}
+
+/// RSIO-02: a blocking watch callback neither makes the hub spin nor is
+/// followed by a call on its drained descriptor.
+#[test]
+fn rsio_watch_spin() {
+    let got = run_with("rsio_watch_spin", &[], &[], Some(10), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(
+        out_of(&got),
+        "callback calls: 1\nunder 100 ms of CPU while the callback slept: true\n"
+    );
+}
+
+/// RSIO-03 and RSIO-09: no other context runs during a handle's drop in a
+/// no-suspend scope (its flush waits for the scope's end); without the
+/// scope, other contexts run during the drop. The child gets every byte.
+#[test]
+fn rsio_drop_no_suspend() {
+    let got = run_with("rsio_drop_no_suspend", &[], &[], Some(10), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "65636\nticks during the drop: 0\n");
+    let got = run_with(
+        "rsio_drop_no_suspend",
+        &["plain".to_string()],
+        &[],
+        Some(10),
+        false,
+    );
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "65636\nticks during the drop: 1\n");
+}
+
+/// RSIO-09 (round 2): a handle dropped unflushed in a no-suspend scope,
+/// its pipe full until a task of this program drains the child: the flush
+/// waits for the scope's end, then completes (natively it completes too).
+#[test]
+fn rsio_ns_drop_deadlock() {
+    for a in [&[][..], &["plain".to_string()][..]] {
+        let got = run_with("rsio_ns_drop_deadlock", a, &[], Some(20), false);
+        assert_eq!(got.code, "0", "{a:?}: stderr {:?}", err_of(&got));
+        assert_eq!(
+            err_of(&got),
+            "main: wrote, dropping stdin\nmain: dropped\n",
+            "{a:?}"
+        );
+        assert_eq!(out_of(&got), "read 200000\nexit Some(0)\n", "{a:?}");
+    }
+}
+
+/// RSIO-09 (round 2): taskio/task_reads_main_writes without its final
+/// flush, the handle dropped in a no-suspend scope (it hung 1 run in 15).
+#[test]
+fn rsio_ns_cat() {
+    for _ in 0..3 {
+        let args = ["3000".to_string(), "1000".to_string()];
+        let got = run_with("rsio_ns_cat", &args, &[], Some(20), false);
+        assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+        assert_eq!(
+            out_of(&got),
+            "main: wrote everything\ntask: read Some(3003000)\ncat exited Some(0)\n"
+        );
+    }
+}
+
+/// RSIO-10 (round 2): a sync dependent run by a drop in a no-suspend scope
+/// sleeps there; the other contexts do not inherit the scope.
+#[test]
+fn rsio_ns_leak() {
+    for a in [&[][..], &["plain".to_string()][..]] {
+        let got = run_with("rsio_ns_leak", a, &[], Some(10), false);
+        assert_eq!(got.code, "0", "{a:?}: stderr {:?}", err_of(&got));
+        assert_eq!(err_of(&got), "reader: io_cooperative = true\n", "{a:?}");
+        assert_eq!(out_of(&got), "reader got \"hi\\n\"\n", "{a:?}");
+    }
+}
+
+/// RSIO-10 (round 2): a task sleeping in a no-suspend scope does not make
+/// `main` (in no scope) panic on a stream another task holds.
+#[test]
+fn rsio_ns_leak_panic() {
+    let got = run_with("rsio_ns_leak_panic", &[], &[], Some(10), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "main: printing (no scope here)\nmain: done\n");
+    assert_eq!(out_of(&got), "main: printed\n");
+}
+
+/// RSIO-12 and RSIO-13 (round 3): a handle dropped with bytes the full pipe
+/// does not take: the child gets every byte, and the modelled errno is as
+/// before the drop (native's blocking `fclose` sets none), in a no-suspend
+/// scope or not, the pipe filled to a page boundary or not.
+#[test]
+fn rsio_ns_partial() {
+    for args in [
+        vec![],
+        vec!["plain"],
+        vec!["scope", "full"],
+        vec!["plain", "full"],
+    ] {
+        let a: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let fill = if args.get(1) == Some(&"full") {
+            65536
+        } else {
+            65440
+        };
+        let got = run_with("rsio_ns_partial", &a, &[], Some(20), false);
+        assert_eq!(got.code, "0", "{args:?}: stderr {:?}", err_of(&got));
+        let out = out_of(&got);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "{args:?}: {out:?}");
+        assert_eq!(
+            lines[0].trim(),
+            (fill + 500).to_string(),
+            "{args:?}: {out:?}"
+        );
+        let e: Vec<&str> = lines[1].rsplit(' ').collect();
+        // "...; errno before B after A"
+        assert_eq!(e[0], e[2], "{args:?}: {out:?}");
+        assert!(lines[1].starts_with(&format!("expected {} bytes", fill + 500)));
+    }
+}
+
 /// The ported cases, in one list: each becomes a test, and
 /// `every_case_is_ported` checks the list against the cases' directories
 /// (review RS1S-06 of sched-1).
@@ -350,4 +522,34 @@ cases!(
     set_during_modify,
     get_during_modify,
     swap_during_modify,
+    output_big_stdout,
+    output_both_overflow,
+    task_reads_main_writes,
+    wait_in_task,
+    output_while_ticking,
+    loop_configure,
+    timer_oneshot,
+    timer_repeating,
+    timer_cancel_reset,
+    signal_usr1,
+    signal_stale,
+    signal_oneshot_twice,
+    signal_failed_next,
+    signal_stale_deferred,
+    timer_due_stop,
+    signal_cancel_restart,
+    signal_order,
+    signal_fds,
+    exit_listening,
+    signal_sigio_default,
+    timer_stop_in_sync_dependent,
+    timer_cancel_in_sync_dependent,
+    signal_stop_in_sync_dependent,
+    signal_cancel_in_sync_dependent,
+    timer_catchup_bound,
+    signal_rearm_in_sync_dependent,
+    signal_rearm_in_async_dependent,
+    lock_blocked,
+    lock_exit,
+    lock_during_read,
 );

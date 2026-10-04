@@ -1,0 +1,9 @@
+one-shot pending: true
+one-shot got some 10
+one-shot second next resolved: true
+repeating 0: got some 10
+repeating 1: got some 10
+repeating: cancelled promise resolved: false
+repeating: after cancel got some 10
+signal 99: invalid argument (error code: 22, invalid argument)
+stopped; the next SIGUSR1 ends the program

@@ -164,3 +164,92 @@ fn buffer_size_follows_filedoalloc() {
     assert_eq!(buffer_size(4 << 20), 8192);
     assert_eq!(buffer_size(i64::MAX), 8192);
 }
+
+/// Review RSIO-12 (the reviewer's probe): a no-suspend drop's nowait flush
+/// that writes part of the pending bytes, then would block, must leave what
+/// is left where the deferred close's flush writes it; before the fix `wb`
+/// stayed moved, the flush sought back (`re != wb`), failed with ESPIPE on
+/// the FIFO, and dropped the rest (3904 bytes). The 8192-byte buffer stands
+/// for a FIFO whose `st_blksize` is 8192 or more (NFS, a 64 KiB-page
+/// kernel), where FIFO writes go in PIPE_BUF pieces.
+#[cfg(feature = "sched")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn rsio12_partial_nowait_flush_then_close_keeps_every_byte() {
+    use std::io::Read;
+    let dir = std::env::temp_dir().join(format!("rsio12-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("fifo");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .unwrap()
+        .success());
+    // the read end first (O_RDWR does not wait), then the write end
+    let mut rd = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let wr: OwnedFd = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .into();
+    // 15 of the FIFO's 16 pages full: room for one PIPE_BUF piece
+    let filler = vec![b'x'; 15 * 4096];
+    let mut done = 0;
+    while done < filler.len() {
+        done += rustix::io::write(&wr, &filler[done..]).unwrap();
+    }
+    let mut f = CFile::fdopen(wr, FsMode::Write);
+    f.buf = vec![0u8; 8192];
+    f.has_buf = true;
+    let tail = vec![b't'; 8000];
+    f.put(&tail).unwrap();
+    assert_eq!(f.pending_output().len(), 8000);
+    let all_out = f.flush_nowait();
+    eprintln!(
+        "flush_nowait -> {all_out}; pending {}",
+        f.pending_output().len()
+    );
+    assert!(!all_out, "the FIFO is full after one piece");
+    // the deferred close, once the reader drains (a thread here)
+    let reader = std::thread::spawn(move || {
+        let mut all = vec![0u8; 15 * 4096 + 8000];
+        let mut got = 0;
+        // read until 200 ms pass without data
+        let _ = rustix::io::ioctl_fionbio(&rd, false);
+        loop {
+            let mut pfd = [rustix::event::PollFd::new(
+                &rd,
+                rustix::event::PollFlags::IN,
+            )];
+            let t = rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 200_000_000,
+            };
+            if rustix::event::poll(&mut pfd, Some(&t)).unwrap() == 0 {
+                break;
+            }
+            match rd.read(&mut all[got..]) {
+                Ok(0) => break,
+                Ok(n) => got += n,
+                Err(_) => break,
+            }
+            if got == all.len() {
+                break;
+            }
+        }
+        got
+    });
+    f.close();
+    let got = reader.join().unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(
+        got,
+        15 * 4096 + 8000,
+        "bytes lost: {}",
+        15 * 4096 + 8000 - got
+    );
+}

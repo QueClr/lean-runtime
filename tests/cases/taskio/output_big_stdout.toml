@@ -1,0 +1,5 @@
+id = "output_big_stdout"
+area = "taskio"
+lean_version = "4.34.0"
+source = "sched-io acceptance (leanrs's review of sched-1, item 1: IO.Process.output of more than 64 KiB on stdout deadlocks on one thread)"
+streams = "separate"

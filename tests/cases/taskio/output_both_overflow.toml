@@ -1,0 +1,5 @@
+id = "output_both_overflow"
+area = "taskio"
+lean_version = "4.34.0"
+source = "sched-io acceptance (a child that overflows both pipes)"
+streams = "separate"

@@ -1267,12 +1267,18 @@ impl Modelled {
     }
 }
 
-/// `waitpid(pid, &status, options)` once (Lean does not retry `EINTR`).
+/// `waitpid(pid, &status, options)` once (Lean does not retry `EINTR`). A
+/// blocking wait in a program with tasks first lets the other contexts run
+/// until the child has exited (sched-io, `io::coop`).
 fn waitpid_once(
     pid: u32,
     opts: WaitOptions,
 ) -> Result<Option<rustix::process::WaitStatus>, IoError> {
     let pid = Pid::from_raw(pid as i32).ok_or_else(|| os_error(ECHILD))?;
+    #[cfg(feature = "sched")]
+    if opts.is_empty() && crate::sched::coop_possible() {
+        super::coop::before_waitpid(pid);
+    }
     match rustix::process::waitpid(Some(pid), opts) {
         Ok(r) => Ok(r.map(|(_, st)| st)),
         Err(e) => Err(os_error(e.raw_os_error())),
@@ -1381,6 +1387,23 @@ fn drain_in_background(fd: Option<OwnedFd>) {
     }
 }
 
+/// Before `output` blocks in `poll` or a read of its pipes: in a program
+/// with tasks, wait until one is readable, letting the other contexts run
+/// (sched-io, `io::coop`).
+#[inline]
+fn ready(fds: &[&Option<OwnedFd>]) {
+    #[cfg(feature = "sched")]
+    if crate::sched::coop_possible() && crate::sched::io_cooperative() {
+        let b: Vec<_> = fds
+            .iter()
+            .filter_map(|f| f.as_ref().map(|f| f.as_fd()))
+            .collect();
+        super::coop::before_read_any(&b);
+    }
+    #[cfg(not(feature = "sched"))]
+    let _ = fds;
+}
+
 /// `IO.Process.output` (Lean code in `Init/System/IO.lean`, here an
 /// override): `spawn` with standard output and error piped and standard
 /// input `null`, or `piped` when `input` is given, in which case the input is
@@ -1434,6 +1457,7 @@ where
     let mut buf = Vec::with_capacity(READ_CHUNK);
     while e.fd.is_some() {
         if o.fd.is_none() {
+            ready(&[&e.fd]);
             e.step(&mut buf);
             continue;
         }
@@ -1441,6 +1465,7 @@ where
             let (Some(fo), Some(fe)) = (&o.fd, &e.fd) else {
                 break;
             };
+            ready(&[&o.fd, &e.fd]);
             let mut fds = [
                 nix::poll::PollFd::new(fo.as_fd(), nix::poll::PollFlags::POLLIN),
                 nix::poll::PollFd::new(fe.as_fd(), nix::poll::PollFlags::POLLIN),
@@ -1467,6 +1492,7 @@ where
         return Err(not_utf8());
     }
     while o.fd.is_some() {
+        ready(&[&o.fd]);
         o.step(&mut buf);
     }
     let code = s.process.wait()?;

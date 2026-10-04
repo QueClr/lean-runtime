@@ -1,0 +1,2 @@
+code 0 stdout 400000 stderr 400000
+stdout all o: true stderr all e: true

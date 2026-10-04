@@ -17,9 +17,12 @@ path = "src/lib.rs"
 #   unshare, poll, the password and group databases, getrusage,
 #   gethostname);
 # - `sched`: corosensei (decisions Q5 and O2), with its default features
-#   (mmap'd stacks with a guard page, and unwinding across the switch).
+#   (mmap'd stacks with a guard page, and unwinding across the switch),
+#   rustix (the event loop's epoll and poll; sched-io), and signal-hook (the
+#   `Std.Internal.UV.Signal` watchers: its safe flag, self-pipe and
+#   conditional default actions; accepted by the owner, 2026-10-04).
 # The requirements are carets compatible with leanrs's offline registry (nix
-# 0.31.3, rustix 1.1.4, corosensei 0.3.4), with only the features the crate
+# 0.31.3, rustix 1.1.4, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
 # uses; leanrs resolves them in its own workspace. lean-runtime's own builds
 # and lean2rr's use Cargo.lock and cargo's local registry cache, offline
 # (`cargo build --offline --locked --features io,sched`; `cargo fetch
@@ -28,13 +31,14 @@ path = "src/lib.rs"
 rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "process", "stdio", "system", "termios", "time"] }
 nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "hostname", "poll", "process", "resource", "sched", "signal", "user"] }
 corosensei = { version = "0.3.4", optional = true }
+signal-hook = { version = "0.3.18", optional = true, default-features = false }
 
 [features]
 default = []
 # OS-level IO mirroring Lean's C runtime (files, handles, standard streams).
 io = ["dep:rustix", "dep:nix"]
 # The deferred task scheduler, promises and Std.Sync.
-sched = ["dep:corosensei"]
+sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
 # docs/development.md). The default build is unsafe-free.
 unsafe-fast = []

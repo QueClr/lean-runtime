@@ -69,7 +69,8 @@ It adds only what a translator's glue adds.</p>
   <li><code>tests/io_cases.rs</code> has a twin for each case of the first io batch.
     It runs <code>cases.py check</code> on them, the same checker that the translators use.</li>
   <li><code>tests/io2_cases.rs</code> does the same for the cases of the second io batch, and for the <code>debug/</code>, <code>clock/</code> and <code>panics/</code> cases.
-    <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code>, <code>sync/</code> and <code>refs/</code> case over <code>sched</code>, with a complete example of the glue.</li>
+    <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code>, <code>sync/</code>, <code>refs/</code>, <code>taskio/</code> and <code>uvloop/</code> case, and for the io cases with tasks.
+    Its twins run over <code>sched</code> and <code>io</code>, with a complete example of the glue.</li>
   <li>A few cases have no twin, because they test what a translator generates, for example whether its compiler folds a libm call.
     Their <code>.toml</code> says why.</li>
   <li>So the crate is checked against native output before either translator adopts it.</li>

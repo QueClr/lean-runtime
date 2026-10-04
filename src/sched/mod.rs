@@ -25,13 +25,29 @@
 
 mod ctx;
 mod env;
+mod reactor;
 pub mod sync;
 mod task;
 #[cfg(test)]
 mod tests;
+pub mod uv;
 
 pub use ctx::{running_stack, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
+#[cfg(feature = "io")]
+pub(crate) use reactor::block_until;
+pub use reactor::{
+    coop_possible, enter_no_suspend, in_no_suspend, io_cooperative, leave_no_suspend, no_suspend,
+    poll_fds, timer_start, timer_stop, unwatch, wait_fd, watch, watch_modify, Interest,
+    NoSuspendGuard, PollItem, Ready, TimerId, WatchId,
+};
+
+/// Turn on the cooperative paths as the first task does (the io layer's
+/// unit tests).
+#[cfg(all(test, feature = "io"))]
+pub(crate) fn reactor_coop_on_for_tests() {
+    reactor::coop_on();
+}
 pub use task::{
     cancel, check_canceled, current_context, depend, dependent_runs_now, effect, finish,
     in_sync_task, is_finished, manager_running, poll, promise_new, release, resolve, sleep_ms,
@@ -46,10 +62,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub(crate) struct Sched {
     pub(crate) cx: ctx::Contexts,
     pub(crate) tk: task::Tasks,
+    /// The event loop (sched-io).
+    pub(crate) ev: reactor::Reactor,
 }
 
 thread_local! {
-    static SCHED: RefCell<Sched> = RefCell::new(Sched { cx: ctx::Contexts::new(), tk: task::Tasks::new() });
+    static SCHED: RefCell<Sched> = RefCell::new(Sched {
+        cx: ctx::Contexts::new(),
+        tk: task::Tasks::new(),
+        ev: reactor::Reactor::default(),
+    });
 }
 
 /// Run `f` on the scheduler's state. `f` never runs translated code, a

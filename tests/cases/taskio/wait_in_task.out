@@ -1,0 +1,8 @@
+ticker: 0
+ticker: 1
+ticker: 2
+ticker: 3
+ticker: 4
+main: ticker done
+waiter: child exited 7
+main: waiter returned some 7

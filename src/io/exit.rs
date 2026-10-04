@@ -23,9 +23,8 @@
 //! Sources: lean2rr's `runtime/leanrt/src/io.rs` (`flush_at_exit`) and
 //! leanrs's `rt/leanrs_rt/src/io/env.rs` (`uncaught`, `process_force_exit`).
 
-use super::handle::{lock, open_files_newest_first, STDERR, STDIN, STDOUT};
+use super::handle::{lock, open_files_newest_first, try_lock, STDERR, STDIN, STDOUT};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::PoisonError;
 
 /// The streams' part of C's `exit` in a native Lean program (see the module
 /// comment): `fflush(stdout)`, then `_IO_flush_all`, then
@@ -37,23 +36,27 @@ pub fn exit_flush() {
         return;
     }
     let _ = lock(&STDOUT).flush();
+    // Streams whose drop in a no-suspend scope found their pipe full
+    // (`io::coop::defer_close`, review RSIO-09): closed (flushed) now, if
+    // the scope has not ended yet.
+    #[cfg(feature = "sched")]
+    if super::coop::deferred_pending() {
+        super::coop::close_deferred();
+    }
     let open = open_files_newest_first();
     for f in open.iter() {
-        f.file
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .exit_flush();
+        lock(&f.file).exit_flush();
     }
     for s in [&STDERR, &STDOUT, &STDIN] {
         lock(s).exit_flush();
     }
     for f in open.iter() {
-        if let Ok(mut g) = f.file.try_lock() {
+        if let Some(mut g) = try_lock(&f.file) {
             g.exit_unbuffer();
         }
     }
     for s in [&STDERR, &STDOUT, &STDIN] {
-        if let Ok(mut g) = s.try_lock() {
+        if let Some(mut g) = try_lock(s) {
             g.exit_unbuffer();
         }
     }

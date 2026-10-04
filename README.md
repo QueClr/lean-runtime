@@ -57,6 +57,13 @@ contexts, the yield points, promises, `Std.Sync`'s primitives and Lean's
 exit behaviour. Every case of `tests/cases/tasks` and `tests/cases/sync`
 passes as a Rust program over it (`tests/sched-driver`). A translator's glue
 has one `unsafe` step, whose soundness argument is in `docs/sched.md`.
+Its second batch, sched-io, makes blocking IO cooperate with the tasks (a
+read of an empty pipe, a write into a full one, `flock`, `waitpid` let the
+other tasks run, as natively only their own thread waits) and adds the
+scheduler's event loop (epoll, timers, descriptor watches), with
+`Std.Internal.UV`'s loop, timers and signals on it (`sched::uv`); the cases
+of `tests/cases/taskio` and `uvloop` and the io cases with tasks pass
+through the driver.
 
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
@@ -79,7 +86,7 @@ that order. See `docs/development.md`, the rules for implementors.
   test suite passes.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
-  `io` uses rustix and nix, and `sched` corosensei, pinned by `Cargo.lock`
+  `io` uses rustix and nix, and `sched` corosensei, rustix and signal-hook, pinned by `Cargo.lock`
   and built offline from cargo's local registry cache.
 
 Bugs in Lean's own runtime that both translators deliberately do not reproduce, each verified first, are listed in `docs/lean-bugs.md`.

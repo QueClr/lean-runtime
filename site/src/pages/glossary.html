@@ -199,8 +199,8 @@ See <a href="testing.html#rows">Testing</a>.</dd>
 They hold the <code>unsafe</code> code, so <code>io</code> stays free of it.</dd>
 
 <dt id="g-sched-io">sched-io</dt>
-<dd>The planned batch of cooperative blocking IO.
-When tasks exist, reads, writes and waits on pipes and child processes yield instead of blocking the one thread.
+<dd>The batch of cooperative blocking IO and the event loop.
+When tasks exist, reads, writes and waits on pipes and child processes let the other contexts run instead of blocking the one thread.
 See <a href="sched.html#sched-io">sched</a>.</dd>
 
 <dt id="g-schedule-dependent">Schedule-dependent</dt>

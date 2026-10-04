@@ -6,6 +6,8 @@
 mod cases;
 mod glue;
 mod lean;
+mod lio;
+mod review;
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();

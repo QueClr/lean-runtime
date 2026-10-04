@@ -220,6 +220,57 @@ impl<T: Clone + 'static> Promise<T> {
     pub fn result_opt(&self) -> Task<Option<T>> {
         self.result.clone()
     }
+
+    /// `promise_is_resolved`: the slot holds a value.
+    pub fn is_resolved(&self) -> bool {
+        self.result.0.slot.get().is_some()
+    }
+}
+
+/// `IO.Promise α` as a counted Lean object, as the event loop's timers and
+/// signals hold it (`lean_runtime::sched::uv::LoopPromise`): a clone is
+/// `lean_inc`, a drop `lean_dec`, and the last one resolves it with `none`.
+pub struct UvPromise<T: Clone + 'static>(Rc<Promise<T>>);
+
+impl<T: Clone + 'static> Clone for UvPromise<T> {
+    fn clone(&self) -> Self {
+        UvPromise(self.0.clone())
+    }
+}
+
+impl<T: Clone + 'static> UvPromise<T> {
+    /// `lean_io_promise_new`.
+    pub fn new() -> UvPromise<T> {
+        UvPromise(Rc::new(Promise::new()))
+    }
+
+    /// `IO.Promise.result?`.
+    pub fn result_opt(&self) -> Task<Option<T>> {
+        self.0.result_opt()
+    }
+
+    /// `IO.Promise.resolve`.
+    pub fn resolve(&self, v: T) {
+        self.0.resolve(v)
+    }
+}
+
+impl lean_runtime::sched::uv::LoopPromise for UvPromise<()> {
+    fn is_resolved(&self) -> bool {
+        self.0.is_resolved()
+    }
+    fn resolve(&self, _: i64) {
+        self.0.resolve(())
+    }
+}
+
+impl lean_runtime::sched::uv::LoopPromise for UvPromise<i64> {
+    fn is_resolved(&self) -> bool {
+        self.0.is_resolved()
+    }
+    fn resolve(&self, v: i64) {
+        self.0.resolve(v)
+    }
 }
 
 impl<T: Clone + 'static> Drop for Promise<T> {

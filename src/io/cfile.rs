@@ -103,6 +103,9 @@ pub struct CFile {
     seek_failed: bool,
     /// The descriptor is a regular file (known once the buffer exists).
     regular: bool,
+    /// What the descriptor is for the cooperative path (sched-io).
+    #[cfg(feature = "sched")]
+    coop: super::coop::Coop,
 }
 
 /// The `fdopen` flags of a mode (`lean_io_prim_handle_mk`): `read` is `"r"`,
@@ -134,7 +137,15 @@ impl CFile {
             eagain_is_epipe: false,
             seek_failed: false,
             regular: false,
+            #[cfg(feature = "sched")]
+            coop: super::coop::Coop::UNKNOWN,
         }
+    }
+
+    /// A stream with no descriptor, as after `fclose`.
+    #[cfg(feature = "sched")]
+    pub(crate) const fn closed() -> CFile {
+        CFile::with(Fd::Closed, 0)
     }
 
     /// glibc's `stdin` (0), `stdout` (1) or `stderr` (2, unbuffered).
@@ -286,12 +297,36 @@ impl CFile {
 
     // ---- system calls ----
 
+    /// Before a `read(2)` that may block: in a program with tasks, wait until
+    /// the descriptor is readable, letting the other contexts run (sched-io,
+    /// `io::coop`); the `read(2)` itself is the same.
+    #[inline]
+    fn before_read(&mut self) {
+        #[cfg(feature = "sched")]
+        if crate::sched::coop_possible() {
+            super::coop::before_read(&self.fd, &mut self.coop);
+        }
+    }
+
+    /// One `write(2)` of `data`: in a program with tasks, without blocking
+    /// the other contexts (sched-io, `io::coop`).
+    #[inline]
+    fn write_once(&mut self, data: &[u8]) -> Result<usize, i32> {
+        #[cfg(feature = "sched")]
+        if crate::sched::coop_possible() {
+            if let Some(r) = super::coop::write_once(&self.fd, data, &mut self.coop) {
+                return r;
+            }
+        }
+        self.fd.write(data)
+    }
+
     /// `_IO_new_file_write`: write all of `data`; a failure sets the error
     /// indicator. Returns the number of bytes written.
     fn syswrite(&mut self, data: &[u8]) -> usize {
         let mut done = 0;
         while done < data.len() {
-            match self.fd.write(&data[done..]) {
+            match self.write_once(&data[done..]) {
                 Ok(n) => done += n,
                 Err(e) => {
                     if e == EAGAIN && self.eagain_is_epipe {
@@ -509,6 +544,7 @@ impl CFile {
         let _ = self.switch_to_get_mode();
         self.setg(0, 0, 0);
         self.setp(0, 0);
+        self.before_read();
         let b = std::mem::take(&mut self.buf);
         let mut b = b;
         let r = self.fd.read(&mut b);
@@ -622,6 +658,7 @@ impl CFile {
             if block >= 128 {
                 count -= want % block;
             }
+            self.before_read();
             match out.read(&self.fd, self.regular, got, count) {
                 Ok(0) => {
                     self.flags |= EOF_SEEN;
@@ -738,6 +775,7 @@ impl CFile {
                     } else {
                         bs as usize
                     };
+                    self.before_read();
                     let mut b = std::mem::take(&mut self.buf);
                     count = match self.fd.read(&mut b[..want]) {
                         Ok(c) => c as i64,
@@ -979,6 +1017,72 @@ impl CFile {
         self.fd = Fd::Closed;
         self.buf = Vec::new();
         self.has_buf = false;
+    }
+
+    /// In a no-suspend scope (the drop of a handle's last reference): write
+    /// as much of the pending output as the descriptor takes without
+    /// blocking (`io::coop::write_nowait`). True when nothing is left pending
+    /// (or the descriptor never blocks, and `close` writes it as usual);
+    /// false when the descriptor would block with bytes still pending, which
+    /// stay in the put area for a later flush (review RSIO-09). A write error
+    /// loses the rest and sets the error indicator, as `new_do_write` does.
+    #[cfg(feature = "sched")]
+    pub(crate) fn flush_nowait(&mut self) -> bool {
+        if matches!(self.fd, Fd::Closed)
+            || self.flags & NO_WRITES != 0
+            || !self.in_put_mode()
+            || self.wp <= self.wb
+            || super::exit::exiting_without_flush()
+        {
+            return true;
+        }
+        // Read-ahead to give back first (a read-write stream): the usual
+        // path, which seeks.
+        if self.flags & IS_APPENDING == 0 && self.re != self.wb {
+            return true;
+        }
+        while self.wb < self.wp {
+            let r =
+                super::coop::write_nowait(&self.fd, &self.buf[self.wb..self.wp], &mut self.coop);
+            match r {
+                None => return true,
+                Some(Ok(n)) => {
+                    self.wb += n;
+                    if self.offset >= 0 {
+                        self.offset += n as i64;
+                    }
+                }
+                Some(Err(EAGAIN)) => {
+                    // What is left goes to the start of the buffer, with no
+                    // read-ahead, so the later flush writes it from there
+                    // instead of seeking back over a moved write base, which
+                    // a pipe refuses (`ESPIPE`) and the bytes would be lost
+                    // (review RSIO-12).
+                    let left = self.wp - self.wb;
+                    self.buf.copy_within(self.wb..self.wp, 0);
+                    self.setg(0, 0, 0);
+                    self.wb = 0;
+                    self.wp = left;
+                    if self.flags & (LINE_BUF | UNBUFFERED) != 0 {
+                        self.we = self.wp;
+                    }
+                    return false;
+                }
+                Some(Err(_)) => {
+                    self.flags |= ERR_SEEN;
+                    break;
+                }
+            }
+        }
+        self.setg(0, 0, 0);
+        self.wb = 0;
+        self.wp = 0;
+        self.we = if self.flags & (LINE_BUF | UNBUFFERED) != 0 {
+            0
+        } else {
+            self.bufsize()
+        };
+        true
     }
 
     /// `_IO_OVERFLOW(fp, EOF)`: write pending output (entering put mode).
