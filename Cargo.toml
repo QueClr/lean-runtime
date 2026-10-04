@@ -18,7 +18,8 @@ path = "src/lib.rs"
 # - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
 #   the scheduling priority), nix (process-level libc calls: posix_spawn,
 #   unshare, poll, the password and group databases, getrusage,
-#   gethostname) and io-uring (the two rings libuv makes at startup; pinned
+#   gethostname, and glibc's own isatty, one TCGETS ioctl as natively,
+#   AR-18) and io-uring (the two rings libuv makes at startup; pinned
 #   exactly, with only `io_safety`, which adds no crate);
 # - `sched`: corosensei (decisions Q5 and O2), with its default features
 #   (mmap'd stacks with a guard page, and unwinding across the switch),

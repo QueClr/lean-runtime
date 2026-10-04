@@ -669,6 +669,11 @@ its own.
   type and numbers are native's (case `uvloop/signal_fds`). Without them,
   the first watcher makes a pipe of its own; if it cannot (`EMFILE`), that
   watcher's `next` fails, and the next watcher tries again (RSIOB-16).
+  The watchers take it with `io::startup::claim_signal_pipe`, which hands
+  it to the first caller only. A translator that keeps its own scheduler
+  and signal watchers over `io` may claim it instead, with or without
+  `sched` (AR-17); it then has the same duty, and `sched`'s watchers, if
+  any, make a pipe of their own.
   **The pipe's duty:** its
   descriptors live in a static the crate owns, for the life of the
   process: never closed, `dup2`'d over or reused, and its write end is never

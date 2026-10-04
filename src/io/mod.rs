@@ -9,14 +9,14 @@
 //! | Module | What |
 //! |---|---|
 //! | [`error`] | `IO.Error` as neutral data ([`IoError`]), its construction from an `errno` or a libuv code (`decode_io_error`, `decode_uv_error`), the crate's model of C's `errno` |
-//! | `sys` | the system calls the FILE model makes, over rustix (crate-internal) |
+//! | `sys` | the system calls the FILE model makes, over rustix, and glibc's `isatty` through nix (crate-internal) |
 //! | [`cfile`] | glibc's `FILE` ([`cfile::CFile`]): buffering, read-ahead, positions, the sticky indicators |
 //! | [`handle`] | `IO.FS.Handle` ([`Handle`]): open modes, the standard streams, the Lean handle primitives, the open-handle list |
 //! | [`exit`] | what a native Lean program's exit does with the streams (libc++'s `ios_base::Init`, then glibc's `_IO_cleanup`), `IO.Process.exit`, `forceExit`, the uncaught-error message |
 //! | [`fs`] | the file system: directories, metadata, `realPath`, removal, renaming, links, permissions, the working directory |
 //! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, random bytes, the monotonic clock, `IO.sleep` |
 //! | [`debug`] | the IO parts of `dbgTrace` and `dbgSleep`, and the runtime's own standard-error lines |
-//! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors |
+//! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors; its signal pipe for the one loop that watches signals (`sched::uv`'s, or a translator's own) |
 //! | [`environ`] | the process environment as C's `environ` holds it (every entry in order, changed as glibc's `setenv` and `unsetenv` change it): a child's `envp`, `osEnviron` |
 //! | [`process`] | child processes: `IO.Process.spawn` over `posix_spawn`, the `Child` operations, `IO.Process.output` |
 //! | [`uvsys`] | `Std.Internal.UV.System`'s queries (libuv 1.48 over std, nix, rustix, `/proc` and `/sys`) |

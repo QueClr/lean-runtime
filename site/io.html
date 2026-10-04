@@ -329,6 +329,10 @@ The two io_uring rings are real rings, made as libuv makes them.</p>
     That needs <code>#[link_section]</code>, which <code>deny(unsafe_code)</code> refuses in the crate.</li>
   <li><strong>Glue duty.</strong> After the module initializers, the glue calls <code>startup::mark_end_initialization</code>, as the generated <code>main</code> does.
     Until then <code>IO.initializing</code> is true; in <code>main</code> it is false.</li>
+  <li>The scheduler's signal watchers use the loop's signal pipe from startup, so a watcher opens no descriptor.
+    A translator with its own scheduler can take the pipe with <code>startup::claim_signal_pipe</code>, also without <code>sched</code>.
+    Only the first caller gets the pipe.
+    The caller must never close it or use its numbers for another file: signal handlers write to it at any time.</li>
   <li>Native Lean ignores <code>SIGPIPE</code> before <code>main</code>, so a write to a pipe without a reader fails with <code>EPIPE</code>.
     Rust's own entry does the same for a Rust <code>main</code>.
     A glue whose entry is not Rust's (lean2rr's) ignores <code>SIGPIPE</code> itself.</li>

@@ -14,7 +14,8 @@
 //! 3. the blocking pipe that locks signal handling, with one byte written
 //!    into it (`uv__signal_global_once_init`);
 //! 4. the loop's non-blocking signal pipe (`uv__process_init`), through
-//!    which `sched::uv`'s signal watchers are woken, as libuv's are;
+//!    which `sched::uv`'s signal watchers are woken, as libuv's are (or a
+//!    translator's own, [`claim_signal_pipe`]);
 //! 5. an eventfd, non-blocking (the loop's async handle).
 //!
 //! Before `main`, a native Lean program also ignores `SIGPIPE`
@@ -97,9 +98,7 @@
 
 use io_uring::IoUring;
 use rustix::event::{epoll, eventfd, EventfdFlags};
-#[cfg(feature = "sched")]
-use rustix::fd::{AsFd, BorrowedFd};
-use rustix::fd::{AsRawFd, OwnedFd};
+use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use rustix::pipe::{pipe_with, PipeFlags};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
@@ -165,9 +164,9 @@ struct Descriptors {
     _rings: Vec<IoUring>,
     _lock_pipe: (OwnedFd, OwnedFd),
     /// Kept open for the life of the process, never closed, `dup2`'d over or
-    /// reused: signal-hook's handlers write to its write end by number
-    /// (`sched::uv`; docs/sched.md, "Std.Internal.UV").
-    #[cfg_attr(not(feature = "sched"), allow(dead_code))]
+    /// reused: signal handlers write to its write end by number (signal-hook's
+    /// in `sched::uv`, or a translator's own; [`claim_signal_pipe`];
+    /// docs/sched.md, "Std.Internal.UV").
     signal_pipe: (OwnedFd, OwnedFd),
     #[cfg_attr(not(feature = "net"), allow(dead_code))]
     eventfd: OwnedFd,
@@ -200,14 +199,32 @@ pub(crate) fn claim_loop_epoll() -> Option<BorrowedFd<'static>> {
     }
 }
 
-/// The read and write ends of the loop's signal pipe, for `sched::uv`'s
-/// signal watchers, once [`open_native_descriptors`] has opened them: the
-/// first caller gets them, as `claim_loop_epoll`, so the watchers open no
-/// descriptor of their own, as natively (review RSIOB-05). The pipe lives
-/// in this module's static for the life of the process: the claimer may
-/// register its write end with signal handlers by number.
-#[cfg(feature = "sched")]
-pub(crate) fn claim_signal_pipe() -> Option<(BorrowedFd<'static>, BorrowedFd<'static>)> {
+/// The read and write ends of the loop's signal pipe (the one libuv's
+/// `uv__process_init` makes at startup), once [`open_native_descriptors`]
+/// has opened them, for the one event loop that delivers
+/// `Std.Internal.UV.Signal`'s signals, so that its watchers open no
+/// descriptor of their own, as natively (review RSIOB-05).
+///
+/// **Who may claim it.** `sched::uv`'s signal watchers (feature `sched`)
+/// claim it at the first watcher. A translator that keeps its own scheduler
+/// and signal watchers over this crate's `io` may claim it instead, with or
+/// without `sched` (AR-17). The first caller gets it, as with
+/// `claim_loop_epoll`; every later call, and every call before
+/// [`open_native_descriptors`] or after it failed, gets `None`, and that
+/// caller makes a pipe of its own (`sched::uv` does): so one loop drains
+/// the pipe, as libuv's one loop does.
+///
+/// **The claimer's duty** (docs/sched.md, "Std.Internal.UV", the pipe's
+/// duty). The descriptors belong to this module's static and stay open for
+/// the life of the process. The claimer:
+/// - never closes them, `dup2`s over them, or wraps their numbers in an
+///   owning type (`OwnedFd`, `File`), whose drop would close them;
+/// - uses them only as the signal pipe: signal handlers may write to the
+///   write end by number at any time, so the numbers must never name
+///   another file (such a write would corrupt it);
+/// - keeps both ends non-blocking (they are made non-blocking and
+///   close-on-exec, as libuv's), so a handler's write never blocks.
+pub fn claim_signal_pipe() -> Option<(BorrowedFd<'static>, BorrowedFd<'static>)> {
     use std::sync::atomic::{AtomicBool, Ordering};
     static CLAIMED: AtomicBool = AtomicBool::new(false);
     match DESCRIPTORS.get() {
@@ -515,6 +532,62 @@ mod tests {
             .unwrap()
             .any(|t| t.is_ok_and(|t| io_worker(&t.path())));
         assert!(polls);
+    }
+
+    /// AR-17: the startup signal pipe under `io` alone. Before
+    /// `open_native_descriptors` a claim gets `None` (and claims nothing);
+    /// after it the first claim gets the two ends of one pipe, read and
+    /// write, both non-blocking and close-on-exec, and every later claim
+    /// gets `None`. In a child process of its own, so that the descriptors
+    /// open nowhere else and no other test claims first.
+    #[test]
+    #[cfg_attr(miri, ignore)] // Miri runs no process or file system call
+    fn signal_pipe_claimed_once() {
+        use rustix::fs::{fcntl_getfl, fstat, OFlags};
+        use rustix::io::{fcntl_getfd, FdFlags};
+        const CHILD: &str = "LEAN_RUNTIME_TEST_SIGNAL_PIPE";
+        if std::env::var_os(CHILD).is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "io::startup::tests::signal_pipe_claimed_once",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+                "{out:?}"
+            );
+            return;
+        }
+        assert!(claim_signal_pipe().is_none());
+        open_native_descriptors().unwrap();
+        let (r, w) = claim_signal_pipe().unwrap();
+        assert!(claim_signal_pipe().is_none());
+        let (sr, sw) = (fstat(r).unwrap(), fstat(w).unwrap());
+        assert_eq!(
+            rustix::fs::FileType::from_raw_mode(sr.st_mode),
+            rustix::fs::FileType::Fifo
+        );
+        assert_eq!((sr.st_dev, sr.st_ino), (sw.st_dev, sw.st_ino));
+        let (fr, fw) = (fcntl_getfl(r).unwrap(), fcntl_getfl(w).unwrap());
+        assert_eq!(fr & OFlags::ACCMODE, OFlags::RDONLY);
+        assert_eq!(fw & OFlags::ACCMODE, OFlags::WRONLY);
+        for (fl, fd) in [(fr, r), (fw, w)] {
+            assert!(fl.contains(OFlags::NONBLOCK));
+            assert!(fcntl_getfd(fd).unwrap().contains(FdFlags::CLOEXEC));
+        }
+        // a byte written to the write end comes out of the read end, and
+        // then the empty pipe's read does not block
+        assert_eq!(rustix::io::write(w, &[7]), Ok(1));
+        let mut b = [0u8; 2];
+        assert_eq!(rustix::io::read(r, &mut b), Ok(1));
+        assert_eq!(b[0], 7);
+        assert_eq!(rustix::io::read(r, &mut b), Err(rustix::io::Errno::AGAIN));
     }
 
     #[test]

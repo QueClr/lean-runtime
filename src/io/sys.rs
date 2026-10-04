@@ -1,12 +1,13 @@
 //! The system calls the FILE model and the handles make, over rustix's safe
-//! API. Each failing call sets the crate's modelled `errno`
-//! ([`super::error::set_errno`]) as the C call would, and returns the code.
+//! API (and nix's for `isatty`, which is glibc's own). Each failing call sets
+//! the crate's modelled `errno` ([`super::error::set_errno`]) as the C call
+//! would, and returns the code.
 //!
 //! Replaces lean2rr's raw `extern "C"` declarations of `read`, `write`,
 //! `lseek`, `ftruncate`, `isatty`, `flock` and `open` (leanrt `cfile.rs`,
 //! `fs.rs`).
 
-use super::error::{set_errno, EINVAL};
+use super::error::{set_errno, EINVAL, ENOTTY};
 use rustix::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::mem::MaybeUninit;
 use std::sync::Arc;
@@ -117,11 +118,11 @@ impl Fd {
         rustix::fs::fstat(self.get()?).map_err(fail)
     }
 
-    /// glibc's `isatty` (`tcgetattr`): `false` with `errno` set (`ENOTTY`,
+    /// glibc's `isatty` ([`isatty`]): `false` with `errno` set (`ENOTTY`,
     /// `EBADF`) when the descriptor is not a terminal.
     pub(crate) fn isatty(&self) -> bool {
         match self.get() {
-            Ok(fd) => rustix::termios::tcgetattr(fd).map_err(fail).is_ok(),
+            Ok(fd) => isatty(fd).map_err(set_errno).is_ok(),
             Err(_) => false,
         }
     }
@@ -130,13 +131,31 @@ impl Fd {
     /// `_IO_file_doallocate`; unused under Miri, which asks nothing there).
     #[cfg_attr(miri, allow(dead_code))]
     pub(crate) fn isatty_keep_errno(&self) -> bool {
-        self.borrow()
-            .is_some_and(|fd| rustix::termios::tcgetattr(fd).is_ok())
+        self.borrow().is_some_and(|fd| isatty(fd).is_ok())
     }
 
     /// `flock(2)`.
     pub(crate) fn flock(&self, op: rustix::fs::FlockOperation) -> Result<(), i32> {
         rustix::fs::flock(self.get()?, op).map_err(fail)
+    }
+}
+
+/// glibc's `isatty(fd)` itself, through nix's safe `unistd::isatty`: one
+/// `ioctl(fd, TCGETS)` (glibc's `tcgetattr`, at 2.39), as native Lean's
+/// `isatty` makes (AR-18). `Err` holds the `errno` (`ENOTTY` for a
+/// descriptor that is no terminal, which nix reports as `Ok(false)`;
+/// `EBADF`); the modelled `errno` is the caller's to set. glibc also sets
+/// the thread's C `errno`, which nothing here reads.
+///
+/// Not rustix's: its `tcgetattr` asks `TCGETS2` first, then `TCGETS` on
+/// `ENOTTY` or `EACCES`, so two ioctls on every descriptor that is no
+/// terminal; its `isatty` asks `TIOCGWINSZ`, another ioctl than glibc's, and
+/// drops the error; and its typed ioctls (`rustix::ioctl`) are `unsafe`.
+fn isatty(fd: BorrowedFd<'_>) -> Result<(), i32> {
+    match nix::unistd::isatty(fd) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ENOTTY),
+        Err(e) => Err(e as i32),
     }
 }
 
