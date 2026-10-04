@@ -1,0 +1,3 @@
+main: locked while the task reads
+task: got "line\n"
+done

@@ -1,0 +1,5 @@
+id = "lock_during_read"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime review io-1 RIO1-01 (the descriptor reachable without the stream lock)"
+streams = "separate"

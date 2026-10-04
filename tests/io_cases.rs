@@ -535,6 +535,21 @@ fn lock_exit(args: &[String]) -> R<()> {
     exit::exit(0)
 }
 
+fn lock_during_read(args: &[String]) -> R<()> {
+    let h = open(&args[0], FsMode::Read)?;
+    let th = h.clone();
+    let t = dedicated_task(move || {
+        let l = get_line(&th)?;
+        println(&format!("task: got {}", quote(&l)))
+    });
+    env::sleep(nat(&args[1]) as u32);
+    h.lock(true)?;
+    println("main: locked while the task reads")?;
+    let _ = t.join().unwrap();
+    h.unlock()?;
+    println("done")
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -558,6 +573,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("startup_closed_stdio", startup_closed_stdio),
     ("lock_blocked", lock_blocked),
     ("lock_exit", lock_exit),
+    ("lock_during_read", lock_during_read),
 ];
 
 /// Twins whose cases are in another branch (cases-xt) until it merges: they

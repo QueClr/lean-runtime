@@ -81,6 +81,9 @@ pub(crate) fn lock(m: &Mutex<CFile>) -> MutexGuard<'_, CFile> {
 #[derive(Debug)]
 pub(crate) struct FileStream {
     pub(crate) file: Mutex<CFile>,
+    /// The descriptor, reachable without the lock (`fileno(fp)`), for the
+    /// calls that take no `FILE` lock natively (`flock`, `isatty`).
+    fd: sys::Fd,
 }
 
 /// The open files, oldest first: glibc's `_IO_list_all`, reversed (new
@@ -117,8 +120,18 @@ pub struct Handle(Repr);
 
 #[derive(Clone, Debug)]
 enum Repr {
-    Std(&'static Mutex<CFile>),
+    /// glibc's `stdin` (0), `stdout` (1) or `stderr` (2).
+    Std(u8),
     File(Arc<FileStream>),
+}
+
+/// The `FILE` of a standard stream.
+fn std_stream(n: u8) -> &'static Mutex<CFile> {
+    match n {
+        0 => &STDIN,
+        1 => &STDOUT,
+        _ => &STDERR,
+    }
 }
 
 /// `lean_alloc_sarray_would_overflow(1, n)`: a byte array of `n` bytes does
@@ -158,17 +171,17 @@ pub(crate) fn flush_line_buffered_stdout() {
 impl Handle {
     /// glibc's `stdin` as a handle (`IO.getStdin`'s default stream).
     pub fn stdin() -> Handle {
-        Handle(Repr::Std(&STDIN))
+        Handle(Repr::Std(0))
     }
 
     /// glibc's `stdout` as a handle.
     pub fn stdout() -> Handle {
-        Handle(Repr::Std(&STDOUT))
+        Handle(Repr::Std(1))
     }
 
     /// glibc's `stderr` as a handle (unbuffered).
     pub fn stderr() -> Handle {
-        Handle(Repr::Std(&STDERR))
+        Handle(Repr::Std(2))
     }
 
     /// `IO.FS.Handle.mk` (`lean_io_prim_handle_mk`): a path holding a NUL byte
@@ -202,8 +215,10 @@ impl Handle {
     }
 
     fn register(file: CFile) -> Handle {
+        let fd = file.descriptor();
         let f = Arc::new(FileStream {
             file: Mutex::new(file),
+            fd,
         });
         OPEN.lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -215,7 +230,7 @@ impl Handle {
     #[inline]
     pub fn file(&self) -> MutexGuard<'_, CFile> {
         match &self.0 {
-            Repr::Std(m) => lock(m),
+            Repr::Std(n) => lock(std_stream(*n)),
             Repr::File(f) => lock(&f.file),
         }
     }
@@ -232,7 +247,7 @@ impl Handle {
     /// Whether two handles are the same stream.
     pub fn ptr_eq(&self, other: &Handle) -> bool {
         match (&self.0, &other.0) {
-            (Repr::Std(a), Repr::Std(b)) => std::ptr::eq(*a, *b),
+            (Repr::Std(a), Repr::Std(b)) => a == b,
             (Repr::File(a), Repr::File(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
@@ -312,7 +327,7 @@ impl Handle {
     /// `Handle.isTty` (`lean_io_prim_handle_is_tty`, `isatty`, errors
     /// ignored).
     pub fn is_tty(&self) -> bool {
-        self.file().is_tty()
+        self.fileno().isatty()
     }
 
     /// `Handle.rewind` (`lean_io_prim_handle_rewind`, `fseek(fp, 0,
@@ -327,13 +342,22 @@ impl Handle {
         self.file().truncate().map_err(os)
     }
 
-    /// `flock(fileno(fp), op)`: natively it takes no `FILE` lock, so the
-    /// stream's lock is dropped before `flock`, which may block: other
-    /// operations on the handle, from other tasks, and the exit go on while a
-    /// task waits for the lock (review RIO1-01).
+    /// `flock(fileno(fp), op)`: natively it takes no `FILE` lock, so it runs
+    /// on the descriptor without the stream's lock, which a blocking read of
+    /// another task may hold: other operations on the handle and the exit go
+    /// on while a task waits in `flock`, and `flock` does not wait for them
+    /// (review RIO1-01).
     fn flock(&self, op: FlockOperation) -> Result<(), i32> {
-        let fd = self.file().descriptor();
-        fd.flock(op)
+        self.fileno().flock(op)
+    }
+
+    /// `fileno(fp)`, without the stream's lock: a standard descriptor, or
+    /// the file's shared descriptor (it stays open while the clone lives).
+    fn fileno(&self) -> sys::Fd {
+        match &self.0 {
+            Repr::Std(n) => sys::Fd::Std(*n),
+            Repr::File(f) => f.fd.clone(),
+        }
     }
 
     /// `Handle.lock` (`lean_io_prim_handle_lock`, `flock` with `LOCK_EX` or
