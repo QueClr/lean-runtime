@@ -14,6 +14,19 @@
 //! 4. the loop's non-blocking signal pipe (`uv__process_init`);
 //! 5. an eventfd, non-blocking (the loop's async handle).
 //!
+//! Before `main`, a native Lean program also ignores `SIGPIPE`
+//! (`initialize_io`, io.cpp:1668: `signal(SIGPIPE, SIG_IGN)`), so a write to
+//! a pipe without a reader fails with `EPIPE` (an `IO.Error`) instead of
+//! killing the process.
+//!
+//! **The translator's glue duties** (review RIO1-03), neither expressible in
+//! this crate's safe code:
+//! - ignore `SIGPIPE` before Lean code runs: Rust's `lang_start` does it for a
+//!   Rust `main`; an entry that is not `lang_start` (lean2rr's) must do it
+//!   itself;
+//! - run an ELF constructor (`#[link_section = ".init_array"]`) that calls
+//!   [`open_native_descriptors`], and on `Err` [`fail_as_native`].
+//!
 //! So on a host with io_uring, descriptors 3 to 10 are taken, and a standard
 //! descriptor closed at startup is taken by the first of them: reading a
 //! closed stdin or writing a closed stdout then fails with `EINVAL`, and the
@@ -36,9 +49,14 @@
 //!
 //! Whether libuv makes the rings is decided as libuv 1.48.0 decides it
 //! ([`io_uring_rings_expected`]), plus what makes `io_uring_setup` fail on
-//! purpose (`kernel.io_uring_disabled`). A seccomp filter that refuses
-//! `io_uring_setup` (some container runtimes install one) cannot be read
-//! reliably: it is the known gap, where native has two descriptors fewer.
+//! purpose (`kernel.io_uring_disabled`). Known gaps, where native has two
+//! descriptors fewer than predicted:
+//! - a seccomp filter that refuses `io_uring_setup` (some container runtimes
+//!   install one): it cannot be read reliably;
+//! - `kernel.io_uring_disabled = 1` in a user namespace (rootless
+//!   containers): the kernel checks `CAP_SYS_ADMIN` in the initial user
+//!   namespace, while the effective capabilities in `/proc/self/status` are
+//!   the namespace's own (review RIO1-10).
 //!
 //! Source: lean2rr's `runtime/leanrt/src/rt.rs` (`reserve_libuv_descriptors`,
 //! `kernel_version`), rewritten over rustix's safe API. lean2rr's version
@@ -240,7 +258,9 @@ pub fn kernel_version() -> u32 {
 /// The io_uring part of `io_uring_allowed` (Linux 6.6 and later; earlier
 /// kernels have no such setting): `kernel.io_uring_disabled` 0 allows, 2
 /// forbids, 1 allows a process with `CAP_SYS_ADMIN` or in
-/// `kernel.io_uring_group`. A setting that cannot be read allows.
+/// `kernel.io_uring_group`. A setting that cannot be read allows. The
+/// capability is read from `CapEff`, the process's own user namespace, while
+/// the kernel asks the initial one: a known gap in user namespaces.
 fn io_uring_allowed() -> bool {
     let read = |p: &str| {
         std::fs::read_to_string(p)

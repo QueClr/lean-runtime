@@ -811,7 +811,9 @@ impl CFile {
     /// read. The bytes copied out of the stream's buffer are appended with no
     /// zero pass; a direct read (a buffer or more) goes into the spare
     /// capacity with no zero pass when it reaches the end of the `n` bytes,
-    /// and into zeroed bytes otherwise (see `sys::VecDest`).
+    /// and into zeroed bytes otherwise: a `memset` of the block-aligned part,
+    /// up to `n` bytes (see `sys::VecDest`, and the module comment of
+    /// `lean_runtime::io` for the `read_uninit` route).
     pub fn read_vec(&mut self, n: usize, out: &mut Vec<u8>) -> Result<usize, i32> {
         out.reserve_exact(n);
         let start = out.len();
@@ -895,7 +897,7 @@ impl CFile {
     }
 
     /// `flock(fileno(fp), op)`. It may block, and the caller holds the
-    /// stream meanwhile; `Handle::lock` & co. wait on [`CFile::descriptor`]'s
+    /// stream meanwhile; `Handle::lock` & co. wait on `CFile::descriptor`'s
     /// clone with the stream unlocked instead, as native takes no `FILE` lock.
     pub fn flock(&self, op: rustix::fs::FlockOperation) -> Result<(), i32> {
         self.fd.flock(op)

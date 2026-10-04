@@ -281,9 +281,12 @@ impl Handle {
     }
 
     /// [`Handle::read`] of up to `n` bytes appended to `out`, a translator's
-    /// `Vec`-based `ByteArray` (call [`check_read_size`] first): no zero pass
-    /// but where a direct read stops short of the `n` bytes' end
-    /// ([`CFile::read_vec`]). The count read.
+    /// `Vec`-based `ByteArray` (call [`check_read_size`] first). The count
+    /// read. Zero pass: when `n` is at least one buffer (4096 bytes) and its
+    /// block-aligned part does not end at the end of the `n` bytes, that part
+    /// is zeroed before the read (a `memset` of up to `n` bytes; the usual
+    /// `readBinFile`). The `read_uninit` route that avoids it is in the
+    /// module comment of `lean_runtime::io`.
     #[inline]
     pub fn read_vec(&self, n: usize, out: &mut Vec<u8>) -> Result<usize, IoError> {
         if n == 0 {

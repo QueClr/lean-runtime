@@ -64,9 +64,20 @@ pub fn exit(code: i32) -> ! {
 }
 
 /// `IO.Process.forceExit` (`lean_io_force_exit`, `_Exit`): end the process
-/// at once, the streams' pending output lost. `std::process::exit` runs the
-/// C library's atexit handlers, which this crate does not use, and none of the
-/// crate's flushes.
+/// with none of this crate's flushes, so the streams' pending output is lost.
+///
+/// It is `std::process::exit`, not `_Exit`: safe Rust has no `_Exit`. What
+/// that runs and `_Exit` does not (review RIO1-04):
+/// - std's own cleanup: Rust's `std::io::stdout` buffer is flushed (this crate
+///   does not use it);
+/// - glibc's `exit`: the calling thread's `thread_local!` destructors
+///   (`__call_tls_dtors`), the `atexit` and `__cxa_atexit` handlers (C++
+///   static destructors, libc++'s flush of `std::cout`), and `_IO_cleanup`,
+///   which flushes the C stdio `FILE`s of linked C code.
+///
+/// The crate registers none of these. A translator whose glue registers any,
+/// or links C or C++ code that buffers output, and needs `_Exit` exactly,
+/// calls `_exit` from its glue.
 pub fn force_exit(code: i32) -> ! {
     std::process::exit(code)
 }

@@ -11,7 +11,7 @@
 //! | [`handle`] | `IO.FS.Handle` ([`Handle`]): open modes, the standard streams, the Lean handle primitives, the open-handle list |
 //! | [`exit`] | what a native Lean program's exit does with the streams (libc++'s `ios_base::Init`, then glibc's `_IO_cleanup`), `IO.Process.exit`, `forceExit`, the uncaught-error message |
 //! | [`fs`] | the file system: directories, metadata, `realPath`, removal, renaming, links, permissions, the working directory |
-//! | [`env`] | `IO.getEnv`, `IO.appPath`, the process id, random bytes, the monotonic clock, `IO.sleep` |
+//! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, random bytes, the monotonic clock, `IO.sleep` |
 //! | [`debug`] | the IO parts of `dbgTrace` and `dbgSleep`, and the runtime's own standard-error lines |
 //! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors |
 //!
@@ -29,8 +29,9 @@
 //!   the caller allocated in its own object and returns the count: as
 //!   uninitialized memory with no zero pass ([`Handle::read_uninit`], over
 //!   rustix's reads into `MaybeUninit` and `write_copy_of_slice`), as a
-//!   `Vec`'s spare capacity ([`Handle::read_vec`]), or as initialized bytes
-//!   ([`Handle::read`]); an unbounded result (`getLine`, a path, an
+//!   `Vec`'s spare capacity ([`Handle::read_vec`], which still zero-fills in
+//!   one case, below), or as initialized bytes ([`Handle::read`]); an
+//!   unbounded result (`getLine`, a path, an
 //!   environment value, a directory entry's name) is appended to a
 //!   [`ByteSink`] the caller implements on its own object;
 //! - **writes take views** (`&[u8]`), never ownership;
@@ -39,12 +40,33 @@
 //! Only the cold error path owns data: [`IoError`] holds its file name and
 //! details as `String`s.
 //!
+//! **`read_vec`'s zero pass** (review RIO1-02). A read of `n` bytes at least
+//! one buffer long (4096 bytes for most files and pipes) reads its
+//! block-aligned part, `n - n % 4096` bytes after the buffered ones, straight
+//! from the descriptor. Safe Rust can only grow a `Vec` over bytes a read
+//! initialized through rustix's `spare_capacity`, which reads into *all* of
+//! the spare capacity; so `read_vec` uses it only when that part ends exactly
+//! at the end of the `n` bytes, and otherwise reads into zeroed bytes: a
+//! `memset` of the block-aligned part, about as fast as copying it once.
+//! That is the usual `IO.FS.readBinFile` (`read size` of a file whose size is
+//! not a multiple of 4096: a 1 MiB + 1 file zeroes 1 MiB). Glue whose
+//! `ByteArray` is a `Vec` and that accepts one performance-justified `unsafe`
+//! avoids it: reserve `n`, call [`Handle::read_uninit`] on
+//! `&mut v.spare_capacity_mut()[..n]`, then `v.set_len(len + count)` (sound:
+//! `read_uninit` initialized exactly `count` bytes). Glue over its own
+//! uninitialized allocation (lean2rr's one-block arrays) calls `read_uninit`
+//! and pays nothing. The timing session measures what it costs.
+//!
 //! # Concurrency
 //!
 //! Every stream is behind a `std::sync::Mutex`, as glibc locks each `FILE`
 //! (native Lean runs `main` on a thread of its own, so glibc's locks are
-//! always on). Nothing here calls back into a translator while holding a
-//! lock.
+//! always on). The one call back into a translator under a stream's lock is
+//! [`ByteSink::extend_from_slice`] (`getLine` appends while it scans the
+//! buffer); the lock is not recursive, so the sink must not call into
+//! `lean_runtime::io` nor end the process (see [`ByteSink`]). `Handle::lock`
+//! and friends wait in `flock` without holding the stream's lock, as native
+//! takes no `FILE` lock for them.
 
 #[cfg(not(all(
     target_os = "linux",
@@ -70,6 +92,12 @@ pub use handle::{FsMode, Handle};
 
 /// A growable byte buffer a translator implements on its own object, so that
 /// an unbounded result is written straight into it (see the module comment).
+///
+/// Contract: `extend_from_slice` may run while a stream's lock is held
+/// (`Handle::get_line`), so it only appends: it must not call into
+/// `lean_runtime::io` (the lock is not recursive: a deadlock) and must not end
+/// the process (`exit` would wait for that lock). Allocation failure may
+/// abort, as Lean's own allocation does.
 pub trait ByteSink {
     /// Append `bytes`.
     fn extend_from_slice(&mut self, bytes: &[u8]);
