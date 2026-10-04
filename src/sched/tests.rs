@@ -1012,12 +1012,17 @@ fn a_watch_runs_when_its_descriptor_is_readable() {
     let r = Rc::new(r);
     let p = promise_new().unwrap();
     let seen = Rc::new(Cell::new(Ready::default()));
-    let s2 = seen.clone();
+    let (s2, r2) = (seen.clone(), r.clone());
     let id = watch(
         r.clone(),
         Interest::READ,
         Rc::new(move |ready| {
             s2.set(ready);
+            // drained: once the call returns and the watch is armed again,
+            // the loop finds nothing to queue (a second call, queued while
+            // the byte was still there, would keep `io_cooperative` true
+            // after `unwatch` until the loop skips it)
+            rustix::io::read(&*r2, &mut [0u8; 1]).unwrap();
             resolve(p, || {});
         }),
     )

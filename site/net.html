@@ -87,7 +87,8 @@ So the waiting tasks wake there, as natively on the loop thread.</p>
   <li><strong>Buffers.</strong> A receive calls back to the translator to allocate its <code>ByteArray</code>, where native allocates it.
     The bytes go straight into it.</li>
   <li><strong>Lifetime.</strong> A socket closes when the translator drops its last handle.
-    A pending operation keeps the socket open until it ends, as natively.</li>
+    A pending operation keeps the socket open until it ends, as natively.
+    The loop's callbacks hold only the socket's number, so the loop never keeps a socket open (net-2).</li>
 </ul>
 
 <h2 id="dns">Name lookups</h2>

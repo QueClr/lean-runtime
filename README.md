@@ -96,7 +96,10 @@ over non-blocking sockets, on the scheduler's event loop), `DNS` (glibc's
 `getaddrinfo` and `getnameinfo` through dns-lookup, on two helper threads)
 and `Std.Net.interfaceAddresses`. The cases of `tests/cases/net` pass
 through the driver; eight native bugs are not reproduced (LB-21 to LB-28).
-See `docs/net.md`.
+Its second batch, net-2, holds no `Weak` reference: the loop's callbacks
+hold a socket's number in the thread's registry of open sockets, so only
+the program's handles and the pending operations keep a socket open
+(AR-12). See `docs/net.md`.
 
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in

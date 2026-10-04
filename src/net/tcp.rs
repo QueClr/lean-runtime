@@ -29,9 +29,9 @@
 
 use super::{
     close_fd, feed, sockaddr, socket_address, uv_err, uv_error, watch_cb, with_code, Done, Ev, Fd,
-    IoWatcher, RecvBuf, RecvTarget, SendData, IOV_MAX, UV_EADDRINUSE, UV_EAFNOSUPPORT, UV_EAGAIN,
-    UV_EALREADY, UV_EBADF, UV_ECANCELED, UV_ECONNREFUSED, UV_EINPROGRESS, UV_EINVAL, UV_ENOBUFS,
-    UV_ENOTCONN, UV_EPIPE,
+    Handle, IoWatcher, RecvBuf, RecvTarget, SendData, SocketId, IOV_MAX, UV_EADDRINUSE,
+    UV_EAFNOSUPPORT, UV_EAGAIN, UV_EALREADY, UV_EBADF, UV_ECANCELED, UV_ECONNREFUSED,
+    UV_EINPROGRESS, UV_EINVAL, UV_ENOBUFS, UV_ENOTCONN, UV_EPIPE,
 };
 use crate::io::IoError;
 use crate::sched::Interest;
@@ -42,15 +42,15 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::IoSlice;
 use std::net::SocketAddr;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::Duration;
 
 /// `Std.Internal.UV.TCP.Socket`: a translator keeps one in its external
 /// object (clones name the same socket). The socket closes when the last
-/// clone goes and no operation is pending (Lean's finalizer).
+/// clone goes and no operation is pending (Lean's finalizer; `Handle`).
 #[derive(Clone)]
-pub struct TcpSocket(Rc<RefCell<Tcp>>);
+pub struct TcpSocket(Rc<Handle<Tcp>>);
 
 /// A receive in progress: Lean's `m_promise_read` (and `m_byte_array`), with
 /// libuv's read callback.
@@ -166,7 +166,8 @@ struct Pending<T> {
 
 #[derive(Default)]
 struct Tcp {
-    me: Weak<RefCell<Tcp>>,
+    /// The socket's number in the registry, which the loop's callbacks hold.
+    id: SocketId,
     fd: Option<Fd>,
     // libuv's handle flags
     readable: bool,
@@ -200,7 +201,9 @@ struct Tcp {
 
 impl Drop for Tcp {
     /// Lean's finalizer: `uv_close`, which closes the descriptors at once
-    /// (`uv__stream_close`). No operation is pending: each holds the socket.
+    /// (`uv__stream_close`), when the handle goes (or a loop callback running
+    /// on the socket returns after that). No operation is pending: each holds
+    /// the handle.
     fn drop(&mut self) {
         self.watcher.close();
         close_fd(self.fd.take());
@@ -323,14 +326,9 @@ impl Tcp {
 
     /// `uv__io_start` / `uv__io_stop`.
     fn io_set(&mut self, want: Interest) {
-        let me = self.me.clone();
+        let id = self.id;
         self.watcher.set(self.fd.as_ref(), want, || {
-            watch_cb(
-                &me,
-                TcpSocket::on_io,
-                |t: &Tcp| t.watcher.want(),
-                Ev::from_ready,
-            )
+            watch_cb(id, Loop::on_io, |t: &Tcp| t.watcher.want(), Ev::from_ready)
         });
     }
 
@@ -349,8 +347,7 @@ impl Tcp {
     }
 
     fn feed(&mut self) {
-        let me = self.me.clone();
-        feed(&mut self.watcher, &me, TcpSocket::on_io, |t: &mut Tcp| {
+        feed(&mut self.watcher, self.id, Loop::on_io, |t: &mut Tcp| {
             &mut t.watcher
         });
     }
@@ -493,6 +490,15 @@ impl Tcp {
     }
 }
 
+#[cfg(test)]
+impl TcpSocket {
+    /// A `uv__io_feed` now, with nothing pending: the state a write that
+    /// finished on the loop leaves behind (the unit tests').
+    pub(crate) fn feed_for_tests(&self) {
+        self.0.borrow_mut().feed();
+    }
+}
+
 impl TcpSocket {
     /// `Socket.new` (`lean_uv_tcp_new`, `uv_tcp_init`): a socket with no
     /// descriptor yet. The first stream also takes libuv's spare descriptor
@@ -505,25 +511,30 @@ impl TcpSocket {
 
     fn make() -> TcpSocket {
         reserve_emfile_fd();
-        TcpSocket(Rc::new_cyclic(|me| {
+        TcpSocket(Rc::new(Handle::new(|id| {
             let mut t = Tcp::default();
-            t.me = me.clone();
-            RefCell::new(t)
-        }))
+            t.id = id;
+            t
+        })))
     }
+}
 
+// ---------------------------------------------------------------------------
+// The loop's side (`uv__stream_io`, `uv__server_io`)
+
+/// A socket's state as a loop callback sees it ([`super::on_socket`]).
+struct Loop<'a>(&'a RefCell<Tcp>);
+
+impl Loop<'_> {
     /// The watch callback and `uv__io_feed`'s call.
-    fn on_io(s: &Rc<RefCell<Tcp>>, ev: Ev) {
-        let t = TcpSocket(s.clone());
+    fn on_io(s: &RefCell<Tcp>, ev: Ev) {
+        let t = Loop(s);
         if s.borrow().listening {
             t.server_io();
         } else {
             t.stream_io(ev);
         }
     }
-
-    // -----------------------------------------------------------------------
-    // The loop's side (`uv__stream_io`, `uv__server_io`)
 
     /// `uv__stream_io`.
     fn stream_io(&self, ev: Ev) {
@@ -780,10 +791,12 @@ impl TcpSocket {
             drop(req._keep);
         }
     }
+}
 
-    // -----------------------------------------------------------------------
-    // The externs
+// ---------------------------------------------------------------------------
+// The externs
 
+impl TcpSocket {
     /// `Socket.connect` (`lean_uv_tcp_connect`, `uv_tcp_connect`): start
     /// connecting to `addr`; `done` gets the outcome on the loop.
     pub fn connect(

@@ -35,7 +35,13 @@
 //!
 //! **Lifetime.** A socket closes when the translator's last handle goes
 //! (Lean's finalizer, `uv_close`), unless an operation is pending: a pending
-//! operation holds the socket, as native's `lean_inc(socket)`.
+//! operation holds the socket, as native's `lean_inc(socket)`. The loop's
+//! callbacks (the watch of the descriptor, a due `uv__io_feed`) hold no
+//! reference to the socket, only its number in the thread's registry of open
+//! sockets ([`Handle`]); one that runs after the socket closed finds nothing
+//! and does nothing. So only the program's handles and the pending
+//! operations keep a socket open, and no reference cycle goes through the
+//! loop.
 //!
 //! **Data.** `send` takes the translator's buffers as a [`SendData`] view and
 //! keeps it until the write completes (Lean's `Array ByteArray` is held
@@ -57,10 +63,11 @@ use crate::io::IoError;
 use crate::sched::{self, Interest, Ready, WatchId};
 use rustix::fd::{BorrowedFd, OwnedFd};
 use rustix::net::SocketAddrAny;
-use std::cell::RefCell;
+use std::any::Any;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::mem::MaybeUninit;
-
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::time::Instant;
 
 pub mod dns;
@@ -245,44 +252,143 @@ impl IoWatcher {
     }
 }
 
+/// A socket's number in the thread's registry of open sockets: given once,
+/// never reused.
+pub(crate) type SocketId = u64;
+
+/// The open sockets of the thread (TCP and UDP), by number. The loop's
+/// callbacks hold a socket's number, not a reference to it, and find the
+/// socket here while it is open ([`on_socket`]).
+///
+/// An entry exists exactly while the socket's [`Handle`] does (made by
+/// [`Handle::new`], removed by its drop), and the handle holds the socket's
+/// state too: the registry is never the last owner of a socket, so removing
+/// an entry, or the registry itself at the thread's end, never closes one.
+#[derive(Default)]
+struct Registry {
+    /// The last number given.
+    last: Cell<SocketId>,
+    open: RefCell<HashMap<SocketId, Rc<dyn Any>>>,
+}
+
+thread_local! {
+    static SOCKETS: Registry = Registry::default();
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many loop callbacks found their socket (the unit tests').
+    pub(crate) static CALLBACKS_RUN: Cell<u32> = const { Cell::new(0) };
+}
+
+/// A socket as the program holds it: `TcpSocket` and `UdpSocket` are an
+/// `Rc` of one, which a pending operation clones (native's
+/// `lean_inc(socket)`). It owns the socket's state and its entry in the
+/// registry. When the last clone goes (the program's last reference, and no
+/// operation pending), its drop removes the entry and lets go of the state,
+/// whose own drop closes the descriptor (Lean's finalizer, `uv_close`): at
+/// once, unless a loop callback is running on the socket, which holds the
+/// state until it returns ([`on_socket`]).
+pub(crate) struct Handle<T: 'static> {
+    id: SocketId,
+    state: Rc<RefCell<T>>,
+}
+
+impl<T: 'static> Handle<T> {
+    /// A new socket: its number, its state `make(id)`, its entry.
+    pub(crate) fn new(make: impl FnOnce(SocketId) -> T) -> Handle<T> {
+        let id = SOCKETS.with(|r| {
+            let id = r.last.get() + 1;
+            r.last.set(id);
+            id
+        });
+        let state = Rc::new(RefCell::new(make(id)));
+        let entry: Rc<dyn Any> = state.clone();
+        SOCKETS.with(|r| r.open.borrow_mut().insert(id, entry));
+        Handle { id, state }
+    }
+}
+
+/// The socket's state.
+impl<T: 'static> std::ops::Deref for Handle<T> {
+    type Target = RefCell<T>;
+    fn deref(&self) -> &RefCell<T> {
+        &self.state
+    }
+}
+
+impl<T: 'static> Drop for Handle<T> {
+    fn drop(&mut self) {
+        // nothing to remove once the thread's locals are gone
+        let entry = SOCKETS
+            .try_with(|r| r.open.borrow_mut().remove(&self.id))
+            .ok()
+            .flatten();
+        drop(entry);
+        // `self.state` goes next: the socket's drop, if nothing else holds it
+    }
+}
+
+/// A loop callback's step: run `f` on socket `id` if it is still open;
+/// otherwise do nothing. `f` holds the socket's state until it returns: a
+/// socket whose last handle goes during the call (its last operation
+/// resolved there) closes when `f` returns. Natively Lean's finalizer takes
+/// the loop's lock (`event_loop_lock`, recursive) before `uv_close`, so its
+/// close too comes no later than the end of the callback; the rest of the
+/// call does nothing visible, since no operation is pending any more. A
+/// watch's callback always finds its socket (the socket's drop ends the
+/// watch, `IoWatcher::close`, before any other callback can run); a
+/// `uv__io_feed` due after the socket closed does not.
+pub(crate) fn on_socket<T: 'static>(id: SocketId, f: impl FnOnce(&RefCell<T>)) {
+    let entry = SOCKETS
+        .try_with(|r| r.open.borrow().get(&id).cloned())
+        .ok()
+        .flatten();
+    let Some(s) = entry.and_then(|e| e.downcast::<RefCell<T>>().ok()) else {
+        return;
+    };
+    #[cfg(test)]
+    CALLBACKS_RUN.with(|n| n.set(n.get() + 1));
+    f(&s);
+}
+
 /// `uv__io_feed`: run `io(FEED)` on the loop context soon (once until it has
 /// run), as libuv's pending queue runs the watcher with `POLLOUT` at its
-/// next turn.
+/// next turn. The timer holds the socket's number only.
 pub(crate) fn feed<T: 'static>(
     w: &mut IoWatcher,
-    me: &Weak<RefCell<T>>,
-    io: fn(&Rc<RefCell<T>>, Ev),
+    id: SocketId,
+    io: fn(&RefCell<T>, Ev),
     fed: fn(&mut T) -> &mut IoWatcher,
 ) {
     if w.fed {
         return;
     }
     w.fed = true;
-    let me = me.clone();
     sched::timer_start(
         Instant::now(),
         Rc::new(move || {
-            if let Some(s) = me.upgrade() {
+            on_socket(id, |s: &RefCell<T>| {
                 fed(&mut s.borrow_mut()).fed = false;
-                io(&s, Ev::FEED);
-            }
+                io(s, Ev::FEED);
+            })
         }),
     );
 }
 
-/// The watch callback of a handle: `io(events)` while the handle lives.
+/// The watch callback of socket `id`: `io(events)` while the socket is
+/// open. It holds the socket's number only.
 pub(crate) fn watch_cb<T: 'static>(
-    me: &Weak<RefCell<T>>,
-    io: fn(&Rc<RefCell<T>>, Ev),
+    id: SocketId,
+    io: fn(&RefCell<T>, Ev),
     want: fn(&T) -> Interest,
     conv: fn(Ready, Interest) -> Ev,
 ) -> Rc<dyn Fn(Ready)> {
-    let me = me.clone();
     Rc::new(move |r| {
-        if let Some(s) = me.upgrade() {
+        on_socket(id, |s: &RefCell<T>| {
             let w = want(&s.borrow());
-            io(&s, conv(r, w));
-        }
+            io(s, conv(r, w));
+        })
     })
 }
 

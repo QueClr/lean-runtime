@@ -1,6 +1,7 @@
-//! Unit tests of `net`'s pure parts and of the calls that need no event
-//! loop. The program cases (`tests/cases/net`, through `tests/sched-driver`)
-//! cover the rest with native Lean's outcomes.
+//! Unit tests of `net`'s pure parts, of the calls that need no event loop,
+//! and of a socket's lifetime on the loop (AR-12). The program cases
+//! (`tests/cases/net`, through `tests/sched-driver`) cover the rest with
+//! native Lean's outcomes.
 
 use super::dns::{
     answer, idna_ok, safe_ascii, translate_eai, Answer, Fail, Job, Pool, Query, Raw, EAI_FAIL,
@@ -449,4 +450,100 @@ fn exit_runs_the_due_lookups_of_fresh_helpers() {
         "and the exit waits for them"
     );
     assert_eq!(delivered.load(Ordering::SeqCst), 0, "no answer after exit");
+}
+
+/// A scheduler for a test's thread whose contexts never suspend, as in
+/// `sched`'s own unit tests: the loop context's callbacks run to their end.
+struct NoSuspend;
+
+impl sched::Glue for NoSuspend {
+    fn suspend(&self, _: sched::Suspend<'_>) {
+        panic!("net's unit tests never suspend a context");
+    }
+}
+
+fn start_loop() {
+    sched::start_with(Rc::new(NoSuspend), 2, 1 << 20);
+}
+
+/// How many loop callbacks of this thread found their socket.
+fn callbacks_run() -> u32 {
+    CALLBACKS_RUN.with(|n| n.get())
+}
+
+/// AR-12: a socket dropped while it is watched (a listening socket with a
+/// connection waiting, so its descriptor is ready) closes its descriptor at
+/// once, as Lean's finalizer does: the watch ends with it, the port can be
+/// bound again at once, and no callback of the socket runs.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_socket_dropped_while_watched_closes_at_once() {
+    start_loop();
+    let t = TcpSocket::new().unwrap();
+    t.bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+        .unwrap();
+    t.listen(4).unwrap();
+    let addr = t.sock_name().unwrap();
+    let _client = std::net::TcpStream::connect(addr).unwrap();
+    assert!(sched::io_cooperative(), "the socket is watched");
+    let before = callbacks_run();
+    drop(t);
+    assert!(!sched::io_cooperative(), "the watch ended with the socket");
+    std::net::TcpListener::bind(addr).expect("the port is free at once");
+    sched::sleep_ms(5);
+    assert_eq!(callbacks_run(), before, "no callback of the socket ran");
+    sched::finish();
+}
+
+/// AR-12: a socket dropped while a `uv__io_feed` is due, with nothing
+/// pending (as a write that finished on the loop leaves it), closes its
+/// descriptor at once; the feed then comes due, finds no socket and runs
+/// nothing.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_socket_dropped_with_a_feed_due_closes_at_once() {
+    use std::io::Read;
+    start_loop();
+    let lo = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+    // TCP: a connected socket, nothing pending
+    let l = std::net::TcpListener::bind(lo).unwrap();
+    let t = TcpSocket::new().unwrap();
+    let p = sched::promise_new().unwrap();
+    t.connect(l.local_addr().unwrap(), move |r| {
+        r.unwrap();
+        sched::resolve(p, || {});
+    })
+    .unwrap();
+    let (mut peer, _) = l.accept().unwrap();
+    sched::wait(p);
+    assert!(
+        callbacks_run() >= 1,
+        "the connect's callback found its socket"
+    );
+    assert!(!sched::io_cooperative(), "nothing is pending or watched");
+    t.feed_for_tests();
+    assert!(sched::io_cooperative(), "the feed is due");
+    let before = callbacks_run();
+    drop(t);
+    // the descriptor is closed: the peer reads the end of the stream now,
+    // with the loop not run since (a plain read, no scheduling point)
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    assert_eq!(peer.read(&mut [0; 1]).unwrap(), 0);
+    assert!(sched::io_cooperative(), "the feed is still due");
+    sched::sleep_ms(5);
+    assert!(!sched::io_cooperative(), "the feed ran");
+    assert_eq!(callbacks_run(), before, "no callback of the socket ran");
+    // UDP: a bound socket
+    let u = UdpSocket::new().unwrap();
+    u.bind(lo).unwrap();
+    let addr = u.sock_name().unwrap();
+    u.feed_for_tests();
+    drop(u);
+    // without `SO_REUSEADDR`: refused while the socket is open
+    std::net::UdpSocket::bind(addr).expect("the port is free at once");
+    sched::sleep_ms(5);
+    assert!(!sched::io_cooperative(), "the feed ran");
+    assert_eq!(callbacks_run(), before, "no callback of the socket ran");
+    sched::finish();
 }

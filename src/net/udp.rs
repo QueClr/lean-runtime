@@ -16,9 +16,9 @@
 //!   is lost) and its sender; one receive at a time (`EALREADY`).
 
 use super::{
-    close_fd, feed, sockaddr, socket_address, uv_err, uv_error, with_code, Done, Ev, Fd, IoWatcher,
-    RecvBuf, RecvTarget, SendData, UV_EAFNOSUPPORT, UV_EAGAIN, UV_EALREADY, UV_EBADF,
-    UV_EDESTADDRREQ, UV_EINVAL, UV_EISCONN, UV_ENOBUFS,
+    close_fd, feed, on_socket, sockaddr, socket_address, uv_err, uv_error, with_code, Done, Ev, Fd,
+    Handle, IoWatcher, RecvBuf, RecvTarget, SendData, SocketId, UV_EAFNOSUPPORT, UV_EAGAIN,
+    UV_EALREADY, UV_EBADF, UV_EDESTADDRREQ, UV_EINVAL, UV_EISCONN, UV_ENOBUFS,
 };
 use crate::io::IoError;
 use crate::sched::{Interest, Ready};
@@ -32,13 +32,13 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::IoSlice;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 /// `Std.Internal.UV.UDP.Socket`: a translator keeps one in its external
 /// object (clones name the same socket). The socket closes when the last
-/// clone goes and no operation is pending (Lean's finalizer).
+/// clone goes and no operation is pending (Lean's finalizer; `Handle`).
 #[derive(Clone)]
-pub struct UdpSocket(Rc<RefCell<Udp>>);
+pub struct UdpSocket(Rc<Handle<Udp>>);
 
 /// The outcome of one libuv receive callback.
 enum RecvOutcome {
@@ -113,7 +113,8 @@ struct SendReq {
 
 #[derive(Default)]
 struct Udp {
-    me: Weak<RefCell<Udp>>,
+    /// The socket's number in the registry, which the loop's callbacks hold.
+    id: SocketId,
     fd: Option<Fd>,
     ipv6: bool,
     bound: bool,
@@ -131,7 +132,9 @@ struct Udp {
 
 impl Drop for Udp {
     /// Lean's finalizer: `uv_close` (`uv__udp_close`) closes the descriptor
-    /// at once. No operation is pending: each holds the socket.
+    /// at once, when the handle goes (or a loop callback running on the
+    /// socket returns after that). No operation is pending: each holds the
+    /// handle.
     fn drop(&mut self) {
         self.watcher.close();
         close_fd(self.fd.take());
@@ -152,13 +155,13 @@ impl Udp {
     }
 
     fn io_set(&mut self, want: Interest) {
-        let me = self.me.clone();
+        let id = self.id;
         self.watcher.set(self.fd.as_ref(), want, || {
             Rc::new(move |r: Ready| {
-                if let Some(s) = me.upgrade() {
-                    let ev = UdpSocket::events(&s, r);
-                    UdpSocket::on_io(&s, ev);
-                }
+                on_socket(id, |s: &RefCell<Udp>| {
+                    let ev = Loop::events(s, r);
+                    Loop::on_io(s, ev);
+                })
             })
         });
     }
@@ -178,8 +181,7 @@ impl Udp {
     }
 
     fn feed(&mut self) {
-        let me = self.me.clone();
-        feed(&mut self.watcher, &me, UdpSocket::on_io, |u: &mut Udp| {
+        feed(&mut self.watcher, self.id, Loop::on_io, |u: &mut Udp| {
             &mut u.watcher
         });
     }
@@ -307,24 +309,40 @@ impl Udp {
     }
 }
 
+#[cfg(test)]
+impl UdpSocket {
+    /// A `uv__io_feed` now, with nothing pending: the state a write that
+    /// finished on the loop leaves behind (the unit tests').
+    pub(crate) fn feed_for_tests(&self) {
+        self.0.borrow_mut().feed();
+    }
+}
+
 impl UdpSocket {
     /// `Socket.new` (`lean_uv_udp_new`, `uv_udp_init`): a socket with no
     /// descriptor yet.
     pub fn new() -> Result<UdpSocket, IoError> {
         crate::io::effect_point();
         super::loop_lock();
-        Ok(UdpSocket(Rc::new_cyclic(|me| {
+        Ok(UdpSocket(Rc::new(Handle::new(|id| {
             let mut t = Udp::default();
-            t.me = me.clone();
-            RefCell::new(t)
-        })))
+            t.id = id;
+            t
+        }))))
     }
+}
 
-    /// The watch callback and `uv__io_feed`'s call: `uv__udp_io`.
+// ---------------------------------------------------------------------------
+// The loop's side (`uv__udp_io`)
+
+/// A socket's state as a loop callback sees it ([`super::on_socket`]).
+struct Loop<'a>(&'a RefCell<Udp>);
+
+impl Loop<'_> {
     /// The events libuv hands `uv__udp_io` ([`Ev::libuv_merge`]). The
     /// loop's `Ready` folds an error or a hang-up into both directions, so
     /// then the raw `POLLIN` and `POLLOUT` are asked again with `poll(2)`.
-    fn events(s: &Rc<RefCell<Udp>>, r: Ready) -> Ev {
+    fn events(s: &RefCell<Udp>, r: Ready) -> Ev {
         let u = s.borrow();
         let want = u.watcher.want();
         if !r.error && !r.hangup {
@@ -353,8 +371,9 @@ impl UdpSocket {
         )
     }
 
-    fn on_io(s: &Rc<RefCell<Udp>>, ev: Ev) {
-        let u = UdpSocket(s.clone());
+    /// The watch callback and `uv__io_feed`'s call: `uv__udp_io`.
+    fn on_io(s: &RefCell<Udp>, ev: Ev) {
+        let u = Loop(s);
         if ev.read {
             u.recvmsg();
         }
@@ -448,10 +467,12 @@ impl UdpSocket {
         }
         u.processing = false;
     }
+}
 
-    // -----------------------------------------------------------------------
-    // The externs
+// ---------------------------------------------------------------------------
+// The externs
 
+impl UdpSocket {
     /// `Socket.bind` (`lean_uv_udp_bind`, `uv_udp_bind(..., UV_UDP_REUSEADDR)`).
     pub fn bind(&self, addr: SocketAddr) -> Result<(), IoError> {
         crate::io::effect_point();

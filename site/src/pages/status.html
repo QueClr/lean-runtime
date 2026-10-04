@@ -52,6 +52,7 @@ So tasks start in native's order.
 A task that waits for <code>main</code> no longer hangs the program when <code>main</code> polls it.
 Lean's stack-overflow report for tasks, behind the feature <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a> (AR-11): the second native quirk.
 lean2rr turns it on.</td></tr>
+<tr><td><code>net-2</code></td><td>The <a href="net.html">net</a> module without <code>Weak</code> references (AR-12). The event loop's callbacks keep only a socket's number. They find the socket in a registry of open sockets. A dropped socket still closes at once.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>
@@ -60,9 +61,6 @@ No timing session has run yet.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>Work</th><th>What</th><th>State</th></tr></thead>
 <tbody>
-<tr><td>Network without <code>Weak</code></td><td>The <a href="net.html">net</a> module without <code>Weak</code> references (AR-12).
-Today the event loop's watches and timers hold a <code>Weak</code> reference to their socket.
-leanrs's checks forbid <code>Weak</code> in runtime code, so leanrs needs this change before it adopts <code>net</code>.</td><td>In progress in <code>net-2</code>.</td></tr>
 <tr><td>Adoption</td><td>Each translator moves onto the merged batches (<a href="#adoption">Adoption</a>).</td><td>In progress in both translators.</td></tr>
 </tbody></table></div>
 <p id="superseded">Superseded: the math batch, which was to replace glibc's libm functions with a Rust library and add machine-specific variants.
@@ -76,7 +74,7 @@ It moves its pin only after its own suite passes.</p>
 <tbody>
 <tr><td>leanrs</td><td><code>semantics-1</code> and <code>semantics-2</code> (its batches 7 and 8), with its out-of-memory end (leanrs's D35).</td><td><code>semantics-3</code>.
 <code>io-1</code> and <code>io-2</code>, with <code>fixes-1</code>, without <code>proc-title</code>.
-<code>sched</code>, with <code>sched-io</code> to <code>sched-3</code>.</td><td><code>net</code>, after <code>net-2</code>.</td></tr>
+<code>sched</code>, with <code>sched-io</code> to <code>sched-3</code>.</td><td><code>net</code> (<code>net-2</code> is merged).</td></tr>
 <tr><td>lean2rr</td><td>Step 1 of its switch: <code>semantics-1</code>.
 Step 2: the <code>Nat</code>, <code>Int</code> and array rules, the panics and the number text of <code>semantics-2</code>.
 Its pin is 1c36a58.</td><td>Step 3: <code>io</code>.</td><td><code>sched</code>.</td></tr>

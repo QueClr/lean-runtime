@@ -18,12 +18,12 @@ compiles them. The text forms of addresses (`IPv4Addr.ofString`,
 
 | File | What |
 |---|---|
-| `src/net/mod.rs` | The model, the glue's types (`Done`, `SendData`, `RecvBuf`, `RecvTarget`), libuv's io watcher and `uv__io_feed` over the scheduler's loop |
+| `src/net/mod.rs` | The model, the glue's types (`Done`, `SendData`, `RecvBuf`, `RecvTarget`), the registry of open sockets (`Handle`), libuv's io watcher and `uv__io_feed` over the scheduler's loop |
 | `src/net/tcp.rs` | libuv 1.48's stream and TCP code (`stream.c`, `tcp.c`) and Lean's `tcp.cpp` |
 | `src/net/udp.rs` | libuv's `udp.c` and Lean's `udp.cpp` |
 | `src/net/dns.rs` | the lookups, on two helper threads |
 | `src/net/iface.rs` | `uv_interface_addresses` over `getifaddrs` |
-| `src/net/tests.rs` | unit tests of the pure parts |
+| `src/net/tests.rs` | unit tests of the pure parts, and of a socket's lifetime on the loop |
 | `tests/cases/net/` | the program cases, recorded natively; twins in `tests/sched-driver/src/netcases.rs` |
 
 Dependencies: rustix's and nix's `net` features (sockets, socket options,
@@ -50,7 +50,8 @@ promise. Here:
   write, `accept4`, `shutdown(2)` after the queued writes, `SO_ERROR`
   after a connect.
 - **libuv's io watcher** is a `sched::watch` of the socket's descriptor
-  (the watch holds a clone of the socket's `Rc<OwnedFd>` until it ends),
+  (the watch holds a clone of the socket's `Rc<OwnedFd>` until it ends, and
+  the socket's number, not the socket: "Ownership" below),
   for what libuv waits for (`POLLIN` while reading or listening, `POLLOUT`
   while connecting or writing), changed where libuv calls
   `uv__io_start`/`uv__io_stop`. **`uv__io_feed`** (a write finished, a
@@ -107,13 +108,62 @@ The API returns crate types and plain data, and takes closures:
 - **Lifetime**: a `TcpSocket`/`UdpSocket` is a counted handle (`Clone`); the
   socket closes when the last one goes (Lean's finalizer, `uv_close`). A
   pending operation holds the socket, as native's `lean_inc(socket)`, so a
-  socket the program dropped still finishes it.
+  socket the program dropped still finishes it ("Ownership" below).
 - Errors are `IoError`s built as the externs build them
   (`lean_decode_uv_error(code, nullptr)`; Lean's own `invalidArgument`
   texts for DNS).
 
 `tests/sched-driver/src/lnet.rs` is a complete glue, with the `Std.Async`
 monad as its Lean code builds tasks.
+
+### Ownership
+
+Natively Lean's socket object owns the libuv handle, and the loop holds a
+reference to the socket (`lean_inc`) only while one of its requests is
+queued; Lean's finalizer closes the handle (`uv_close`), and with it the
+descriptor, when the last reference goes. Here (AR-12):
+
+- **The handle owns the socket.** `TcpSocket` and `UdpSocket` are an `Rc`
+  of one `net::Handle`, which owns the socket's state and its entry in the
+  thread's registry of open sockets (a number given once, never reused).
+  The program's clones hold the handle, and so does each pending operation
+  (a connect, a receive, a queued write or datagram, a shutdown, an
+  accept), as native's `lean_inc(socket)`, until its promise is resolved
+  or the operation is cancelled.
+- **The loop's callbacks hold a number.** The watch of the descriptor and
+  a due `uv__io_feed` hold the socket's number, never a reference. When one
+  runs, it looks the socket up in the registry (`net::on_socket`) and holds
+  it for the call; if the socket is no longer there, it has closed, and the
+  callback does nothing. A watch's callback always finds its socket (the
+  socket's close ends the watch before another callback can run); a feed
+  due after the close finds nothing. There is no `Weak` in the module.
+- **The close.** When the handle's last clone goes, its drop removes the
+  entry, then lets go of the state, whose drop ends the watch
+  (`uv__io_close`) and closes the descriptor (`uv_close`), at once: the
+  port can be bound again right after. Only a loop callback running on the
+  socket at that moment (its last operation's promise resolved there) holds
+  the state until it returns; the close comes then, before the loop runs
+  anything else. Natively the finalizer takes the loop's lock before
+  `uv_close` (`tcp.cpp`, `udp.cpp`), so its close too comes no later than
+  the end of the callback, and the rest of the callback does nothing
+  visible: no operation is pending any more.
+- **No cycle through the loop.** Nothing the loop holds refers to a socket,
+  so the loop never keeps one open. The only reference cycle is a pending
+  operation's (the socket holds the operation, which holds the handle), and
+  it ends with the operation, as native's `lean_inc` ends with the
+  request. The registry is never a socket's last owner (the handle holds
+  the state while the entry exists), so removing an entry, or the registry
+  itself at the thread's end, closes nothing.
+
+Example (the state the unit test
+`a_socket_dropped_with_a_feed_due_closes_at_once` makes):
+1. A `send` finishes on the loop: the watch's callback finds the socket,
+   writes the rest and resolves the send's promise, and the write lets go
+   of its clone of the handle. The `uv__io_feed` of the write is still
+   due, with the socket's number.
+2. The program drops its handle, the last clone: the entry goes, and the
+   descriptor closes; the peer reads the end of the stream at once.
+3. The feed comes due, finds no socket, and does nothing.
 
 ## What a program sees
 
@@ -265,8 +315,10 @@ Other differences, none visible in the cases:
 ## Costs
 
 A program that uses no socket pays nothing: the module is behind its
-feature, and nothing runs until an extern is called. A socket costs an `Rc`
-and a `RefCell`; each wait for readiness is an `epoll_ctl` through the
+feature, and nothing runs until an extern is called. A socket costs two
+`Rc`s (the handle and its state), a `RefCell` and an entry in the
+thread's registry (a hash map); each loop callback looks its socket up
+there once; each wait for readiness is an `epoll_ctl` through the
 scheduler's watch (added, changed, removed where libuv does), and each
 completion one due timer. A `send` copies nothing: the translator's buffers
 are written from where they are.
