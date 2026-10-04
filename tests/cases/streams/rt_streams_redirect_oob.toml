@@ -1,0 +1,5 @@
+id = "rt_streams_redirect_oob"
+area = "streams"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtStreamsRedirectOob.lean"
+streams = "separate"

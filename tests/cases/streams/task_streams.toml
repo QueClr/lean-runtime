@@ -1,0 +1,5 @@
+id = "task_streams"
+area = "streams"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: io.cpp's thread-local current streams (get_stream_current_stdout)"
+streams = "separate"

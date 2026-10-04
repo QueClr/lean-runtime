@@ -1,0 +1,6 @@
+task: to the real stdout
+task result: some "task: own buffer\n"
+main stdout buffer: "main: captured\nmain: still captured\n"
+main stderr buffer: "main: captured error\n"
+dedicated task: real stdout
+end

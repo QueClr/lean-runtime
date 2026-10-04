@@ -1,0 +1,9 @@
+sigpipe: exit 0 out "y\n" err "yes exited 1\n"
+cwd-no-search: exit 255 out "" err "could not change directory to locked\n"
+cwd-no-search-missing-prog: exit 255 out "" err "could not change directory to locked\n"
+cwd-search-only: exit 0 out "searchonly\n" err ""
+cwd-file: exit 255 out "" err "could not change directory to plain\n"
+cwd-through-file: exit 255 out "" err "could not change directory to plain/sub\n"
+cwd-empty: exit 255 out "" err "could not change directory to \n"
+malformed environ: exit 0 out "noinherit: \"Z=1\\n\"\nafter noinherit: [(, x), (A, 1), (, a=b), (B, 2), (, ), (D, 4), (B, dup), (PATH, /usr/bin:/bin)]\nchanged: \"=x\\n=a=b\\nB=9\\n=\\nD=4\\nB=dup\\nnoequals\\nPATH=/usr/bin:/bin\\n\"\nafter changed: [(, x), (A, 1), (, a=b), (B, 2), (, ), (D, 4), (B, dup), (PATH, /usr/bin:/bin)]\nplain: \"=x\\nA=1\\n=a=b\\nB=2\\n=\\nD=4\\nB=dup\\nnoequals\\nPATH=/usr/bin:/bin\\n\"\n" err ""
+end

@@ -1,0 +1,5 @@
+id = "failed_child_stdin"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs adversarial A755 (sysio tester and breaker, eac34312)"
+streams = "separate"

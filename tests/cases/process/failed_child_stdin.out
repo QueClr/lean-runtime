@@ -1,0 +1,8 @@
+output: exit 255 out "" err "could not execute external process 'no-such-program-xyz'\n"
+output-empty: exit 255 out "" err "could not execute external process 'no-such-program-xyz'\n"
+output-bad-cwd: exit 255 out "" err "could not change directory to no-such-dir\n"
+output-big: error resource vanished (error code: 32, broken pipe)
+spawn stdin write: ok
+code 255
+spawn big write: error resource vanished (error code: 32, broken pipe)
+code 255

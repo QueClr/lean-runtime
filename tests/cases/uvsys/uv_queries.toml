@@ -1,0 +1,5 @@
+id = "uv_queries"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "leanrs adversarial A756 (sysio-uv breaker, 02cb35a5)"
+streams = "separate"

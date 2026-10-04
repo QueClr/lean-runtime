@@ -1,0 +1,54 @@
+temp file: 11 chars then 6: "/tmp/tmp.XX"
+size 0 type IO.FS.FileType.file
+read back: "hello temp\n"
+via readFile: "hello temp\nsecond\n"
+exists after remove: false
+temp dir: 11 chars then 6: "/tmp/tmp.XX"
+is dir: true
+inner: inside
+dir exists after remove: false
+withTempFile: "scoped\n"
+withTempDir entries: 1
+temp file: 14 chars then 6: "scratch/tmp.XX"
+size 0 type IO.FS.FileType.file
+read back: "hello temp\n"
+via readFile: "hello temp\nsecond\n"
+exists after remove: false
+temp dir: 14 chars then 6: "scratch/tmp.XX"
+is dir: true
+inner: inside
+dir exists after remove: false
+withTempFile: "scoped\n"
+withTempDir entries: 1
+temp file: 14 chars then 6: "scratch/tmp.XX"
+size 0 type IO.FS.FileType.file
+read back: "hello temp\n"
+via readFile: "hello temp\nsecond\n"
+exists after remove: false
+temp dir: 14 chars then 6: "scratch/tmp.XX"
+is dir: true
+inner: inside
+dir exists after remove: false
+withTempFile: "scoped\n"
+withTempDir entries: 1
+temp file: 14 chars then 6: "scratch/tmp.XX"
+size 0 type IO.FS.FileType.file
+read back: "hello temp\n"
+via readFile: "hello temp\nsecond\n"
+exists after remove: false
+temp dir: 14 chars then 6: "scratch/tmp.XX"
+is dir: true
+inner: inside
+dir exists after remove: false
+withTempFile: "scoped\n"
+withTempDir entries: 1
+error: no such file or directory (error code: 2)
+  file: 
+dir error: no such file or directory (error code: 2)
+  file: 
+error: permission denied (error code: 13)
+dir error: permission denied (error code: 13)
+error: resource exhausted (error code: 105, no buffer space available)
+dir error: resource exhausted (error code: 105, no buffer space available)
+error: permission denied (error code: 13)
+dir error: permission denied (error code: 13)

@@ -1,0 +1,7 @@
+id = "rt_streams_redirect"
+area = "streams"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtStreamsRedirect.lean"
+streams = "separate"
+# the module name in a panic message depends on how the case is built
+normalize = ['PANIC at (\w+) [\w.]+:(\d+):(\d+): -> PANIC at \1 <module>:\2:\3:']

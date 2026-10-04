@@ -1,0 +1,5 @@
+id = "exec_search"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: glibc 2.39 __execvpe over posix_spawn (leanrs chapter 05 O8 item 2)"
+streams = "separate"

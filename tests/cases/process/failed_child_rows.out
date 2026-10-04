@@ -1,0 +1,26 @@
+program: stderr "could not execute external process 'no-such-program-xyz'\n"
+program: kill before wait ok
+program: wait 255
+program: kill after wait: no such thing (error code: 3, no such process)
+program: second wait: no such thing (error code: 10, no such process)
+program: tryWait: no such thing (error code: 10, no such process)
+program setsid: stderr "could not execute external process 'no-such-program-xyz'\n"
+program setsid: kill before wait ok
+program setsid: wait 255
+program setsid: kill after wait: no such thing (error code: 3, no such process)
+program setsid: second wait: no such thing (error code: 10, no such process)
+program setsid: tryWait: no such thing (error code: 10, no such process)
+cwd: stderr "could not change directory to no-such-dir\n"
+cwd: kill before wait ok
+cwd: wait 255
+cwd: kill after wait: no such thing (error code: 3, no such process)
+cwd: second wait: no such thing (error code: 10, no such process)
+cwd: tryWait: no such thing (error code: 10, no such process)
+cwd setsid: stderr "could not change directory to no-such-dir\n"
+cwd setsid: kill before wait: no such thing (error code: 3, no such process)
+cwd setsid: wait 255
+cwd setsid: kill after wait: no such thing (error code: 3, no such process)
+cwd setsid: second wait: no such thing (error code: 10, no such process)
+cwd setsid: tryWait: no such thing (error code: 10, no such process)
+tryWait first (some 255)
+wait after tryWait: no such thing (error code: 10, no such process)

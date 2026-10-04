@@ -1,0 +1,5 @@
+id = "cwd_nosearch"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: leanrs DV15 (d), rt test io_spawn_cwd_failures"
+streams = "separate"

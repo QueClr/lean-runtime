@@ -10,8 +10,8 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
   <li><a href="#handles">Handles</a></li>
   <li><a href="#errors">Errors</a></li>
   <li><a href="#fs">Files, directories, environment</a></li>
-  <li><a href="#processes">Processes (io-2)</a></li>
-  <li><a href="#streams">Stream redirection (io-2)</a></li>
+  <li><a href="#processes">Processes</a></li>
+  <li><a href="#streams">Stream redirection</a></li>
   <li><a href="#startup">Startup descriptors</a></li>
   <li><a href="#exit">Exit</a></li>
 </ul></div>
@@ -27,9 +27,9 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>env</code>, <code>debug</code></td><td><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, random bytes, the monotonic clock, <code>IO.sleep</code>; <code>dbgTrace</code>, <code>dbgSleep</code>.</td><td>main</td></tr>
 <tr><td><code>startup</code></td><td>The descriptors native Lean has open before <code>main</code>.</td><td>main</td></tr>
 <tr><td><code>exit</code></td><td>What the exit does with the streams; <code>IO.Process.exit</code>, <code>forceExit</code>, the uncaught-error message.</td><td>main</td></tr>
-<tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>io-2</td></tr>
-<tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>io-2</td></tr>
-<tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>io-2</td></tr>
+<tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
+<tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
+<tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>main (io-2)</td></tr>
 </tbody></table></div>
 
 <h2 id="layers">The layers of a handle call</h2>
@@ -90,7 +90,8 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
   <li>The three standard streams are static and never close.</li>
   <li>A file that the crate opened closes (<code>fclose</code>) when the last clone of its <code>Handle</code> goes away.
     A translator keeps the <code>Handle</code> inside its own object and drops it when it frees that object.</li>
-  <li>The crate keeps a list of open handles in glibc's order, for the exit.</li>
+  <li>The crate keeps a list of open handles in glibc's order, for the exit.
+    The list holds each file by a strong reference, and lets it go when the file's last handle goes away.</li>
   <li><code>lock</code>, <code>tryLock</code> and <code>unlock</code> wait in <code>flock</code> without the stream's lock, as native does.</li>
 </ul>
 
@@ -117,10 +118,10 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
     Results of unbounded size (a path, a directory entry's name) go to the caller's <code>ByteSink</code> or callback, as bytes.</li>
   <li><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, <code>IO.getRandomBytes</code>, <code>IO.sleep</code> and the monotonic clock (Lean's absolute <code>CLOCK_MONOTONIC</code>) are in <code>env</code>.</li>
   <li><code>dbgTrace</code> prints its message to stderr and continues; <code>dbgSleep</code> sleeps (decision DV5).
-    With io-2's <code>streams</code>, the message goes to the current stderr stream, as natively.</li>
+    With <code>streams</code>, the message goes to the current stderr stream, as natively.</li>
 </ul>
 
-<h2 id="processes">Processes (io-2)</h2>
+<h2 id="processes">Processes</h2>
 <p>Native Lean forks, and the child calls <code>execvp</code>.
 Safe Rust cannot fork, so <code>io::process</code> spawns with <code>posix_spawn</code> (nix's safe wrapper).
 It then does what the forked child does before <code>execvp</code>:</p>
@@ -130,12 +131,16 @@ It then does what the forked child does before <code>execvp</code>:</p>
   <li>builds the child's environment from the parent's <code>environ</code>, with Lean's changes applied in order;</li>
   <li>enters the working directory in a spawner thread, so the parent's own directory does not change.
     Where the kernel refuses that, it changes the directory under a lock, then changes it back;</li>
-  <li>for a child that cannot start, builds the child that Lean's fork makes: its message on the child's stderr, exit status 255.</li>
+  <li>for a child that cannot start, starts a stand-in: a short <code>/bin/sh</code> with the child's streams.
+    It writes the message on the child's stderr and exits with status 255, as Lean's forked child does.</li>
 </ul>
 <p><code>wait</code>, <code>tryWait</code> and <code>kill</code> follow <code>process.cpp</code>.
-<code>IO.Process.output</code> reads both pipes with <code>poll</code>.</p>
+<code>IO.Process.output</code> reads both pipes with <code>poll</code>.
+Three <a href="lean-bugs.html#confirmed">Lean bugs</a> are not copied.
+<code>takeStdin</code> keeps the <code>setsid</code> flag (LB-14).
+A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the parent, so nothing leaks (LB-15), and its failure is an error (LB-17).</p>
 
-<h2 id="streams">Stream redirection (io-2)</h2>
+<h2 id="streams">Stream redirection</h2>
 <ul>
   <li>Natively, every thread has its own current standard streams.
     <code>IO.setStdout</code> replaces the calling thread's stream and returns the old one.</li>
@@ -186,4 +191,4 @@ So a runaway task keeps the process alive, and <code>main</code>'s buffered outp
 </figure>
 
 <p class="more">Detail: <a href="repo:src/io/mod.rs">src/io/mod.rs</a> (the layout, "no bulk copies", concurrency), <a href="repo:src/io/cfile.rs">cfile.rs</a>, <a href="repo:src/io/debug.rs">debug.rs</a>, <a href="repo:src/io/env.rs">env.rs</a>, <a href="repo:src/io/error.rs">error.rs</a>, <a href="repo:src/io/exit.rs">exit.rs</a>, <a href="repo:src/io/fs.rs">fs.rs</a>, <a href="repo:src/io/handle.rs">handle.rs</a>, <a href="repo:src/io/startup.rs">startup.rs</a>.
-The io-2 modules are on branch <code>io-2</code> (<code>src/io/process.rs</code>, <code>streams.rs</code> and others).</p>
+From io-2: <a href="repo:src/io/environ.rs">environ.rs</a>, <a href="repo:src/io/process.rs">process.rs</a>, <a href="repo:src/io/streams.rs">streams.rs</a>, <a href="repo:src/io/temp.rs">temp.rs</a>, <a href="repo:src/io/time.rs">time.rs</a>, <a href="repo:src/io/uvsys.rs">uvsys.rs</a>.</p>

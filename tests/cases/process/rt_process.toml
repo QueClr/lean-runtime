@@ -1,0 +1,5 @@
+id = "rt_process"
+area = "process"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtProcess.lean"
+streams = "separate"

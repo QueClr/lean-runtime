@@ -1,0 +1,8 @@
+stdout null:
+  child: written to the parent
+  exit 0
+stdin null:
+  child: read line1
+  exit 0
+parent reads: line2
+handles kept open: true

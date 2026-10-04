@@ -1,0 +1,23 @@
+osHomedir: 0 ""
+osTmpdir: 0 ""
+osHomedir: 1 "/"
+osTmpdir: 4 "/a/b"
+osHomedir: <n> "<passwd home>"
+osTmpdir: 4 "/tmp"
+osHomedir: 4095 "/hhhhhhhhhhh"
+osTmpdir: 4095 "/ttttttttttt"
+osHomedir: error: resource exhausted (error code: 105, no buffer space available)
+osTmpdir: error: resource exhausted (error code: 105, no buffer space available)
+osHomedir: <n> "<passwd home>"
+osTmpdir: 4 "/tmp"
+setPriority 20: error: invalid argument (error code: 22, invalid argument)
+setPriority -21: error: invalid argument (error code: 22, invalid argument)
+setPriority 100: error: invalid argument (error code: 22, invalid argument)
+setPriority -100: error: invalid argument (error code: 22, invalid argument)
+setPriority 4294967321: error: invalid argument (error code: 22, invalid argument)
+setPriority 21474836450: error: invalid argument (error code: 22, invalid argument)
+priority unchanged true
+title of 600: error: resource exhausted (error code: 105, no buffer space available)
+title of 511: 511
+title of 512: error: resource exhausted (error code: 105, no buffer space available)
+random 0x80000000: error: resource exhausted (error code: 7, argument list too long)

@@ -1,0 +1,7 @@
+could not execute external process 'no-such-program-xyz'
+missing program: exit 255
+relative cwd: exit 0
+absolute cwd: exit 0
+could not change directory to no-such-dir
+missing dir: exit 255
+kept true

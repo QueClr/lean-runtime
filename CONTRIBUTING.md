@@ -24,7 +24,7 @@ once.
 - **`unsafe-fast`.** Every `unsafe` item has its own `#[allow(unsafe_code)]` (the crate root denies it under this feature). An implementation behind this feature must:
   - have the same observable behaviour as the safe one, which stays;
   - have an entry in `UNSAFE.md` with a written proof;
-  - run under Miri (`scripts/check.sh` runs Miri on the `unsafe-fast` configurations), and under Kani where that applies (Kani joins the checks with the first entry).
+  - run under Miri (`LEAN_RUNTIME_MIRI=1 scripts/check.sh` runs Miri on the `unsafe-fast` configurations; Miri is opt-in, so set the variable whenever such an item is added or changed), and under Kani where that applies (Kani joins the checks with the first entry).
 
   The tests run both configurations.
 - **Signatures on views and plain data.** No function here owns, allocates

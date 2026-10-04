@@ -1,0 +1,12 @@
+file mode 600
+read back [97, 98, 99]
+child sees the file: 0
+dir mode 700
+file mode 600
+read back [97, 98, 99]
+child sees the file: 0
+dir mode 700
+file mode 600
+read back [97, 98, 99]
+child sees the file: 0
+dir mode 700

@@ -1,0 +1,11 @@
+id = "failed_child_order"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs review of io-2, LRIO2-F2 (native/O.lean: the parent's line first in 49 of 50 native runs)"
+streams = "merged"
+schedule_dependent = true
+# Native's schedules, each recorded (review RIO2-19); in 300 native runs on a loaded host (150 in
+# turn, 150 ten at a time): the parent's line first (283, failed_child_order.*); the child's
+# pending bytes and message first (13, .alt1.*); the parent's line between the child's two writes,
+# its flush of the pending bytes and its message (4, .alt2.*). `expect`'s few runs may miss the
+# rare ones and would then drop their files: re-record with `--runs 300` and keep any it misses.

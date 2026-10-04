@@ -1,0 +1,9 @@
+id = "temp_long_file"
+area = "temp"
+lean_version = "4.34.0"
+source = "LB-16 (docs/lean-bugs.md; judge/lio2 c/tmpdir.lean; lean2rr-side judge, leanrs-side judge confirms, 2026-10-04)"
+streams = "separate"
+deviations = { lean2rr = "LB-16", leanrs = "LB-16" }
+# `expected` is native's assertion abort (status 134). The correct behaviour, which both
+# translators give, is the system's answer for the over-long path (ENAMETOOLONG, no file name),
+# the alternative outcome temp_long_file.alt1.*.

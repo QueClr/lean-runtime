@@ -1,0 +1,5 @@
+id = "failed_child_rows"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: the rows of a child that cannot start (leanrs chapter 05 O8 items 5, 6), checked against native 4.34.0"
+streams = "separate"

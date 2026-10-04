@@ -1,0 +1,12 @@
+id = "pipe_null_two_free"
+area = "process"
+lean_version = "4.34.0"
+source = "lean2rr's review of the LB-17 design (docs/lean-bugs.md LB-17, Our behaviour): a null stream after a piped one with two descriptors free"
+streams = "separate"
+deviations = { lean_runtime = "LIO2-05" }
+# `expected` is native's, and right: the forked child closes the pipe's read end before it opens
+# /dev/null, so two free descriptors suffice and the child runs. The shared runtime opens
+# /dev/null in the parent (LB-17's fix) and needs a third: the alternative outcome
+# pipe_null_two_free.alt1.* (the spawn fails with EMFILE) is that fix's cost (docs/lean-bugs.md
+# LB-17, Our behaviour; disagreements.md LIO2-05), not a Lean bug, so `check` accepts both
+# outcomes (lean2rr's fork-based leanrt proc.rs gives native's).

@@ -3,3 +3,7 @@ area = "io"
 lean_version = "4.34.0"
 source = "lean-runtime review io-1 RIO1-01 (review-io1/native/LockExit.lean)"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs runs a task eagerly at its creation until it adopts sched/ (leanrs DV2), so there the
+# blocked task hangs `main` or its lines come out of order; native's outcome is recorded, and it
+# is what `check` accepts (DV2 names no Lean bug).

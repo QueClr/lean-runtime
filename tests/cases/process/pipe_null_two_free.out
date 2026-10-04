@@ -1,0 +1,2 @@
+child: stdout "out\n", exit 0
+handles kept open: true

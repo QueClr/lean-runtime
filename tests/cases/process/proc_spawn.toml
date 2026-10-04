@@ -1,0 +1,5 @@
+id = "proc_spawn"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs validate/io/proc_spawn (probe v4.34.0-rc1, chapter 05 O8)"
+streams = "separate"

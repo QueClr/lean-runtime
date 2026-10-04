@@ -1,0 +1,5 @@
+id = "output_fields"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs adversarial A753 (sysio breaker, eac34312)"
+streams = "separate"

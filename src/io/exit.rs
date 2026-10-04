@@ -38,7 +38,7 @@ pub fn exit_flush() {
     }
     let _ = lock(&STDOUT).flush();
     let open = open_files_newest_first();
-    for f in &open {
+    for f in open.iter() {
         f.file
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -47,7 +47,7 @@ pub fn exit_flush() {
     for s in [&STDERR, &STDOUT, &STDIN] {
         lock(s).exit_flush();
     }
-    for f in &open {
+    for f in open.iter() {
         if let Ok(mut g) = f.file.try_lock() {
             g.exit_unbuffer();
         }

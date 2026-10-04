@@ -1,0 +1,12 @@
+panic 0
+trace 1
+allocprof 7
+captured stderr:
+PANIC at boom <module>:6:42: boom 3
+traced 0
+profiled
+Allocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`
+
+explicit eprintln
+
+after 0

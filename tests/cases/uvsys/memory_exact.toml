@@ -1,0 +1,5 @@
+id = "memory_exact"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean-runtime io-2 review RIO2-09 (the memory figures checked against the files libuv reads)"
+streams = "separate"

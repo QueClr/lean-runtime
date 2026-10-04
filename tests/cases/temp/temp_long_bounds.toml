@@ -1,0 +1,5 @@
+id = "temp_long_bounds"
+area = "temp"
+lean_version = "4.34.0"
+source = "LB-16's boundaries (judge/lio2 c/tmpdir.runs.txt), followed as native"
+streams = "separate"

@@ -23,7 +23,7 @@ capped() {
 (cd benches/io/rust && capped cargo +"$TC" build --offline --release --quiet)
 (cd benches/io/native && PATH="$LEAN/bin:$PATH" capped "$LEAN/bin/lake" build -q)
 fail=0
-for b in io_put_str io_read io_get_line; do
+for b in io_put_str io_read io_get_line proc_spawn_wait proc_spawn_path proc_spawn_cwd proc_output; do
   r=$(benches/io/rust/target/release/$b "$N" | head -1)
   l=$(benches/io/native/.lake/build/bin/$b "$N" | head -1)
   if [[ "$r" == "$l" ]]; then

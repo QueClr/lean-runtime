@@ -15,9 +15,9 @@ fn pipe() -> (OwnedFd, OwnedFd) {
 }
 
 /// `pending_output` is the put area's unwritten bytes, empty after a flush
-/// and outside put mode.
+/// and outside put mode. It and the open-list tests also run under Miri
+/// (`doallocate` asks no `fstat` there).
 #[test]
-#[cfg_attr(miri, ignore)]
 fn pending_output_is_the_put_area() {
     let (r, w) = pipe();
     let mut f = CFile::fdopen(w, FsMode::Write);
@@ -72,11 +72,36 @@ fn bounded_pipe_reports_epipe() {
     );
 }
 
-/// The open-handle list: newest first, a handle leaves it when its last clone
-/// goes away (and is closed, its pending output written).
+/// Reads `r` to its end (every write end closed).
+fn read_to_end(r: &OwnedFd) -> Vec<u8> {
+    let mut got = Vec::new();
+    let mut buf = [0u8; 16];
+    loop {
+        let n = rustix::io::read(r, &mut buf[..]).unwrap();
+        if n == 0 {
+            return got;
+        }
+        got.extend_from_slice(&buf[..n]);
+    }
+}
+
+/// Taken by the tests that walk the open-handle list: a walk holds a
+/// reference to every open file, which another such test would see in its
+/// counts (no other test in the crate walks the list).
+static OPEN_LIST_WALKS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn walks_alone() -> std::sync::MutexGuard<'static, ()> {
+    OPEN_LIST_WALKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The open-handle list: newest first; it holds each file besides its
+/// handles, and a handle leaves it when its last clone goes away (the file
+/// then closes, its pending output written).
 #[test]
-#[cfg_attr(miri, ignore)]
 fn open_list_order_and_close() {
+    let _alone = walks_alone();
     let (r1, w1) = pipe();
     let (_r2, w2) = pipe();
     let a = Handle::fdopen(w1, FsMode::Write);
@@ -90,30 +115,39 @@ fn open_list_order_and_close() {
         .collect();
     assert_eq!(order, [fd_b, fd_a]);
     a.put_str(b"pending").unwrap();
-    let weak = std::sync::Arc::downgrade(a.file_stream().unwrap());
-    let listed = |w: &std::sync::Weak<crate::io::handle::FileStream>| {
-        crate::io::handle::OPEN
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|x| x.ptr_eq(w))
-    };
+    let count = |h: &Handle| std::sync::Arc::strong_count(h.file_stream().unwrap());
+    // the list's slot and `a`
+    assert_eq!(count(&a), 2);
     let a2 = a.clone();
+    assert_eq!(count(&a2), 3);
     drop(a);
-    assert!(listed(&weak));
+    assert_eq!(count(&a2), 2);
     drop(a2);
-    assert_eq!(weak.strong_count(), 0);
-    assert!(!listed(&weak));
-    let mut got = Vec::new();
-    let mut buf = [0u8; 16];
-    loop {
-        let n = rustix::io::read(&r1, &mut buf[..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        got.extend_from_slice(&buf[..n]);
-    }
-    assert_eq!(got, b"pending");
+    // closed (so out of the list, which held it): its pending output written
+    assert_eq!(read_to_end(&r1), b"pending");
+}
+
+/// A file whose last handle goes away while the exit holds the open files
+/// (`open_files_newest_first`) closes when the exit lets go of them.
+#[test]
+fn open_list_release_after_walk() {
+    let _alone = walks_alone();
+    let (r, w) = pipe();
+    let a = Handle::fdopen(w, FsMode::Write);
+    a.put_str(b"late").unwrap();
+    let open = crate::io::handle::open_files_newest_first();
+    assert_eq!(std::sync::Arc::strong_count(a.file_stream().unwrap()), 3);
+    drop(a);
+    // still open: nothing written, no end of file
+    rustix::fs::fcntl_setfl(&r, OFlags::NONBLOCK).unwrap();
+    let mut buf = [0u8; 8];
+    assert_eq!(
+        rustix::io::read(&r, &mut buf[..]),
+        Err(rustix::io::Errno::AGAIN)
+    );
+    rustix::fs::fcntl_setfl(&r, OFlags::empty()).unwrap();
+    drop(open);
+    assert_eq!(read_to_end(&r), b"late");
 }
 
 /// glibc's `_IO_file_doallocate`: `st_blksize` only when positive and below

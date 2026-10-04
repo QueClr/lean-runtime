@@ -1,0 +1,1 @@
+TMPDIR=$(printf 'a%.0s' $(seq 4095)) $BIN dir

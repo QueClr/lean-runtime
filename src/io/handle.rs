@@ -26,7 +26,7 @@ use super::{sys, ByteSink};
 use rustix::fd::OwnedFd;
 use rustix::fs::{FlockOperation, OFlags};
 use std::mem::MaybeUninit;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// Lean's `IO.FS.Mode` (`Init/System/IO.lean`), its constructors in Lean's
 /// order.
@@ -76,8 +76,8 @@ pub(crate) fn lock(m: &Mutex<CFile>) -> MutexGuard<'_, CFile> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// An open file: its `FILE`, unregistered and closed when the last `Handle`
-/// goes away.
+/// An open file: its `FILE`, closed when the last `Handle` goes away (and
+/// the open list's slot with it).
 #[derive(Debug)]
 pub(crate) struct FileStream {
     pub(crate) file: Mutex<CFile>,
@@ -87,18 +87,16 @@ pub(crate) struct FileStream {
 }
 
 /// The open files, oldest first: glibc's `_IO_list_all`, reversed (new
-/// streams are linked at its head, and the exit walks it from there).
-pub(crate) static OPEN: Mutex<Vec<Weak<FileStream>>> = Mutex::new(Vec::new());
+/// streams are linked at its head, and the exit walks it from there). Each
+/// slot is a strong reference, held besides the stream's `Handle`s (no
+/// non-owning reference: leanrs's ownership rule S4 forbids std's in
+/// runtime code). Every other reference is let go through [`release`], under this lock, so the
+/// one that leaves the slot alone with it sees a count of 2 and empties the
+/// slot, and the stream closes.
+static OPEN: Mutex<Vec<Arc<FileStream>>> = Mutex::new(Vec::new());
 
 impl Drop for FileStream {
     fn drop(&mut self) {
-        let me: *const FileStream = self;
-        {
-            let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(i) = open.iter().rposition(|w| std::ptr::eq(w.as_ptr(), me)) {
-                open.remove(i);
-            }
-        }
         self.file
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
@@ -106,17 +104,65 @@ impl Drop for FileStream {
     }
 }
 
+/// Lets go of a reference to an open file: when only the open list's slot
+/// holds it besides (a strong count of 2, under the list's lock, where every
+/// release happens, so two releases never both see 3), the slot is removed
+/// and the file closes, as Lean's finalizer `fclose`s it, outside the lock
+/// (closing writes pending output, which may wait on a pipe).
+fn release(f: Arc<FileStream>) {
+    let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+    if Arc::strong_count(&f) == 2 {
+        if let Some(i) = open.iter().rposition(|g| Arc::ptr_eq(g, &f)) {
+            let slot = open.remove(i);
+            drop(open);
+            drop(slot);
+            drop(f);
+            return;
+        }
+    }
+    drop(f);
+}
+
 /// The open files, newest first (the order of `_IO_flush_all` and
-/// `_IO_unbuffer_all`).
-pub(crate) fn open_files_newest_first() -> Vec<Arc<FileStream>> {
+/// `_IO_unbuffer_all`); dropping it lets go of them through [`release`], so
+/// a file whose last `Handle` went away meanwhile closes then.
+pub(crate) struct OpenFiles(Vec<Arc<FileStream>>);
+
+impl std::ops::Deref for OpenFiles {
+    type Target = [Arc<FileStream>];
+    fn deref(&self) -> &[Arc<FileStream>] {
+        &self.0
+    }
+}
+
+impl Drop for OpenFiles {
+    fn drop(&mut self) {
+        for f in std::mem::take(&mut self.0) {
+            release(f);
+        }
+    }
+}
+
+/// The open files, newest first (see [`OpenFiles`]).
+pub(crate) fn open_files_newest_first() -> OpenFiles {
     let open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-    open.iter().rev().filter_map(Weak::upgrade).collect()
+    OpenFiles(open.iter().rev().cloned().collect())
 }
 
 /// `IO.FS.Handle`: a standard stream or an open file (see the module
 /// comment). Clones name the same stream.
 #[derive(Clone, Debug)]
 pub struct Handle(Repr);
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        if let Repr::File(_) = self.0 {
+            if let Repr::File(f) = std::mem::replace(&mut self.0, Repr::Std(0)) {
+                release(f);
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 enum Repr {
@@ -222,7 +268,7 @@ impl Handle {
         });
         OPEN.lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(Arc::downgrade(&f));
+            .push(f.clone());
         Handle(Repr::File(f))
     }
 

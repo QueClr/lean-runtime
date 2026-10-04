@@ -1,0 +1,16 @@
+id = "rt_system"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtSystem.lean"
+streams = "separate"
+# host-dependent values, each normalized only in its expected shape: the host name (a DNS
+# label), the user name, the CPU count (positive) and its models (a non-empty list), the
+# cgroup's limit, the machine, the nice value (-20 to 19)
+normalize = [
+  '(?m)^hostname [A-Za-z0-9][A-Za-z0-9.-]*$ -> hostname <host>',
+  '(?m)^passwd [a-z_][a-z0-9_.-]*\$? uid -> passwd <user> uid',
+  '(?m)^cpus [1-9][0-9]* models \[[^\[\],]+(, [^\[\],]+)*\]$ -> cpus <n> models <models>',
+  '(?m)^constrained memory [0-9]+$ -> constrained memory <n>',
+  '(?m)^uname Linux (aarch64|x86_64) -> uname Linux <machine>',
+  '(?m)^priority (-?1?[0-9]|-20) -> priority <p>',
+]

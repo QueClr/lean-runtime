@@ -1,0 +1,1 @@
+$BIN $(printf 'x%.0s' $(seq 100)); (exec -a P $BIN title)

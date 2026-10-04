@@ -1,0 +1,5 @@
+id = "failed_child_pid"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: leanrs DV15 (a), resolved toward native by review RIO2-05 (a /bin/sh stand-in gives the child that cannot start a real pid); lean2rr forks as native does"
+streams = "separate"

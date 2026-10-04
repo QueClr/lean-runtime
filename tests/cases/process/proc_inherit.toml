@@ -1,0 +1,5 @@
+id = "proc_inherit"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs validate/io/proc_inherit (probe v4.34.0-rc1, chapter 05 O8 items 3, 4, 5)"
+streams = "separate"

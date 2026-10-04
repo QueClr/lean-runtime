@@ -157,7 +157,7 @@ leanrs's value is 2<sup>39</sup>.</dd>
 
 <dt id="g-miri">Miri</dt>
 <dd>Rust's interpreter that finds undefined behaviour.
-<code>scripts/check.sh</code> runs it on the <code>unsafe-fast</code> configurations.</dd>
+<code>scripts/check.sh</code> runs it on the <code>unsafe-fast</code> configurations when <code>LEAN_RUNTIME_MIRI=1</code> is set.</dd>
 
 <dt id="g-native">Native Lean</dt>
 <dd>Lean's own build: the Lean compiler emits C, which links with Lean's C runtime.

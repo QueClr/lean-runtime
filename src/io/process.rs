@@ -1,0 +1,1484 @@
+//! Child processes: `IO.Process.spawn` and the `Child` operations, following
+//! the POSIX branch of Lean 4.34.0's `src/runtime/process.cpp`, and
+//! `IO.Process.output`, whose Lean definition reads the child's standard
+//! output on a dedicated task.
+//!
+//! Lean forks and the child runs `execvp`. This crate cannot fork in safe
+//! Rust, so it spawns through `posix_spawn` (`nix`'s safe wrapper) and
+//! reproduces what the forked child does before `execvp`:
+//!
+//! 1. **Standard streams.** `piped` is a pipe (`pipe2` with `O_CLOEXEC`)
+//!    whose parent end becomes a [`Handle`] (`fdopen` `"w"` for standard
+//!    input, `"r"` for the other two), `inherit` keeps the parent's
+//!    descriptor, `null` is `/dev/null`. A field whose stream is not `piped`
+//!    is Lean's `()`, here `None`. When standard input is `inherit`, standard
+//!    output is flushed first (`std::cout.flush()`).
+//! 2. **Program and arguments.** `cmd` and each argument are C strings (cut
+//!    at their first NUL byte), `argv[0]` is `cmd`, and the program is found
+//!    as glibc 2.39's `execvp` finds it ([`Spec::exec_search`]), the search
+//!    running over `posix_spawn`, a file the kernel refuses with `ENOEXEC`
+//!    included (run by `/bin/sh`).
+//! 3. **Environment.** The child's `envp` is the parent's `environ`
+//!    ([`super::environ`], every entry in order) or nothing when
+//!    `inheritEnv` is false (`clearenv`), with `env` applied in order as
+//!    glibc's `setenv` and `unsetenv` apply it; the parent's own environment
+//!    never changes.
+//! 4. **Working directory.** Lean's child calls `chdir(cwd)`. Here a
+//!    long-lived spawner thread, which has unshared its file-system
+//!    attributes from the process (`unshare(CLONE_FS)`, `nix`'s safe
+//!    wrapper), enters `cwd` and spawns; `posix_spawn`'s child copies that
+//!    thread's working directory. A relative `cwd` is entered from the
+//!    caller's working directory (an `O_PATH` descriptor of `.` the caller
+//!    opens, then `fchdir` and `chdir`; its path where no descriptor is
+//!    left), so it fails exactly when the forked child's `chdir` would: when
+//!    the process may not search its own working directory, or that
+//!    directory has been removed. The process's working directory never
+//!    changes, and an absolute `cwd` works from a working directory the
+//!    process may not search, as natively (this closes leanrs's DV15 (d)).
+//!    Relative `PATH` entries and programs resolve against `cwd`, as after
+//!    Lean's `chdir`. The child gets the caller's attributes that Linux
+//!    keeps per thread: its signal mask (`POSIX_SPAWN_SETSIGMASK` with the
+//!    caller's mask, for every spawn) and its nice value, which the spawner
+//!    takes before each spawn; where it cannot (lowering a nice value needs
+//!    privilege), the caller makes that spawn on a short-lived helper thread
+//!    of its own, which has the caller's nice value and unshares its
+//!    file-system attributes in turn (review RIO2-14). The spawner's
+//!    file-system attributes are a copy taken at its `unshare`: its `umask`
+//!    and root directory stay the process's of that moment, so a child
+//!    spawned with a `cwd` after a `umask` change (by user C code: Lean has
+//!    no `umask`) gets the old mask. The child's parent thread is the
+//!    spawner, which lives as long as the process (so `PR_SET_PDEATHSIG`
+//!    fires at the process's exit, natively at the calling thread's).
+//!
+//!    **Fallback.** Where `unshare(CLONE_FS)` is refused (Docker's default
+//!    seccomp profile gives `EPERM` without `CAP_SYS_ADMIN`; `ENOSYS`,
+//!    `EINVAL`), the calling thread enters `cwd` for the process, spawns,
+//!    and returns by `fchdir` to an `O_PATH` descriptor of the directory it
+//!    left. Meanwhile it holds a lock that the runtime's other changes of
+//!    the working directory (`setCurrentDir`, `uv_chdir`) take exclusively,
+//!    and its reads of it (`IO.currentDir`, `IO.Process.getCurrentDir`,
+//!    `uv_cwd`) and spawns without a `cwd` take shared, so none of them runs
+//!    while the process is in `cwd` (reviews RIO2-13, RIO2-20). Limits
+//!    remain there:
+//!    - another thread's relative path operation during the spawn (an open,
+//!      a metadata query, a directory listing, a removal: every call that
+//!      takes a path relative to the working directory) still sees `cwd`
+//!      (the runtime runs Lean code on one thread today);
+//!    - the way back, checked before leaving, fails only if another process
+//!      changes the directory's mode (or moves it, where the way back is a
+//!      path), and the process then stays in `cwd`;
+//!    - a process that may not search its own working directory cannot come
+//!      back, so an absolute `cwd` is then the spawn's `EACCES` (leanrs's
+//!      DV15 (d)); a relative one fails as natively.
+//!
+//!    The real fix, for later, is a spawn that needs no change of the
+//!    process's working directory: glibc 2.29's
+//!    `posix_spawn_file_actions_addchdir_np` (POSIX 2024's
+//!    `posix_spawn_file_actions_addchdir`), which `nix` does not wrap yet and
+//!    this crate cannot call without `unsafe`.
+//! 5. **`setsid`** is `POSIX_SPAWN_SETSID`. `posix_spawn` resets no signal
+//!    disposition, so an ignored `SIGPIPE` stays ignored, as across `fork`.
+//! 6. **A child that cannot start.** Lean's `spawn` succeeds even when `cwd`
+//!    cannot be entered or the program cannot be executed: the forked child
+//!    flushes its copy of standard output's buffer (`std::cerr` is tied to
+//!    `std::cout`), writes `could not change directory to <cwd>` or `could
+//!    not execute external process '<cmd>'` and a newline to its standard
+//!    error, and exits with status 255. `posix_spawn` reports both failures
+//!    to the parent instead, and the runtime starts a stand-in, a `/bin/sh`
+//!    with the child's standard streams, in a new session when the program
+//!    failed and `setsid` was asked for (Lean's child calls `setsid()` after
+//!    `chdir`, before `execvp`). [`STAND_IN_LIFE`] after the spawn (about the
+//!    forked child's delay), the stand-in itself writes the pending bytes
+//!    (copied by `/bin/cat` from a pipe on its descriptor 4; like Lean's
+//!    child, it says nothing when nobody reads them) and the message
+//!    (its argument, by `printf`), and exits with 255. So the parent's next
+//!    lines come first, as natively, and the parent never blocks on a full
+//!    output pipe at the spawn. The child is a real process, with a pid,
+//!    `wait`, `kill` and `killpg`, and a standard input that closes when it
+//!    exits, as natively. Where the stand-in cannot be set up (no `/bin/sh`,
+//!    or no descriptor left for its pipes: `EMFILE`, which natively leaves
+//!    the forked child running), the runtime models that child: it writes the
+//!    pending bytes and the message at once; the pid is above any the kernel
+//!    gives (counting down from `0x7FFFFFFF`); `wait` gives 255 once; `kill`
+//!    succeeds until it has been waited (`killpg` of a child that failed at
+//!    `chdir` finding no group); and a piped standard input takes a pipe's
+//!    capacity and then fails with `EPIPE`.
+//! 7. **Waiting and signals.** `wait` and `tryWait` are `waitpid`, the status
+//!    or 128 plus the signal (bash's convention); `kill` is `SIGKILL`, to the
+//!    process group (`killpg`) for a child spawned with `setsid`.
+//!    `takeStdin` returns the same process with its `setsid` flag. Lean's
+//!    builds a child object without the flag, so `kill` after it signals the
+//!    pid alone and the group survives (LB-14, `docs/lean-bugs.md`); the
+//!    runtime keeps the flag, as `Child.kill`'s documentation promises.
+//!
+//! Errors of the parent's own calls (a pipe, a thread, `posix_spawn` itself)
+//! are `decode_io_error(errno, nullptr)`, as Lean's `throw errno`; a thread
+//! the system cannot create is `EAGAIN`, as `fork`'s failure is.
+//!
+//! Sources: leanrs's `rt/leanrs_rt/src/io/process.rs` (docs ch05 O8, D25;
+//! probes `validate/io/proc_spawn`, `proc_output`, `proc_inherit`, A755),
+//! rewritten over this crate's handles and views; lean2rr's
+//! `runtime/leanrt/src/proc.rs` (the fork-based original, which gave the
+//! native outputs every case here was checked against) and its `drain`
+//! (both pipes of `output` read on the calling thread with `poll`).
+
+use std::ffi::{CStr, CString};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{mpsc, Arc, Mutex, PoisonError, RwLock};
+
+use nix::errno::Errno;
+use nix::spawn::{posix_spawn, PosixSpawnAttr, PosixSpawnFileActions, PosixSpawnFlags};
+use nix::sys::signal::SigSet;
+use rustix::fd::{AsFd, AsRawFd, OwnedFd};
+use rustix::process::{Pid, Signal, WaitOptions};
+
+use super::error::{
+    set_errno, IoError, E2BIG, EACCES, EAGAIN, ECHILD, EINVAL, EIO, EISDIR, ELOOP, EMFILE,
+    ENAMETOOLONG, ENFILE, ENODEV, ENOENT, ENOEXEC, ENOTDIR, EPERM, ESRCH, ETIMEDOUT, ETXTBSY,
+};
+use super::handle::{FsMode, Handle};
+use super::{environ, ByteSink};
+
+/// `ESTALE` (not among the crate's constants).
+const ESTALE: i32 = 116;
+/// `ELIBBAD`: `execve` of a corrupt shared-library interpreter.
+const ELIBBAD: i32 = 80;
+/// glibc's `NAME_MAX`, the longest program name `execvp` searches for.
+const NAME_MAX: usize = 255;
+/// glibc's `PATH_MAX`.
+const PATH_MAX: usize = 4096;
+/// POSIX's `PIPE_BUF`: a pipe always holds at least this many bytes.
+const PIPE_BUF: usize = 4096;
+/// glibc's `POSIX_SPAWN_SETSID` (`spawn.h`, glibc 2.26), which `nix`'s
+/// `PosixSpawnFlags` does not name.
+const POSIX_SPAWN_SETSID: i32 = 0x80;
+/// The size of the buffer `output` reads the child's pipes into.
+const READ_CHUNK: usize = 65536;
+
+/// Lean's `IO.Process.Stdio`, its constructors in Lean's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stdio {
+    Piped,
+    Inherit,
+    Null,
+}
+
+impl Stdio {
+    /// The mode of Lean's constructor index (0 to 2).
+    pub fn from_index(i: u8) -> Option<Stdio> {
+        Some(match i {
+            0 => Stdio::Piped,
+            1 => Stdio::Inherit,
+            2 => Stdio::Null,
+            _ => return None,
+        })
+    }
+}
+
+/// Lean's `IO.Process.StdioConfig`, its fields in Lean's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StdioConfig {
+    pub stdin: Stdio,
+    pub stdout: Stdio,
+    pub stderr: Stdio,
+}
+
+/// The fields of Lean's `IO.Process.SpawnArgs` other than its
+/// `StdioConfig`, as views of the program's strings.
+#[derive(Clone, Copy, Debug)]
+pub struct SpawnArgs<'a> {
+    pub cmd: &'a [u8],
+    pub args: &'a [&'a [u8]],
+    pub cwd: Option<&'a [u8]>,
+    /// The changes, in order: `Some(v)` sets the variable, `None` unsets it.
+    pub env: &'a [(&'a [u8], Option<&'a [u8]>)],
+    pub inherit_env: bool,
+    pub setsid: bool,
+}
+
+/// What `IO.Process.spawn` returns: Lean's `Child` object, the three stream
+/// fields (`None` for a stream that is not `piped`, Lean's `()`) and the
+/// process. A translator keeps the handles in its own fields and the
+/// [`ChildProcess`] beside them.
+#[derive(Debug)]
+pub struct Child {
+    pub stdin: Option<Handle>,
+    pub stdout: Option<Handle>,
+    pub stderr: Option<Handle>,
+    pub process: ChildProcess,
+}
+
+/// The process of a `Child`: its pid and `setsid` flag, as in Lean's object,
+/// and, for the modelled child of module comment item 6 (no `/bin/sh`), its
+/// state, which clones (and the child `takeStdin` returns) share.
+#[derive(Clone, Debug)]
+pub struct ChildProcess {
+    pid: u32,
+    setsid: bool,
+    modelled: Option<Arc<Mutex<Modelled>>>,
+}
+
+/// The state of a modelled child that could not start (module comment,
+/// item 6, when `/bin/sh` cannot be spawned).
+#[derive(Debug)]
+struct Modelled {
+    /// The read end of its piped standard input, held until it is waited.
+    stdin_reader: Option<OwnedFd>,
+    reaped: bool,
+    /// It failed at `chdir`, before Lean's child calls `setsid()`.
+    at_chdir: bool,
+}
+
+/// Why a child cannot start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Failure {
+    Cwd,
+    Program,
+}
+
+/// A failure of the spawn: the child's own (it starts and fails, status
+/// 255), or the parent's (`errno`), which `spawn` reports.
+#[derive(Debug)]
+enum SpawnError {
+    Child(Failure),
+    Os(i32),
+}
+
+/// `decode_io_error(errno, nullptr)` of a failing call, with the modelled
+/// `errno` set as the call sets C's.
+fn os_error(e: i32) -> IoError {
+    set_errno(e);
+    IoError::decode_io_error(e, None)
+}
+
+/// The `errno` of a thread the system could not create (`pthread_create`'s
+/// `EAGAIN`, as `fork`'s).
+fn thread_error(e: std::io::Error) -> i32 {
+    e.raw_os_error().unwrap_or(EAGAIN)
+}
+
+/// A C string's bytes: up to the first NUL byte (Lean passes `cmd`, the
+/// arguments, `cwd` and the environment to the system as C strings).
+fn c_text(s: &[u8]) -> &[u8] {
+    match s.iter().position(|&b| b == 0) {
+        Some(n) => &s[..n],
+        None => s,
+    }
+}
+
+fn c_string(s: &[u8]) -> CString {
+    // `c_text` leaves no NUL byte
+    CString::new(c_text(s)).unwrap_or_default()
+}
+
+/// A `nix` pid as `rustix`'s (positive).
+fn to_pid(p: nix::unistd::Pid) -> Result<Pid, i32> {
+    Pid::from_raw(p.as_raw()).ok_or(EAGAIN)
+}
+
+/// A spawn's program, arguments, working directory, environment and session
+/// flag as the C strings Lean passes.
+struct Spec {
+    cmd: Vec<u8>,
+    argv: Vec<CString>,
+    cwd: Option<Vec<u8>>,
+    /// The child's environment (shared with the runtime's cached one when it
+    /// is inherited unchanged).
+    envp: Arc<[CString]>,
+    setsid: bool,
+    /// The calling thread's signal mask, the child's (a forked child keeps
+    /// the forking thread's), whichever thread spawns.
+    sigmask: Option<SigSet>,
+}
+
+impl Spec {
+    fn new(a: &SpawnArgs) -> Spec {
+        let cmd = c_text(a.cmd).to_vec();
+        let mut argv = Vec::with_capacity(a.args.len() + 1);
+        argv.push(c_string(&cmd));
+        argv.extend(a.args.iter().map(|s| c_string(s)));
+        let envp = if a.inherit_env && a.env.is_empty() {
+            environ::envp()
+        } else {
+            let mut env = if a.inherit_env {
+                environ::entries()
+            } else {
+                Vec::new()
+            };
+            for (name, value) in a.env {
+                let name = c_text(name);
+                // `setenv` and `unsetenv` refuse such a name and change nothing
+                if !environ::name_ok(name) {
+                    continue;
+                }
+                match value {
+                    Some(v) => environ::apply_set(&mut env, name, c_text(v)),
+                    None => environ::apply_unset(&mut env, name),
+                }
+            }
+            env.iter()
+                .filter_map(|e| CString::new(e.as_slice()).ok())
+                .collect()
+        };
+        Spec {
+            cmd,
+            argv,
+            cwd: a.cwd.map(|d| c_text(d).to_vec()),
+            envp,
+            setsid: a.setsid,
+            sigmask: SigSet::thread_get_mask().ok(),
+        }
+    }
+
+    /// The message Lean's child writes when it cannot start.
+    fn failure_message(&self, f: Failure) -> Vec<u8> {
+        let mut m = Vec::new();
+        match (f, &self.cwd) {
+            (Failure::Cwd, Some(d)) => {
+                m.extend_from_slice(b"could not change directory to ");
+                m.extend_from_slice(d);
+            }
+            _ => {
+                m.extend_from_slice(b"could not execute external process '");
+                m.extend_from_slice(&self.cmd);
+                m.push(b'\'');
+            }
+        }
+        m.push(b'\n');
+        m
+    }
+
+    /// `posix_spawn` with the standard streams `dups` (each a descriptor and
+    /// its target 0, 1 or 2) and `setsid`, through glibc's `execvp` search,
+    /// from the calling thread's working directory.
+    fn spawn_here(&self, dups: &[(i32, i32)]) -> Result<Pid, SpawnError> {
+        let os = |e: Errno| SpawnError::Os(e as i32);
+        let mut actions = PosixSpawnFileActions::init().map_err(os)?;
+        for &(fd, target) in dups {
+            actions.add_dup2(fd, target).map_err(os)?;
+        }
+        let mut attr = PosixSpawnAttr::init().map_err(os)?;
+        let mut flags = PosixSpawnFlags::empty();
+        if self.setsid {
+            flags |= PosixSpawnFlags::from_bits_retain(POSIX_SPAWN_SETSID);
+        }
+        if let Some(mask) = &self.sigmask {
+            attr.set_sigmask(mask).map_err(os)?;
+            flags |= PosixSpawnFlags::POSIX_SPAWN_SETSIGMASK;
+        }
+        if !flags.is_empty() {
+            attr.set_flags(flags).map_err(os)?;
+        }
+        self.exec_search(&actions, &attr).map_err(|e| {
+            if is_exec_failure(e) {
+                SpawnError::Child(Failure::Program)
+            } else {
+                SpawnError::Os(e)
+            }
+        })
+    }
+
+    /// One `execve` of `file` (with `argv` and `envp`) as `posix_spawn`, and
+    /// glibc's `maybe_script_execute` after `ENOEXEC`: `/bin/sh file args`.
+    fn exec_one(
+        &self,
+        file: &[u8],
+        actions: &PosixSpawnFileActions,
+        attr: &PosixSpawnAttr,
+    ) -> Result<Pid, i32> {
+        match posix_spawn(file, actions, attr, &self.argv, &self.envp) {
+            Ok(p) => to_pid(p),
+            Err(Errno::ENOEXEC) => {
+                let mut sh = Vec::with_capacity(self.argv.len() + 1);
+                sh.push(CString::from(c"/bin/sh"));
+                sh.push(CString::new(file).unwrap_or_default());
+                sh.extend(self.argv.iter().skip(1).cloned());
+                posix_spawn(c"/bin/sh", actions, attr, &sh, &self.envp)
+                    .map_err(|e| e as i32)
+                    .and_then(to_pid)
+            }
+            Err(e) => Err(e as i32),
+        }
+    }
+
+    /// glibc 2.39's `__execvpe_common` over [`Spec::exec_one`]: an empty name
+    /// is `ENOENT`; a name holding `/` is tried as it is; a name longer than
+    /// `NAME_MAX` is `ENAMETOOLONG`; otherwise each entry of the child's
+    /// `PATH` (its first `PATH=` entry, `/bin:/usr/bin` without one; an
+    /// empty entry the working directory; an entry as long as the whole,
+    /// `PATH_MAX`-capped value skipped) joined with the name, in order, going
+    /// on after `EACCES` (remembered), `ENOENT`, `ESTALE`, `ENOTDIR`, `ENODEV`
+    /// and `ETIMEDOUT` and stopping at any other error, `EACCES` when some
+    /// entry gave it.
+    fn exec_search(
+        &self,
+        actions: &PosixSpawnFileActions,
+        attr: &PosixSpawnAttr,
+    ) -> Result<Pid, i32> {
+        let file = self.cmd.as_slice();
+        if file.is_empty() {
+            return Err(ENOENT);
+        }
+        if file.contains(&b'/') {
+            return self.exec_one(file, actions, attr);
+        }
+        if file.len() > NAME_MAX {
+            return Err(ENAMETOOLONG);
+        }
+        let path: &[u8] = self
+            .envp
+            .iter()
+            .find_map(|e| e.to_bytes().strip_prefix(b"PATH="))
+            .unwrap_or(b"/bin:/usr/bin");
+        let path_len = path.len().min(PATH_MAX - 1) + 1;
+        let mut got_eacces = false;
+        let mut buf = Vec::with_capacity(path_len + file.len() + 1);
+        let mut p = 0;
+        loop {
+            let subp = p + path[p..]
+                .iter()
+                .position(|&c| c == b':')
+                .unwrap_or(path.len() - p);
+            if subp - p >= path_len {
+                // glibc's `continue` leaves `p` at the `:`: the next entry is empty
+                if subp == path.len() {
+                    break;
+                }
+                p = subp;
+                continue;
+            }
+            buf.clear();
+            buf.extend_from_slice(&path[p..subp]);
+            if subp > p {
+                buf.push(b'/');
+            }
+            buf.extend_from_slice(file);
+            if missing(&buf) {
+                // `execve` would fail as the lookup does, and the search goes on
+                if subp == path.len() {
+                    break;
+                }
+                p = subp + 1;
+                continue;
+            }
+            match self.exec_one(&buf, actions, attr) {
+                Ok(pid) => return Ok(pid),
+                Err(EACCES) => got_eacces = true,
+                Err(ENOENT | ESTALE | ENOTDIR | ENODEV | ETIMEDOUT) => {}
+                Err(e) => return Err(e),
+            }
+            if subp == path.len() {
+                break;
+            }
+            p = subp + 1;
+        }
+        Err(if got_eacces { EACCES } else { ENOENT })
+    }
+}
+/// Whether `file` does not exist as a path lookup with the effective ids
+/// sees it (`faccessat(AT_FDCWD, file, F_OK, AT_EACCESS)` failing with
+/// `ENOENT` or `ENOTDIR`): its `execve` would fail with that same error, which
+/// the search passes over. Checking first spares a `posix_spawn` (a clone of
+/// the process) per `PATH` entry that does not hold the program, where Lean's
+/// child pays a failing `execve` only. Any other answer, an existing file
+/// included, leaves the file to `execve`.
+fn missing(file: &[u8]) -> bool {
+    matches!(
+        rustix::fs::accessat(
+            rustix::fs::CWD,
+            file,
+            rustix::fs::Access::EXISTS,
+            rustix::fs::AtFlags::EACCESS
+        ),
+        Err(rustix::io::Errno::NOENT | rustix::io::Errno::NOTDIR)
+    )
+}
+
+/// Whether an error of the search is `execve`'s, the program's failure that
+/// Lean's forked child reports, rather than the spawn's own (`posix_spawn`
+/// reports both): every error `execve` gives for a file, those the search
+/// passes over included, since the last entry's error ends the search.
+fn is_exec_failure(e: i32) -> bool {
+    matches!(
+        e,
+        ENOENT
+            | EACCES
+            | ENOEXEC
+            | ENOTDIR
+            | ELOOP
+            | ENAMETOOLONG
+            | EPERM
+            | ETXTBSY
+            | EISDIR
+            | E2BIG
+            | EINVAL
+            | EIO
+            | ELIBBAD
+            | EMFILE
+            | ENFILE
+            | ESTALE
+            | ENODEV
+            | ETIMEDOUT
+    )
+}
+
+/// `pipe2(fds, O_CLOEXEC)`: the read and write ends.
+fn pipe() -> Result<(OwnedFd, OwnedFd), i32> {
+    match std::io::pipe() {
+        Ok((r, w)) => Ok((OwnedFd::from(r), OwnedFd::from(w))),
+        Err(e) => Err(e.raw_os_error().unwrap_or(EAGAIN)),
+    }
+}
+
+/// `open(".", O_PATH | O_DIRECTORY | O_CLOEXEC)`: the calling thread's
+/// working directory, which it can come back to (`fchdir`) or enter from
+/// another thread. It fails when the process may not search that directory.
+fn open_dot() -> Result<OwnedFd, rustix::io::Errno> {
+    use rustix::fs::{Mode, OFlags};
+    rustix::fs::open(
+        ".",
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+}
+
+// ---- spawns with a `cwd` (module comment, item 4) ----
+
+/// A spawn the spawner thread makes for a caller, who waits for the answer.
+struct Job {
+    spec: Arc<Spec>,
+    /// The child's standard streams (descriptors and their targets), which
+    /// the caller keeps open until the answer.
+    dups: Vec<(i32, i32)>,
+    /// For a relative `cwd`: the caller's working directory.
+    base: Base,
+    /// The caller thread's nice value.
+    nice: Option<i32>,
+    answer: mpsc::SyncSender<Answer>,
+}
+
+/// The spawner's answer to a [`Job`].
+enum Answer {
+    Spawned(Result<Pid, SpawnError>),
+    /// The spawner could not take the caller's nice value (lowering a
+    /// thread's nice value needs privilege): the caller runs the job on a
+    /// helper thread of its own ([`on_helper`]).
+    Refused(Job),
+}
+
+/// The working directory a relative `cwd` starts from: the caller's, as an
+/// `O_PATH` descriptor, or as its path where no descriptor is left
+/// (`EMFILE`, `ENFILE`, `ENOMEM`: natively the forked child's `chdir` needs
+/// none); or none, with the error, where the forked child's `chdir` of a
+/// relative path fails as well: the process may not search the directory
+/// (`EACCES`) or it has been removed (`ENOENT`).
+enum Base {
+    Fd(OwnedFd),
+    Path(std::path::PathBuf),
+    Fails(rustix::io::Errno),
+    /// The `cwd` is absolute.
+    Unused,
+}
+
+impl Base {
+    /// The calling thread's working directory, for a relative `cwd`. An
+    /// error is the parent's: no descriptor left, and the path not found
+    /// either (LRIO2-F3, RIO2-16).
+    fn here() -> Result<Base, i32> {
+        use rustix::io::Errno as E;
+        match open_dot() {
+            Ok(f) => Ok(Base::Fd(f)),
+            Err(e @ (E::ACCESS | E::NOENT)) => Ok(Base::Fails(e)),
+            Err(e) => match std::env::current_dir() {
+                Ok(p) => Ok(Base::Path(p)),
+                Err(d) if d.raw_os_error() == Some(ENOENT) => Ok(Base::Fails(E::NOENT)),
+                Err(_) => Err(e.raw_os_error()),
+            },
+        }
+    }
+
+    /// Makes it the calling thread's working directory.
+    fn enter(&self) -> Result<(), rustix::io::Errno> {
+        match self {
+            Base::Fd(f) => rustix::process::fchdir(f),
+            Base::Path(p) => rustix::process::chdir(p.as_path()),
+            Base::Fails(e) => Err(*e),
+            Base::Unused => Ok(()),
+        }
+    }
+}
+
+impl Job {
+    /// On the spawner thread: take the caller's nice value (or hand the job
+    /// back), enter `cwd`, spawn, and go back to `/`, so the spawner holds
+    /// no directory (`/proc/<pid>/task/*/cwd`, `lsof` and `umount` would see
+    /// it).
+    fn run(self) {
+        if let Some(n) = self.nice {
+            if rustix::process::setpriority_process(None, n).is_err() {
+                let answer = self.answer.clone();
+                let _ = answer.send(Answer::Refused(self));
+                return;
+            }
+        }
+        let r = self.spawn();
+        let _ = rustix::process::chdir("/");
+        let _ = self.answer.send(Answer::Spawned(r));
+    }
+
+    /// Enters `cwd` (a relative one from the caller's working directory)
+    /// and spawns, on a thread with file-system attributes of its own.
+    fn spawn(&self) -> Result<Pid, SpawnError> {
+        let cwd = self.spec.cwd.as_deref().unwrap_or_default();
+        let cannot = |_| SpawnError::Child(Failure::Cwd);
+        self.base.enter().map_err(cannot)?;
+        rustix::process::chdir(cwd).map_err(cannot)?;
+        self.spec.spawn_here(&self.dups)
+    }
+}
+
+/// The spawner thread's queue, once it runs.
+static SPAWNER: Mutex<Option<mpsc::Sender<Job>>> = Mutex::new(None);
+/// `unshare(CLONE_FS)` was refused: spawns with a `cwd` take the fallback.
+static NO_PRIVATE_CWD: AtomicBool = AtomicBool::new(false);
+/// Test hook: spawns with a `cwd` take the fallback.
+#[cfg(test)]
+pub(crate) static FORCE_FALLBACK: AtomicBool = AtomicBool::new(false);
+/// Test hook: `/bin/sh` cannot be spawned, so a child that cannot start is
+/// modelled.
+#[cfg(test)]
+pub(crate) static FORCE_NO_SHELL: AtomicBool = AtomicBool::new(false);
+/// The process's working directory as the runtime changes it: the
+/// fallback's spawns hold it exclusively while the process is in their
+/// `cwd`, [`with_cwd_change`] (`setCurrentDir`, `uv_chdir`) exclusively,
+/// [`with_cwd_read`] (`currentDir`, `getCurrentDir`, `uv_cwd`) and spawns
+/// without a `cwd` shared (module comment, item 4; reviews RIO2-13,
+/// RIO2-20).
+static CWD_LOCK: RwLock<()> = RwLock::new(());
+
+/// Runs `f`, a change of the process's working directory, never during a
+/// fallback spawn's (which would come back over it) nor during a spawn
+/// without a `cwd`.
+pub(crate) fn with_cwd_change<T>(f: impl FnOnce() -> T) -> T {
+    let _g = CWD_LOCK.write().unwrap_or_else(PoisonError::into_inner);
+    f()
+}
+
+/// Runs `f`, a read of the process's working directory, never during a
+/// fallback spawn's (it would read the spawn's `cwd`) nor during a change.
+pub(crate) fn with_cwd_read<T>(f: impl FnOnce() -> T) -> T {
+    let _g = CWD_LOCK.read().unwrap_or_else(PoisonError::into_inner);
+    f()
+}
+
+fn fallback_forced() -> bool {
+    #[cfg(test)]
+    return FORCE_FALLBACK.load(Ordering::Relaxed);
+    #[cfg(not(test))]
+    false
+}
+
+/// Whether this thread could give itself file-system attributes of its own.
+fn unshare_fs() -> bool {
+    nix::sched::unshare(nix::sched::CloneFlags::CLONE_FS).is_ok()
+}
+
+/// The spawner thread's queue, the thread started at the first call; `None`
+/// when it could not unshare its file-system attributes (the fallback).
+fn spawner() -> Result<Option<mpsc::Sender<Job>>, i32> {
+    if fallback_forced() || NO_PRIVATE_CWD.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    let mut g = SPAWNER.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(tx) = g.as_ref() {
+        return Ok(Some(tx.clone()));
+    }
+    let (tx, rx) = mpsc::channel::<Job>();
+    let (ready_tx, ready_rx) = mpsc::sync_channel::<bool>(1);
+    std::thread::Builder::new()
+        .name("lean-runtime-spawner".to_owned())
+        .spawn(move || {
+            let private = unshare_fs();
+            let _ = ready_tx.send(private);
+            if private {
+                for job in rx {
+                    job.run();
+                }
+            }
+        })
+        .map_err(thread_error)?;
+    if ready_rx.recv() == Ok(true) {
+        *g = Some(tx.clone());
+        Ok(Some(tx))
+    } else {
+        NO_PRIVATE_CWD.store(true, Ordering::Relaxed);
+        Ok(None)
+    }
+}
+
+/// The spawner thread has gone (it cannot, short of a panic): the next spawn
+/// starts another.
+fn spawner_gone() -> SpawnError {
+    *SPAWNER.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    SpawnError::Os(EAGAIN)
+}
+
+/// A spawn with a `cwd`: on the spawner thread, on a helper thread when the
+/// spawner cannot take the caller's nice value, or the fallback.
+fn spawn_in(spec: &Arc<Spec>, dups: Vec<(i32, i32)>, cwd: &[u8]) -> Result<Pid, SpawnError> {
+    let relative = !cwd.starts_with(b"/");
+    match spawner().map_err(SpawnError::Os)? {
+        Some(tx) => {
+            let (answer, answers) = mpsc::sync_channel(1);
+            let job = Job {
+                spec: spec.clone(),
+                dups,
+                base: if relative {
+                    Base::here().map_err(SpawnError::Os)?
+                } else {
+                    Base::Unused
+                },
+                nice: rustix::process::getpriority_process(None).ok(),
+                answer,
+            };
+            if tx.send(job).is_err() {
+                return Err(spawner_gone());
+            }
+            match answers.recv() {
+                Ok(Answer::Spawned(r)) => r,
+                Ok(Answer::Refused(job)) => on_helper(job),
+                Err(_) => Err(spawner_gone()),
+            }
+        }
+        None => fallback_spawn(spec, &dups, cwd, relative),
+    }
+}
+
+/// A job the spawner thread could not run at the caller's nice value: a
+/// short-lived thread the caller creates, which has the caller's nice value
+/// and signal mask, gives itself file-system attributes of its own and runs
+/// it (or, where it cannot, takes the fallback) (review RIO2-14).
+fn on_helper(job: Job) -> Result<Pid, SpawnError> {
+    let helper = std::thread::Builder::new()
+        .name("lean-runtime-spawn".to_owned())
+        .spawn(move || {
+            if unshare_fs() {
+                job.spawn()
+            } else {
+                let cwd = job.spec.cwd.as_deref().unwrap_or_default();
+                fallback_spawn(&job.spec, &job.dups, cwd, !cwd.starts_with(b"/"))
+            }
+        })
+        .map_err(|e| SpawnError::Os(thread_error(e)))?;
+    helper.join().unwrap_or(Err(SpawnError::Os(EAGAIN)))
+}
+
+/// The fallback of module comment item 4: the calling thread enters `cwd`
+/// for the process, spawns, and comes back, holding [`CWD_LOCK`]
+/// exclusively.
+fn fallback_spawn(
+    spec: &Spec,
+    dups: &[(i32, i32)],
+    cwd: &[u8],
+    relative: bool,
+) -> Result<Pid, SpawnError> {
+    let _g = CWD_LOCK.write().unwrap_or_else(PoisonError::into_inner);
+    // the way back, checked before leaving
+    let back = Base::here().map_err(SpawnError::Os)?;
+    match back.enter() {
+        Ok(()) => {}
+        // the child's `chdir` of a relative `cwd` needs the same permission
+        Err(_) if relative => return Err(SpawnError::Child(Failure::Cwd)),
+        Err(e) => return Err(SpawnError::Os(e.raw_os_error())),
+    }
+    if rustix::process::chdir(cwd).is_err() {
+        return Err(SpawnError::Child(Failure::Cwd));
+    }
+    let r = spec.spawn_here(dups);
+    // Checked above, and no thread of the runtime changes the directory
+    // meanwhile; only another process's change to it (its mode, its
+    // removal) can make this fail, and the process stays in `cwd` (module
+    // comment, item 4).
+    let _ = back.enter();
+    r
+}
+
+// ---- the standard streams ----
+
+/// The child's ends of its standard streams (by target 0, 1, 2) and the
+/// parent's ends of its pipes.
+struct Ends {
+    child: [Option<OwnedFd>; 3],
+    parent: [Option<OwnedFd>; 3],
+}
+
+impl Ends {
+    /// `setup_stdio` for each stream: a pipe for `piped`, `/dev/null`
+    /// (read-only for standard input, write-only otherwise) for `null`,
+    /// nothing for `inherit`. Every pipe is made first, in stream order, and
+    /// `/dev/null` opened after them, so the parent's pipe ends get the same
+    /// numbers as natively, where only the forked child opens `/dev/null`.
+    /// `/dev/null` is opened here, in the parent, close-on-exec: the program
+    /// does not inherit the opened descriptor (LB-15), and a failure to open
+    /// it is the spawn's error, not the parent's stream left in place
+    /// (LB-17); Lean's forked child opens it without `O_CLOEXEC` and ignores
+    /// the failure.
+    fn new(cfg: StdioConfig) -> Result<Ends, i32> {
+        let mut child = [None, None, None];
+        let mut parent = [None, None, None];
+        let streams = [cfg.stdin, cfg.stdout, cfg.stderr];
+        for (i, s) in streams.into_iter().enumerate() {
+            if s == Stdio::Piped {
+                let (r, w) = pipe()?;
+                let (mine, theirs) = if i == 0 { (w, r) } else { (r, w) };
+                child[i] = Some(theirs);
+                parent[i] = Some(mine);
+            }
+        }
+        for (i, s) in streams.into_iter().enumerate() {
+            if s == Stdio::Null {
+                let flags = if i == 0 {
+                    rustix::fs::OFlags::RDONLY
+                } else {
+                    rustix::fs::OFlags::WRONLY
+                };
+                let f = rustix::fs::open(
+                    "/dev/null",
+                    flags | rustix::fs::OFlags::CLOEXEC,
+                    rustix::fs::Mode::empty(),
+                )
+                .map_err(|e| e.raw_os_error())?;
+                child[i] = Some(f);
+            }
+        }
+        Ok(Ends { child, parent })
+    }
+
+    fn dups(&self) -> Vec<(i32, i32)> {
+        self.child
+            .iter()
+            .enumerate()
+            .filter_map(|(i, fd)| fd.as_ref().map(|fd| (fd.as_raw_fd(), i as i32)))
+            .collect()
+    }
+}
+
+/// A started child with the parent's ends: standard input as a handle,
+/// standard output and error as descriptors (`spawn` wraps them in handles,
+/// `output` reads them directly).
+struct Started {
+    stdin: Option<Handle>,
+    stdout: Option<OwnedFd>,
+    stderr: Option<OwnedFd>,
+    process: ChildProcess,
+}
+
+impl Started {
+    /// The parent's ends of a child that runs (the child's close here).
+    fn running(ends: Ends, pid: Pid, setsid: bool) -> Started {
+        let Ends { child, parent } = ends;
+        drop(child);
+        let [i, o, e] = parent;
+        Started {
+            stdin: i.map(|fd| Handle::fdopen(fd, FsMode::Write)),
+            stdout: o,
+            stderr: e,
+            process: ChildProcess {
+                pid: pid.as_raw_nonzero().get() as u32,
+                setsid,
+                modelled: None,
+            },
+        }
+    }
+}
+
+fn write_all_fd(fd: impl AsFd, mut bytes: &[u8]) {
+    while !bytes.is_empty() {
+        match rustix::io::write(&fd, bytes) {
+            Ok(0) => return,
+            Ok(n) => bytes = &bytes[n..],
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => return,
+        }
+    }
+}
+
+/// Writes `bytes` into a pipe nobody reads yet: at once when they fit
+/// (`PIPE_BUF`), else on a thread while the program reads, as the forked
+/// child writes them.
+fn fill_pipe(w: OwnedFd, bytes: Vec<u8>) -> Result<(), i32> {
+    if bytes.len() <= PIPE_BUF {
+        write_all_fd(&w, &bytes);
+        return Ok(());
+    }
+    std::thread::Builder::new()
+        .name("lean-runtime-child-output".to_owned())
+        .spawn(move || write_all_fd(&w, &bytes))
+        .map(drop)
+        .map_err(thread_error)
+}
+
+/// What a child that cannot start writes on its output stream `target` (1 or
+/// 2): into the pipe's write end `end` for `piped`, on the parent's own
+/// descriptor for `inherit` (the forked child's inherited one), nowhere for
+/// `null`.
+fn deliver(cfg: Stdio, target: u8, end: Option<OwnedFd>, bytes: Vec<u8>) -> Result<(), i32> {
+    match (cfg, end) {
+        (Stdio::Piped, Some(w)) => fill_pipe(w, bytes),
+        (Stdio::Inherit, _) => {
+            let fd = if target == 1 {
+                rustix::stdio::stdout()
+            } else {
+                rustix::stdio::stderr()
+            };
+            write_all_fd(fd, &bytes);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+// ---- a child that cannot start (module comment, item 6) ----
+
+/// How long the stand-in waits after the spawn before it writes and exits:
+/// about the life of Lean's forked child that fails (the fork, the child's
+/// start, its `execvp` attempts and its message take 1 to 3 ms natively on
+/// the reference host). So a write right after the spawn finds its standard
+/// input open and one after a delay does not, and the parent's next lines
+/// come before the child's message, as natively. A stand-in that exited as
+/// soon as `/bin/sh` starts lost the first race to the program most of the
+/// time.
+const STAND_IN_LIFE: std::time::Duration = std::time::Duration::from_millis(2);
+
+/// The stand-in's descriptors above the standard ones: the release pipe's
+/// read end and, when there are pending bytes, their pipe's read end.
+const RELEASE_FD: i32 = 3;
+const PENDING_FD: i32 = 4;
+
+/// `cat`, which copies the pending bytes in the stand-in (binary data, which
+/// no `sh` builtin copies).
+const CAT: &CStr = c"/bin/cat";
+
+/// A descriptor of `fd`'s file numbered `RELEASE_FD + 2` or above, so that
+/// the stand-in's `dup2`s onto 0 to 4 cannot overwrite it before it is
+/// copied.
+fn above_targets(fd: OwnedFd) -> Result<OwnedFd, i32> {
+    if fd.as_raw_fd() > PENDING_FD {
+        return Ok(fd);
+    }
+    rustix::io::fcntl_dupfd_cloexec(&fd, PENDING_FD + 1).map_err(|e| e.raw_os_error())
+}
+
+/// Spawns the stand-in, `/bin/sh` running `read x <&3`, then `cat <&4` when
+/// there are pending bytes (its own errors to `/dev/null`: where the child's
+/// standard output is a pipe nobody reads, Lean's child fails to write them
+/// without a word, while `cat` would report `write error: Broken pipe`;
+/// review RIO2-17), then `printf %s "$1"` onto its standard error,
+/// then `exit 255`, with the message as `$1`. It gets the child's standard
+/// streams `dups`, the read ends of `release` (descriptor 3) and of the
+/// pending bytes' pipe (descriptor 4, when given), and a new session when
+/// `session`. Once `release`'s write end is closed it writes the pending
+/// bytes on its standard output and the message on its standard error, as
+/// Lean's forked child does, and exits with 255.
+fn spawn_stand_in(
+    dups: &[(i32, i32)],
+    release: &OwnedFd,
+    pending: Option<&OwnedFd>,
+    message: &CStr,
+    session: bool,
+) -> Result<Pid, i32> {
+    #[cfg(test)]
+    if FORCE_NO_SHELL.load(Ordering::Relaxed) {
+        return Err(ENOENT);
+    }
+    let mut actions = PosixSpawnFileActions::init().map_err(|e| e as i32)?;
+    for &(fd, target) in dups {
+        actions.add_dup2(fd, target).map_err(|e| e as i32)?;
+    }
+    actions
+        .add_dup2(release.as_raw_fd(), RELEASE_FD)
+        .map_err(|e| e as i32)?;
+    if let Some(p) = pending {
+        actions
+            .add_dup2(p.as_raw_fd(), PENDING_FD)
+            .map_err(|e| e as i32)?;
+    }
+    let mut attr = PosixSpawnAttr::init().map_err(|e| e as i32)?;
+    if session {
+        attr.set_flags(PosixSpawnFlags::from_bits_retain(POSIX_SPAWN_SETSID))
+            .map_err(|e| e as i32)?;
+    }
+    let script: &CStr = if pending.is_some() {
+        c"read x <&3; /bin/cat <&4 2>/dev/null; printf %s \"$1\" >&2; exit 255"
+    } else {
+        c"read x <&3; printf %s \"$1\" >&2; exit 255"
+    };
+    let argv: [&CStr; 5] = [c"/bin/sh", c"-c", script, c"sh", message];
+    let envp: [&CStr; 0] = [];
+    posix_spawn(c"/bin/sh", &actions, &attr, &argv, &envp)
+        .map_err(|e| e as i32)
+        .and_then(to_pid)
+}
+
+/// The child that cannot start, as a stand-in process (module comment, item
+/// 6): it runs with the child's streams and writes the pending
+/// standard-output bytes and the message itself, `STAND_IN_LIFE` after the
+/// spawn, as the forked child writes them about a millisecond later. `None`
+/// when it cannot be set up (no `/bin/sh`, no descriptor or thread left):
+/// the child is then modelled.
+fn stand_in(
+    cfg: StdioConfig,
+    ends: Ends,
+    spec: &Spec,
+    f: Failure,
+    pending: &[u8],
+) -> Option<Started> {
+    let session = spec.setsid && f == Failure::Program;
+    let message = CString::new(spec.failure_message(f)).ok()?;
+    let (release, hold) = pipe().ok()?;
+    let release = above_targets(release).ok()?;
+    // the pending bytes through a pipe the stand-in copies with `cat`
+    let copy = !pending.is_empty() && rustix::fs::access(CAT, rustix::fs::Access::EXEC_OK).is_ok();
+    let pending_end = if copy {
+        let (r, w) = pipe().ok()?;
+        let r = above_targets(r).ok()?;
+        fill_pipe(w, pending.to_vec()).ok()?;
+        Some(r)
+    } else {
+        None
+    };
+    let pid = spawn_stand_in(
+        &ends.dups(),
+        &release,
+        pending_end.as_ref(),
+        &message,
+        session,
+    )
+    .ok()?;
+    drop(release);
+    drop(pending_end);
+    // the stand-in proceeds `STAND_IN_LIFE` after the spawn (at once without
+    // a thread)
+    let _ = std::thread::Builder::new()
+        .name("lean-runtime-stand-in".to_owned())
+        .spawn(move || {
+            std::thread::sleep(STAND_IN_LIFE);
+            drop(hold);
+        });
+    if !copy && !pending.is_empty() {
+        // no `cat`: the runtime writes the pending bytes at once
+        let mut ends = ends;
+        let stdout = ends.child[1].take();
+        if deliver(cfg.stdout, 1, stdout, pending.to_vec()).is_err() {
+            let _ = rustix::process::waitpid(Some(pid), WaitOptions::empty());
+            return None;
+        }
+        return Some(Started::running(ends, pid, spec.setsid));
+    }
+    Some(Started::running(ends, pid, spec.setsid))
+}
+
+/// The next pid of a modelled child: above any pid the kernel gives
+/// (`pid_max` is at most 2^22), counting down from `0x7FFFFFFF`.
+static NEXT_MODELLED_PID: AtomicU32 = AtomicU32::new(0x7FFF_FFFF);
+
+/// One output stream of a modelled child: a `piped` one is a new pipe holding
+/// the bytes, then end of file.
+fn modelled_output(cfg: Stdio, target: u8, bytes: Vec<u8>) -> Result<Option<OwnedFd>, i32> {
+    match cfg {
+        Stdio::Piped => {
+            let (r, w) = pipe()?;
+            fill_pipe(w, bytes)?;
+            Ok(Some(r))
+        }
+        _ => deliver(cfg, target, None, bytes).map(|()| None),
+    }
+}
+
+/// The child that cannot start, modelled where `/bin/sh` cannot be spawned:
+/// a piped standard input whose read end it holds until it is waited,
+/// written through a non-blocking end that reports a full pipe as `EPIPE`.
+fn modelled_child(
+    cfg: StdioConfig,
+    spec: &Spec,
+    f: Failure,
+    pending: Vec<u8>,
+) -> Result<Started, i32> {
+    let mut stdin_reader = None;
+    let stdin = match cfg.stdin {
+        Stdio::Piped => {
+            let (r, w) = pipe()?;
+            rustix::fs::fcntl_setfl(&w, rustix::fs::OFlags::NONBLOCK)
+                .map_err(|e| e.raw_os_error())?;
+            stdin_reader = Some(r);
+            Some(Handle::fdopen_bounded_pipe(w))
+        }
+        Stdio::Inherit | Stdio::Null => None,
+    };
+    let stdout = modelled_output(cfg.stdout, 1, pending)?;
+    let stderr = modelled_output(cfg.stderr, 2, spec.failure_message(f))?;
+    Ok(Started {
+        stdin,
+        stdout,
+        stderr,
+        process: ChildProcess {
+            pid: NEXT_MODELLED_PID.fetch_sub(1, Ordering::Relaxed),
+            setsid: spec.setsid,
+            modelled: Some(Arc::new(Mutex::new(Modelled {
+                stdin_reader,
+                reaped: false,
+                at_chdir: f == Failure::Cwd,
+            }))),
+        },
+    })
+}
+
+/// `lean_io_process_spawn` up to the parent's ends (see the module comment).
+fn start(cfg: StdioConfig, a: &SpawnArgs) -> Result<Started, IoError> {
+    if cfg.stdin == Stdio::Inherit {
+        // `std::cout.flush()`, `fflush(stdout)` under `sync_with_stdio`;
+        // its error is not reported
+        let _ = Handle::stdout().flush();
+    }
+    let spec = Arc::new(Spec::new(a));
+    let ends = Ends::new(cfg).map_err(os_error)?;
+    let launched = match &spec.cwd {
+        None => {
+            // never while a fallback spawn has the process in its `cwd`
+            let _g = CWD_LOCK.read().unwrap_or_else(PoisonError::into_inner);
+            spec.spawn_here(&ends.dups())
+        }
+        Some(cwd) => spawn_in(&spec, ends.dups(), cwd),
+    };
+    match launched {
+        Ok(pid) => Ok(Started::running(ends, pid, spec.setsid)),
+        Err(SpawnError::Child(f)) => {
+            // the forked child's copy of standard output's buffer
+            let pending = Handle::stdout().file().pending_output().to_vec();
+            match stand_in(cfg, ends, &spec, f, &pending) {
+                Some(s) => Ok(s),
+                None => modelled_child(cfg, &spec, f, pending).map_err(os_error),
+            }
+        }
+        Err(SpawnError::Os(e)) => Err(os_error(e)),
+    }
+}
+
+/// `IO.Process.spawn` (`lean_io_process_spawn`).
+pub fn spawn(cfg: StdioConfig, args: &SpawnArgs) -> Result<Child, IoError> {
+    let s = start(cfg, args)?;
+    Ok(Child {
+        stdin: s.stdin,
+        stdout: s.stdout.map(|fd| Handle::fdopen(fd, FsMode::Read)),
+        stderr: s.stderr.map(|fd| Handle::fdopen(fd, FsMode::Read)),
+        process: s.process,
+    })
+}
+
+/// `waitpid`'s status as Lean reports it: the exit status, or 128 plus the
+/// signal (bash's convention).
+fn status_code(st: rustix::process::WaitStatus) -> u32 {
+    if let Some(c) = st.exit_status() {
+        c as u32
+    } else if let Some(s) = st.terminating_signal() {
+        128 + s as u32
+    } else {
+        // `waitpid` without `WUNTRACED` or `WCONTINUED` reports neither
+        0
+    }
+}
+
+impl ChildProcess {
+    /// `Child.pid` (`lean_io_process_child_pid`).
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// The `setsid` flag of Lean's child object.
+    pub fn setsid(&self) -> bool {
+        self.setsid
+    }
+
+    /// The process of the child `Child.takeStdin` returns
+    /// (`lean_io_process_child_take_stdin`): the same process, with its
+    /// `setsid` flag, so `kill` still reaches the group. Lean's new object
+    /// holds the pid only and its flag reads zeroed padding (LB-14). The
+    /// translator moves the standard-input field out and gives the new child
+    /// `()` there.
+    pub fn take_stdin(&self) -> ChildProcess {
+        self.clone()
+    }
+
+    fn modelled(&self) -> Option<std::sync::MutexGuard<'_, Modelled>> {
+        self.modelled
+            .as_ref()
+            .map(|f| f.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// `Child.wait` (`lean_io_process_child_wait`, `waitpid`): the exit code.
+    pub fn wait(&self) -> Result<u32, IoError> {
+        if let Some(mut f) = self.modelled() {
+            return f.reap().map_err(os_error);
+        }
+        waitpid_once(self.pid, WaitOptions::empty()).map(|st| st.map_or(0, status_code))
+    }
+
+    /// `Child.tryWait` (`lean_io_process_child_try_wait`, `waitpid` with
+    /// `WNOHANG`): `None` while the child runs.
+    pub fn try_wait(&self) -> Result<Option<u32>, IoError> {
+        if let Some(mut f) = self.modelled() {
+            return f.reap().map(Some).map_err(os_error);
+        }
+        waitpid_once(self.pid, WaitOptions::NOHANG).map(|st| st.map(status_code))
+    }
+
+    /// `Child.kill` (`lean_io_process_child_kill`): `SIGKILL` to the child,
+    /// or to its process group (`killpg`) with `setsid`.
+    pub fn kill(&self) -> Result<(), IoError> {
+        if let Some(f) = self.modelled() {
+            // a zombie until waited; a child that failed at `chdir` never
+            // called `setsid()`, so no group has its id
+            return if f.reaped || (self.setsid && f.at_chdir) {
+                Err(os_error(ESRCH))
+            } else {
+                Ok(())
+            };
+        }
+        let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| os_error(ESRCH))?;
+        let r = if self.setsid {
+            rustix::process::kill_process_group(pid, Signal::KILL)
+        } else {
+            rustix::process::kill_process(pid, Signal::KILL)
+        };
+        r.map_err(|e| os_error(e.raw_os_error()))
+    }
+}
+
+impl Modelled {
+    /// The forked child exited at once with status 255: the first wait reaps
+    /// it and closes its standard input; later ones find no child.
+    fn reap(&mut self) -> Result<u32, i32> {
+        if self.reaped {
+            return Err(ECHILD);
+        }
+        self.reaped = true;
+        self.stdin_reader = None;
+        Ok(255)
+    }
+}
+
+/// `waitpid(pid, &status, options)` once (Lean does not retry `EINTR`).
+fn waitpid_once(
+    pid: u32,
+    opts: WaitOptions,
+) -> Result<Option<rustix::process::WaitStatus>, IoError> {
+    let pid = Pid::from_raw(pid as i32).ok_or_else(|| os_error(ECHILD))?;
+    match rustix::process::waitpid(Some(pid), opts) {
+        Ok(r) => Ok(r.map(|(_, st)| st)),
+        Err(e) => Err(os_error(e.raw_os_error())),
+    }
+}
+
+/// A UTF-8 check over a byte stream that arrives in pieces (`readToEnd`'s
+/// `String.fromUTF8?`, which is standard UTF-8, as Rust's).
+#[derive(Default)]
+struct Utf8Stream {
+    carry: [u8; 4],
+    n: usize,
+    bad: bool,
+}
+
+impl Utf8Stream {
+    fn feed(&mut self, mut chunk: &[u8]) {
+        if self.bad {
+            return;
+        }
+        while self.n > 0 {
+            let Some((&b, rest)) = chunk.split_first() else {
+                return;
+            };
+            chunk = rest;
+            self.carry[self.n] = b;
+            self.n += 1;
+            match std::str::from_utf8(&self.carry[..self.n]) {
+                Ok(_) => self.n = 0,
+                Err(e) if e.error_len().is_none() && self.n < 4 => {}
+                Err(_) => {
+                    self.bad = true;
+                    return;
+                }
+            }
+        }
+        if let Err(e) = std::str::from_utf8(chunk) {
+            match e.error_len() {
+                Some(_) => self.bad = true,
+                None => {
+                    let rest = &chunk[e.valid_up_to()..];
+                    self.carry[..rest.len()].copy_from_slice(rest);
+                    self.n = rest.len();
+                }
+            }
+        }
+    }
+
+    fn valid(&self) -> bool {
+        !self.bad && self.n == 0
+    }
+}
+
+/// `Handle.readToEnd`'s error for bytes that are not UTF-8.
+fn not_utf8() -> IoError {
+    IoError::user_error("Tried to read from handle containing non UTF-8 data.")
+}
+
+/// One pipe of `output` being read to its end.
+struct Reading<'a, S: ByteSink + ?Sized> {
+    fd: Option<OwnedFd>,
+    sink: &'a mut S,
+    utf8: Utf8Stream,
+    error: Option<i32>,
+}
+
+impl<S: ByteSink + ?Sized> Reading<'_, S> {
+    /// One `read` into `buf`'s spare capacity (no zeroing), appended to the
+    /// sink; the descriptor is dropped at end of file or on an error.
+    fn step(&mut self, buf: &mut Vec<u8>) {
+        let Some(fd) = &self.fd else { return };
+        buf.clear();
+        match rustix::io::read(fd, buf.spare_capacity_mut()) {
+            Ok(([], _)) => self.fd = None,
+            Ok((got, _)) => {
+                self.utf8.feed(got);
+                self.sink.extend_from_slice(got);
+            }
+            Err(rustix::io::Errno::INTR) => {}
+            Err(e) => {
+                self.error = Some(e.raw_os_error());
+                self.fd = None;
+            }
+        }
+    }
+}
+
+/// Reads a pipe to its end on a thread of its own and drops what it reads:
+/// `output`'s standard-output task, still running when `output` has failed.
+/// Without a thread, the pipe closes here (a child still writing then gets
+/// `EPIPE`).
+fn drain_in_background(fd: Option<OwnedFd>) {
+    if let Some(fd) = fd {
+        let _ = std::thread::Builder::new()
+            .name("lean-runtime-output-drain".to_owned())
+            .spawn(move || {
+                let mut buf = Vec::with_capacity(READ_CHUNK);
+                loop {
+                    match rustix::io::read(&fd, buf.spare_capacity_mut()) {
+                        Ok(([], _)) => return,
+                        Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                        Err(_) => return,
+                    }
+                }
+            });
+    }
+}
+
+/// `IO.Process.output` (Lean code in `Init/System/IO.lean`, here an
+/// override): `spawn` with standard output and error piped and standard
+/// input `null`, or `piped` when `input` is given, in which case the input is
+/// written (`putStr`), flushed and its handle closed first, a write error
+/// ending `output`. Both pipes are then read to their end into `out` and
+/// `err`, the caller's storage, on the calling thread with `poll` (Lean reads
+/// standard output on a dedicated task while it reads standard error, so
+/// neither pipe can block the child). Then, in Lean's order: a read error of
+/// standard error, or standard error that is not UTF-8
+/// (`Tried to read from handle containing non UTF-8 data.`), fails before
+/// the child is waited (its standard output is still read, and dropped, as
+/// Lean's task does); then `wait`; then standard output's read error or
+/// UTF-8 error. Returns the exit code; the sinks then hold valid UTF-8.
+pub fn output<O, E>(
+    args: &SpawnArgs,
+    input: Option<&[u8]>,
+    out: &mut O,
+    err: &mut E,
+) -> Result<u32, IoError>
+where
+    O: ByteSink + ?Sized,
+    E: ByteSink + ?Sized,
+{
+    let cfg = StdioConfig {
+        stdin: if input.is_some() {
+            Stdio::Piped
+        } else {
+            Stdio::Null
+        },
+        stdout: Stdio::Piped,
+        stderr: Stdio::Piped,
+    };
+    let s = start(cfg, args)?;
+    if let (Some(h), Some(bytes)) = (s.stdin, input) {
+        h.put_str(bytes)?;
+        h.flush()?;
+        // the handle closes here (Lean drops it after `flush`)
+    }
+    let mut o = Reading {
+        fd: s.stdout,
+        sink: out,
+        utf8: Utf8Stream::default(),
+        error: None,
+    };
+    let mut e = Reading {
+        fd: s.stderr,
+        sink: err,
+        utf8: Utf8Stream::default(),
+        error: None,
+    };
+    let mut buf = Vec::with_capacity(READ_CHUNK);
+    while e.fd.is_some() {
+        if o.fd.is_none() {
+            e.step(&mut buf);
+            continue;
+        }
+        let (ro, re) = {
+            let (Some(fo), Some(fe)) = (&o.fd, &e.fd) else {
+                break;
+            };
+            let mut fds = [
+                nix::poll::PollFd::new(fo.as_fd(), nix::poll::PollFlags::POLLIN),
+                nix::poll::PollFd::new(fe.as_fd(), nix::poll::PollFlags::POLLIN),
+            ];
+            match nix::poll::poll(&mut fds, nix::poll::PollTimeout::NONE) {
+                Ok(_) => (fds[0].any().unwrap_or(true), fds[1].any().unwrap_or(true)),
+                Err(Errno::EINTR) => (false, false),
+                Err(x) => return Err(os_error(x as i32)),
+            }
+        };
+        if ro {
+            o.step(&mut buf);
+        }
+        if re {
+            e.step(&mut buf);
+        }
+    }
+    if let Some(x) = e.error {
+        drain_in_background(o.fd.take());
+        return Err(os_error(x));
+    }
+    if !e.utf8.valid() {
+        drain_in_background(o.fd.take());
+        return Err(not_utf8());
+    }
+    while o.fd.is_some() {
+        o.step(&mut buf);
+    }
+    let code = s.process.wait()?;
+    if let Some(x) = o.error {
+        return Err(os_error(x));
+    }
+    if !o.utf8.valid() {
+        return Err(not_utf8());
+    }
+    Ok(code)
+}
+
+#[cfg(test)]
+#[path = "process_tests.rs"]
+mod tests;

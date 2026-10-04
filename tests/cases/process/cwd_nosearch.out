@@ -1,0 +1,5 @@
+relative: exit 255 out "" err "could not change directory to sub\n"
+absolute: exit 0 out "/\n" err ""
+absolute missing program: exit 255 out "" err "could not execute external process 'no-such-program-xyz'\n"
+none: exit 0 out "ran\n" err ""
+cwd unchanged: true

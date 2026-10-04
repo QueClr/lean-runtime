@@ -1,0 +1,1 @@
+TZ=Asia/Tokyo $BIN; TZ=:/usr/share/zoneinfo/Europe/Paris $BIN; TZ=No/Such_Zone $BIN; TZDIR=/nonexistent-tzdir TZ=UTC $BIN

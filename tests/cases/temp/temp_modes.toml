@@ -1,0 +1,5 @@
+id = "temp_modes"
+area = "temp"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: io.cpp lean_io_create_tempfile/_tempdir, libuv 1.48 uv_fs_mkstemp/mkdtemp; leanrs rt tests io_create_temp_file/_dir"
+streams = "separate"

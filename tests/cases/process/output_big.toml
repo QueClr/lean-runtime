@@ -1,0 +1,5 @@
+id = "output_big"
+area = "process"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtProcessOutputBig.lean"
+streams = "separate"

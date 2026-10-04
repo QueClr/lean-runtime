@@ -1,0 +1,5 @@
+id = "errno_after"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean-runtime io-2 review RIO2-02 (the reviewer's native repro review-io2/repro/errno: errno_after, errno_temp, errno_uvchk)"
+streams = "separate"

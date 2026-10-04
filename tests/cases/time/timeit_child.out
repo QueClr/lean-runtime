@@ -1,0 +1,6 @@
+child exit 5
+child stdout "child result 42\nchild result slept\nchild caught inside\n"
+stderr lines 3
+label one: true
+label two: true
+label three: true

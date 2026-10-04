@@ -1,0 +1,7 @@
+id = "uv_limits"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtUvSysLimits.lean (with .pipe), without its DNS part"
+streams = "separate"
+# with HOME unset, osHomedir is the user's password-entry directory
+normalize = ['(?m)^osHomedir: \d+ "/home/[^"]*"$ -> osHomedir: <n> "<passwd home>"']

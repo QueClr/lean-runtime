@@ -295,9 +295,10 @@ pub fn symlink_metadata(p: &[u8]) -> Result<Metadata, IoError> {
 }
 
 /// `getcwd` into a `PATH_MAX` buffer, as Lean's C code calls it (a longer
-/// path is `ERANGE`); the `errno` on failure.
+/// path is `ERANGE`); the `errno` on failure. Never during a spawn that has
+/// the process in its `cwd` (`process::with_cwd_read`, review RIO2-20).
 fn getcwd_max() -> Result<Vec<u8>, i32> {
-    match nix::unistd::getcwd() {
+    match super::process::with_cwd_read(nix::unistd::getcwd) {
         Ok(p) if p.as_os_str().len() < PATH_MAX => Ok(p.into_os_string().into_vec()),
         Ok(_) => {
             set_errno(ERANGE);
@@ -343,10 +344,11 @@ pub fn process_current_dir<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoEr
 
 /// `IO.Process.setCurrentDir` (`lean_io_process_set_current_dir`, `chdir` of
 /// the path as a C string, so up to its first NUL byte); an error names the
-/// whole path.
+/// whole path. Never during a spawn that has the process in its `cwd`
+/// (`process::with_cwd_change`).
 pub fn set_current_dir(p: &[u8]) -> Result<(), IoError> {
     let cut = p.iter().position(|&b| b == 0).unwrap_or(p.len());
-    nix::unistd::chdir(os_path(&p[..cut])).map_err(|e| {
+    super::process::with_cwd_change(|| nix::unistd::chdir(os_path(&p[..cut]))).map_err(|e| {
         set_errno(e as i32);
         IoError::decode_io_error(e as i32, Some(p))
     })

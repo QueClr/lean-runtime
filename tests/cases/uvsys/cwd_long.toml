@@ -1,0 +1,5 @@
+id = "cwd_long"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtCwdLong.lean"
+streams = "separate"

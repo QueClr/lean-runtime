@@ -1,0 +1,5 @@
+id = "time_format"
+area = "time"
+lean_version = "4.34.0"
+source = "leanrs validate/io/time_format (probe v4.34.0-rc1, its 4 cases as the .pipe's runs)"
+streams = "separate"

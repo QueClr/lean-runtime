@@ -1,0 +1,8 @@
+id = "temp_missing_dir"
+area = "temp"
+lean_version = "4.34.0"
+source = "LB-03 (docs/lean-bugs.md); leanrs DV15 (b) (probe v4.34.0-rc1: TMPDIR=no-such-dir exits 139)"
+streams = "separate"
+deviations = { leanrs = "DV15 (b)", lean2rr = "LB-03" }
+# `expected` is native's crash (SIGSEGV, code 139, stdout lost). The correct behaviour, which
+# both translators give, is the alternative outcome temp_missing_dir.alt1.*.

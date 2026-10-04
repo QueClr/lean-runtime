@@ -21,10 +21,23 @@ code = ... }` (beside `deviations` naming an LB-nn of docs/lean-bugs.md)
 expects the correct outcome, written by hand: `expect` checks that native
 still gives `native`, and leaves the expected files alone.
 
+A case whose <id>.toml says `hand_written = true` (native is wrong and
+nondeterministic there) is skipped by `expect`: its expected files are the
+correct result, written by hand. A case with `deviations` keeps its
+<id>.altK.* files across `expect` (the correct outcome where native is
+wrong, written by hand); otherwise `expect` rewrites them. For such a case
+whose `deviations` name a Lean bug (a value `LB-nn`, docs/lean-bugs.md),
+with alternatives and no `native` field, `check` accepts only the
+alternatives: a translator that gives native's outcome there has the bug
+back. A deviation that names no Lean bug (a translator's or the shared
+runtime's own, where native is right) keeps native's outcome allowed.
+
 Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
 ("separate" or "merged": stderr into stdout) and optionally
-`expect = { nonterminating = true, timeout_s = N }`. Arguments, stdin and
+`expect = { nonterminating = true, timeout_s = N }`, and `normalize`, a list
+of "regex -> replacement" rules applied to stdout and stderr of every run
+(recorded and checked alike). Arguments, stdin and
 environment come from <id>.args, <id>.stdin and <id>.env; <id>.pipe, if present,
 is a bash line run with pipefail instead of the executable ($BIN, $ARGS);
 <id>.files/ is copied into the working directory first. Every run starts in
@@ -32,7 +45,7 @@ a fresh temporary working directory, with stdin, stdout and stderr as pipes,
 inside a memory cap (LEAN_RUNTIME_CASE_MEM, default 4G, through a systemd user
 scope; LEAN_RUNTIME_NO_CAP=1 disables it) and a CPU-time limit.
 """
-import argparse, os, pathlib, resource, shlex, shutil, signal, subprocess, sys, tempfile, tomllib
+import argparse, os, pathlib, re, resource, shlex, shutil, signal, subprocess, sys, tempfile, tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CASES = ROOT / "tests" / "cases"
@@ -71,6 +84,10 @@ def meta(case):
     t = case.with_suffix(".toml")
     return tomllib.loads(t.read_text()) if t.exists() else {}
 
+def names_lean_bug(m):
+    """Whether one of the case's `deviations` is a Lean bug (`LB-nn`)."""
+    return any(re.match(r"LB-\d+\b", str(v)) for v in m.get("deviations", {}).values())
+
 def build_native(case, outdir):
     c_file = outdir / (case.stem + ".c")
     exe = outdir / case.stem
@@ -79,6 +96,21 @@ def build_native(case, outdir):
     subprocess.run(capped([str(TOOLCHAIN / "bin/leanc"), str(c_file), "-o", str(exe)]),
                    check=True, preexec_fn=cpu_limit(600))
     return exe
+
+def normalizer(m):
+    """The case's `normalize` list (`"regex -> replacement"`, applied in order
+    to stdout and stderr, multi-line mode) as a function on bytes."""
+    rules = []
+    for r in m.get("normalize", []):
+        pat, sep, rep = r.partition(" -> ")
+        if not sep:
+            raise SystemExit(f"bad normalize rule {r!r}: expected 'regex -> replacement'")
+        rules.append((re.compile(pat.encode(), re.M), rep.encode()))
+    def apply(b):
+        for pat, rep in rules:
+            b = pat.sub(rep, b)
+        return b
+    return apply
 
 def expect_of(m):
     e = m.get("expect", {})
@@ -130,7 +162,8 @@ def run(exe, case):
         out, err = p.communicate()
         code = "timeout"
     workdir.cleanup()
-    return out, (err or b""), code
+    norm = normalizer(m)
+    return norm(out), norm(err or b""), code
 
 def cmd_expect(ns):
     ok = True
@@ -139,6 +172,11 @@ def cmd_expect(ns):
         ok = False
     with tempfile.TemporaryDirectory() as d:
         for case in find_cases(ns.cases):
+            if meta(case).get("hand_written"):
+                # Native is wrong and nondeterministic here: the expected
+                # files are the correct result, written by hand.
+                print(f"skipped {case.stem}: hand_written")
+                continue
             exe = build_native(case, pathlib.Path(d))
             runs = [run(exe, case) for _ in range(ns.runs)]
             distinct = sorted(set(runs), key=runs.index)
@@ -162,8 +200,12 @@ def cmd_expect(ns):
                 continue
             # The most frequent outcome is the primary one; others are <id>.altK.*
             distinct.sort(key=lambda r: -runs.count(r))
-            for old in case.parent.glob(case.stem + ".alt*.*"):
-                old.unlink()
+            # Alternatives are native's other schedules here; a case with
+            # `deviations` keeps its hand-written alternatives (the correct
+            # outcome where native is wrong).
+            if meta(case).get("schedule_dependent") or not meta(case).get("deviations"):
+                for old in case.parent.glob(case.stem + ".alt*.*"):
+                    old.unlink()
             for k, (out, err, code) in enumerate(distinct):
                 stem = case.stem if k == 0 else f"{case.stem}.alt{k}"
                 (case.parent / (stem + ".out")).write_bytes(out)
@@ -190,6 +232,11 @@ def cmd_check(ns):
             allowed.append(((case.parent / (stem + ".out")).read_bytes(),
                             (case.parent / (stem + ".err")).read_bytes(),
                             (case.parent / (stem + ".code")).read_text().strip()))
+        m = meta(case)
+        if names_lean_bug(m) and "native" not in m and len(allowed) > 1:
+            # <id>.out is native's wrong outcome (a Lean bug); only the
+            # corrected ones pass
+            allowed = allowed[1:]
         want = allowed[0]
         if (out, err, code) in allowed:
             print(f"PASS {case.stem}")

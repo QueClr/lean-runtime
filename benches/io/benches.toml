@@ -17,3 +17,27 @@ name = "io_get_line"
 function = "io::Handle::get_line"
 comparable = true
 note = "both sides make a new string (validated, characters counted); native reads byte by byte with getc"
+
+[[bench]]
+name = "proc_spawn_wait"
+function = "io::process::spawn, io::process::ChildProcess::wait"
+comparable = true
+note = "/bin/true, every stream null: posix_spawn (a vfork-like clone) against Lean's fork; native also allocates the IO results and the Child"
+
+[[bench]]
+name = "proc_spawn_path"
+function = "io::process::spawn (execvp's PATH search), io::process::ChildProcess::wait"
+comparable = true
+note = "true through PATH=/usr/local/bin:/usr/bin:/bin set in the call: the runtime skips the missing candidate with faccessat where Lean's child pays a failing execve"
+
+[[bench]]
+name = "proc_spawn_cwd"
+function = "io::process::spawn (with a cwd), io::process::ChildProcess::wait"
+comparable = true
+note = "/bin/true in /: the runtime sends the spawn to its spawner thread (a channel round trip, chdir) where Lean's child calls chdir after fork"
+
+[[bench]]
+name = "proc_output"
+function = "io::process::output"
+comparable = true
+note = "/bin/echo <word>: both pipes read with poll on the calling thread against Lean's dedicated stdout task; both sides make the two strings"

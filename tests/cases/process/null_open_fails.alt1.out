@@ -1,0 +1,6 @@
+stdout null:
+  spawn failed: resource exhausted (error code: 24, too many open files)
+stdin null:
+  spawn failed: resource exhausted (error code: 24, too many open files)
+parent reads: line1
+handles kept open: true

@@ -1,0 +1,1 @@
+$BIN; HOME=/h $BIN with-home; env -u HOME $BIN home; TMPDIR= $BIN tmp; TMPDIR=$(printf 'a%.0s' $(seq 4096)) $BIN tmp

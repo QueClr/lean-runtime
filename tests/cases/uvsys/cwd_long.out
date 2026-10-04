@@ -1,0 +1,18 @@
+cwd of 4095 bytes
+  IO.currentDir: 4095
+  IO.Process.getCurrentDir: 4095
+  realPath .: 4095
+  uv cwd: 4095
+cwd of 4096 bytes
+  IO.currentDir: error: failed to retrieve current working directory
+  IO.Process.getCurrentDir: error: unsupported operation (error code: 34, result too large)
+  realPath .: error: no such file or directory (error code: 2)
+  file: .
+  uv cwd: error: resource exhausted (error code: 105, no buffer space available)
+cwd of 4297 bytes
+  IO.currentDir: error: failed to retrieve current working directory
+  IO.Process.getCurrentDir: error: unsupported operation (error code: 34, result too large)
+  realPath .: error: no such file or directory (error code: 2)
+  file: .
+  uv cwd: error: unsupported operation (error code: 34, result too large)
+removed true

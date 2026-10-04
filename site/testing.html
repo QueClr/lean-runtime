@@ -139,12 +139,15 @@ So the oracle reads its inputs at run time.</p>
   <li>A case that natively never ends records the output before its timeout.</li>
   <li><code>scripts/cases.py check --exe-dir DIR</code> runs a translator's build of each case and compares it with the recorded files.</li>
   <li>Each run starts in a fresh directory, with an empty environment, pipes for the three streams, a memory cap and a CPU-time limit.</li>
-  <li>There are 51 program cases: 19 in <code>io/</code>, 4 in <code>sync/</code> and 28 in <code>tasks/</code>.</li>
+  <li>There are 96 program cases.
+    Per area: <code>io/</code> 20, <code>process/</code> 19, <code>streams/</code> 4, <code>sync/</code> 4, <code>tasks/</code> 28, <code>temp/</code> 7, <code>time/</code> 3, <code>uvsys/</code> 11.</li>
 </ul>
 <p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
 Usually its expected output stays native's, and the deviation's outcome is also allowed.
 When native's outcome is a <a href="lean-bugs.html">Lean bug</a>, the case may expect the correct outcome instead.
-It then records native's outcome in a <code>native</code> field, which <code>cases.py expect</code> checks (LB-13's cases do).</p>
+It then records native's outcome in a <code>native</code> field, which <code>cases.py expect</code> checks (LB-13's cases do).
+The Lean-bug cases of io-2 keep native's outcome and add the correct one as an alternative.
+For them, <code>check</code> accepts the alternative only, so a return of the bug fails.</p>
 
 <h2 id="twins">Rust twins</h2>
 <p>A <a href="glossary.html#g-twin">twin</a> is a Rust program that makes the same calls through lean-runtime as the case's Lean program makes through Lean's runtime.
@@ -152,7 +155,7 @@ It adds only what a translator's glue adds.</p>
 <ul>
   <li><code>tests/io_cases.rs</code> has a twin for each io case.
     It runs <code>cases.py check</code> on them, the same checker that the translators use.</li>
-  <li>Branch <code>io-2</code> adds <code>tests/io2_cases.rs</code>.
+  <li><code>tests/io2_cases.rs</code> does the same for the cases of the second io batch.
     <a href="../tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code> and <code>sync/</code> case over <code>sched</code>, with a complete example of the glue.</li>
   <li>So the crate is checked against native output before either translator adopts it.</li>
 </ul>
@@ -178,10 +181,12 @@ It adds only what a translator's glue adds.</p>
 <ul>
   <li>build, tests and clippy on the Rust toolchains of both translators, in every feature configuration;</li>
   <li>formatting;</li>
-  <li>Miri on the <code>unsafe-fast</code> configurations;</li>
   <li>the plain-rustc builds that one translator uses, with its driver's cfg flags;</li>
-  <li>the libm folding test in a release build.</li>
+  <li>the libm folding test in a release build;</li>
+  <li>only with <code>LEAN_RUNTIME_MIRI=1</code>: Miri on the <code>unsafe-fast</code> configurations.</li>
 </ul>
+<p>Miri is opt-in, because the default build forbids <code>unsafe</code> and Miri costs much CPU time (decision of 2026-10-04).
+Run it when an <code>unsafe-fast</code> item changes.</p>
 <p>Heavy steps run under a memory cap, and every test run has a deadline, because the host is shared.</p>
 
 <h2 id="cross">Both translators</h2>
@@ -216,7 +221,7 @@ The pairs exist; nothing is timed yet.</p>
   <li><strong>The same work on both sides.</strong> The Rust side also does the glue's work, for example boxed <code>Nat</code> words and new string objects.</li>
   <li><strong>No folding.</strong> Only N, the number of iterations, comes from argv.
     The operands come from a fixed-seed generator and pass through an opaque sink (<code>black_box</code>, <code>Bench.pin</code>).</li>
-  <li><strong>Counts:</strong> 307 pairs for <code>semantics</code> (6 of them not comparable) and 3 for <code>io</code>.</li>
+  <li><strong>Counts:</strong> 307 pairs for <code>semantics</code> (6 of them not comparable) and 7 for <code>io</code>.</li>
   <li><code>scripts/check_benches.sh</code> builds both sides and compares the checksums.
     It times nothing.</li>
   <li><strong>Timing</strong> follows a fixed protocol: a host lock, one quiet core, nine alternating pairs, the median, and the peak memory beside it.

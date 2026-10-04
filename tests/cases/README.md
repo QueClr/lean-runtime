@@ -30,6 +30,10 @@ records native Lean's in its `.toml` as `native = { stdout = "…", stderr =
 "…", code = "…" }` (`code` as in `<id>.code`: a status, or `timeout` for a
 hang), beside `deviations` naming the `LB-nn`; `scripts/cases.py expect`
 then checks native against `native` and leaves the expected files alone.
+The Lean-bug cases of io-2 (LB-03, LB-14 to LB-17) still use the older
+form, to be moved to `native` later (leanrs review LRIO2-F4): native's
+outcome in `<id>.out/.err/.code` and the correct one as `<id>.alt1.*`,
+which alone `check` accepts (`deviations` below).
 
 **`row`**: one function call, as a TOML `[[row]]` table in
 `<area>/<area>.rows.toml`:
@@ -98,10 +102,10 @@ Written in `<id>.toml` for programs and inline for rows:
 | `lean_version` | The Lean version of the native build that produced the expected values (4.34.0) |
 | `source` | Where the case came from: a finding id and the project that found it, plus file:line where there is one |
 | `normalize` | Optional list of `regex -> replacement` applied to both outputs before comparing (pids, times, addresses) |
-| `deviations` | Optional documented translator deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "plan §10 ..." }`. The expected value stays compiled Lean's; a listed deviation is the only difference allowed. A row whose deviation is an `LB-nn` that the crate itself follows expects the Lean definition's result instead and records native's outcome in `native` |
+| `deviations` | Optional documented translator deviations, e.g. `{ leanrs = "DV15 (d)", lean2rr = "plan §10 ..." }`. The expected value stays compiled Lean's; a listed deviation is the only difference allowed. A row whose deviation is an `LB-nn` that the crate itself follows expects the Lean definition's result instead and records native's outcome in `native`. A program case with `deviations` and no `native` field keeps native's outcome in `<id>.out/.err/.code` and the deviating one as `<id>.alt1.*`. Where a deviation names a Lean bug (`LB-nn`), `check` accepts only the alternatives, so a regression to native's bug fails; where none does (a translator's or the shared runtime's own deviation, native being right: `LIO2-05`, `LIO2-06` of the coordination notes), native's outcome passes too |
 | `files` | For IO cases: the expected directory tree after the run, with each file's SHA-256 |
 | `streams` | `"separate"` (default) or `"merged"` (stderr into stdout, to observe the order between the two) |
-| `schedule_dependent` | Optional `true` when native Lean has more than one outcome depending on thread timing. The case records the dominant native outcome (the one every measured native run took); the `.toml` comment says what the other outcome is. A translator showing the other outcome shows another native schedule, not a semantic error |
+| `schedule_dependent` | Optional `true` when native Lean has more than one outcome depending on thread timing. The case records the dominant native outcome as `<id>.*` and each other native outcome seen as `<id>.altK.*`, and `check` accepts any of them; the `.toml` comment says what they are and how often each was seen. An outcome possible natively but never seen is named in the comment and not accepted (`tasks/dropped_pure_task`): a translator showing it shows another native schedule, not a semantic error |
 | `expect` | Optional `{ hang = N }` (N seconds, about 3 to 5) for a program that natively never exits. The output produced before the timeout is compared; the code is `timeout`. In a case with `native`, `hang` only bounds the run (native's, and a translator's): the expected code is the corrected one in `<id>.code`. Each run starts in its own process group, which the runner kills by its id, never by name |
 
 ## How a case runs

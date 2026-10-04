@@ -1,0 +1,4 @@
+program: pid positive true
+program: wait 255
+cwd: pid positive true
+cwd: wait 255

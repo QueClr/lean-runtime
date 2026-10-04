@@ -1,0 +1,5 @@
+child: stdout closed
+exit 0
+cat: standard output: Bad file descriptor
+cat exit 1
+output "captured\n" 0

@@ -127,7 +127,8 @@ impl Fd {
     }
 
     /// `isatty` that leaves `errno` alone (glibc's `local_isatty` in
-    /// `_IO_file_doallocate`).
+    /// `_IO_file_doallocate`; unused under Miri, which asks nothing there).
+    #[cfg_attr(miri, allow(dead_code))]
     pub(crate) fn isatty_keep_errno(&self) -> bool {
         self.borrow()
             .is_some_and(|fd| rustix::termios::tcgetattr(fd).is_ok())

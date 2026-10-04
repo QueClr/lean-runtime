@@ -1,0 +1,5 @@
+id = "timeit_child"
+area = "time"
+lean_version = "4.34.0"
+source = "leanrs validate/io/timeit_child (probe v4.34.0-rc1)"
+streams = "separate"

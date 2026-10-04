@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Checks run before every commit: build, test and clippy on the Rust
 # toolchains both translators use, in every feature configuration; the task
-# and sync cases' Rust ports over `sched` (tests/sched-driver); fmt;
-# Miri where the unsafe code is; the plain-rustc build of the
-# dependency-free configuration, which one translator builds without cargo;
-# and `sched`'s offline build from Cargo.lock.
+# and sync cases' Rust ports over `sched` (tests/sched-driver); fmt; the
+# plain-rustc build of the dependency-free configuration, which one
+# translator builds without cargo; `sched`'s offline build from Cargo.lock;
+# and, only with LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
 #
 # The host is shared: the heavy steps (cargo test, Miri) run inside a memory
 # cap, `systemd-run --user --scope -p MemoryMax=$LEAN_RUNTIME_MEM` (default
@@ -76,9 +76,15 @@ done
 last="${TOOLCHAINS[${#TOOLCHAINS[@]}-1]}"
 cargo +"$last" fmt --all --check
 
-# Miri runs where `unsafe` can be: the unsafe-fast configurations. Tests that
-# call foreign code or switch stacks are marked #[cfg_attr(miri, ignore)].
-if cargo +"$last" miri --version >/dev/null 2>&1; then
+# Miri runs where `unsafe` can be: the unsafe-fast configurations. It is
+# opt-in (LEAN_RUNTIME_MIRI=1): the default build forbids `unsafe`, so Miri
+# checks little there for a large CPU cost on the shared host (owner,
+# 2026-10-04). Run it when an `unsafe-fast` item changes (CONTRIBUTING.md).
+# Tests that call foreign code or switch stacks are marked
+# #[cfg_attr(miri, ignore)].
+if [[ "${LEAN_RUNTIME_MIRI:-}" != 1 ]]; then
+  echo "Miri skipped (set LEAN_RUNTIME_MIRI=1 to run it)"
+elif cargo +"$last" miri --version >/dev/null 2>&1; then
   for f in "" "unsafe-fast" "io,sched,unsafe-fast"; do
     echo "== miri features=[${f}]"
     capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet ${f:+--features "$f"}

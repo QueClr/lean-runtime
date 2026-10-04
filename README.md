@@ -42,8 +42,13 @@ micro-benchmark per public function and its native-Lean twin in `benches/`
 decoding from `errno`, glibc's `FILE` model, handles and the standard
 streams, the exit sequence, the file system, the environment, the clock and
 the debug primitives, with bench pairs for its hot paths in `benches/io/`
-(not timed yet); processes, `Std.Time`, temporary files, the `UV.System`
-queries and stream redirection come next. See `src/io/mod.rs`.
+(not timed yet). Its second batch adds child processes (over
+`posix_spawn`), `timeit` and `Std.Time`'s clock, temporary files, the
+`Std.Internal.UV.System` queries and the redirection of the standard
+streams; `tests/io2_cases.rs` runs a Rust twin of each of its program cases
+(`tests/cases/{process,temp,time,uvsys,streams}`) through the case checker,
+and `benches/io/` has pairs for spawning and `IO.Process.output`. See
+`src/io/mod.rs`.
 
 `sched` has its first batch (feature `sched`): deferred tasks on corosensei
 contexts, the yield points, promises, `Std.Sync`'s primitives and Lean's

@@ -1,0 +1,9 @@
+output: code 3 stdout "out\n" stderr "err\n"
+run: "run me\n"
+env: "[set][]\n"
+cwd: "/\n"
+missing: code 255 stderr "could not execute external process 'rt-process-no-such-command'\n"
+tr: "PIPED THROUGH TR\n" code 0
+tryWait while running: false
+killed: 137
+second wait: no such thing (error code: 10, no such process)

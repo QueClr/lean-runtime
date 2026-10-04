@@ -1,0 +1,8 @@
+id = "title_cmdline"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: libuv 1.48 proctitle.c uv_set_process_title; disagreements.md LIO2-06"
+streams = "separate"
+# Native writes the title over argv's memory; the shared runtime cannot without unsafe code
+# (title_cmdline.alt1.*: /proc/self/cmdline unchanged).
+deviations = { lean_runtime = "LIO2-06" }

@@ -1,0 +1,5 @@
+id = "dir_entry_update"
+area = "io"
+lean_version = "4.34.0"
+source = "leanrs adversarial A754 (sysio breaker, eac34312): readDir's DirEntry updated with a literal"
+streams = "separate"

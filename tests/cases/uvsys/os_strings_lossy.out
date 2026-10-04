@@ -1,0 +1,8 @@
+osGetenv "a�b�" (8 bytes, 4 characters)
+osEnviron "a�b�" (8 bytes, 4 characters)
+IO.getEnv "a�b�" (8 bytes, 4 characters)
+osHomedir "/h�" (5 bytes, 3 characters)
+osTmpdir "/t�x" (6 bytes, 4 characters)
+title "üüü�" (9 bytes, 4 characters)
+createTempFile in "tmp�" (6 bytes, 4 characters), name of 12, exists false
+createTempDir in "tmp�" (6 bytes, 4 characters), name of 12, exists false

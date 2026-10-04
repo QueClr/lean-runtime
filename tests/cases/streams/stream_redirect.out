@@ -1,0 +1,14 @@
+start
+through the previous stream
+buffer: "captured one\ncaptured two (and through the returned buffer stream)\n"
+stderr buffer: "error captured\n"
+stdin lines: "first line\n" "second line\n" "rest" ""
+real stdin: "real input line\n"
+b1: "to b1\nto b1 again\n" b2: "to b2\n"
+isolated: "isolated out\nisolated err\n" 42
+isolated stdout only: "isolated out only\n"
+isolated panics: "Error: index out of bounds\nPANIC at boom <module>:8:51: boom\ngot 0 and 0\n" 7
+panic under setStderr: 0
+timeit captured: 3 true true "PANIC at boom <module>:8:51: boom" 3
+after restore: 0
+end

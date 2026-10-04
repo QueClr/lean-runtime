@@ -235,20 +235,38 @@ impl CFile {
     /// buffered on a terminal (`DEV_TTY_P`: a pty slave, majors 136 to 143,
     /// or `local_isatty`, which keeps `errno`). A failing `fstat` leaves its
     /// `errno` and gives `BUFSIZ`.
+    ///
+    /// Under Miri, which cannot run `fstat`, the buffer is always `BUFSIZ`
+    /// bytes and nothing else is asked of the descriptor: never line
+    /// buffered (Miri's isolation has no terminal), never marked regular
+    /// (a read then goes through zeroed windows, with the same result), and
+    /// `errno` untouched. Without it, any test that prints through a buffered
+    /// stream stops Miri (leanrs's tests do). A seek from the end still asks
+    /// `fstat`, so it does not run under Miri.
     fn doallocate(&mut self) {
-        let mut size = BUFSIZ;
-        if let Ok(st) = self.fd.fstat() {
-            self.regular = st.st_mode & 0o170000 == 0o100000;
-            if st.st_mode & 0o170000 == 0o020000 {
-                let major = rustix::fs::major(st.st_rdev);
-                if (136..=143).contains(&major) || self.fd.isatty_keep_errno() {
-                    self.flags |= LINE_BUF;
-                }
-            }
-            size = buffer_size(st.st_blksize as i64);
-        }
+        #[cfg(not(miri))]
+        let size = self.probe_descriptor();
+        #[cfg(miri)]
+        let size = BUFSIZ;
         self.buf = vec![0u8; size];
         self.has_buf = true;
+    }
+
+    /// `doallocate`'s `fstat` of the descriptor: the buffer size, and the
+    /// line buffering and `regular` mark it implies.
+    #[cfg(not(miri))]
+    fn probe_descriptor(&mut self) -> usize {
+        let Ok(st) = self.fd.fstat() else {
+            return BUFSIZ;
+        };
+        self.regular = st.st_mode & 0o170000 == 0o100000;
+        if st.st_mode & 0o170000 == 0o020000 {
+            let major = rustix::fs::major(st.st_rdev);
+            if (136..=143).contains(&major) || self.fd.isatty_keep_errno() {
+                self.flags |= LINE_BUF;
+            }
+        }
+        buffer_size(st.st_blksize as i64)
     }
 
     /// `_IO_doallocbuf`: unbuffered streams get a one-byte buffer.

@@ -3,6 +3,10 @@ area = "io"
 lean_version = "4.34.0"
 source = "leanrs step-1 finding A821; lean2rr tests/runtime/RtFdLimit.lean"
 streams = "separate"
+deviations = { leanrs = "DV19" }
+# leanrs's runs with closed standard streams differ: Rust's std opens /dev/null on closed
+# descriptors 0-2 before main (leanrs DV19; docs/lean-bugs.md LB-10). Native's outcome is
+# recorded, and it is what `check` accepts (DV19 names no Lean bug).
 # Host-dependent: recorded where libuv 1.48 makes its two io_uring rings
 # (Linux 5.13 or later, io_uring allowed); elsewhere native has two
 # descriptors fewer at startup and opens two more files.

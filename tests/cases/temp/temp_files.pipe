@@ -1,0 +1,1 @@
+$BIN; TMPDIR=scratch/ $BIN; TMP=scratch $BIN; TEMP=scratch TEMPDIR=nowhere $BIN; TMPDIR= $BIN dir-only; TMPDIR=/ TEMPDIR=scratch $BIN dir-only; TMPDIR=$(printf 'a%.0s' $(seq 4096)) $BIN dir-only; TMPDIR=// $BIN dir-only

@@ -1,0 +1,5 @@
+id = "uv_system"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "leanrs validate/io/uv_system (probe v4.34.0-rc1, chapter 05 D25)"
+streams = "separate"

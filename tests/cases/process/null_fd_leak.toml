@@ -1,0 +1,10 @@
+id = "null_fd_leak"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io-2: process.cpp spawn (open(\"/dev/null\") then dup2, the opened descriptor left open across execvp); LB-15 (docs/lean-bugs.md; lean2rr-side judge, leanrs-side judge confirms, 2026-10-04)"
+streams = "separate"
+deviations = { lean2rr = "LB-15", leanrs = "LB-15" }
+# `expected` is native's: the program the child runs keeps one descriptor on /dev/null per null
+# stream (it takes the lowest number free in the forked child, above the parent's close-on-exec
+# descriptors, so it shifts no descriptor the program sees first). The correct behaviour, which
+# both translators give, is the alternative outcome null_fd_leak.alt1.* (none).

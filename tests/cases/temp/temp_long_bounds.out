@@ -1,0 +1,12 @@
+before
+caught: invalid argument (error code: 36, name too long)
+after
+before
+caught: invalid argument (error code: 36, name too long)
+after
+before
+caught: resource exhausted (error code: 105, no buffer space available)
+after
+before
+caught: resource exhausted (error code: 105, no buffer space available)
+after

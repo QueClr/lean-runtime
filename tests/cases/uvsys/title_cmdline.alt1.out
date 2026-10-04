@@ -1,0 +1,4 @@
+cmdline before holds the argument: true
+title: new-title
+cmdline starts with the title: false
+args: [abcdefghijklmnop]

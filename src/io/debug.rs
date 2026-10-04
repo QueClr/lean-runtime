@@ -8,21 +8,23 @@
 //!
 //! Natively the runtime writes these lines with `io_eprintln`, which calls
 //! Lean's `IO.eprintln`, so they go to the calling thread's *current*
-//! standard-error stream. [`runtime_eprintln`] writes to glibc's `stderr`,
-//! the stream every thread starts with; the redirection of the standard
-//! streams (`IO.setStderr`, the second io batch) routes it to the current
-//! stream instead.
+//! standard-error stream: [`runtime_eprintln`] writes through the stream
+//! `IO.setStderr` made current ([`super::streams`]), else to glibc's
+//! `stderr`, the stream every thread starts with.
 
 use super::handle::{lock, STDERR};
 
-/// `io_eprintln(s)` (object.cpp) while the current standard-error stream is
-/// the default one: `IO.eprintln`, one `putStr` of `msg` and `\n` on
-/// `stderr` (unbuffered, so one `write`). Errors are ignored.
+/// `io_eprintln(s)` (object.cpp): `IO.eprintln`, one `putStr` of `msg` and
+/// `\n` on the calling thread's current standard-error stream
+/// ([`super::streams::put_current_stderr`]), or on `stderr` (unbuffered, so
+/// one `write`) while the current one is the default. Errors are ignored.
 pub fn runtime_eprintln(msg: &[u8]) {
     let mut line = Vec::with_capacity(msg.len() + 1);
     line.extend_from_slice(msg);
     line.push(b'\n');
-    let _ = lock(&STDERR).put(&line);
+    if !super::streams::put_current_stderr(&line) {
+        let _ = lock(&STDERR).put(&line);
+    }
 }
 
 /// `dbgTrace` (`lean_dbg_trace`): `io_eprintln(msg)`; the translator then

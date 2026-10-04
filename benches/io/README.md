@@ -8,6 +8,10 @@ the same checksum:
 | `io_put_str` | `Handle.putStr` of a string of 1 to 64 bytes (chosen by the LCG) on a handle over `/dev/null`: the copy into the `FILE` buffer, one `write` per full buffer |
 | `io_read` | `Handle.read k`, `k` from 1 to 64, from a 1 MiB file, rewinding at its end: a new byte array of `k` bytes, the copy out of the buffer, one `read` per buffer |
 | `io_get_line` | `Handle.getLine` over a 64 KiB file of lines of 1 to 79 bytes, rewinding at its end: the line into a new string (checked as UTF-8, its characters counted), one `read` per buffer |
+| `proc_spawn_wait` | `IO.Process.spawn` of `/bin/true` with every stream `null`, then `Child.wait` |
+| `proc_spawn_path` | the same with `true` found through `PATH` (`/usr/local/bin:/usr/bin:/bin`, set in the call): `execvp`'s search |
+| `proc_spawn_cwd` | the same as `proc_spawn_wait` with `cwd := some "/"`: the spawner thread's round trip |
+| `proc_output` | `IO.Process.output` of `/bin/echo <word>`: two pipes, both read to their end into new strings, the wait |
 
 - `rust/src/bin/<name>.rs`: the crate's calls as a translator's code makes
   them, with its glue: a new `Vec` of `k` bytes for each `read`, a new `Vec`

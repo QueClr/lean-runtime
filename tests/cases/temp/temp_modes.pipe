@@ -1,0 +1,1 @@
+$BIN; (umask 077; $BIN); (umask 0; $BIN)

@@ -1,0 +1,5 @@
+id = "spawn_fds_exhausted"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs review of io-2, LRIO2-F3 (native/E.lean under ulimit -n 64)"
+streams = "merged"

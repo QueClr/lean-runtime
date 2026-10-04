@@ -66,13 +66,14 @@ The verdict needs three things:</p>
 </svg>
 <figcaption>Figure 1. Three outcomes of a verdict.
 Each confirmed bug gets an entry and a <a href="glossary.html#g-case">case</a>.
-Its expected output is native's, or the correct output with native's recorded beside it.
+Its expected output is the correct one with native's recorded beside it, or native's with the correct one as the accepted alternative.
 Its <a href="glossary.html#g-deviation">deviation</a> names the entry.</figcaption>
 </figure>
 <p>Decision (2026-10-03): these bugs are not reported upstream.
 They are recorded in <a href="../docs/lean-bugs.md">docs/lean-bugs.md</a> only.
 Each translator also lists them among its intended differences.
-The cases of LB-01, LB-02 and LB-03 are on branch <code>cases-xt</code>, not on main yet.</p>
+The cases of LB-01 and LB-02 are on branch <code>cases-xt</code>, not on main yet.
+LB-03 has two cases on main, from io-2, and more on <code>cases-xt</code>.</p>
 
 <h2 id="confirmed">Confirmed bugs</h2>
 <div class="tblwrap"><table>
@@ -85,6 +86,14 @@ The cases of LB-01, LB-02 and LB-03 are on branch <code>cases-xt</code>, not on 
 Its effects are lost, and a wait on it hangs.</td><td>The task runs, and a wait on it returns (<a href="sched.html#exit">sched</a>).
 Both judges confirmed it on 2026-10-03.
 Its cases are <code>tasks/late_*</code>, with three controls that follow native.</td></tr>
+<tr id="lb-14"><td>LB-14</td><td>After <code>takeStdin</code>, a child started with <code>setsid</code> has lost that flag.
+So <code>kill</code> kills the child alone, and its process group survives.</td><td><code>takeStdin</code> keeps the flag, so <code>kill</code> reaches the group (<a href="io.html#processes">io</a>).</td></tr>
+<tr id="lb-15"><td>LB-15</td><td>Each <code>null</code> standard stream of a child leaves one more descriptor on <code>/dev/null</code> open in the program it runs.</td><td><code>/dev/null</code> opens close-on-exec in the parent, so the program starts with no extra descriptor.</td></tr>
+<tr id="lb-16"><td>LB-16</td><td>A temporary directory of 4083 to 4095 bytes makes <code>createTempFile</code> and <code>createTempDir</code> abort (status 134) instead of raising an <code>IO.Error</code>.</td><td>It raises the system's error, <code>name too long</code>.</td></tr>
+<tr id="lb-17"><td>LB-17</td><td>When <code>/dev/null</code> cannot be opened (no descriptor left), a <code>null</code> stream is silently the parent's stream.</td><td>The spawn fails with an <code>IO.Error</code> (<code>too many open files</code>).
+This needs one free descriptor more than native in one rare case.</td></tr>
+<tr><td colspan="3">Both judges confirmed LB-14 to LB-17 on 2026-10-04.
+Their cases are in <code>process/</code> and <code>temp/</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

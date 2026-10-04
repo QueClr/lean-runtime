@@ -14,10 +14,15 @@
 //! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, random bytes, the monotonic clock, `IO.sleep` |
 //! | [`debug`] | the IO parts of `dbgTrace` and `dbgSleep`, and the runtime's own standard-error lines |
 //! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors |
+//! | [`environ`] | the process environment as C's `environ` holds it (every entry in order, changed as glibc's `setenv` and `unsetenv` change it): a child's `envp`, `osEnviron` |
+//! | [`process`] | child processes: `IO.Process.spawn` over `posix_spawn`, the `Child` operations, `IO.Process.output` |
+//! | [`uvsys`] | `Std.Internal.UV.System`'s queries (libuv 1.48 over std, nix, rustix, `/proc` and `/sys`) |
+//! | [`temp`] | `IO.FS.createTempFile` and `createTempDir` |
+//! | [`time`] | `timeit`, `Std.Time.Timestamp.now`'s clock, the Windows time-zone externs |
+//! | [`streams`] | the calling thread's current standard streams (`IO.getStdout`, `IO.setStdout` & co.) and the route of the runtime's own standard-error lines |
 //!
-//! The second io batch adds processes, `Std.Time`, temporary files, the
-//! `Std.Internal.UV.System` queries and the redirection of the standard
-//! streams (`IO.setStdout` & co.) as modules of their own.
+//! The second io batch added [`environ`], [`process`], [`uvsys`], [`temp`],
+//! [`time`] and [`streams`].
 //!
 //! # Rule: no bulk copies in a translator's glue
 //!
@@ -91,12 +96,18 @@ compile_error!(
 pub mod cfile;
 pub mod debug;
 pub mod env;
+pub mod environ;
 pub mod error;
 pub mod exit;
 pub mod fs;
 pub mod handle;
+pub mod process;
 pub mod startup;
+pub mod streams;
 mod sys;
+pub mod temp;
+pub mod time;
+pub mod uvsys;
 
 pub use error::IoError;
 pub use handle::{FsMode, Handle};

@@ -1,0 +1,5 @@
+id = "temp_files"
+area = "temp"
+lean_version = "4.34.0"
+source = "leanrs validate/io/temp_files (probe v4.34.0-rc1, its 8 cases as the .pipe's runs); lean2rr fs.rs create_temp_file"
+streams = "separate"

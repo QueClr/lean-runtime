@@ -1,0 +1,9 @@
+id = "group_missing_errno"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "leanrs review of io-2 (native/G.lean and Probe.lean errno: osGetGroup of a missing gid, then getLine); LB-03"
+streams = "separate"
+deviations = { lean2rr = "LB-03", leanrs = "LB-03" }
+# `expected` is native's crash (SIGSEGV, code 139, the buffered lines lost). The correct behaviour,
+# which both translators give, is the alternative outcome group_missing_errno.alt1.*. Host-dependent:
+# recorded with NSS `group: files systemd sss`, whose getgrgid_r reports a missing group as ENOENT.

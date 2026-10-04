@@ -1,0 +1,1 @@
+for n in 4082 4096; do for k in file dir; do TMPDIR=$(printf 'a%.0s' $(seq $n)) $BIN $k; done; done

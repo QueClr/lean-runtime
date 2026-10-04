@@ -1,7 +1,7 @@
 # lean-runtime's native io micro-benchmarks (benches/io/README.md): one executable per benchmark,
 # each the twin of the Rust binary of the same name in benches/io/rust/.
 name = "iobench"
-defaultTargets = ["io_put_str", "io_read", "io_get_line"]
+defaultTargets = ["io_put_str", "io_read", "io_get_line", "proc_spawn_wait", "proc_spawn_path", "proc_spawn_cwd", "proc_output"]
 
 [[lean_lib]]
 name = "Bench"
@@ -18,3 +18,19 @@ root = "Bench.IoRead"
 [[lean_exe]]
 name = "io_get_line"
 root = "Bench.IoGetLine"
+
+[[lean_exe]]
+name = "proc_spawn_wait"
+root = "Bench.ProcSpawnWait"
+
+[[lean_exe]]
+name = "proc_spawn_path"
+root = "Bench.ProcSpawnPath"
+
+[[lean_exe]]
+name = "proc_spawn_cwd"
+root = "Bench.ProcSpawnCwd"
+
+[[lean_exe]]
+name = "proc_output"
+root = "Bench.ProcOutput"

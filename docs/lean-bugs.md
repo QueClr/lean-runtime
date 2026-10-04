@@ -18,7 +18,9 @@ Every confirmed bug has:
 - a case in `tests/cases/` with `deviations` naming the entry, whose
   `expected` is native's output, or the correct output with native's
   recorded in a `native` field (rows; program cases such as LB-13's; also
-  when native is nondeterministic).
+  when native is nondeterministic). io-2's program cases (LB-03, LB-14 to
+  LB-17) keep native's output and give the correct one as `<id>.alt1.*`,
+  which alone `scripts/cases.py check` accepts (to move to `native` later).
 
 Each translator also lists it among its intended differences. The owner's
 decision (2026-10-03): these bugs are not reported upstream. They are
@@ -91,6 +93,58 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Translators | lean2rr: plan §10, "Runtime"; leanrs: no DV (its tasks run at creation, chapter 05 D30, so late tasks already run; it lists LB-13 as a judged bug it does not exhibit) |
 | Upstream | Not reported (owner: record only). Related: #7958, #12094 / PR #12052, commit 380dd9e |
 | Verdict | lean2rr-side judge, 2026-10-03; leanrs-side judge confirms |
+
+### LB-14: after `takeStdin`, `kill` no longer reaches a `setsid` child's group
+
+| Field | Content |
+|---|---|
+| Summary | The child `IO.Process.Child.takeStdin` returns has lost its `setsid` flag, so `kill` sends `SIGKILL` to the pid alone, not to the process group |
+| Where | `src/runtime/process.cpp`: `lean_io_process_child_take_stdin` (550-556) allocates the new child with `sizeof(pid_t)` scalar bytes (552) and copies only the pid (553); `spawn` allocates `sizeof(pid_t) + 1` (543) with the flag at scalar byte 4 (546, object offset 28); `lean_io_process_child_kill` (392-400) reads that byte (395) and picks `killpg` or `kill` (396). Under `LEAN_MIMALLOC` the 36-byte object rounds up to 40 and `lean_alloc_ctor_memory` zeroes the last word (lean.h 501-518), so the flag reads 0; without mimalloc it is read past a 44-byte block. Introduced by 9901804 (2023), which left `take_stdin` unchanged |
+| Why it is a bug | `Child.kill`'s documentation: "If the process was started using `SpawnArgs.setsid`, terminates the entire process group instead", and `takeStdin` returns the same process. The flag is read past the object's scalar area (padding with mimalloc, an out-of-bounds read without). The group survives, and a `readToEnd` on the child's pipe then waits for the survivors |
+| Native repro | A `setsid` child with a background grandchild: `kill` kills the group; `takeStdin` then `kill` leaves the grandchild alive (`strace`: `kill(pid)` instead of `kill(-pid)`). Case: `process/take_stdin_setsid` |
+| Our behaviour | `takeStdin` keeps the pid and the `setsid` flag, so `kill` uses `killpg` (`process::ChildProcess::take_stdin`) |
+| Translators | leanrs mimics native today (`child_take_stdin` sets `setsid: false`) and will keep the flag (its DV15 rows cite LB-14); lean2rr already keeps the flag (`Lower/Process.lean`) |
+| Upstream | Not reported (owner: record only); still present on lean4 master |
+| Verdict | lean2rr-side judge, 2026-10-04; leanrs-side judge confirms |
+
+### LB-15: a `null` stream leaks a `/dev/null` descriptor into the program
+
+| Field | Content |
+|---|---|
+| Summary | For each `null` standard stream, the program a child runs has one more open descriptor on `/dev/null`, inherited by its descendants |
+| Where | `src/runtime/process.cpp` `spawn`, in the forked child: `open("/dev/null", ...)` then `dup2(fd, n)` (474-477, 482-485, 490-493), without `O_CLOEXEC` and without closing `fd` before `execvp` (510); the pipes of the same function are `pipe2(fds, O_CLOEXEC)` (424) |
+| Why it is a bug | Lean's evident intent: PR #2138 (51e77d1, "Fix leaking of file descriptors", for #2137) made every descriptor the runtime opens close-on-exec (`Handle.mk`'s `O_CLOEXEC`, io.cpp 400-404: "do not inherit across process creation"; the pipes); this path was missed. A descriptor-auditing program reports it (lvm: "File descriptor 15 (/dev/null) leaked on lvm invocation"). A resource leak into the child, without data loss; the leaked descriptor takes the lowest number free in the forked child, above the parent's close-on-exec ones, so it shifts no descriptor the program sees first |
+| Native repro | The child lists `/proc/$$/fd`: with `stdin := .null` there is an extra `13 -> /dev/null`. Case: `process/null_fd_leak` |
+| Our behaviour | `/dev/null` is opened close-on-exec in the parent and `posix_spawn` `dup2`s it, so the program starts with 0-2 and what the parent lets through (`process::Ends::new`) |
+| Translators | leanrs is already correct; lean2rr's leanrt `proc.rs` leaks as native today (a fix and tests are coming on the lean2rr side) |
+| Upstream | Not reported (owner: record only); still present on lean4 master |
+| Verdict | lean2rr-side judge, 2026-10-04; leanrs-side judge confirms |
+
+### LB-16: an over-long temporary directory aborts `createTempFile` and `createTempDir`
+
+| Field | Content |
+|---|---|
+| Summary | A temporary directory (`TMPDIR` and its fallbacks) of 4083 to 4095 bytes makes `IO.FS.createTempFile` and `createTempDir` abort with `LEAN ASSERTION VIOLATION` (status 134) instead of raising an `IO.Error` |
+| Where | `src/runtime/io.cpp` `lean_io_create_tempfile` (1261-1304): `uv_os_tmpdir` into `char path[PATH_MAX]` (libuv 1.48 accepts up to 4095 bytes, `ENOBUFS` from 4096), then `lean_always_assert(PATH_MAX >= base_len + 1 + 1)` (1281) and `lean_always_assert(PATH_MAX >= strlen(path) + file_pattern_size + 1)` (1288); `lean_io_create_tempdir` has the same at 1327 and 1334. `lean_always_assert` throws `lean::unreachable_reached` through `extern "C"` frames, so `std::terminate` raises `SIGABRT` |
+| Why it is a bug | A crash where the type promises an `IO.Error` (as LB-03), on input from the environment: every neighbouring length gives one (4082 bytes: the system's `ENAMETOOLONG`; 4096: libuv's `ENOBUFS`). Not a limit: there is no value to compute past the cap, and without the assertion the system answers `ENAMETOOLONG`. Data written to other handles and not flushed is lost (standard output survives: `std::cerr` is tied to `std::cout`) |
+| Native repro | `TMPDIR` of N `a`s, the call in `try`/`catch`: 4082, caught `invalid argument (error code: 36, name too long)`; 4083 to 4094, the assertion at 1288 (1334 for a directory), 134; 4095, the assertion at 1281 (1327), 134; 4096, caught `resource exhausted (error code: 105, no buffer space available)`. Cases: `temp/temp_long_dir`, `temp/temp_long_file`, `temp/temp_long_dir_4095`, and the boundaries `temp/temp_long_bounds` (followed as native) |
+| Our behaviour | No assertion: the template is built at any length and the system's `ENAMETOOLONG` is the error (`invalid argument (error code: 36, name too long)`, no file name); 4096 bytes or more keep libuv's `ENOBUFS` (`temp.rs`) |
+| Translators | leanrs is already correct (DV15 (b)); lean2rr's leanrt `fs.rs` (`temp_template`) has no assertion and is already correct |
+| Upstream | Not reported (owner: record only); still present on lean4 master |
+| Verdict | lean2rr-side judge, 2026-10-04; leanrs-side judge confirms |
+
+### LB-17: a `null` stream falls back to the parent's stream when `/dev/null` cannot be opened
+
+| Field | Content |
+|---|---|
+| Summary | When the forked child cannot open `/dev/null` (the parent's descriptors exhausted), a `null` stream is silently the parent's: a `null` standard output writes to the parent's, a `null` standard input reads the parent's input |
+| Where | The same lines as LB-15: the result of `open("/dev/null", ...)` is unchecked, `dup2(-1, n)` fails with `EBADF` and is ignored, and `execvp` runs with descriptor `n` still the parent's |
+| Why it is a bug | `IO.Process.Stdio.null`'s documentation: "The stream should be empty". Lost data: the child consumes the parent's standard input, and output meant to be discarded appears on the parent's standard output. Every other failure of the spawn's setup is an `IO.Error` |
+| Native repro | Under `ulimit -n 64`, with the parent's descriptors exhausted: `stdout := .null` writes to the parent's standard output; `stdin := .null` reads the parent's `line1`, and the parent's own `getLine` then gets `line2`. Without exhaustion: no input, and the parent reads `line1`. Case: `process/null_open_fails` (the program keeps its handles open to the end) |
+| Our behaviour | `/dev/null` is opened in the parent before the spawn, and its failure is the spawn's `IO.Error` (`resource exhausted (error code: 24, too many open files)`; `process::Ends::new`). Every pipe is made first and `/dev/null` opened after them, so the parent's pipe ends get native's numbers. One consequence: a `null` stream after a piped one needs one free descriptor more than natively, where the forked child closes the pipe's other end before it opens `/dev/null`: with exactly two descriptors free, `stdout := .piped, stderr := .null` runs natively and fails with `EMFILE` here (case `process/pipe_null_two_free`: native's outcome, and the shared runtime's as its `alt1`, a deviation of its own that `check` accepts beside native's) |
+| Translators | leanrs is already correct; lean2rr's leanrt `proc.rs` mimics native today (a fix and tests are coming on the lean2rr side) |
+| Upstream | Not reported (owner: record only); still present on lean4 master |
+| Verdict | lean2rr-side judge, 2026-10-04; leanrs-side judge confirms |
 
 ## Limits
 

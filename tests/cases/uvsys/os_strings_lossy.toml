@@ -1,0 +1,5 @@
+id = "os_strings_lossy"
+area = "uvsys"
+lean_version = "4.34.0"
+source = "lean2rr tests/runtime/RtOsStringsLossy.lean (with .pipe)"
+streams = "separate"

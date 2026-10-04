@@ -12,8 +12,10 @@ path = "src/lib.rs"
 # The default build has no dependencies. The optional layers make their
 # system calls and stack switches through vetted crates, so that the crate
 # itself stays free of `unsafe`:
-# - `io`: rustix (the FILE model's descriptor calls, the clock) and nix
-#   (process-level libc calls);
+# - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
+#   the scheduling priority) and nix (process-level libc calls: posix_spawn,
+#   unshare, poll, the password and group databases, getrusage,
+#   gethostname);
 # - `sched`: corosensei (decisions Q5 and O2), with its default features
 #   (mmap'd stacks with a guard page, and unwinding across the switch).
 # The requirements are carets compatible with leanrs's offline registry (nix
@@ -23,8 +25,8 @@ path = "src/lib.rs"
 # (`cargo build --offline --locked --features io,sched`; `cargo fetch
 # --locked` once fills the cache).
 [dependencies]
-rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "stdio", "system", "termios", "time"] }
-nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "process", "signal"] }
+rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "process", "stdio", "system", "termios", "time"] }
+nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "hostname", "poll", "process", "resource", "sched", "signal", "user"] }
 corosensei = { version = "0.3.4", optional = true }
 
 [features]
@@ -41,6 +43,14 @@ unsafe-fast = []
 # each case's twin, so it runs without libtest.
 [[test]]
 name = "io_cases"
+harness = false
+required-features = ["io"]
+
+# The io-2 program cases (processes, temporary files, UV.System, time, stream
+# redirection) on the crate (tests/io2_cases.rs): the binary is also each
+# case's twin, so it runs without libtest.
+[[test]]
+name = "io2_cases"
 harness = false
 required-features = ["io"]
 
