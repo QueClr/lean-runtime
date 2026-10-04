@@ -36,8 +36,9 @@ It is built to be shared by two Lean <a href="glossary.html#g-translator">transl
   </div>
   <div class="card">
     <h3>Safe Rust</h3>
-    <p>The default build has no <code>unsafe</code> code: <code>#![forbid(unsafe_code)]</code>.
-    System calls go through vetted crates.</p>
+    <p>The default build has no <code>unsafe</code> code, and the crate root denies it: <code>#![deny(unsafe_code)]</code>.
+    System calls go through vetted crates.
+    A file may allow <code>unsafe</code> only with an entry in <a href="repo:UNSAFE.md">UNSAFE.md</a>: so far one <a href="glossary.html#g-quirk">native quirk</a>.</p>
   </div>
   <div class="card">
     <h3>Speed floor (<a href="glossary.html#g-o12">O12</a>)</h3>

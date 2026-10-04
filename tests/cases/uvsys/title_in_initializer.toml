@@ -1,7 +1,7 @@
-id = "title_cmdline"
+id = "title_in_initializer"
 area = "uvsys"
 lean_version = "4.34.0"
-source = "lean-runtime io-2: libuv 1.48 proctitle.c uv_set_process_title; disagreements.md LIO2-06 (resolved in quirks-1: src/io/argv_title.rs)"
+source = "lean-runtime quirks-1 review (leanrs): libuv 1.48 uv_setup_args copies the arguments (args_mem); EmitC's main builds args from the copy after the initializers"
 streams = "separate"
 deviations = { leanrs = "DV2" }
 # leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:

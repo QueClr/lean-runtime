@@ -1,0 +1,5 @@
+id = "allocprof"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime quirks-1: io.cpp lean_io_allocprof, allocprof.cpp; lean2rr tests/runtime/RtAllocProf.lean"
+streams = "separate"

@@ -49,13 +49,13 @@ Each translator's glue connects its own values to the crate.</p>
 <figure class="fig">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 330" role="img" aria-labelledby="ar1-t ar1-d">
   <title id="ar1-t">Modules, features and their dependencies</title>
-  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei for the stack switch, rustix for the event loop and signal-hook for the signal watchers. Feature unsafe-fast is opt-in and has no entries yet.</desc>
+  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei for the stack switch, rustix for the event loop and signal-hook for the signal watchers. Feature unsafe-fast is opt-in and has no entries yet. The crate root denies unsafe code; only the files that UNSAFE.md lists may allow it.</desc>
   <defs>
     <marker id="ar1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
   </defs>
   <rect class="k-rt" x="20" y="20" width="960" height="170" rx="8"/>
   <text class="tb" x="40" y="44">lean-runtime</text>
-  <text class="ts" x="160" y="44">#![forbid(unsafe_code)] unless unsafe-fast is on</text>
+  <text class="ts" x="160" y="44">#![deny(unsafe_code)]: unsafe only in the files UNSAFE.md lists</text>
 
   <rect class="k-none" x="40" y="60" width="230" height="110" rx="6"/>
   <text class="tb" x="155" y="86" text-anchor="middle">semantics</text>
@@ -109,7 +109,9 @@ The owner approved nix, rustix, corosensei and signal-hook (its safe API only).<
   <li><strong>Default.</strong> <code>semantics</code> only.
     No dependencies, so a plain <code>rustc --crate-type rlib</code> build works (one translator does not use cargo).</li>
   <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix.
-    These crates hold the <code>unsafe</code> code, so lean-runtime itself stays free of it.</li>
+    These crates hold the <code>unsafe</code> code.
+    The one exception is a <a href="glossary.html#g-quirk">native quirk</a> with no safe route, in a file of its own.
+    <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).</li>
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>

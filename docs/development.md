@@ -19,17 +19,30 @@ once.
 
 ## Code
 
-- **No `unsafe` in the default build** (`#![forbid(unsafe_code)]`).
+- **No `unsafe` in the default build.**
   Anything that needs `unsafe` comes from a vetted external crate: `nix` or
   `rustix` for system calls, corosensei for task switching, signal-hook
   (its safe API only) for signal handlers. What no crate
   offers safely stays in each translator's glue, behind a contract the
   crate states and upholds: so far `sched::Glue::suspend` (one dereference
   of a coroutine's yielder) and the SIGSEGV handler of Lean's stack-overflow
-  report (`docs/sched.md`).
+  report (`docs/sched.md`). The crate root denies `unsafe_code`
+  (`#![deny(unsafe_code)]`), and forbids it in a build with neither `io`
+  nor `unsafe-fast`.
+- **Native quirks.** A native behaviour that no safe API can reproduce, and
+  that each glue would otherwise write on its own, may be written with
+  `unsafe` in the crate (owner, 2026-10-04), in the build of the feature
+  that needs it: one small file with `#![allow(unsafe_code)]` and
+  `#![deny(unsafe_op_in_unsafe_fn)]`, a `// SAFETY:` comment on every
+  `unsafe` block, an entry in `UNSAFE.md` and its proof in
+  `docs/native-quirks.md`; leanrs reviews it before merge. Try the safe
+  routes first, and name them in the entry. Run Miri on its unit tests
+  where it can model them (`LEAN_RUNTIME_MIRI=1 scripts/check.sh`).
+  `scripts/check.sh` fails on a file that names `unsafe_code` without an
+  entry. So far: `src/io/argv_title.rs`.
 - **`unsafe-fast`.** Every `unsafe` item has its own
-  `#[allow(unsafe_code)]` (the crate root denies it under this feature). An
-  implementation behind this feature must:
+  `#[allow(unsafe_code)]` (the crate root denies it). An implementation
+  behind this feature must:
   - have the same observable behaviour as the safe one, which stays;
   - have an entry in `UNSAFE.md` with a written proof;
   - run under Miri (`LEAN_RUNTIME_MIRI=1 scripts/check.sh`; Miri is opt-in,

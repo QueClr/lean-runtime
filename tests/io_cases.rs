@@ -22,7 +22,7 @@
 //! startup descriptors (`io::startup`) before Rust's runtime starts, so that
 //! closed standard descriptors are taken as natively.
 
-use lean_runtime::io::{env, exit, fs as lfs, FsMode, Handle, IoError};
+use lean_runtime::io::{debug, env, exit, fs as lfs, startup, FsMode, Handle, IoError};
 
 // ---- the glue a translator adds ----
 
@@ -633,6 +633,34 @@ fn handle_release_order(args: &[String]) -> R<()> {
     println(&format!("apply3 put3: {}", read_file("o4.txt")?))
 }
 
+/// `IO.initializing` in an `initialize` block, in a stored `initialize`
+/// value, then in `main`: the glue runs the initializers, then calls
+/// `mark_end_initialization`, as the generated `main` does.
+fn initializing(args: &[String]) -> R<()> {
+    println(&format!("initialize block: {}", startup::initializing()))?;
+    let during = startup::initializing();
+    startup::mark_end_initialization();
+    println(&format!("stored during initialization: {during}"))?;
+    println(&format!("in main: {}", startup::initializing()))?;
+    println(&format!("args: {}", args.len()))
+}
+
+/// `allocprof` around an action that prints, then around one that fails.
+fn allocprof(args: &[String]) -> R<()> {
+    let r = debug::allocprof(b"profile\0hidden", || -> R<usize> {
+        eprintln("inside")?;
+        Ok(args.len() + 1)
+    })?;
+    println(&format!("allocprof {r}"))?;
+    let failing = format!("failing {}", args.len());
+    match debug::allocprof(failing.as_bytes(), || -> R<usize> {
+        Err(IoError::user_error("inner"))
+    }) {
+        Ok(_) => println("not reached"),
+        Err(e) => println(&format!("caught: {}", to_string(&e))),
+    }
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -659,6 +687,8 @@ const TWINS: &[(&str, Twin)] = &[
     ("lock_during_read", lock_during_read),
     ("realpath_errno", realpath_errno),
     ("handle_release_order", handle_release_order),
+    ("initializing", initializing),
+    ("allocprof", allocprof),
 ];
 
 /// The twin named by `argv[0]`'s file name, if any.

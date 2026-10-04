@@ -8,12 +8,23 @@
 //! Each translator keeps its own value representations, memory protocol and
 //! hot paths in its own glue, and calls this crate for the rest.
 //!
-//! The default build contains no `unsafe` code. The opt-in feature
-//! `unsafe-fast` may enable faster implementations of specific functions, each
-//! with the same observable behaviour as its safe twin (see `UNSAFE.md`).
+//! The crate root denies `unsafe` code. It is allowed only in files that
+//! say so themselves (`#![allow(unsafe_code)]`), each with an entry in
+//! `UNSAFE.md`:
+//! - a native quirk that no safe API can reproduce, in the build of the
+//!   feature that needs it; so far one, `io::argv_title` (feature `io`):
+//!   `setProcessTitle` writes the title into the arguments' memory, as
+//!   libuv does;
+//! - with the opt-in feature `unsafe-fast`, a faster implementation of a
+//!   specific function, with the same observable behaviour as its safe twin.
+//!
+//! The default build (no features) contains no `unsafe` code. `deny` lets a
+//! file allow it for itself, so `scripts/check.sh` checks that every such
+//! file has its entry; in a build with neither `io` nor `unsafe-fast`, which
+//! has no such file, the root forbids `unsafe` outright.
 
-#![cfg_attr(not(feature = "unsafe-fast"), forbid(unsafe_code))]
-#![cfg_attr(feature = "unsafe-fast", deny(unsafe_code))]
+#![deny(unsafe_code)]
+#![cfg_attr(not(any(feature = "io", feature = "unsafe-fast")), forbid(unsafe_code))]
 
 pub mod semantics;
 

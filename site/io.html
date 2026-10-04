@@ -24,7 +24,7 @@
 <main>
 <h1>The io module</h1>
 <p class="lead"><code>io</code> (feature <code>io</code>) does what Lean 4.34.0's <code>io.cpp</code> and <code>process.cpp</code> do.
-It is safe Rust over std, rustix and nix.
+It is safe Rust over std, rustix and nix, except one <a href="glossary.html#g-quirk">native quirk</a> (<a href="#title">the process title</a>).
 It copies the behaviour of glibc where a Lean program can see it.</p>
 
 <div class="toc"><ul>
@@ -37,6 +37,7 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
   <li><a href="#processes">Processes</a></li>
   <li><a href="#streams">Stream redirection</a></li>
   <li><a href="#startup">Startup descriptors</a></li>
+  <li><a href="#title">The process title</a></li>
   <li><a href="#exit">Exit</a></li>
 </ul></div>
 
@@ -54,6 +55,7 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
 <tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
 <tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>main (io-2)</td></tr>
+<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: the crate's one <code>unsafe</code> file, for a native quirk.</td><td>main (quirks-1)</td></tr>
 </tbody></table></div>
 
 <h2 id="layers">The layers of a handle call</h2>
@@ -221,6 +223,8 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
   <li><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, <code>IO.getRandomBytes</code>, <code>IO.sleep</code> and the monotonic clock (Lean's absolute <code>CLOCK_MONOTONIC</code>) are in <code>env</code>.</li>
   <li><code>dbgTrace</code> prints its message to stderr and continues; <code>dbgSleep</code> sleeps (decision DV5).
     With <code>streams</code>, the message goes to the current stderr stream, as natively.</li>
+  <li><code>allocprof</code> runs its action, then prints its message and a note on stderr.
+    The note says that no data is available, because Lean's release runtime has no allocation statistics.</li>
 </ul>
 
 <h2 id="processes">Processes</h2>
@@ -310,16 +314,51 @@ Two epoll descriptors stand in for the io_uring rings (A821, option C).</p>
   <li>libuv decides whether to make the two io_uring rings.
     The crate predicts that decision as libuv 1.48.0 makes it, and also reads <code>kernel.io_uring_disabled</code>.</li>
   <li>No safe API makes a ring without a new crate.
+    rustix's <code>io_uring_setup</code> is <code>unsafe</code> (checked again on 2026-10-04), and nix and std have none.
     So two more epoll descriptors stand in for the rings.
     Reads and writes on both kinds fail alike, with <code>EINVAL</code>.</li>
   <li>Two things differ: the metadata of <code>/proc/self/fd/N</code>, and the ring's kernel thread in <code>/proc/self/task</code>.</li>
   <li>Known gaps: a seccomp filter that refuses io_uring, and <code>io_uring_disabled = 1</code> in a user namespace.</li>
   <li><strong>Glue duty.</strong> The descriptors must open before Rust's runtime starts, because Rust puts <code>/dev/null</code> on closed standard descriptors.
     So each translator's glue calls <code>open_native_descriptors</code> from an ELF constructor.
-    That needs <code>#[link_section]</code>, which <code>forbid(unsafe_code)</code> refuses in the crate.</li>
+    That needs <code>#[link_section]</code>, which <code>deny(unsafe_code)</code> refuses in the crate.</li>
+  <li><strong>Glue duty.</strong> After the module initializers, the glue calls <code>startup::mark_end_initialization</code>, as the generated <code>main</code> does.
+    Until then <code>IO.initializing</code> is true; in <code>main</code> it is false.</li>
   <li>Native Lean ignores <code>SIGPIPE</code> before <code>main</code>, so a write to a pipe without a reader fails with <code>EPIPE</code>.
     Rust's own entry does the same for a Rust <code>main</code>.
     A glue whose entry is not Rust's (lean2rr's) ignores <code>SIGPIPE</code> itself.</li>
+</ul>
+
+<h2 id="title">The process title</h2>
+<p>Natively, <code>IO.setProcessTitle</code> writes the title over the process's original arguments (libuv 1.48).
+So <code>/proc/self/cmdline</code> and <code>ps</code> show the title.</p>
+<ul>
+  <li>The memory runs from <code>argv[0]</code> to the end of the last argument.
+    A longer title is cut to that length less one byte, without an error.
+    NUL bytes fill the rest.</li>
+  <li>The environment comes right after the arguments, and libuv does not move it.
+    So a title can never grow past the arguments.</li>
+  <li>Lean's <code>args</code> come from libuv's copy of the arguments, so they do not change.</li>
+</ul>
+<p>No safe API can write that memory.
+std returns copies of the arguments.
+The <code>prctl</code> calls that move the kernel's view are <code>unsafe</code> too: one needs a privilege, and the other resets the whole memory map.
+Writing <code>/proc/self/mem</code> would hide the same write from the compiler.
+So <code>io::argv_title</code> does it with <code>unsafe</code> code: the crate's one <a href="glossary.html#g-quirk">native quirk</a>.</p>
+<ul>
+  <li>The file has its own ELF constructor, so no glue takes part.
+    glibc calls it with <code>main</code>'s <code>argc</code> and <code>argv</code>, before <code>main</code> (glibc only: musl passes no arguments).</li>
+  <li>The constructor checks what it would write.
+    In a shared library it writes nothing, and the title functions fail with <code>ENOBUFS</code>, as natively.
+    A program started through the dynamic loader (<code>ld.so ./prog</code>) also writes nothing: a judged deviation (LQ1-01), since natively the title is written.
+    In the program's executable it keeps the memory only if no other thread runs.
+    The memory must also lie inside the kernel's span of the arguments (<code>/proc/self/stat</code>).
+    Otherwise the title still behaves as natively, but <code>/proc/self/cmdline</code> keeps the arguments.</li>
+  <li>Like libuv, it copies the arguments and points the argument table at the copies.
+    So <code>std::env::args</code> and <code>main</code>'s <code>argv</code> keep the original arguments, as Lean's <code>args</code> do natively.</li>
+  <li>The file reads the table and the strings, writes the table's entries, and copies each new title over the arguments.
+    Each <code>unsafe</code> block has a <code>// SAFETY:</code> comment.</li>
+  <li><a href="../UNSAFE.md">UNSAFE.md</a> has its entry, and <a href="../docs/native-quirks.md">docs/native-quirks.md</a> its proof.</li>
 </ul>
 
 <h2 id="exit">Exit</h2>
@@ -369,7 +408,8 @@ So a runaway task keeps the process alive, and <code>main</code>'s buffered outp
 </figure>
 
 <p class="more">Detail: <a href="../src/io/mod.rs">src/io/mod.rs</a> (the layout, "no bulk copies", concurrency), <a href="../src/io/cfile.rs">cfile.rs</a>, <a href="../src/io/debug.rs">debug.rs</a>, <a href="../src/io/env.rs">env.rs</a>, <a href="../src/io/error.rs">error.rs</a>, <a href="../src/io/exit.rs">exit.rs</a>, <a href="../src/io/fs.rs">fs.rs</a>, <a href="../src/io/handle.rs">handle.rs</a>, <a href="../src/io/startup.rs">startup.rs</a>.
-From io-2: <a href="../src/io/environ.rs">environ.rs</a>, <a href="../src/io/process.rs">process.rs</a>, <a href="../src/io/streams.rs">streams.rs</a>, <a href="../src/io/temp.rs">temp.rs</a>, <a href="../src/io/time.rs">time.rs</a>, <a href="../src/io/uvsys.rs">uvsys.rs</a>.</p>
+From io-2: <a href="../src/io/environ.rs">environ.rs</a>, <a href="../src/io/process.rs">process.rs</a>, <a href="../src/io/streams.rs">streams.rs</a>, <a href="../src/io/temp.rs">temp.rs</a>, <a href="../src/io/time.rs">time.rs</a>, <a href="../src/io/uvsys.rs">uvsys.rs</a>.
+From quirks-1: <a href="../src/io/argv_title.rs">argv_title.rs</a>, with <a href="../docs/native-quirks.md">docs/native-quirks.md</a>.</p>
 </main>
 <footer>Generated by <code>site/build.py</code> from <code>site/src/</code> and the repository's files.
 Written about 80% to ASD-STE100 (Simplified Technical English).

@@ -1,4 +1,5 @@
-//! The descriptors native Lean has open before `main` (A821).
+//! The descriptors native Lean has open before `main` (A821), and
+//! `IO.initializing`'s flag ([`initializing`]).
 //!
 //! Lean's runtime starts libuv's default loop during initialization
 //! (`initialize_libuv`, then `event_loop_init` in `src/runtime/uv/event_loop.cpp`),
@@ -20,13 +21,20 @@
 //! a pipe without a reader fails with `EPIPE` (an `IO.Error`) instead of
 //! killing the process.
 //!
-//! **The translator's glue duties** (review RIO1-03), neither expressible in
-//! this crate's safe code:
+//! **The translator's glue duties** at startup (review RIO1-03):
 //! - ignore `SIGPIPE` before Lean code runs: Rust's `lang_start` does it for a
 //!   Rust `main`; an entry that is not `lang_start` (lean2rr's) must do it
 //!   itself;
 //! - run an ELF constructor (`#[link_section = ".init_array"]`) that calls
-//!   [`open_native_descriptors`], and on `Err` [`fail_as_native`].
+//!   [`open_native_descriptors`], and on `Err` [`fail_as_native`];
+//! - call [`mark_end_initialization`] once the module initializers have run,
+//!   before `main`, as the generated `main` calls
+//!   `lean_io_mark_end_initialization` (also when an initializer failed).
+//!
+//! The crate does none of them itself: its ELF constructors live only in
+//! the native quirks' files (the process's arguments, [`super::argv_title`],
+//! need no glue), `SIGPIPE`'s disposition belongs to the entry, and only the
+//! glue knows when the initializers end.
 //!
 //! So on a host with io_uring, descriptors 3 to 10 are taken, and a standard
 //! descriptor closed at startup is taken by the first of them: reading a
@@ -34,12 +42,15 @@
 //! point where opening a file fails with `EMFILE` is native's. A translator
 //! calls [`open_native_descriptors`] from an ELF constructor, before Rust's
 //! runtime puts `/dev/null` in the place of closed standard descriptors (the
-//! constructor needs `#[link_section]`, which `forbid(unsafe_code)` refuses,
+//! constructor needs `#[link_section]`, which `deny(unsafe_code)` refuses,
 //! so it lives in each translator's glue).
 //!
 //! The rings are stood in for by two more epoll descriptors: no safe API
-//! creates a ring without a new crate (rustix's `io_uring_setup` is
-//! `unsafe`). On every descriptor operation a Lean program can reach, an
+//! creates a ring without a new crate (checked again for quirks-1: rustix
+//! 1.1.4's `io_uring::io_uring_setup` is a `pub unsafe fn`, whose stated
+//! precondition is an open `wq_fd` under `IORING_SETUP_ATTACH_WQ`; nix
+//! 0.31.3 and std have no io_uring call). On every descriptor operation a
+//! Lean program can reach, an
 //! io_uring descriptor and an epoll descriptor fail alike (`read` and `write`
 //! give `EINVAL`; checked natively, `work/io-1-a821/FINDING.txt`). What differs:
 //! - `fstat` (`System.FilePath.metadata "/proc/self/fd/4"`): a ring has its
@@ -76,7 +87,26 @@ use rustix::fd::OwnedFd;
 #[cfg(feature = "sched")]
 use rustix::fd::{AsFd, BorrowedFd};
 use rustix::pipe::{pipe_with, PipeFlags};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+
+/// Lean's `g_initializing` (io.cpp): true from the start of the process until
+/// the glue's [`mark_end_initialization`].
+static INITIALIZING: AtomicBool = AtomicBool::new(true);
+
+/// `IO.initializing` (`lean_io_initializing`): true while the module
+/// initializers run (from the start of the process), false once the glue has
+/// called [`mark_end_initialization`], so in `main` and in every task.
+pub fn initializing() -> bool {
+    INITIALIZING.load(Ordering::Relaxed)
+}
+
+/// `lean_io_mark_end_initialization`: the generated `main` calls it right
+/// after the module initializers (whether they succeeded or not), before
+/// `main` runs; so does each translator's glue.
+pub fn mark_end_initialization() {
+    INITIALIZING.store(false, Ordering::Relaxed)
+}
 
 /// Why native Lean's startup would not reach `main`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -345,6 +375,16 @@ fn io_uring_allowed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The only test that ends initialization: true until then, false after.
+    #[test]
+    fn initializing_until_marked() {
+        assert!(initializing());
+        mark_end_initialization();
+        assert!(!initializing());
+        mark_end_initialization();
+        assert!(!initializing());
+    }
 
     #[test]
     fn atoi_is_c_atoi() {

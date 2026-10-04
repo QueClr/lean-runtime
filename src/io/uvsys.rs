@@ -1,7 +1,8 @@
 //! `Std.Internal.UV.System`'s queries: Lean 4.34.0's `src/runtime/uv/system.cpp`
 //! over libuv 1.48 (`src/unix/core.c`, `linux.c`, `proctitle.c`,
 //! `procfs-exepath.c`, `random-getrandom.c`), through `std`, `nix`'s and
-//! `rustix`'s safe wrappers, `/proc` and `/sys`.
+//! `rustix`'s safe wrappers, `/proc` and `/sys`; the process title's write
+//! into the arguments' memory is [`argv_title`]'s.
 //!
 //! A libuv error `-e` is Lean's `lean_decode_uv_error(-e, nullptr)`
 //! ([`IoError::decode_uv_error`]); where Lean builds that error over a null
@@ -29,7 +30,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::sync::{Mutex, PoisonError};
 
 use super::error::{set_errno, IoError, E2BIG, EINTR, EINVAL, ENOBUFS, ENOENT, ERANGE, ESRCH};
-use super::{environ, ByteSink};
+use super::{argv_title, environ, ByteSink};
 
 /// `PATH_MAX`, the buffer `system.cpp` gives `uv_cwd`, `uv_os_homedir`,
 /// `uv_os_tmpdir` and `uv_exepath`.
@@ -83,7 +84,8 @@ fn slurp(path: &[u8], len: usize) -> Option<Vec<u8>> {
 // ---- the process title (`uv_setup_args`, `uv_get_process_title`, `uv_set_process_title`) ----
 
 /// libuv's `process_title`: the title, and the memory of the original
-/// arguments it may grow over (`pt.cap`: every argument's bytes and NUL).
+/// arguments it may grow over (`pt.cap`: from `argv[0]` to the NUL ending the
+/// last argument).
 struct Title {
     title: Vec<u8>,
     cap: usize,
@@ -92,11 +94,19 @@ struct Title {
 static TITLE: Mutex<Option<Option<Title>>> = Mutex::new(None);
 
 /// The title as `uv_setup_args` sets it up from `argv` (Lean's
-/// `lean_setup_args` calls it before `main`): `argv[0]`; none (`args_mem`
-/// null) without arguments.
+/// `lean_setup_args` calls it before the module initializers): `argv[0]`;
+/// none (`args_mem` null) without arguments. The arguments are those the
+/// crate's constructor kept ([`argv_title`]); when it kept nothing, std's
+/// (`std::env::args_os`, read once here, under this lock; nothing is written
+/// then).
 fn with_title<R>(f: impl FnOnce(Option<&mut Title>) -> R) -> R {
     let mut g = TITLE.lock().unwrap_or_else(PoisonError::into_inner);
     let t = g.get_or_insert_with(|| {
+        match argv_title::initial() {
+            argv_title::Setup::Arguments(title, cap) => return Some(Title { title, cap }),
+            argv_title::Setup::NoArguments => return None,
+            argv_title::Setup::NotCalled => {}
+        }
         let args: Vec<Vec<u8>> = std::env::args_os().map(OsStringExt::into_vec).collect();
         let first = args.first()?.clone();
         Some(Title {
@@ -121,9 +131,10 @@ pub fn get_process_title<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoErro
 
 /// `setProcessTitle` (`uv_set_process_title`): a title holding a NUL byte is
 /// Lean's embedded-NUL error; otherwise it is cut to the arguments' memory
-/// less one byte and becomes the calling thread's name (`prctl(PR_SET_NAME)`,
-/// its first 15 bytes). Native libuv also writes it over the original
-/// `argv` strings (`/proc/self/cmdline`), which safe code cannot do.
+/// less one byte (`cap - 1`), written over the original arguments with NUL
+/// bytes to the end of their memory, so `/proc/self/cmdline` shows it
+/// ([`argv_title`], when the crate's constructor kept them), and becomes
+/// the calling thread's name (`prctl(PR_SET_NAME)`, its first 15 bytes).
 pub fn set_process_title(title: &[u8]) -> Result<(), IoError> {
     if title.contains(&0) {
         return Err(IoError::embedded_nul(title));
@@ -138,6 +149,7 @@ pub fn set_process_title(title: &[u8]) -> Result<(), IoError> {
             title.len()
         };
         t.title = title[..len].to_vec();
+        let _ = argv_title::write(&t.title);
         if let Ok(name) = std::ffi::CString::new(t.title.clone()) {
             let _ = nix::sys::prctl::set_name(&name);
         }

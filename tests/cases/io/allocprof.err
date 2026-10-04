@@ -1,0 +1,7 @@
+inside
+profile
+Allocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`
+
+failing 0
+Allocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`
+

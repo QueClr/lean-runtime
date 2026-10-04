@@ -52,6 +52,12 @@ streams; `tests/io2_cases.rs` runs a Rust twin of each of its program cases
 and `benches/io/` has pairs for spawning and `IO.Process.output`. See
 `src/io/mod.rs`.
 
+A small `io` batch, `quirks-1`, adds `IO.initializing` and `allocprof`,
+and makes `setProcessTitle` write the title into the arguments' memory, so
+`/proc/self/cmdline` shows it as natively. That write is the crate's first
+`unsafe` item, a native quirk in `src/io/argv_title.rs` (`UNSAFE.md`,
+`docs/native-quirks.md`).
+
 `sched` has its first batch (feature `sched`): deferred tasks on corosensei
 contexts, the yield points, promises, `Std.Sync`'s primitives and Lean's
 exit behaviour. Every case of `tests/cases/tasks` and `tests/cases/sync`
@@ -71,9 +77,13 @@ that order. See `docs/development.md`, the rules for implementors.
 
 ## Rules in short
 
-- The default build contains no `unsafe` code
-  (`#![forbid(unsafe_code)]`). The opt-in feature `unsafe-fast` may enable
-  faster implementations with the same behaviour (see `UNSAFE.md`).
+- The crate root denies `unsafe` code (`#![deny(unsafe_code)]`), and the
+  default build contains none. A file may allow it for itself only with an
+  entry in `UNSAFE.md`: a native quirk that no safe API can reproduce (one
+  so far, `io::argv_title`: `setProcessTitle` writes the title into the
+  arguments' memory, as libuv does; its proof is in
+  `docs/native-quirks.md`), or a faster implementation behind the opt-in
+  feature `unsafe-fast`, with the same behaviour as its safe twin.
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
   on). The ports of glibc's `cbrt` and `cbrtf` give glibc 2.39's aarch64

@@ -1,6 +1,6 @@
 <h1>Status</h1>
 <p class="lead">State of 2026-10-04.
-main holds <code>semantics</code>, both <code>io</code> batches and both <code>sched</code> batches.</p>
+main holds <code>semantics</code>, both <code>io</code> batches, both <code>sched</code> batches and the first batch of native quirks.</p>
 
 <h2 id="merged">Merged on main</h2>
 <div class="tblwrap"><table>
@@ -19,6 +19,9 @@ The libm ports of <code>cbrt</code>, <code>cbrtf</code>, <code>atanh</code> and 
 <tr><td><code>sched-io</code></td><td>Cooperative blocking IO: reads, writes, <code>flock</code> and <code>waitpid</code> let the other tasks run (<a href="sched.html#sched-io">details</a>).
 The scheduler's event loop, and <code>Std.Internal.UV</code>'s loop, timers and signals on it; the <code>taskio/</code> and <code>uvloop/</code> cases.</td></tr>
 <tr><td><code>cases-xt</code></td><td>Program cases from lean2rr's cross-test of leanrs's fixtures, cases for LB-01, LB-02 and LB-03, and cases for two decisions (DV5, DV10).</td></tr>
+<tr><td><code>quirks-1</code></td><td><code>IO.initializing</code>, <code>allocprof</code>, and the write of <code>setProcessTitle</code> into the arguments' memory.
+That write is the crate's first <code>unsafe</code> item, a <a href="glossary.html#g-quirk">native quirk</a> with its proof in <code>docs/native-quirks.md</code>.
+Real io_uring rings at startup still have epoll stand-ins, since no safe API makes a ring.</td></tr>
 <tr><td><code>cases-tasks-1</code></td><td>Program cases for tasks and for two io findings, recorded natively; <code>scripts/cases.py</code> runs every case under a memory cap.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).

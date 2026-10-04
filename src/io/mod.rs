@@ -1,5 +1,7 @@
 //! OS-level IO mirroring Lean 4.34.0's C runtime (`src/runtime/io.cpp`,
-//! `process.cpp`), in safe Rust over std, rustix and nix.
+//! `process.cpp`), in safe Rust over std, rustix and nix, except
+//! [`argv_title`]: the one native quirk no safe API can reproduce, in a file
+//! of its own (`UNSAFE.md`).
 //!
 //! # Layout
 //!
@@ -17,6 +19,7 @@
 //! | [`environ`] | the process environment as C's `environ` holds it (every entry in order, changed as glibc's `setenv` and `unsetenv` change it): a child's `envp`, `osEnviron` |
 //! | [`process`] | child processes: `IO.Process.spawn` over `posix_spawn`, the `Child` operations, `IO.Process.output` |
 //! | [`uvsys`] | `Std.Internal.UV.System`'s queries (libuv 1.48 over std, nix, rustix, `/proc` and `/sys`) |
+//! | [`argv_title`] | the process title in the arguments' memory (`uv_setup_args`, with the crate's own ELF constructor, and `uv_set_process_title`'s write): an `unsafe` file for a native quirk (`UNSAFE.md`) |
 //! | [`temp`] | `IO.FS.createTempFile` and `createTempDir` |
 //! | [`time`] | `timeit`, `Std.Time.Timestamp.now`'s clock, the Windows time-zone externs |
 //! | [`streams`] | the calling thread's current standard streams (`IO.getStdout`, `IO.setStdout` & co.) and the route of the runtime's own standard-error lines |
@@ -109,6 +112,7 @@ compile_error!(
      libuv message table are those of that platform"
 );
 
+pub mod argv_title;
 pub mod cfile;
 #[cfg(feature = "sched")]
 pub(crate) mod coop;

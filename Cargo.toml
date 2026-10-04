@@ -11,7 +11,8 @@ path = "src/lib.rs"
 
 # The default build has no dependencies. The optional layers make their
 # system calls and stack switches through vetted crates, so that the crate
-# itself stays free of `unsafe`:
+# itself stays free of `unsafe` (except the native quirks of UNSAFE.md: so
+# far `io`'s write of the process title into the arguments' memory):
 # - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
 #   the scheduling priority) and nix (process-level libc calls: posix_spawn,
 #   unshare, poll, the password and group databases, getrusage,

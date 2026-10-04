@@ -1,0 +1,1 @@
+ld=$(ls /lib/ld-linux-*.so.* /lib64/ld-linux-*.so.* 2>/dev/null | head -n 1); "$ld" "$BIN" abcdefghijklmnop

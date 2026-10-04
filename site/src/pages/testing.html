@@ -100,10 +100,12 @@ It adds only what a translator's glue adds.</p>
   <li>formatting;</li>
   <li>the plain-rustc builds that one translator uses, with its driver's cfg flags;</li>
   <li>the libm folding test in a release build;</li>
-  <li>only with <code>LEAN_RUNTIME_MIRI=1</code>: Miri on the <code>unsafe-fast</code> configurations.</li>
+  <li>only with <code>LEAN_RUNTIME_MIRI=1</code>: Miri on the <code>unsafe-fast</code> configurations, one of them with <code>io</code> and its native quirk;</li>
+  <li>a check that every file that allows <code>unsafe</code> has an entry in <a href="repo:UNSAFE.md">UNSAFE.md</a>.</li>
 </ul>
-<p>Miri is opt-in, because the default build forbids <code>unsafe</code> and Miri costs much CPU time (decision of 2026-10-04).
-Run it when an <code>unsafe-fast</code> item changes.</p>
+<p>Miri is opt-in, because the default build has no <code>unsafe</code> code and Miri costs much CPU time (decision of 2026-10-04).
+Run it when an <code>unsafe</code> item changes.
+<code>LEAN_RUNTIME_MIRI_FILTER</code> limits it to the unit tests whose name holds a given text, such as <code>argv_title</code>.</p>
 <p>Heavy steps run under a memory cap, and every test run has a deadline, because the host is shared.</p>
 
 <h2 id="cross">Both translators</h2>

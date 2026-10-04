@@ -1,14 +1,48 @@
 # `unsafe` in lean-runtime
 
-The default build contains no `unsafe` code: `src/lib.rs` has
-`#![forbid(unsafe_code)]` unless the feature `unsafe-fast` is enabled.
+The crate root denies `unsafe` code (`#![deny(unsafe_code)]` in
+`src/lib.rs`). A file may allow it for itself only, and only with an entry
+here: `deny` does not stop a file's `allow`, so `scripts/check.sh` fails on
+a file that names `unsafe_code` without one. The default build (no
+features) contains no `unsafe` code, and a build with neither `io` nor
+`unsafe-fast` forbids it outright.
 
-Each `unsafe` block behind `unsafe-fast` gets an entry here with four parts:
-- **Where and what:** file, function, the safe twin it replaces.
-- **What it gets us:** the measured speed or memory gain.
-- **Why it is sound:** a written proof.
-- **How it is checked:** Miri (and Kani where it applies), plus the test
-  suite in both configurations.
+There are two kinds of entry:
+- **Native quirks.** Behaviour of native Lean that no safe API can
+  reproduce (owner, 2026-10-04: "no way around"). Each item is a small file
+  of its own, in the build of the feature that needs it, with
+  `#![allow(unsafe_code)]`, `#![deny(unsafe_op_in_unsafe_fn)]` and a
+  `// SAFETY:` comment on every `unsafe` block. Its entry gives:
+  - **Where and what:** the file and its `unsafe` operations.
+  - **Native behaviour:** what it reproduces, and the case that records it.
+  - **Why no safe route exists:** the crates and APIs checked.
+  - **Invariant and proof:** a section of `docs/native-quirks.md`.
+  - **How it is checked:** the native cases, adversarial review, and Miri
+    or Kani where they apply.
+
+  leanrs reviews each item before merge. No such item is in a hot path.
+- **`unsafe-fast`.** A faster implementation behind the opt-in feature
+  `unsafe-fast`, with the same observable behaviour as its safe twin, which
+  stays. Its entry gives:
+  - **Where and what:** file, function, the safe twin it replaces.
+  - **What it gets us:** the measured speed or memory gain.
+  - **Why it is sound:** a written proof.
+  - **How it is checked:** Miri (and Kani where it applies), plus the test
+    suite in both configurations.
+
+## Native quirks
+
+### `src/io/argv_title.rs`: the process title in the arguments' memory
+
+| Part | |
+|---|---|
+| Where and what | `src/io/argv_title.rs`, feature `io`. An ELF constructor of the crate (glibc only) gets the process's `argc` and `argv` and does what libuv 1.48's `uv_setup_args` does: after checking that it is in the program's own executable (its address inside the kernel's `start_code` to `end_code`, `/proc/self/stat`; in a shared library it keeps nothing, and the title functions fail with `ENOBUFS` as natively; so does a launch through the dynamic loader, `ld.so ./prog`, where native writes: judged deviation LQ1-01), that no other thread runs and that the memory from `argv[0]` to the end of the last argument lies inside the kernel's span of the arguments (`/proc/self/stat`), it keeps that memory, copies the arguments into a block of its own and points the table at the copies. `uvsys::set_process_title` then writes the title into the memory. The `unsafe` operations: reads of the table and the strings (U1, U2), the write of the title, one `copy_nonoverlapping` (U3), the writes of the table's entries (U4), and the constructor's `#[link_section = ".init_array"]` static. No glue writes `unsafe` for it |
+| Native behaviour | `IO.setProcessTitle` (libuv's `uv_set_process_title`) writes the title over the original arguments: the title cut to their memory less one byte, then NUL bytes to the end of that memory; the environment is not moved. So `/proc/self/cmdline` shows the title, while Lean's `args` come from libuv's copy. Cases `uvsys/title_cmdline` (LIO2-06, resolved), `uvsys/title_in_initializer`, `uvsys/title_via_loader` (deviation LQ1-01: started through the dynamic loader, the title fails with `ENOBUFS`; native writes it) and `uvsys/process_title` |
+| Why no safe route exists | std: `std::env::args_os` returns copies, and std keeps `argc` and `argv` in private statics. rustix 1.1.4: `process::set_name` only names the thread; `set_virtual_memory_map_address` (`PR_SET_MM_ARG_START`/`ARG_END`, which need `CAP_SYS_RESOURCE`) and `configure_virtual_memory_map` (`PR_SET_MM_MAP`, which needs no capability but resets the whole memory map, its `brk` racing with `sbrk`) are `unsafe`. nix 0.31.3: `sys::prctl` has `set_name` and no `PR_SET_MM`. Writing `/proc/self/mem` takes only safe calls but is the same write hidden from the compiler, outside Rust's safety guarantees (rejected in io-2's review, LIO2-06) |
+| Invariant and proof | `docs/native-quirks.md`, "The process title in the arguments' memory": what the constructor relies on (glibc's `.init_array` convention, the kernel's layout, earlier code), the checks, the invariants I1 to I7, and the proof of U1 to U4 and of the constructor |
+| How it is checked | The cases `uvsys/title_cmdline`, `uvsys/title_in_initializer`, `uvsys/title_via_loader` and `uvsys/process_title` through their twins in `tests/io2_cases.rs`, which link the crate's constructor as any binary does. The constructor linked and working in downstream binaries built by cargo (debug, release), by plain `rustc` from rlibs (as lean2rr builds), and as a static library linked into a C `main`; a `cdylib` loaded by `dlopen` keeps nothing (`ENOBUFS`). The file's unit tests on blocks laid out as the kernel lays out the arguments, which Miri runs (Stacked Borrows; Tree Borrows with strict provenance; passed 2026-10-04; `LEAN_RUNTIME_MIRI=1 LEAN_RUNTIME_MIRI_FILTER=argv_title scripts/check.sh`). Miri cannot run the constructor on real arguments. Adversarial review, ours and leanrs's. Kani does not apply |
+
+## `unsafe-fast`
 
 There are no entries yet.
 
@@ -32,3 +66,7 @@ plumbing only:
   - it installs Lean's stack-overflow report (`sigaltstack`, `sigaction`,
     `pthread_getattr_np`; `write` and `abort` in the handler), as
     `src/runtime/stack_overflow.cpp` does.
+
+The unit tests of `src/io/argv_title.rs` make regions over blocks of their
+own, and repoint a table of their own, under the same contracts as the
+constructor's calls.

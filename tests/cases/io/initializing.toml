@@ -1,0 +1,5 @@
+id = "initializing"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime quirks-1: io.cpp lean_io_initializing, lean_io_mark_end_initialization; lean2rr tests/runtime/RtInitializing.lean"
+streams = "separate"

@@ -5,7 +5,8 @@
 # task, sync, refs, taskio and uvloop cases and of the io cases with tasks,
 # over `sched` and `io` (tests/sched-driver); fmt; the plain-rustc
 # build of the dependency-free configuration, which one translator builds
-# without cargo; `sched`'s offline build from Cargo.lock; and, only with
+# without cargo; `sched`'s offline build from Cargo.lock; that every file
+# allowing `unsafe` has its UNSAFE.md entry; and, only with
 # LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
 #
 # The host is shared: the heavy steps (cargo test, Miri) run inside a memory
@@ -50,6 +51,24 @@ fi
 echo "== site/build.py --check"
 python3 site/build.py --check
 
+# `unsafe` in the crate only where UNSAFE.md has an entry: the crate root
+# denies `unsafe_code` (`deny` lets a file allow it for itself), and any other
+# file that names `unsafe_code` outside a comment (an `allow`, an `expect`, a
+# `cfg_attr`, on one line or several) needs an entry headed "### `<path>`".
+echo "== unsafe files"
+code_lines() { grep -rnP '^(?!\s*//).*\bunsafe_code\b' "$@" || true; }
+if ! code_lines src/lib.rs | grep -q 'deny(unsafe_code)' ||
+  code_lines src/lib.rs | grep -vqE '(deny|forbid)\(unsafe_code\)'; then
+  echo "error: src/lib.rs must deny unsafe_code and allow it nowhere" >&2
+  exit 1
+fi
+while IFS= read -r f; do
+  if [[ "$f" != src/lib.rs ]] && ! grep -qF "### \`$f\`" UNSAFE.md; then
+    echo "error: $f names unsafe_code, and UNSAFE.md has no entry for it" >&2
+    exit 1
+  fi
+done < <(code_lines src | cut -d: -f1 | sort -u)
+
 for tc in "${TOOLCHAINS[@]}"; do
   for f in "${FEATURE_SETS[@]}"; do
     echo "== $tc test features=[${f}]"
@@ -84,18 +103,29 @@ done
 last="${TOOLCHAINS[${#TOOLCHAINS[@]}-1]}"
 cargo +"$last" fmt --all --check
 
-# Miri runs where `unsafe` can be: the unsafe-fast configurations. It is
-# opt-in (LEAN_RUNTIME_MIRI=1): the default build forbids `unsafe`, so Miri
-# checks little there for a large CPU cost on the shared host (owner,
-# 2026-10-04). Run it when an `unsafe-fast` item changes (docs/development.md).
+# Miri runs where `unsafe` can be: the unsafe-fast configurations, and with
+# `io` the native quirks' unit tests (UNSAFE.md). It is opt-in
+# (LEAN_RUNTIME_MIRI=1): the default build has no `unsafe`, so Miri checks
+# little there for a large CPU cost on the shared host (owner, 2026-10-04).
+# Run it when an `unsafe` item changes (docs/development.md).
+# LEAN_RUNTIME_MIRI_FILTER=NAME limits it to the library's unit tests whose
+# name holds NAME, in the configuration with every feature: `argv_title` for the native
+# quirk of src/io/argv_title.rs, whose tests run on a block laid out as the
+# process's arguments (Miri has no process arguments' memory).
 # Tests that call foreign code or switch stacks are marked
 # #[cfg_attr(miri, ignore)].
 if [[ "${LEAN_RUNTIME_MIRI:-}" != 1 ]]; then
   echo "Miri skipped (set LEAN_RUNTIME_MIRI=1 to run it)"
 elif cargo +"$last" miri --version >/dev/null 2>&1; then
-  for f in "" "unsafe-fast" "io,sched,unsafe-fast"; do
-    echo "== miri features=[${f}]"
-    capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet ${f:+--features "$f"}
+  filter="${LEAN_RUNTIME_MIRI_FILTER:-}"
+  configs=("" "unsafe-fast" "io,sched,unsafe-fast")
+  # the native quirks' tests are in `io`: with a filter, only the
+  # configuration with every feature can match
+  [[ -n "$filter" ]] && configs=("io,sched,unsafe-fast")
+  for f in "${configs[@]}"; do
+    echo "== miri features=[${f}]${filter:+ unit tests matching $filter}"
+    capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet ${f:+--features "$f"} \
+      ${filter:+--lib -- "$filter"}
   done
 else
   echo "warning: Miri is not installed for $last; skipped" >&2

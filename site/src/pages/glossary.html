@@ -75,7 +75,8 @@ There, a task that was queued 5 ms ago or more runs first.</dd>
 
 <dt id="g-elf-constructor">ELF constructor</dt>
 <dd>A function that the program loader runs before <code>main</code> and before Rust's runtime starts.
-The glue registers one to open the <a href="#g-startup">startup descriptors</a> early enough.</dd>
+The glue registers one to open the <a href="#g-startup">startup descriptors</a> early enough.
+glibc calls it with <code>main</code>'s arguments, so lean-runtime has one of its own for the process title.</dd>
 
 <dt id="g-errno">errno model</dt>
 <dd>lean-runtime's own copy of C's <code>errno</code>, one per thread.
@@ -157,11 +158,18 @@ leanrs's value is 2<sup>39</sup>.</dd>
 
 <dt id="g-miri">Miri</dt>
 <dd>Rust's interpreter that finds undefined behaviour.
-<code>scripts/check.sh</code> runs it on the <code>unsafe-fast</code> configurations when <code>LEAN_RUNTIME_MIRI=1</code> is set.</dd>
+<code>scripts/check.sh</code> runs it on the <code>unsafe-fast</code> configurations when <code>LEAN_RUNTIME_MIRI=1</code> is set.
+Those include the unit tests of the <a href="#g-quirk">native quirks</a>.</dd>
 
 <dt id="g-native">Native Lean</dt>
 <dd>Lean's own build: the Lean compiler emits C, which links with Lean's C runtime.
 A native build with Lean 4.34.0 gives every expected value.</dd>
+
+<dt id="g-quirk">Native quirk</dt>
+<dd>A behaviour of native Lean that no safe API can reproduce.
+lean-runtime writes such an item with <code>unsafe</code> code, in a small file of its own (decision of 2026-10-04).
+Each has an entry in <a href="repo:UNSAFE.md">UNSAFE.md</a> and a written proof.
+The one so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>).</dd>
 
 <dt id="g-o12">O12 (speed floor)</dt>
 <dd>The decision of 2026-10-03: the default, safe build of every shared function must be at least as fast as Lean 4.34.0's native runtime.

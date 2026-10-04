@@ -865,9 +865,9 @@ fn miri_sample(text: &str) -> String {
 /// also run under Miri, on a sample (`miri_sample`) without the rows whose
 /// arguments are 2^(2^32)-sized. Under Miri they run in one configuration of
 /// `scripts/check.sh`, `--features unsafe-fast`, and are ignored in the
-/// others (each test's `cfg_attr`): the default build has
-/// `forbid(unsafe_code)` and no dependencies, so Miri cannot find undefined
-/// behaviour in it, and `io` and `sched` do not change `semantics`.
+/// others (each test's `cfg_attr`): the default build has no `unsafe` code
+/// and no dependencies, so Miri cannot find undefined behaviour in it, and
+/// `io` and `sched` do not change `semantics`.
 fn run(file: &str, text: &str, deviations: usize) {
     let sample;
     let text = if cfg!(miri) {

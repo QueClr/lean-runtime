@@ -327,7 +327,7 @@ Examples: <code>IO.Process.output</code> of a child that writes 300 000 bytes to
 The cases in <code>tests/cases/uvloop/</code> check the timers and signals; one sends SIGUSR1 to the program itself.</p>
 
 <h2 id="suspend">The unsafe steps in the glue</h2>
-<p>lean-runtime stays <code>forbid(unsafe_code)</code>.
+<p><code>sched</code> has no <code>unsafe</code> code: the crate root denies it, outside the files that <a href="../UNSAFE.md">UNSAFE.md</a> lists.
 Two steps remain that safe code cannot do, so each translator's glue does them.
 The first is to suspend the running coroutine from deep inside a call.
 corosensei gives the coroutine's <code>Yielder</code> only to its top function, and nothing safe gives it to deeper code.

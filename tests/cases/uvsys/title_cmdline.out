@@ -1,4 +1,9 @@
 cmdline before holds the argument: true
 title: new-title
 cmdline starts with the title: true
+then only NUL bytes: true, as long as before: true
+a longer title is cut to the memory less one byte: true
+cmdline is the cut title and one NUL: true
+environment kept: (some kept)
+environment's memory unchanged: true
 args: [abcdefghijklmnop]

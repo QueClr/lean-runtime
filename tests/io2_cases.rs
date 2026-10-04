@@ -15,9 +15,12 @@
 //! outcome: native Lean 4.34.0's, or the correct one where native is wrong
 //! (LB-03, LB-14, LB-15, LB-16, LB-17 in `docs/lean-bugs.md`; native's is
 //! then in the case's `native` field), or the documented alternative where
-//! safe code cannot follow native (LIO2-06, the process title in `argv`'s
-//! memory) or where LB-17's fix costs a descriptor (LIO2-05,
-//! `pipe_null_two_free`).
+//! LB-17's fix costs a descriptor (LIO2-05, `pipe_null_two_free`).
+//!
+//! The crate's own ELF constructor (`io::argv_title`) hands it the
+//! arguments, so `setProcessTitle` writes them as natively
+//! (`title_cmdline`, `title_in_initializer`, `process_title`): no glue takes
+//! part, and this binary links the constructor as any other binary does.
 //!
 //! The binary runs without libtest (`harness = false`).
 
@@ -2310,9 +2313,8 @@ fn rt_streams_redirect(args: &[String]) -> R<()> {
     println(&format!("panic {b}"))?;
     debug::dbg_trace(format!("traced {k}").as_bytes());
     println(&format!("trace {}", k + 1))?;
-    // `allocprof`'s lines, as a build without RUNTIME_STATS prints them
-    debug::runtime_eprintln(b"profiled\nAllocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`\n");
-    println(&format!("allocprof {}", k + 7))?;
+    let r = debug::allocprof(b"profiled", || k + 7);
+    println(&format!("allocprof {r}"))?;
     eprintln("explicit eprintln")?;
     set_stderr(old);
     println(&format!("captured stderr:\n{}", text(&buf)))?;
@@ -2339,8 +2341,11 @@ fn null_fd_leak(_: &[String]) -> R<()> {
     Ok(())
 }
 
+/// LIO2-06: the title is written over the arguments' memory, which the
+/// crate's constructor kept (`io::argv_title`).
 fn title_cmdline(args: &[String]) -> R<()> {
     let before = read_file("/proc/self/cmdline")?;
+    let environ_before = read_file("/proc/self/environ")?;
     println(&format!(
         "cmdline before holds the argument: {}",
         before.contains("abcdefghijklmnop")
@@ -2351,6 +2356,70 @@ fn title_cmdline(args: &[String]) -> R<()> {
     println(&format!(
         "cmdline starts with the title: {}",
         c.starts_with("new-title")
+    ))?;
+    println(&format!(
+        "then only NUL bytes: {}, as long as before: {}",
+        c.chars().skip(9).all(|ch| ch == '\0'),
+        c.chars().count() == before.chars().count()
+    ))?;
+    uvsys::set_process_title("z".repeat(before.chars().count() + 5).as_bytes())?;
+    let t = bytes_to(uvsys::get_process_title)?;
+    println(&format!(
+        "a longer title is cut to the memory less one byte: {}",
+        t.chars().count() + 1 == before.chars().count()
+    ))?;
+    let c2 = read_file("/proc/self/cmdline")?;
+    println(&format!(
+        "cmdline is the cut title and one NUL: {}",
+        c2 == format!("{t}\0")
+    ))?;
+    println(&format!(
+        "environment kept: {}",
+        opt(io_getenv("TITLE_ENV"))
+    ))?;
+    println(&format!(
+        "environment's memory unchanged: {}",
+        read_file("/proc/self/environ")? == environ_before
+    ))?;
+    println(&format!("args: [{}]", args.join(", ")))
+}
+
+/// A module initializer sets a long title; `main`'s `args` are then built
+/// from the arguments, as a translator builds them after the initializers
+/// (`std::env::args`, which reads the table the crate's constructor pointed
+/// at copies of the arguments).
+fn title_in_initializer(_: &[String]) -> R<()> {
+    uvsys::set_process_title("é".repeat(300).as_bytes())?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    println(&format!("args: [{}]", args.join(", ")))?;
+    // `IO.FS.readBinFile`: `read` until empty (the file's size is 0)
+    let h = Handle::open(b"/proc/self/cmdline", FsMode::Read)?;
+    let mut c = Vec::new();
+    let mut buf = [0u8; 1024];
+    loop {
+        let n = h.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        c.extend_from_slice(&buf[..n]);
+    }
+    println(&format!(
+        "cmdline starts with the title: {}",
+        c.starts_with(&[0xC3, 0xA9, 0xC3, 0xA9])
+    ))
+}
+
+/// LQ1-01: started through the dynamic loader, the crate keeps no
+/// arguments' memory, so the title fails with `ENOBUFS` (native writes it).
+fn title_via_loader(args: &[String]) -> R<()> {
+    match uvsys::set_process_title(b"loader-title") {
+        Ok(()) => println("title set")?,
+        Err(e) => println(&format!("title not set: {}", to_string(&e)))?,
+    }
+    let c = read_file("/proc/self/cmdline")?;
+    println(&format!(
+        "cmdline holds the title: {}",
+        c.contains("loader-title")
     ))?;
     println(&format!("args: [{}]", args.join(", ")))
 }
@@ -2837,6 +2906,8 @@ const TWINS: &[(&str, Twin)] = &[
     ("uv_queries", uv_queries),
     ("null_fd_leak", null_fd_leak),
     ("title_cmdline", title_cmdline),
+    ("title_in_initializer", title_in_initializer),
+    ("title_via_loader", title_via_loader),
     ("dir_entry_update", dir_entry_update),
     ("errno_after", errno_after),
     ("memory_exact", memory_exact),
@@ -2865,7 +2936,16 @@ fn main() {
         .and_then(|n| n.to_str())
         .unwrap_or_default()
         .to_owned();
-    if let Some((_, twin)) = TWINS.iter().find(|(n, _)| *n == name) {
+    // the twin named by the binary's file name, or by `argv[0]`'s when the
+    // binary was started through the dynamic loader (`ld.so ./title_via_loader`),
+    // whose path `current_exe` then gives
+    let argv0 = std::env::args().next().unwrap_or_default();
+    let argv0_name = argv0.rsplit('/').next().unwrap_or_default().to_owned();
+    if let Some((_, twin)) = TWINS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .or_else(|| TWINS.iter().find(|(n, _)| *n == argv0_name))
+    {
         let args: Vec<String> = std::env::args().skip(1).collect();
         finish(twin(&args));
     }
