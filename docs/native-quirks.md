@@ -5,11 +5,14 @@ The owner's decision (2026-10-04): "the quirks one since need unsafe (no
 other way) then we can just write unsafe for them (no way around)". Each
 such item follows the pattern agreed with leanrs:
 - it lives in its own small file, with `#![allow(unsafe_code)]` and
-  `#![deny(unsafe_op_in_unsafe_fn)]`. The crate root denies `unsafe_code`.
-  A `deny` can be overridden by a file's `allow`, so `scripts/check.sh`
-  fails on any file that names `unsafe_code` without an entry in
-  `UNSAFE.md`; a build with neither `io` nor `unsafe-fast` has no such file,
-  and there the root forbids `unsafe` outright;
+  `#![deny(unsafe_op_in_unsafe_fn)]`, compiled only with a feature of its
+  own, so that a translator that does not need the quirk compiles no
+  `unsafe` (owner: avoid `unsafe` where it is not needed; AR-14). The crate
+  root denies `unsafe_code`. A `deny` can be overridden by a file's
+  `allow`, so `scripts/check.sh` fails on any file that names `unsafe_code`
+  without an entry in `UNSAFE.md`; a build with neither `proc-title` nor
+  `unsafe-fast` has no such file, and there the root forbids `unsafe`
+  outright;
 - every `unsafe` block has a `// SAFETY:` comment naming the invariant it
   relies on;
 - `UNSAFE.md` has its entry, and this file its invariants and proof;
@@ -24,6 +27,11 @@ This section is self-contained: with it and the source of
 can check the item. It replaces the first version's contract on the glue
 (leanrs's review of quirks-1): the crate now runs its own constructor,
 checks what it would write, and keeps libuv's copy of the arguments.
+
+The item is compiled only with the feature `proc-title` (which turns on
+`io`). lean2rr enables it. A translator that leaves it off compiles no
+`unsafe` code of the crate, and its programs get `ENOBUFS` from
+`setProcessTitle` ("Without the feature", below).
 
 ### What native does
 
@@ -68,6 +76,7 @@ The case `uvsys/title_cmdline` records this natively,
 
 ### What the crate does
 
+With the feature `proc-title`:
 - **The constructor.** On glibc, `argv_title.rs` has an ELF constructor
   (`#[link_section = ".init_array"]`, cfg `target_os = "linux"` and
   `target_env = "gnu"`). glibc calls it, as every `.init_array` function,
@@ -144,6 +153,34 @@ The case `uvsys/title_cmdline` records this natively,
   `argv_title::initial` and `write`, which every title function calls,
   refer to the constructor (`std::hint::black_box`), so the object that
   holds it is linked wherever the title functions are.
+
+### Without the feature
+
+Without `proc-title`, `argv_title.rs` is not compiled: the crate has no
+constructor, holds no arguments' memory, and compiles no `unsafe` code (the
+root forbids it). The title functions of `src/io/uvsys.rs` then behave as
+native's when libuv holds no arguments' memory, except that the title can
+still be read:
+- **`setProcessTitle`** gives Lean's embedded-NUL error for a title with a
+  NUL byte (Lean checks before it calls libuv), and `UV_ENOBUFS` for any
+  other: `uv_set_process_title` returns it when `uv_setup_args` kept nothing
+  (`args_mem` null). Nothing changes: not the title, not the arguments'
+  memory (`/proc/self/cmdline`), not the thread's name.
+- **`getProcessTitle`** gives `argv[0]`, read once from `std::env::args_os`:
+  the title a native program starts with (its generated `main` always calls
+  `lean_setup_args`), and the model the feature's build uses when the
+  constructor kept nothing. As natively, it is `UV_ENOBUFS` with no
+  arguments, or for 512 bytes or more. (libuv without `uv_setup_args`
+  would fail `uv_get_process_title` with `UV_ENOBUFS` too; no native Lean
+  program runs without it, so the crate keeps native's `argv[0]`.)
+
+So a program that only reads the title behaves as natively, and one that
+sets it gets `ENOBUFS` where native writes it: a difference of the
+translator that leaves the feature off (leanrs refuses `setProcessTitle` at
+translation, DV2). The cases that set a title expect native's outcome, so
+`tests/io2_cases.rs` checks their twins only with `proc-title`;
+`uvsys/title_via_loader` passes in both builds, since its alternative
+(LQ1-01) is that `ENOBUFS`.
 
 ### The `unsafe` operations
 
@@ -293,7 +330,9 @@ memory belongs to the process, not to a thread.
   by a module initializer leaves `args` whole), `uvsys/title_via_loader`
   (LQ1-01) and `uvsys/process_title`
   run through their twins in `tests/io2_cases.rs`, which links the crate's
-  constructor as any binary does and has no constructor of its own.
+  constructor as any binary does and has no constructor of its own, in
+  `scripts/check.sh`'s configurations with `proc-title` (`io,proc-title`
+  and `io,sched,proc-title,unsafe-fast`).
 - The constructor is linked, and works, in a downstream binary built each
   way the translators build (2026-10-04): cargo, debug and release; plain
   `rustc` rlibs linked by `rustc` (lean2rr's leanrt is a plain-rustc rlib

@@ -19,7 +19,7 @@ once.
 
 ## Code
 
-- **No `unsafe` in the default build.**
+- **No `unsafe` without a feature that needs it.**
   Anything that needs `unsafe` comes from a vetted external crate: `nix` or
   `rustix` for system calls, io-uring for the startup rings, corosensei for
   task switching, signal-hook (its safe API only) for signal handlers,
@@ -30,18 +30,25 @@ once.
   (one dereference of a coroutine's yielder) and the SIGSEGV handler of
   Lean's stack-overflow report (`docs/sched.md`). The crate root denies
   `unsafe_code` (`#![deny(unsafe_code)]`), and forbids it in a build with
-  neither `io` nor `unsafe-fast`.
+  neither `proc-title` nor `unsafe-fast`: the default build, `io`, `sched`
+  and `net` compile no `unsafe` code of the crate.
 - **Native quirks.** A native behaviour that no safe API can reproduce, and
   that each glue would otherwise write on its own, may be written with
-  `unsafe` in the crate (owner, 2026-10-04), in the build of the feature
-  that needs it: one small file with `#![allow(unsafe_code)]` and
+  `unsafe` in the crate (owner, 2026-10-04), behind a feature of its own,
+  so that a translator that does not need it compiles no `unsafe` (owner:
+  avoid `unsafe` where it is not needed): one small file with
+  `#![allow(unsafe_code)]` and
   `#![deny(unsafe_op_in_unsafe_fn)]`, a `// SAFETY:` comment on every
   `unsafe` block, an entry in `UNSAFE.md` and its proof in
   `docs/native-quirks.md`; leanrs reviews it before merge. Try the safe
   routes first, and name them in the entry. Run Miri on its unit tests
   where it can model them (`LEAN_RUNTIME_MIRI=1 scripts/check.sh`).
   `scripts/check.sh` fails on a file that names `unsafe_code` without an
-  entry. So far: `src/io/argv_title.rs`.
+  entry, and runs the quirk's feature in a configuration of its own. So
+  far: `src/io/argv_title.rs`, feature `proc-title` (which turns on `io`).
+  lean2rr enables it; a translator that leaves it off gets `ENOBUFS` from
+  `setProcessTitle` (`getProcessTitle` still gives `argv[0]`;
+  `docs/native-quirks.md`, "Without the feature").
 - **`unsafe-fast`.** Every `unsafe` item has its own
   `#[allow(unsafe_code)]` (the crate root denies it). An implementation
   behind this feature must:

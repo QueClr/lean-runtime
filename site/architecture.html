@@ -51,13 +51,13 @@ Each translator's glue connects its own values to the crate.</p>
 <figure class="fig">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 330" role="img" aria-labelledby="ar1-t ar1-d">
   <title id="ar1-t">Modules, features and their dependencies</title>
-  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei for the stack switch, rustix for the event loop and signal-hook for the signal watchers. Feature net adds the net module and turns on io and sched; it uses dns-lookup for name lookups, and the net features of rustix and nix. Feature unsafe-fast is opt-in and has no entries yet. The crate root denies unsafe code; only the files that UNSAFE.md lists may allow it.</desc>
+  <desc id="ar1-d">The default build has semantics only, with no dependencies. Feature io adds the io module, which uses rustix and nix. Feature sched adds the sched module, which uses corosensei for the stack switch, rustix for the event loop and signal-hook for the signal watchers. Feature net adds the net module and turns on io and sched; it uses dns-lookup for name lookups, and the net features of rustix and nix. Feature proc-title turns on io and adds one file, the native quirk of the process title. Feature unsafe-fast is opt-in and has no entries yet. The crate root denies unsafe code; only the files that UNSAFE.md lists may allow it, and only with proc-title or unsafe-fast.</desc>
   <defs>
     <marker id="ar1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
   </defs>
   <rect class="k-rt" x="20" y="20" width="1120" height="170" rx="8"/>
   <text class="tb" x="40" y="44">lean-runtime</text>
-  <text class="ts" x="160" y="44">#![deny(unsafe_code)]: unsafe only in the files UNSAFE.md lists</text>
+  <text class="ts" x="160" y="44">#![deny(unsafe_code)]: unsafe only in the files UNSAFE.md lists, with feature proc-title (the process title) or unsafe-fast</text>
 
   <rect class="k-none" x="40" y="60" width="220" height="110" rx="6"/>
   <text class="tb" x="150" y="86" text-anchor="middle">semantics</text>
@@ -115,6 +115,8 @@ Each translator's glue connects its own values to the crate.</p>
 </svg>
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
+<code>proc-title</code> adds one file to <code>io</code>.
+Without <code>proc-title</code> and <code>unsafe-fast</code>, the crate has no <code>unsafe</code> code of its own.
 The owner approved nix, rustix, corosensei, signal-hook (its safe API only) and dns-lookup (for <code>net</code> only).
 leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegation of dependency decisions (2026-10-04).</figcaption>
 </figure>
@@ -122,9 +124,7 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
   <li><strong>Default.</strong> <code>semantics</code> only.
     No dependencies, so a plain <code>rustc --crate-type rlib</code> build works (one translator does not use cargo).</li>
   <li><strong><code>io</code>.</strong> Makes system calls through rustix and nix, and the io_uring rings at startup through io-uring.
-    These crates hold the <code>unsafe</code> code.
-    The one exception is a <a href="glossary.html#g-quirk">native quirk</a> with no safe route, in a file of its own.
-    <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).</li>
+    These crates hold the <code>unsafe</code> code, so <code>io</code> has none of its own.</li>
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     Two <code>unsafe</code> steps remain, and both stay in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>, and the SIGSEGV handler for stack overflow.</li>
@@ -132,6 +132,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
     Its sockets use the net features of rustix and nix.
     Its name lookups call glibc through dns-lookup, pinned at 2.1.1.
     <a href="../UNSAFE.md">UNSAFE.md</a> records the audit of that crate's <code>unsafe</code> code.</li>
+  <li><strong><code>proc-title</code>.</strong> Turns on <code>io</code>, and adds a <a href="glossary.html#g-quirk">native quirk</a> with no safe route, in a file of its own.
+    <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).
+    lean2rr turns it on.
+    Without it, <code>setProcessTitle</code> fails with <code>ENOBUFS</code>.</li>
   <li><strong><code>unsafe-fast</code>.</strong> Opt-in.
     It may enable a faster <code>unsafe</code> version of a function.
     That version must have the same behaviour as the safe one, a written proof in <a href="../UNSAFE.md">UNSAFE.md</a>, and Miri checks.

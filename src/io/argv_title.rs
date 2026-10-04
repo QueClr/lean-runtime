@@ -6,9 +6,12 @@
 //! This file holds one of the crate's `unsafe` items, a native quirk that no
 //! safe API can reproduce: `UNSAFE.md` has its entry, and
 //! `docs/native-quirks.md` ("The process title in the arguments' memory")
-//! its invariants and proof. Every other file of the crate stays free of
-//! `unsafe`: the crate root denies it, and `scripts/check.sh` fails on a file
-//! that allows it without an entry in `UNSAFE.md`.
+//! its invariants and proof. It is compiled only with the feature
+//! `proc-title`; without it, `setProcessTitle` fails with `UV_ENOBUFS` and
+//! `getProcessTitle` gives `argv[0]` ([`super::uvsys`]), and the crate root
+//! forbids `unsafe`. Every other file of the crate stays free of `unsafe`:
+//! the crate root denies it, and `scripts/check.sh` fails on a file that
+//! allows it without an entry in `UNSAFE.md`.
 //!
 //! **What native does.**
 //! - `uv_setup_args(argc, argv)`: with `argc > 0`, the title's storage is

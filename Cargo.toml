@@ -11,8 +11,9 @@ path = "src/lib.rs"
 
 # The default build has no dependencies. The optional layers make their
 # system calls and stack switches through vetted crates, so that the crate
-# itself stays free of `unsafe` (except the native quirks of UNSAFE.md: so
-# far `io`'s write of the process title into the arguments' memory):
+# itself stays free of `unsafe` (except the native quirks of UNSAFE.md, each
+# behind a feature of its own: so far `proc-title`, the write of the process
+# title into the arguments' memory):
 # - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
 #   the scheduling priority), nix (process-level libc calls: posix_spawn,
 #   unshare, poll, the password and group databases, getrusage,
@@ -48,9 +49,19 @@ sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
 # Networking (Std.Internal.UV.TCP/UDP/DNS, Std.Net.interfaceAddresses) on the
 # scheduler's event loop: an optional module a translator admits per program.
 net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
+# The process title in the arguments' memory (`io::argv_title`, a native
+# quirk written with `unsafe`: UNSAFE.md, docs/native-quirks.md): the
+# crate's ELF constructor keeps the arguments' memory, and `setProcessTitle`
+# writes the title there, as libuv does. lean2rr enables it. Without it,
+# `setProcessTitle` fails with ENOBUFS, as libuv does when it holds no
+# arguments' memory, and `getProcessTitle` gives `argv[0]`.
+proc-title = ["io"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
-# docs/development.md). The default build is unsafe-free.
+# docs/development.md).
 unsafe-fast = []
+# The crate's own code contains no `unsafe` unless `proc-title` or
+# `unsafe-fast` is enabled: without them the crate root forbids it. The
+# `unsafe` of the dependencies is audited in UNSAFE.md.
 
 # The io program cases on the model (tests/io_cases.rs): the binary is also
 # each case's twin, so it runs without libtest.
@@ -61,7 +72,8 @@ required-features = ["io"]
 
 # The io-2 program cases (processes, temporary files, UV.System, time, stream
 # redirection) on the crate (tests/io2_cases.rs): the binary is also each
-# case's twin, so it runs without libtest.
+# case's twin, so it runs without libtest. The cases that set the process
+# title run only with `proc-title`.
 [[test]]
 name = "io2_cases"
 harness = false

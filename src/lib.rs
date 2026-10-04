@@ -12,20 +12,23 @@
 //! The crate root denies `unsafe` code. It is allowed only in files that
 //! say so themselves (`#![allow(unsafe_code)]`), each with an entry in
 //! `UNSAFE.md`:
-//! - a native quirk that no safe API can reproduce, in the build of the
-//!   feature that needs it; so far one, `io::argv_title` (feature `io`):
-//!   `setProcessTitle` writes the title into the arguments' memory, as
-//!   libuv does;
+//! - a native quirk that no safe API can reproduce, behind a feature of its
+//!   own; so far one, `io::argv_title` (feature `proc-title`, which turns on
+//!   `io`): `setProcessTitle` writes the title into the arguments' memory,
+//!   as libuv does;
 //! - with the opt-in feature `unsafe-fast`, a faster implementation of a
 //!   specific function, with the same observable behaviour as its safe twin.
 //!
-//! The default build (no features) contains no `unsafe` code. `deny` lets a
-//! file allow it for itself, so `scripts/check.sh` checks that every such
-//! file has its entry; in a build with neither `io` nor `unsafe-fast`, which
-//! has no such file, the root forbids `unsafe` outright.
+//! A build with neither `proc-title` nor `unsafe-fast` (the default build,
+//! `io`, `sched`, `net`) compiles no `unsafe` code of the crate: there the
+//! root forbids it outright. With either, `deny` lets a file allow it for
+//! itself, so `scripts/check.sh` checks that every such file has its entry.
 
 #![deny(unsafe_code)]
-#![cfg_attr(not(any(feature = "io", feature = "unsafe-fast")), forbid(unsafe_code))]
+#![cfg_attr(
+    not(any(feature = "proc-title", feature = "unsafe-fast")),
+    forbid(unsafe_code)
+)]
 
 pub mod semantics;
 

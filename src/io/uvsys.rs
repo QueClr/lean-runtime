@@ -2,7 +2,8 @@
 //! over libuv 1.48 (`src/unix/core.c`, `linux.c`, `proctitle.c`,
 //! `procfs-exepath.c`, `random-getrandom.c`), through `std`, `nix`'s and
 //! `rustix`'s safe wrappers, `/proc` and `/sys`; the process title's write
-//! into the arguments' memory is [`argv_title`]'s.
+//! into the arguments' memory is `argv_title`'s (feature `proc-title`;
+//! without it, `setProcessTitle` fails with `UV_ENOBUFS`).
 //!
 //! A libuv error `-e` is Lean's `lean_decode_uv_error(-e, nullptr)`
 //! ([`IoError::decode_uv_error`]); where Lean builds that error over a null
@@ -29,8 +30,10 @@ use std::io::Read;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::sync::{Mutex, PoisonError};
 
+#[cfg(feature = "proc-title")]
+use super::argv_title;
 use super::error::{set_errno, IoError, E2BIG, EINTR, EINVAL, ENOBUFS, ENOENT, ERANGE, ESRCH};
-use super::{argv_title, environ, ByteSink};
+use super::{environ, ByteSink};
 
 /// `PATH_MAX`, the buffer `system.cpp` gives `uv_cwd`, `uv_os_homedir`,
 /// `uv_os_tmpdir` and `uv_exepath`.
@@ -84,12 +87,23 @@ fn slurp(path: &[u8], len: usize) -> Option<Vec<u8>> {
 }
 
 // ---- the process title (`uv_setup_args`, `uv_get_process_title`, `uv_set_process_title`) ----
+//
+// With the feature `proc-title`, the title is libuv's: the crate's ELF
+// constructor (`argv_title`) keeps the arguments' memory, and
+// `setProcessTitle` writes the title there. Without it, the crate holds no
+// arguments' memory and compiles no `unsafe` code: `setProcessTitle` fails
+// with `UV_ENOBUFS`, as `uv_set_process_title` does when `uv_setup_args`
+// kept nothing (`args_mem` null), and `getProcessTitle` gives `argv[0]`,
+// the title a native program starts with (the model below, as with the
+// feature when the constructor kept nothing).
 
 /// libuv's `process_title`: the title, and the memory of the original
 /// arguments it may grow over (`pt.cap`: from `argv[0]` to the NUL ending the
 /// last argument).
 struct Title {
     title: Vec<u8>,
+    /// Only `setProcessTitle` reads it, with the feature `proc-title`.
+    #[cfg(feature = "proc-title")]
     cap: usize,
 }
 
@@ -97,13 +111,15 @@ static TITLE: Mutex<Option<Option<Title>>> = Mutex::new(None);
 
 /// The title as `uv_setup_args` sets it up from `argv` (Lean's
 /// `lean_setup_args` calls it before the module initializers): `argv[0]`;
-/// none (`args_mem` null) without arguments. The arguments are those the
-/// crate's constructor kept ([`argv_title`]); when it kept nothing, std's
+/// none (`args_mem` null) without arguments. With the feature `proc-title`,
+/// the arguments are those the crate's constructor kept (`argv_title`);
+/// when it kept nothing, and without the feature, std's
 /// (`std::env::args_os`, read once here, under this lock; nothing is written
 /// then).
 fn with_title<R>(f: impl FnOnce(Option<&mut Title>) -> R) -> R {
     let mut g = TITLE.lock().unwrap_or_else(PoisonError::into_inner);
     let t = g.get_or_insert_with(|| {
+        #[cfg(feature = "proc-title")]
         match argv_title::initial() {
             argv_title::Setup::Arguments(title, cap) => return Some(Title { title, cap }),
             argv_title::Setup::NoArguments => return None,
@@ -113,6 +129,7 @@ fn with_title<R>(f: impl FnOnce(Option<&mut Title>) -> R) -> R {
         let first = args.first()?.clone();
         Some(Title {
             title: first,
+            #[cfg(feature = "proc-title")]
             cap: args.iter().map(|a| a.len() + 1).sum(),
         })
     });
@@ -120,7 +137,8 @@ fn with_title<R>(f: impl FnOnce(Option<&mut Title>) -> R) -> R {
 }
 
 /// `getProcessTitle` (`uv_get_process_title` into 512 bytes): the title; one
-/// of 512 bytes or more, or no arguments, is `UV_ENOBUFS`.
+/// of 512 bytes or more, or no arguments, is `UV_ENOBUFS`. Without the
+/// feature `proc-title`, the title stays `argv[0]`.
 pub fn get_process_title<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoError> {
     with_title(|t| match t {
         Some(t) if t.title.len() < 512 => {
@@ -135,8 +153,9 @@ pub fn get_process_title<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoErro
 /// Lean's embedded-NUL error; otherwise it is cut to the arguments' memory
 /// less one byte (`cap - 1`), written over the original arguments with NUL
 /// bytes to the end of their memory, so `/proc/self/cmdline` shows it
-/// ([`argv_title`], when the crate's constructor kept them), and becomes
+/// (`argv_title`, when the crate's constructor kept them), and becomes
 /// the calling thread's name (`prctl(PR_SET_NAME)`, its first 15 bytes).
+#[cfg(feature = "proc-title")]
 pub fn set_process_title(title: &[u8]) -> Result<(), IoError> {
     super::effect_point();
     if title.contains(&0) {
@@ -158,6 +177,21 @@ pub fn set_process_title(title: &[u8]) -> Result<(), IoError> {
         }
         Ok(())
     })
+}
+
+/// `setProcessTitle` without the feature `proc-title`: a title holding a NUL
+/// byte is Lean's embedded-NUL error (Lean checks before it calls libuv);
+/// any other is `UV_ENOBUFS`, as `uv_set_process_title` returns when
+/// `uv_setup_args` kept no arguments' memory (`args_mem` null). Nothing
+/// changes: the title (`getProcessTitle` stays `argv[0]`), the arguments'
+/// memory and the thread's name.
+#[cfg(not(feature = "proc-title"))]
+pub fn set_process_title(title: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
+    if title.contains(&0) {
+        return Err(IoError::embedded_nul(title));
+    }
+    Err(libuv(ENOBUFS))
 }
 
 // ---- simple values ----

@@ -19,7 +19,7 @@ values.
 | In this crate | In each translator's own glue |
 |---|---|
 | `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
-| `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error` | The memory protocol: reference counting, ownership, freeing |
+| `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error`; with the feature `proc-title` (it turns on `io`), `setProcessTitle`'s write into the arguments' memory, a native quirk written with `unsafe` (without it, `setProcessTitle` fails with `ENOBUFS`) | The memory protocol: reference counting, ownership, freeing |
 | `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
 | `net` (feature `net`, with `io` and `sched`): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
 
@@ -57,9 +57,12 @@ A small `io` batch, `quirks-1`, adds `IO.initializing` and `allocprof`,
 and makes `setProcessTitle` write the title into the arguments' memory, so
 `/proc/self/cmdline` shows it as natively. That write is the crate's first
 `unsafe` item, a native quirk in `src/io/argv_title.rs` (`UNSAFE.md`,
-`docs/native-quirks.md`). The next, `quirks-2`, makes the two io_uring
-rings among the startup descriptors real rings, made and mapped as libuv
-makes them, through the io-uring crate, in place of epoll stand-ins.
+`docs/native-quirks.md`), compiled only with the feature `proc-title`
+(lean2rr enables it; without it, `setProcessTitle` fails with `ENOBUFS`
+and `getProcessTitle` gives `argv[0]`). The next, `quirks-2`, makes the
+two io_uring rings among the startup descriptors real rings, made and
+mapped as libuv makes them, through the io-uring crate, in place of epoll
+stand-ins.
 
 `sched` has its first batch (feature `sched`): deferred tasks on corosensei
 contexts, the yield points, promises, `Std.Sync`'s primitives and Lean's
@@ -94,13 +97,15 @@ that order. See `docs/development.md`, the rules for implementors.
 
 ## Rules in short
 
-- The crate root denies `unsafe` code (`#![deny(unsafe_code)]`), and the
-  default build contains none. A file may allow it for itself only with an
-  entry in `UNSAFE.md`: a native quirk that no safe API can reproduce (one
-  so far, `io::argv_title`: `setProcessTitle` writes the title into the
-  arguments' memory, as libuv does; its proof is in
+- The crate root denies `unsafe` code (`#![deny(unsafe_code)]`). A file may
+  allow it for itself only with an entry in `UNSAFE.md`, behind a feature:
+  a native quirk that no safe API can reproduce (one so far,
+  `io::argv_title`, feature `proc-title`: `setProcessTitle` writes the
+  title into the arguments' memory, as libuv does; its proof is in
   `docs/native-quirks.md`), or a faster implementation behind the opt-in
-  feature `unsafe-fast`, with the same behaviour as its safe twin.
+  feature `unsafe-fast`, with the same behaviour as its safe twin. Without
+  `proc-title` and `unsafe-fast` (the default build, `io`, `sched`, `net`),
+  the crate's own code contains no `unsafe`, and the root forbids it.
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
   on). The ports of glibc's `cbrt` and `cbrtf` give glibc 2.39's aarch64

@@ -257,6 +257,7 @@ fn io_uptime() {
 /// the arguments' memory less one byte, the thread's name its first 15
 /// bytes; 512 bytes or more is `ENOBUFS` (native case `process_title`). The
 /// title is the process's: a child.
+#[cfg(feature = "proc-title")]
 #[test]
 fn io_process_title() {
     let a0 = std::env::args_os().next().unwrap();
@@ -288,6 +289,27 @@ fn io_process_title() {
         return;
     }
     ok(child("io_process_title", "title"));
+}
+
+/// Without the feature `proc-title`: `getProcessTitle` gives `argv[0]`;
+/// `setProcessTitle` is Lean's embedded-NUL error for a title with a NUL
+/// byte and `ENOBUFS` for any other (libuv with no arguments' memory), and
+/// changes nothing: the title, `/proc/self/cmdline`, the thread's name.
+#[cfg(not(feature = "proc-title"))]
+#[test]
+fn io_process_title_without_the_feature() {
+    let a0 = std::env::args_os().next().unwrap();
+    let cmdline = || std::fs::read("/proc/self/cmdline").unwrap();
+    let comm = || std::fs::read_to_string("/proc/thread-self/comm").unwrap();
+    let (cmdline_before, comm_before) = (cmdline(), comm());
+    assert_eq!(text(get_process_title).as_bytes(), a0.as_bytes());
+    for t in [&b"short"[..], b"", &[b'T'; 600]] {
+        assert_eq!(set_process_title(t).unwrap_err(), enobufs());
+    }
+    assert_eq!(set_process_title(b"a\0b").unwrap_err(), nul("a\0b"));
+    assert_eq!(text(get_process_title).as_bytes(), a0.as_bytes());
+    assert_eq!(cmdline(), cmdline_before);
+    assert_eq!(comm(), comm_before);
 }
 
 /// `osGetPasswd` (`uv_os_get_passwd`): the effective user's entry.

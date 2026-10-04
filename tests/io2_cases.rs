@@ -17,10 +17,15 @@
 //! then in the case's `native` field), or the documented alternative where
 //! LB-17's fix costs a descriptor (LIO2-05, `pipe_null_two_free`).
 //!
-//! The crate's own ELF constructor (`io::argv_title`) hands it the
-//! arguments, so `setProcessTitle` writes them as natively
-//! (`title_cmdline`, `title_in_initializer`, `process_title`): no glue takes
-//! part, and this binary links the constructor as any other binary does.
+//! With the feature `proc-title`, the crate's own ELF constructor
+//! (`io::argv_title`) hands it the arguments, so `setProcessTitle` writes
+//! them as natively (`title_cmdline`, `title_in_initializer`,
+//! `process_title`): no glue takes part, and this binary links the
+//! constructor as any other binary does. Without the feature,
+//! `setProcessTitle` fails with `ENOBUFS`, so the twins of the cases that
+//! set a title ([`NEED_PROC_TITLE`]) are not checked; `title_via_loader` is
+//! checked in both builds, since its accepted alternative (LQ1-01) is that
+//! `ENOBUFS`.
 //!
 //! The binary runs without libtest (`harness = false`).
 
@@ -3067,6 +3072,18 @@ const TWINS: &[(&str, Twin)] = &[
     ("replicate_overflow", replicate_overflow),
 ];
 
+/// The twins of the cases that set the process title and expect native's
+/// outcome, where the title is written: checked only with the feature
+/// `proc-title` (without it, `setProcessTitle` fails with `ENOBUFS`).
+const NEED_PROC_TITLE: &[&str] = &[
+    "uv_limits",
+    "process_title",
+    "os_strings_lossy",
+    "rt_system",
+    "title_cmdline",
+    "title_in_initializer",
+];
+
 fn main() {
     if cfg!(miri) {
         return;
@@ -3091,13 +3108,24 @@ fn main() {
         finish(twin(&args));
     }
     let root = env!("CARGO_MANIFEST_DIR");
+    let ids: Vec<&str> = TWINS
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| cfg!(feature = "proc-title") || !NEED_PROC_TITLE.contains(id))
+        .collect();
+    if !cfg!(feature = "proc-title") {
+        println!(
+            "io2_cases: without the feature proc-title, not checked: {}",
+            NEED_PROC_TITLE.join(", ")
+        );
+    }
     // hard links next to the binary (same file system), one per case
     let dir = exe
         .parent()
         .unwrap()
         .join(format!("io2-twins-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for (id, _) in TWINS {
+    for id in &ids {
         let w = dir.join(id);
         if std::fs::hard_link(&exe, &w).is_err() {
             std::fs::copy(&exe, &w).unwrap();
@@ -3107,7 +3135,7 @@ fn main() {
         .arg(format!("{root}/scripts/cases.py"))
         .args(["check", "--exe-dir"])
         .arg(&dir)
-        .args(TWINS.iter().map(|(id, _)| *id))
+        .args(&ids)
         .env("LEAN_RUNTIME_NO_CAP", "1")
         .status()
         .expect("python3 scripts/cases.py");

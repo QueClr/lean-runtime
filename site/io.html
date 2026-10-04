@@ -56,7 +56,8 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
 <tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
 <tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>main (io-2)</td></tr>
-<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: an <code>unsafe</code> file, for a native quirk.</td><td>main (quirks-1)</td></tr>
+<tr><td><code>argv_title</code></td><td>The process title in the arguments' memory: an <code>unsafe</code> file, for a native quirk.
+Feature <code>proc-title</code> only.</td><td>main (quirks-1)</td></tr>
 </tbody></table></div>
 
 <h2 id="layers">The layers of a handle call</h2>
@@ -349,6 +350,15 @@ std returns copies of the arguments.
 The <code>prctl</code> calls that move the kernel's view are <code>unsafe</code> too: one needs a privilege, and the other resets the whole memory map.
 Writing <code>/proc/self/mem</code> would hide the same write from the compiler.
 So <code>io::argv_title</code> does it with <code>unsafe</code> code: a <a href="glossary.html#g-quirk">native quirk</a>.</p>
+<p>The file is built only with the feature <a href="glossary.html#g-proc-title"><code>proc-title</code></a>, which lean2rr turns on.
+Without it, the crate has no <code>unsafe</code> code, and the title functions do this:</p>
+<ul>
+  <li><code>setProcessTitle</code> fails with <code>ENOBUFS</code>, as libuv does when it holds no arguments' memory.
+    A title with a NUL byte gives Lean's own error first.
+    Nothing changes.</li>
+  <li><code>getProcessTitle</code> gives <code>argv[0]</code>, the title that a native program starts with.</li>
+</ul>
+<p>With the feature:</p>
 <ul>
   <li>The file has its own ELF constructor, so no glue takes part.
     glibc calls it with <code>main</code>'s <code>argc</code> and <code>argv</code>, before <code>main</code> (glibc only: musl passes no arguments).</li>

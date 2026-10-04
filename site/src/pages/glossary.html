@@ -85,7 +85,7 @@ There, a task that was queued 5 ms ago or more runs first.</dd>
 <dt id="g-elf-constructor">ELF constructor</dt>
 <dd>A function that the program loader runs before <code>main</code> and before Rust's runtime starts.
 The glue registers one to open the <a href="#g-startup">startup descriptors</a> early enough.
-glibc calls it with <code>main</code>'s arguments, so lean-runtime has one of its own for the process title.</dd>
+glibc calls it with <code>main</code>'s arguments, so lean-runtime has one of its own for the process title (feature <a href="#g-proc-title"><code>proc-title</code></a>).</dd>
 
 <dt id="g-errno">errno model</dt>
 <dd>lean-runtime's own copy of C's <code>errno</code>, one per thread.
@@ -172,7 +172,7 @@ leanrs's value is 2<sup>39</sup>.</dd>
 <dt id="g-miri">Miri</dt>
 <dd>Rust's interpreter that finds undefined behaviour.
 <code>scripts/check.sh</code> runs it on the <code>unsafe-fast</code> configurations when <code>LEAN_RUNTIME_MIRI=1</code> is set.
-Those include the unit tests of the <a href="#g-quirk">native quirks</a>.</dd>
+One of them has <a href="#g-proc-title"><code>proc-title</code></a>, with the unit tests of the <a href="#g-quirk">native quirk</a>.</dd>
 
 <dt id="g-native">Native Lean</dt>
 <dd>Lean's own build: the Lean compiler emits C, which links with Lean's C runtime.
@@ -182,7 +182,8 @@ A native build with Lean 4.34.0 gives every expected value.</dd>
 <dd>A behaviour of native Lean that no safe API can reproduce.
 lean-runtime writes such an item with <code>unsafe</code> code, in a small file of its own (decision of 2026-10-04).
 Each has an entry in <a href="repo:UNSAFE.md">UNSAFE.md</a> and a written proof.
-The one so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>).</dd>
+The one so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>).
+Each is built only with a feature of its own; this one with <a href="#g-proc-title"><code>proc-title</code></a>.</dd>
 
 <dt id="g-o12">O12 (speed floor)</dt>
 <dd>The decision of 2026-10-03: the default, safe build of every shared function must be at least as fast as Lean 4.34.0's native runtime.
@@ -203,6 +204,11 @@ A translator moves its pin only after its own test suite passes.</dd>
 <dt id="g-priority">Priority</dt>
 <dd>The order in which queued tasks start: Lean's priorities 0 to 8, and dedicated tasks, which natively get a thread of their own.</dd>
 
+<dt id="g-proc-title">proc-title</dt>
+<dd>The Cargo feature of the process title's <a href="#g-quirk">native quirk</a>: <code>setProcessTitle</code> writes the title into the arguments' memory.
+It turns on <code>io</code>, and lean2rr turns it on.
+Without it, the crate has no <code>unsafe</code> code, and <code>setProcessTitle</code> fails with <code>ENOBUFS</code>.</dd>
+
 <dt id="g-promise">Promise</dt>
 <dd>A task without a computation: <code>IO.Promise</code>.
 Its first resolution stores the value.</dd>
@@ -217,7 +223,8 @@ See <a href="testing.html#rows">Testing</a>.</dd>
 
 <dt id="g-rustix">rustix, nix, io-uring</dt>
 <dd>Vetted Rust crates for system calls.
-They hold the <code>unsafe</code> code, so <code>io</code> stays free of it, but for one <a href="#g-quirk">native quirk</a>.
+They hold the <code>unsafe</code> code, so <code>io</code> stays free of it.
+The one <a href="#g-quirk">native quirk</a> is behind <a href="#g-proc-title"><code>proc-title</code></a>.
 io-uring makes the io_uring rings that libuv opens at startup.</dd>
 
 <dt id="g-sched-io">sched-io</dt>
