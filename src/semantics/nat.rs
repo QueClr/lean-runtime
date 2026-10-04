@@ -23,13 +23,19 @@
 //!   (LB-04).
 //!
 //! Every rule whose result size is known before computing it (`add`,
-//! `succ`, `mul`, `pow`, `shiftl`) refuses a result larger than the
+//! `succ`, `mul`, `pow`, `shiftl`) tests its own size bound against the
 //! backend's `BigNat::MAX_BITS` at once, before calling the backend
-//! (`check_result_bits`): `INTERNAL PANIC: Nat.pow exponent is too big` or
-//! `Nat.shiftl exponent is too big` when the exponent or shift is 2^32 or
-//! more (native's own end there), `INTERNAL PANIC: out of memory` otherwise.
-//! So every backend ends the same way at its own limit, and none is asked
-//! for a result it cannot hold.
+//! (`check_result_bits`), and refuses above it: `INTERNAL PANIC: Nat.pow
+//! exponent is too big` or `Nat.shiftl exponent is too big` when the
+//! exponent or shift is 2^32 or more (native's own end there), `INTERNAL
+//! PANIC: out of memory` otherwise. `shiftl` and a power-of-two `pow` test
+//! the exact size; `add` and `succ` test an upper bound (the larger
+//! operand's bit length plus one), `mul` another (the sum of the bit
+//! lengths), and `pow` of another base `bit_len(a) * e`. So a number of
+//! exactly `MAX_BITS` bits, which `shiftl` can build, fails `x + 0`,
+//! `succ x` and `x * 1` (review RS2-12); the margin protects backends that
+//! reserve an extra limb for a carry. Every backend ends the same way at its
+//! own limit, and none is asked for a result above it.
 //!
 //! The `Nat` externs of 4.34.0 are `lean_nat_add`, `_sub`, `_mul`, `_div`,
 //! `_div_exact`, `_mod`, `_pow`, `_gcd`, `_log2`, `_land`, `_lor`, `_lxor`,

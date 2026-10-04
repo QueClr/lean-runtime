@@ -140,6 +140,11 @@ impl PanicSettings {
     /// The settings of a process started with the given values of
     /// `LEAN_ABORT_ON_PANIC` and `LEAN_BACKTRACE` (`None` when unset): the
     /// defaults for the two flags no environment variable controls.
+    ///
+    /// Source: new, from `object.cpp` (`should_abort_on_panic`: set, to any
+    /// value; `lean_panic_impl`: `LEAN_BACKTRACE` other than `0`); leanrs_rt
+    /// `src/panic.rs` (`abort_on_panic`) and lean2rr's leanrt `panic_msg` read
+    /// the same variables.
     pub fn from_env(abort_on_panic: Option<&[u8]>, backtrace: Option<&[u8]>) -> PanicSettings {
         PanicSettings {
             abort_on_panic: abort_on_panic.is_some(),

@@ -18,9 +18,11 @@
 //! - `Array.swapIfInBounds`, `ByteArray.set!` and `FloatArray.set!` out of
 //!   bounds return the array unchanged, and `ByteArray.get!`/`FloatArray.get!`
 //!   return 0/0.0, with no message, in C. Their Lean definitions give the
-//!   same values but are written with `Array`'s (`bs[i]!`, `bs.set! i b`),
-//!   whose externs print: compiling those definitions instead of the
-//!   externs would print where C does not (review RS2-08).
+//!   same values. `swapIfInBounds`'s is silent (it tests the bounds and
+//!   swaps); the `ByteArray`/`FloatArray` ones are written with `Array`'s
+//!   (`bs[i]!`, `bs.set! i b`), whose externs print, so compiling those
+//!   definitions instead of the externs would print where C does not
+//!   (review RS2-08).
 //! - `Array.pop` of an empty array is the empty array.
 //! - The allocators end the process with `INTERNAL PANIC: integer overflow in
 //!   runtime computation` when the object size `24 + elem * n` exceeds
@@ -62,6 +64,10 @@ pub struct OutOfBounds;
 
 impl OutOfBounds {
     /// The message to print.
+    ///
+    /// Source: leanrs_rt `src/array.rs` (`OUT_OF_BOUNDS`) and lean2rr's
+    /// `runtime/prelude.rr` (`l2r_panic_code_text` 0), the text of
+    /// `lean_array_get_panic` (`object.cpp`).
     pub const fn message(self) -> &'static str {
         INDEX_OUT_OF_BOUNDS
     }

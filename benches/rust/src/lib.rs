@@ -370,7 +370,8 @@ fn cold_fmt() -> fmt::Result {
 }
 
 impl BigNat for ColdBig {
-    /// lean2rr's (GMP's limb cap, `i32::MAX` limbs, less one, in bits).
+    /// lean2rr's placeholder (GMP's limb cap, `i32::MAX` limbs, less one, in bits;
+    /// `BigNat::MAX_BITS`).
     const MAX_BITS: u64 = (i32::MAX as u64 - 1) * 64;
     fn from_u64(_: u64) -> ColdBig {
         cold_big()

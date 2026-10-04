@@ -82,9 +82,17 @@ pub trait BigNat: Sized {
     /// `tests/cases/nat` run (their largest result has 2^32 + 65 bits),
     /// and below 2^64. A backend whose allocations reserve more than the
     /// result (GMP's `mpz_add` reserves one limb for a carry) states its
-    /// limit minus that margin. lean2rr's GMP backend: its block's limb cap,
-    /// `i32::MAX` limbs (`big.rs` `MAX_LIMBS`, GMP's own `int` sizes), times
-    /// 64, less a limb; leanrs's malachite backend picks its own.
+    /// limit minus that margin. The rules test upper bounds for `add`,
+    /// `mul` and non-power-of-two `pow` (`nat`'s module doc), so a result
+    /// close to `MAX_BITS` may be refused although it would fit.
+    ///
+    /// lean2rr's GMP backend: its block's limb cap, `i32::MAX` limbs
+    /// (`big.rs` `MAX_LIMBS`, GMP's own `int` sizes), times 64, less a limb
+    /// is a placeholder (the benches' `ColdBig` uses it). The value is set
+    /// when lean2rr adopts the rules, with a margin taken from the sizes
+    /// GMP's `mpz_pow_ui` reallocates to (`mpz/n_pow_ui.c`, its `ralloc`
+    /// estimate and `MPZ_NEWALLOC`; review D3). leanrs's malachite backend
+    /// picks its own.
     const MAX_BITS: u64;
 
     /// The value `v`.
