@@ -1609,9 +1609,9 @@ fn io_modelled_errno_stdin_flush() {
 /// the bytes read, so a huge `n` on a small file costs no memory (compiled
 /// Lean v4.34.0-rc1: `read (2^40)` of a 3-byte file gives the 3 bytes,
 /// leanrs's A828; leanrs review F4: the zeroing it replaced was OOM-killed).
-/// From leanrs's `io_read_huge_touches_nothing`. In a child under a 2G memory
-/// cap (`ulimit -v` is useless here: Lean reserves the array): the address
-/// space limit is set to 4 GiB, so a zeroed or reserved 64 GiB fails.
+/// From leanrs's `io_read_huge_touches_nothing`. In a child under a 4 GiB
+/// address-space limit (`ulimit -v`), so reserving or zeroing 64 GiB fails
+/// (review RIO1-18).
 #[test]
 fn io_read_huge_touches_nothing() {
     if child_case().as_deref() == Some("huge") {
@@ -1640,6 +1640,65 @@ fn io_read_huge_touches_nothing() {
         r#"ResourceExhausted(None, 12, "not enough memory")"#
     );
     drop(h);
+}
+
+/// `read_vec` reserves the rest of the request when it reads a regular
+/// file, the refill's tail included, so the `Vec` never doubles: `readBinFile`
+/// of 1 MiB + 1 bytes ends with that capacity, not 2 MiB (review RIO1-14).
+#[test]
+fn io_read_vec_capacity() {
+    let d = setup("read-vec-capacity");
+    for size in [1usize << 20 | 1, 10_000, 4096, 5] {
+        let f = p(&d, &format!("{size}.bin"));
+        fs::write(&f, vec![7u8; size]).unwrap();
+        let h = open(&f, FsMode::Read).unwrap();
+        let mut v = Vec::new();
+        assert_eq!(h.read_vec(size, &mut v).unwrap(), size);
+        assert_eq!(v.len(), size);
+        assert!(
+            // std's smallest allocation of bytes is 8
+            v.capacity() <= (size + 1).max(8),
+            "{size} bytes: capacity {}",
+            v.capacity()
+        );
+    }
+}
+
+/// The read(2) calls this thread has made (`/proc/thread-self/io`).
+fn reads_so_far() -> u64 {
+    let io = fs::read_to_string("/proc/thread-self/io").unwrap();
+    io.lines()
+        .find_map(|l| l.strip_prefix("syscr: "))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+/// A file that reports size 0 (procfs) is read as glibc reads it, one
+/// `read(2)` of the direct part, not std's 32-byte probes, which stitch a
+/// generated file from several generations (review RIO1-15):
+/// `/proc/sys/kernel/random/uuid` read with `read_vec 1024` takes two
+/// `read(2)` calls (the uuid, then end of file) and gives one uuid.
+#[test]
+fn io_read_vec_procfs() {
+    let uuid = "/proc/sys/kernel/random/uuid";
+    if !std::path::Path::new(uuid).exists() {
+        eprintln!("io_read_vec_procfs: no {uuid}, skipped");
+        return;
+    }
+    let h = open(uuid, FsMode::Read).unwrap();
+    let a = reads_so_far();
+    let b = reads_so_far();
+    let measure = b - a;
+    let mut v = Vec::new();
+    let got = h.read_vec(1024, &mut v).unwrap();
+    let c = reads_so_far();
+    assert_eq!(c - b - measure, 2, "read(2) calls of read_vec 1024");
+    assert_eq!(got, 37);
+    let t = String::from_utf8(v).unwrap();
+    let groups: Vec<usize> = t.trim_end().split('-').map(str::len).collect();
+    assert_eq!(groups, [8, 4, 4, 4, 12], "{t:?}");
 }
 
 /// `get_random_bytes_uninit` fills all of its uninitialized bytes.

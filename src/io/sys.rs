@@ -200,8 +200,9 @@ impl ReadDest for [MaybeUninit<u8>] {
 /// and stops at `count` bytes or end of file: the same bytes and position as
 /// glibc's single `read(2)` of `count`, in two or three `read(2)` calls once
 /// the `Vec` has room for what the file still holds (leanrs review F4; from
-/// leanrs_rt's `read_into`). Any other descriptor (a pipe,
-/// a standard descriptor, a device) is read with exact `read(2)` calls into a
+/// leanrs_rt's `read_into`). A regular file that reports size 0 (procfs,
+/// sysfs) and any other descriptor (a pipe, a standard descriptor, a device)
+/// are read with exact `read(2)` calls into a
 /// zeroed window: a pipe's capacity (`F_GETPIPE_SZ`), which no single
 /// `read(2)` of a pipe exceeds, so the call returns what glibc's would, or 64
 /// KiB.
@@ -229,17 +230,31 @@ impl ReadDest for VecDest<'_> {
         use std::io::Read;
         debug_assert_eq!(self.v.len(), self.start + at);
         let l = self.v.len();
-        if let (true, Some(file)) = (regular, fd.file()) {
-            // room for what the file still holds (std's own `File::read_to_end`
-            // hint), at most `count`: then std reads it in two or three calls
-            // instead of probing upwards from 32 bytes, and a huge request on
-            // a small file reserves next to nothing
+        // a regular file that reports a size: std's `read_to_end`; one that
+        // reports none (procfs, sysfs) would get std's 32-byte probe reads,
+        // stitching generated contents from several reads, so it takes the
+        // window path, one `read(2)` as glibc's (review RIO1-15)
+        let sized = match (regular, fd.file()) {
+            (true, Some(file)) => file
+                .metadata()
+                .ok()
+                .map(|m| (file, m.len()))
+                .filter(|&(_, len)| len > 0),
+            _ => None,
+        };
+        if let Some((file, len)) = sized {
+            // room for what the file still holds, at most the rest of the
+            // request (the refill's tail included, so the `Vec` never doubles;
+            // review RIO1-14): std then reads in two or three calls instead of
+            // probing upwards from 32 bytes, and a huge request on a small
+            // file reserves next to nothing
             let mut f: &std::fs::File = file;
-            let left = match (f.metadata(), std::io::Seek::stream_position(&mut f)) {
-                (Ok(m), Ok(pos)) => m.len().saturating_sub(pos).saturating_add(1),
-                _ => 0,
+            let left = match std::io::Seek::stream_position(&mut f) {
+                Ok(pos) => len.saturating_sub(pos).saturating_add(1),
+                Err(_) => 0,
             };
-            self.v.reserve(left.min(count as u64) as usize);
+            self.v
+                .reserve_exact(left.min((self.n - at) as u64) as usize);
             let r = f.take(count as u64).read_to_end(self.v);
             let got = self.v.len() - l;
             return match r {
