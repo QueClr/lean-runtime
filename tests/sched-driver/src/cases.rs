@@ -34,6 +34,32 @@ pub fn lookup(id: &str) -> Option<Case> {
         "pure_bind_io_dep" => (no_init, pure_bind_io_dep),
         "exit_from_task" => (no_init, exit_from_task),
         "get_in_sync_task" => (no_init, get_in_sync_task),
+        "promise_result_opt" => (no_init, promise_result_opt),
+        "result_bang_some" => (no_init, result_bang_some),
+        "result_bang_dropped" => (no_init, result_bang_dropped),
+        "result_bang_dropped_in_task" => (no_init, result_bang_dropped_in_task),
+        "result_bang_dropped_abort" => (no_init, result_bang_dropped_abort),
+        "result_bang_dropped_first" => (no_init, result_bang_dropped_first),
+        "task_pure_graph" => (no_init, task_pure_graph),
+        "result_bang_dropped_redirected" => (no_init, result_bang_dropped_redirected),
+        "get_in_sync_task_redirected" => (no_init, get_in_sync_task_redirected),
+        "cancel_promise_and_pure" => (no_init, cancel_promise_and_pure),
+        "result_bang_dep_order" => (no_init, result_bang_dep_order),
+        "pure_get_in_sync_task" => (no_init, pure_get_in_sync_task),
+        "sync_dependent_before_waiter" => (no_init, sync_dependent_before_waiter),
+        "dropped_promise_waiter_wakes" => (no_init, dropped_promise_waiter_wakes),
+        "dropped_promise_waiter_unrelated_finish" => {
+            (no_init, dropped_promise_waiter_unrelated_finish)
+        }
+        "waiter_wakes_after_nested_finish" => (no_init, waiter_wakes_after_nested_finish),
+        "sync_walk_stuck_unrelated_finish" => (no_init, sync_walk_stuck_unrelated_finish),
+        "wait_any_wakes_on_finish" => (no_init, wait_any_wakes_on_finish),
+        "sync_walk_mutex_unrelated_finish" => (no_init, sync_walk_mutex_unrelated_finish),
+        "sync_walk_mutex_alone" => (no_init, sync_walk_mutex_alone),
+        "sync_walk_stuck_alone" => (no_init, sync_walk_stuck_alone),
+        "sync_walk_mutex_unref_finish" => (no_init, sync_walk_mutex_unref_finish),
+        "wait_any_unref_finish" => (no_init, wait_any_unref_finish),
+        "wait_any_pure_stalled" => (no_init, wait_any_pure_stalled),
         "late_task_after_main" => (no_init, late_task_after_main),
         "late_dependent_of_dedicated" => (no_init, late_dependent_of_dedicated),
         "late_wait_dedicated" => (no_init, late_wait_dedicated),
@@ -356,14 +382,7 @@ fn sync_dependent_order(args: &[String]) -> u32 {
 fn promise_across_tasks(args: &[String]) -> u32 {
     let ms = to_nat(&args[0]) as u32;
     let p: Promise<u64> = Promise::new();
-    // `IO.Promise.result!`: `result?.map (sync := true) Option.getOrBlock!`.
-    let result = map_task(
-        |o: Option<u64>| o.expect("resolved"),
-        p.result_opt(),
-        PRIO_DEFAULT,
-        true,
-        false,
-    );
+    let result = p.result_bang();
     let t = as_task(move || result.get() + 1, PRIO_DEDICATED);
     sleep(ms);
     println(&format!(
@@ -777,6 +796,1256 @@ fn get_in_sync_task(args: &[String]) -> u32 {
     );
     d.get();
     eprintln("main done");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// sched-2: `IO.Promise.result?`, `IO.Option.getOrBlock!` (`Promise.result!`)
+// and `Task.pure`.
+
+/// `repr` of an `Option Nat`.
+fn repr_opt(o: Option<u64>) -> String {
+    match o {
+        Some(v) => format!("some {v}"),
+        None => "none".into(),
+    }
+}
+
+// let ms := args.head!.toNat!
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// IO.println s!"before resolve: {← IO.getTaskState r}, finished {← IO.hasFinished p.result?}, resolved {← p.isResolved}"
+// let w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait p.result?
+//   IO.eprintln s!"waiter woke: {repr v}"
+//   return v
+// IO.sleep ms.toUInt32
+// IO.println s!"waiter finished before resolve: {← IO.hasFinished w}"
+// p.resolve 41
+// p.resolve 42
+// IO.println s!"after resolve: {← IO.getTaskState r}, {repr r.get}, again {repr (← IO.wait p.result?)}, resolved {← p.isResolved}"
+// match ← IO.wait w with
+// | .ok v => IO.println s!"waiter got {repr v}"
+// | .error e => IO.println s!"error {e}"
+// let q ← IO.Promise.new (α := Nat)
+// let r2 := q.result?
+// let m ← IO.mapTask (fun o => IO.eprintln s!"dependent saw {repr o}") r2
+// IO.println s!"before drop: {← IO.getTaskState r2}, resolved {← q.isResolved}"
+// let d := q.resultD 5
+// IO.println s!"after drop: {← IO.getTaskState r2}, {repr r2.get}, resultD {d.get}"
+// let _ ← IO.wait m
+// IO.println "done"
+fn promise_result_opt(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    let p: Rc<Promise<u64>> = Rc::new(Promise::new());
+    let r = p.result_opt();
+    let st = task_state_str(r.state());
+    let fin = has_finished(&p.result_opt());
+    let res = has_finished(&p.result_opt());
+    println(&format!(
+        "before resolve: {st}, finished {fin}, resolved {res}"
+    ));
+    let p2 = p.clone();
+    let w = as_task(
+        move || {
+            let v = p2.result_opt().get();
+            eprintln(&format!("waiter woke: {}", repr_opt(v)));
+            v
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(ms);
+    println(&format!(
+        "waiter finished before resolve: {}",
+        has_finished(&w)
+    ));
+    p.resolve(41);
+    p.resolve(42);
+    let st = task_state_str(r.state());
+    let v = r.get();
+    let again = p.result_opt().get();
+    let res = has_finished(&p.result_opt());
+    // `p`'s last use (resolved: its drop changes nothing).
+    drop(p);
+    println(&format!(
+        "after resolve: {st}, {}, again {}, resolved {res}",
+        repr_opt(v),
+        repr_opt(again)
+    ));
+    println(&format!("waiter got {}", repr_opt(w.get())));
+    let q: Promise<u64> = Promise::new();
+    let r2 = q.result_opt();
+    let m = map_task(
+        |o: Option<u64>| eprintln(&format!("dependent saw {}", repr_opt(o))),
+        r2.clone(),
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    let st = task_state_str(r2.state());
+    let res = has_finished(&q.result_opt());
+    // `q.resultD 5` is `q.result?.map (sync := true) (·.getD 5)`, and
+    // compiled Lean shares its `q.result?` with `r2`, so `q`'s last use is
+    // `q.isResolved`: dropped here, before the line is printed, it resolves
+    // `r2` with `none` (the walk queues `m`).
+    drop(q);
+    println(&format!("before drop: {st}, resolved {res}"));
+    // `resultD`'s map of the finished `r2` runs at once.
+    let d = map_task(
+        |o: Option<u64>| o.unwrap_or(5),
+        r2.clone(),
+        PRIO_DEFAULT,
+        true,
+        false,
+    );
+    let st = task_state_str(r2.state());
+    println(&format!(
+        "after drop: {st}, {}, resultD {}",
+        repr_opt(r2.get()),
+        d.get()
+    ));
+    m.get();
+    println("done");
+    0
+}
+
+// let ms := args.head!.toNat!
+// let p ← IO.Promise.new (α := Nat)
+// p.resolve 7
+// let t := p.result!
+// IO.println s!"resolved first: {← IO.getTaskState t}, {t.get}"
+// let q ← IO.Promise.new (α := String)
+// let u := q.result!
+// IO.println s!"before resolve: {← IO.getTaskState u}"
+// q.resolve "from main"
+// IO.println s!"after resolve: {← IO.getTaskState u}, {u.get}"
+// let s ← IO.Promise.new (α := Nat)
+// let v := s.result!
+// let _ ← IO.asTask (prio := .dedicated) do
+//   IO.sleep ms.toUInt32
+//   s.resolve 99
+// IO.println s!"resolved by a task: {← IO.wait v}"
+fn result_bang_some(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    let p: Promise<u64> = Promise::new();
+    p.resolve(7);
+    // Already resolved: `getOrBlock!` runs at once, and `t` is `Task.pure 7`.
+    let t = p.result_bang();
+    drop(p);
+    println(&format!(
+        "resolved first: {}, {}",
+        task_state_str(t.state()),
+        t.get()
+    ));
+    let q: Promise<String> = Promise::new();
+    let u = q.result_bang();
+    println(&format!("before resolve: {}", task_state_str(u.state())));
+    // The `sync` dependent runs here, in `resolve`.
+    q.resolve("from main".to_string());
+    drop(q);
+    println(&format!(
+        "after resolve: {}, {}",
+        task_state_str(u.state()),
+        u.get()
+    ));
+    let s: Rc<Promise<u64>> = Rc::new(Promise::new());
+    let s2 = s.clone();
+    let _ = as_task(
+        move || {
+            sleep(ms);
+            s2.resolve(99);
+        },
+        PRIO_DEDICATED,
+    );
+    // Compiled Lean makes the pure `s.result!` where it is first used, after
+    // the task.
+    let v = s.result_bang();
+    drop(s);
+    println(&format!("resolved by a task: {}", v.get()));
+    0
+}
+
+// IO.println "before"
+// let p ← IO.Promise.new (α := Nat)
+// let t := p.result!
+// IO.eprintln s!"not reached: {← IO.hasFinished t}"
+fn result_bang_dropped(_: &[String]) -> u32 {
+    println("before");
+    let p: Promise<u64> = Promise::new();
+    let t = p.result_bang();
+    // `p`'s last use: the drop resolves it with `none`, and the `sync`
+    // dependent reports the panic and waits forever, here on `main`.
+    drop(p);
+    eprintln(&format!("not reached: {}", has_finished(&t)));
+    0
+}
+
+// let ms := args.head!.toNat!
+// IO.println "before"
+// let t ← IO.asTask (prio := .dedicated) do
+//   let p ← IO.Promise.new (α := Nat)
+//   let t := p.result!
+//   IO.eprintln s!"not reached: {← IO.hasFinished t}"
+// IO.sleep ms.toUInt32
+// IO.eprintln s!"main: dropping task finished: {← IO.hasFinished t}"
+// let o ← IO.asTask (IO.eprintln "another task runs")
+// let _ ← IO.wait o
+// IO.println "main done"
+// IO.eprintln "main returns"
+fn result_bang_dropped_in_task(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    println("before");
+    let t = as_task(
+        || {
+            let p: Promise<u64> = Promise::new();
+            let t = p.result_bang();
+            drop(p);
+            eprintln(&format!("not reached: {}", has_finished(&t)));
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(ms);
+    eprintln(&format!(
+        "main: dropping task finished: {}",
+        has_finished(&t)
+    ));
+    let o = as_task(|| eprintln("another task runs"), PRIO_DEFAULT);
+    o.get();
+    println("main done");
+    eprintln("main returns");
+    0
+}
+
+// IO.println "before"
+// let buf ← IO.mkRef {}
+// let _ ← IO.setStderr (IO.FS.Stream.ofBuffer buf)
+// let p ← IO.Promise.new (α := Nat)
+// let t := p.result!
+// IO.eprintln s!"not reached: {← IO.hasFinished t}"
+fn result_bang_dropped_abort(_: &[String]) -> u32 {
+    println("before");
+    // Under `LEAN_ABORT_ON_PANIC` every Lean panic goes to the process's
+    // stderr, the buffer or not (`result_bang_dropped_redirected` tells the
+    // two apart).
+    let _ = set_stderr_stream(Some(Rc::new(RefCell::new(Vec::new()))));
+    let p: Promise<u64> = Promise::new();
+    let t = p.result_bang();
+    drop(p);
+    eprintln(&format!("not reached: {}", has_finished(&t)));
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let t := p.result!
+// IO.println s!"result! pending: {← IO.getTaskState t}"
+// IO.println s!"promise resolved: {← p.isResolved}"
+// IO.println "no panic"
+fn result_bang_dropped_first(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let t = p.result_bang();
+    let st = task_state_str(t.state());
+    // `t`'s last use: the dependent is deleted (`release`).
+    drop(t);
+    println(&format!("result! pending: {st}"));
+    let res = has_finished(&p.result_opt());
+    // `p`'s last use: resolved with `none`, no dependent left.
+    drop(p);
+    println(&format!("promise resolved: {res}"));
+    println("no panic");
+    0
+}
+
+// let n := args[0]!.toNat!
+// let ms := args[1]!.toNat!
+// let t := Task.pure n
+// IO.println s!"pure: {← IO.getTaskState t}, {t.get}"
+// IO.cancel t
+// IO.println s!"after cancel: {← IO.getTaskState t}, {← IO.wait t}"
+// let m1 := t.map (· + 1)
+// let m2 ← IO.mapTask (sync := true) (fun x => do
+//   IO.println s!"sync dependent of a pure task runs at once: {x}"
+//   return x * 2) t
+// IO.println s!"after the sync dependent: {← IO.getTaskState m2}"
+// let b1 := t.bind fun x => Task.pure (x + 10)
+// let b2 ← IO.bindTask t fun x => return Task.pure (.ok (x + 20))
+// let slow ← IO.asTask (prio := .dedicated) do
+//   IO.sleep ms.toUInt32
+//   return n + 30
+// let b3 ← IO.bindTask slow fun r => return Task.pure (r.map (· + 1))
+// let b4 := (Task.spawn fun _ => n + 40).bind fun x => Task.pure (x + 1)
+// let any ← IO.waitAny [slow.map (fun r => r.toOption.getD 0), Task.pure (n + 50)]
+// IO.println s!"waitAny: {any}, slow finished: {← IO.hasFinished slow}"
+// let inner ← IO.asTask do
+//   let v ← (← IO.mkRef (n + 60)).get
+//   let p := Task.pure v
+//   let q ← IO.mapTask (sync := true) (fun x => do
+//     IO.eprintln s!"inner sync dependent of a pure task: {x}"
+//     return x + 1) p
+//   return (← IO.wait q).toOption.getD 0
+// IO.println s!"m1 {m1.get}, m2 {repr (← IO.wait m2).toOption}, b1 {b1.get}, b2 {repr (← IO.wait b2).toOption}"
+// IO.println s!"b3 {repr (← IO.wait b3).toOption}, b4 {b4.get}, inner {repr (← IO.wait inner).toOption}"
+fn task_pure_graph(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let ms = to_nat(&args[1]) as u32;
+    let t = Task::pure(n);
+    println(&format!("pure: {}, {}", task_state_str(t.state()), t.get()));
+    cancel(&t);
+    println(&format!(
+        "after cancel: {}, {}",
+        task_state_str(t.state()),
+        t.get()
+    ));
+    let m1 = map_task(|x: u64| x + 1, t.clone(), PRIO_DEFAULT, false, false);
+    let m2 = map_task(
+        |x: u64| {
+            println(&format!("sync dependent of a pure task runs at once: {x}"));
+            x * 2
+        },
+        t.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    println(&format!(
+        "after the sync dependent: {}",
+        task_state_str(m2.state())
+    ));
+    let b1 = bind_task(
+        t.clone(),
+        |x: u64| Task::pure(x + 10),
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let b2 = bind_task(t, |x: u64| Task::pure(x + 20), PRIO_DEFAULT, false, true);
+    let slow = as_task(
+        move || {
+            sleep(ms);
+            n + 30
+        },
+        PRIO_DEDICATED,
+    );
+    let b3 = bind_task(
+        slow.clone(),
+        |x: u64| Task::pure(x + 1),
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    let b4 = bind_task(
+        Task::spawn(move || n + 40, PRIO_DEFAULT),
+        |x: u64| Task::pure(x + 1),
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let any = wait_any(&[
+        map_task(|x: u64| x, slow.clone(), PRIO_DEFAULT, false, false),
+        Task::pure(n + 50),
+    ]);
+    println(&format!(
+        "waitAny: {any}, slow finished: {}",
+        has_finished(&slow)
+    ));
+    let inner = as_task(
+        move || {
+            let v = Ref::new(n + 60).get();
+            let p = Task::pure(v);
+            let q = map_task(
+                |x: u64| {
+                    eprintln(&format!("inner sync dependent of a pure task: {x}"));
+                    x + 1
+                },
+                p,
+                PRIO_DEFAULT,
+                true,
+                true,
+            );
+            q.get()
+        },
+        PRIO_DEFAULT,
+    );
+    println(&format!(
+        "m1 {}, m2 some {}, b1 {}, b2 some {}",
+        m1.get(),
+        m2.get(),
+        b1.get(),
+        b2.get()
+    ));
+    println(&format!(
+        "b3 some {}, b4 {}, inner some {}",
+        b3.get(),
+        b4.get(),
+        inner.get()
+    ));
+    0
+}
+
+/// Lean's current stderr as the twins set it: a buffer
+/// (`IO.FS.Stream.ofBuffer`), or `None` for the process's stream.
+type ErrStream = Option<Rc<RefCell<Vec<u8>>>>;
+
+/// `IO.setStderr s`: the runtime's lines written with `io_eprintln` now go
+/// to `s` (`io::streams::set_stderr`, with `s`'s `putStr`); returns the
+/// previous stream.
+fn set_stderr_stream(s: ErrStream) -> ErrStream {
+    let put: lean_runtime::io::streams::StderrPut = match &s {
+        Some(b) => {
+            let b = b.clone();
+            Rc::new(move |l: &[u8]| b.borrow_mut().extend_from_slice(l))
+        }
+        None => Rc::new(|l: &[u8]| {
+            let _ = lean_runtime::io::Handle::stderr().put_str(l);
+        }),
+    };
+    lean_runtime::io::streams::set_stderr(s, put, || None)
+}
+
+// IO.println "before"
+// let buf ← IO.mkRef {}
+// let _ ← IO.setStderr (IO.FS.Stream.ofBuffer buf)
+// let p ← IO.Promise.new (α := Nat)
+// let t := p.result!
+// IO.eprintln s!"not reached: {← IO.hasFinished t}"
+fn result_bang_dropped_redirected(_: &[String]) -> u32 {
+    println("before");
+    // The forced panic bypasses the buffer: a report through Lean's current
+    // stderr would leave the process's stderr empty.
+    let _ = set_stderr_stream(Some(Rc::new(RefCell::new(Vec::new()))));
+    let p: Promise<u64> = Promise::new();
+    let t = p.result_bang();
+    drop(p);
+    eprintln(&format!("not reached: {}", has_finished(&t)));
+    0
+}
+
+// let ms := args.head!.toNat!
+// let buf ← IO.mkRef {}
+// let old ← IO.setStderr (IO.FS.Stream.ofBuffer buf)
+// let p ← IO.Promise.new (α := Unit)
+// let tb ← IO.asTask (do IO.sleep ms.toUInt32; return 5)
+// let d ← IO.mapTask (sync := true) (fun _ => do
+//   let v ← IO.wait tb
+//   IO.println s!"dependent got {repr v.toOption}") p.result?
+// p.resolve ()
+// let _ ← IO.wait d
+// let _ ← IO.setStderr old
+// let b ← buf.get
+// IO.println s!"captured: {repr (String.fromUTF8! b.data)}"
+// IO.eprintln "main done"
+fn get_in_sync_task_redirected(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    let buf = Rc::new(RefCell::new(Vec::new()));
+    let old = set_stderr_stream(Some(buf.clone()));
+    let p: Promise<()> = Promise::new();
+    let tb = as_task(
+        move || {
+            sleep(ms);
+            5u64
+        },
+        PRIO_DEFAULT,
+    );
+    // `main` resolves `p`, so the dependent runs on `main`'s context, and
+    // its panic goes to the buffer.
+    let d = map_task(
+        move |_: Option<()>| {
+            let v = tb.get();
+            println(&format!("dependent got some {v}"));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    p.resolve(());
+    d.get();
+    let _ = set_stderr_stream(old);
+    let b = buf.borrow().clone();
+    println(&format!(
+        "captured: {}",
+        crate::lio::quote(&String::from_utf8(b).expect("UTF-8"))
+    ));
+    eprintln("main done");
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// IO.cancel p.result?
+// let d ← IO.mapTask (fun _ => IO.checkCanceled) p.result?
+// let s ← IO.mapTask (sync := true) (fun _ => IO.checkCanceled) p.result?
+// IO.println s!"state after cancel: {← IO.getTaskState p.result?}"
+// let a ← IO.waitAny [p.result?, Task.pure (some 3)]
+// IO.println s!"waitAny: {repr a}"
+// p.resolve 1
+// IO.println s!"canceled promise deps: {← IO.wait d} {← IO.wait s}"
+// let t := Task.pure 1
+// IO.cancel t
+// let d2 ← IO.mapTask (fun _ => IO.checkCanceled) t
+// IO.println s!"pure dep: {← IO.wait d2}"
+fn cancel_promise_and_pure(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    cancel(&p.result_opt());
+    let d = map_task(
+        |_: Option<u64>| check_canceled(),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    let s = map_task(
+        |_: Option<u64>| check_canceled(),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    println(&format!(
+        "state after cancel: {}",
+        task_state_str(p.result_opt().state())
+    ));
+    let a = wait_any(&[p.result_opt(), Task::pure(Some(3))]);
+    println(&format!("waitAny: {}", repr_opt(a)));
+    p.resolve(1);
+    println(&format!(
+        "canceled promise deps: ok: {} ok: {}",
+        d.get(),
+        s.get()
+    ));
+    let t = Task::pure(1u64);
+    cancel(&t);
+    let d2 = map_task(|_: u64| check_canceled(), t, PRIO_DEFAULT, false, true);
+    println(&format!("pure dep: ok: {}", d2.get()));
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let _before ← IO.mapTask (fun o => IO.eprintln s!"dep before: {repr o}") r
+// let t := p.result!
+// IO.eprintln s!"t: {← IO.getTaskState t}"
+// let _after ← IO.mapTask (fun o => IO.eprintln s!"dep after: {repr o}") r
+// let ref ← IO.mkRef (some p)
+// IO.eprintln "dropping"
+// ref.set none
+// IO.eprintln s!"not reached {← IO.hasFinished t}"
+fn result_bang_dep_order(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    // `_before` and `_after` are unused: compiled Lean drops them at once.
+    drop(map_task(
+        |o: Option<u64>| eprintln(&format!("dep before: {}", repr_opt(o))),
+        r.clone(),
+        PRIO_DEFAULT,
+        false,
+        true,
+    ));
+    let t = p.result_bang();
+    eprintln(&format!("t: {}", task_state_str(t.state())));
+    drop(map_task(
+        |o: Option<u64>| eprintln(&format!("dep after: {}", repr_opt(o))),
+        r,
+        PRIO_DEFAULT,
+        false,
+        true,
+    ));
+    let rf = Ref::new(Some(Rc::new(p)));
+    eprintln("dropping");
+    // The old value, the promise's last reference, is dropped in `set`: the
+    // walk queues `_after`, then `result!` hangs, and `_before` is never
+    // reached.
+    rf.set(None);
+    eprintln(&format!("not reached {}", has_finished(&t)));
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r ← IO.mkRef 5
+// let pt := Task.pure (← r.get)
+// let s ← IO.mapTask (sync := true) (fun o => do
+//   let v ← IO.wait pt
+//   let u ← IO.mkRef (v + 1)
+//   let w := Task.pure (← u.get)
+//   IO.eprintln s!"sync dependent: {repr o}, {v}, {w.get}") p.result?
+// IO.eprintln "resolving"
+// p.resolve 1
+// let _ ← IO.wait s
+// IO.eprintln "done"
+fn pure_get_in_sync_task(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = Ref::new(5u64);
+    let pt = Task::pure(r.get());
+    let s = map_task(
+        move |o: Option<u64>| {
+            // The slot holds the value: no `GET_IN_SYNC_TASK`.
+            let v = pt.get();
+            let u = Ref::new(v + 1);
+            let w = Task::pure(u.get());
+            eprintln(&format!(
+                "sync dependent: {}, {v}, {}",
+                repr_opt(o),
+                w.get()
+            ));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    eprintln("resolving");
+    p.resolve(1);
+    s.get();
+    eprintln("done");
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let s ← IO.mapTask (sync := true) (fun o => do IO.sleep 300; IO.eprintln s!"sync dep done {repr o}") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait r
+//   return s!"waiter woke: {repr v}, sync dep finished: {← IO.hasFinished s}"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// match ← IO.wait w with
+// | .ok m => IO.eprintln m
+// | .error e => IO.eprintln s!"waiter: {e}"
+fn sync_dependent_before_waiter(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let s = map_task(
+        |o: Option<u64>| {
+            sleep(300);
+            eprintln(&format!("sync dep done {}", repr_opt(o)));
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let w = as_task(
+        move || {
+            let v = r.get();
+            format!(
+                "waiter woke: {}, sync dep finished: {}",
+                repr_opt(v),
+                has_finished(&s)
+            )
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(100);
+    eprintln("resolving");
+    // The waiter wakes once the walk, and the sleeping `sync` dependent in
+    // it, is over.
+    p.resolve(1);
+    eprintln("resolved");
+    eprintln(&w.get());
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let t := p.result!
+// let _w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait r
+//   IO.eprintln s!"waiter woke: {repr v}"
+// let ref ← IO.mkRef (some p)
+// IO.sleep 200
+// IO.eprintln "dropping"
+// ref.set none
+// IO.eprintln s!"not reached {← IO.hasFinished t}"
+fn dropped_promise_waiter_wakes(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    // `_w` is unused: compiled Lean drops it at once.
+    drop(as_task(
+        move || {
+            let v = r.get();
+            eprintln(&format!("waiter woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    ));
+    // Compiled Lean makes the pure `p.result!` after the task.
+    let t = p.result_bang();
+    let rf = Ref::new(Some(Rc::new(p)));
+    sleep(200);
+    eprintln("dropping");
+    // LB-32: `result!` reaches its permanent block in the drop's walk; the
+    // waiter of `result?` wakes then, with `none`.
+    rf.set(None);
+    eprintln(&format!("not reached {}", has_finished(&t)));
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let t := p.result!
+// let _w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait r
+//   IO.eprintln s!"waiter woke: {repr v}"
+// let o ← IO.asTask (prio := .dedicated) do
+//   IO.sleep 1000
+//   IO.eprintln "other task finishes"
+// let keep ← IO.mkRef [o]
+// let ref ← IO.mkRef (some p)
+// IO.sleep 200
+// IO.eprintln "dropping"
+// ref.set none
+// IO.eprintln s!"not reached {← IO.hasFinished t} {(← keep.get).length}"
+fn dropped_promise_waiter_unrelated_finish(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    // `_w` is unused: compiled Lean drops it at once.
+    drop(as_task(
+        move || {
+            let v = r.get();
+            eprintln(&format!("waiter woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    ));
+    let o = as_task(
+        || {
+            sleep(1000);
+            eprintln("other task finishes");
+        },
+        PRIO_DEDICATED,
+    );
+    let keep = Ref::new(vec![o]);
+    // Compiled Lean makes the pure `p.result!` here.
+    let t = p.result_bang();
+    let rf = Ref::new(Some(Rc::new(p)));
+    sleep(200);
+    eprintln("dropping");
+    rf.set(None);
+    eprintln(&format!(
+        "not reached {} {}",
+        has_finished(&t),
+        keep.get().len()
+    ));
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let slow ← IO.mapTask (sync := true) (fun o => do IO.sleep 300; IO.eprintln s!"slow sync dep done {repr o}") r
+// let quick ← IO.mapTask (sync := true) (fun o => IO.eprintln s!"quick sync dep done {repr o}") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait r
+//   IO.eprintln s!"waiter woke: {repr v}"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// let _ ← IO.wait w
+// let _ ← IO.wait slow
+// let _ ← IO.wait quick
+fn waiter_wakes_after_nested_finish(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let slow = map_task(
+        |o: Option<u64>| {
+            sleep(300);
+            eprintln(&format!("slow sync dep done {}", repr_opt(o)));
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let quick = map_task(
+        |o: Option<u64>| eprintln(&format!("quick sync dep done {}", repr_opt(o))),
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let w = as_task(
+        move || {
+            let v = r.get();
+            eprintln(&format!("waiter woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(100);
+    eprintln("resolving");
+    // The walk runs `quick` (newest first), whose finish wakes the waiter,
+    // then sleeps in `slow`.
+    p.resolve(1);
+    eprintln("resolved");
+    w.get();
+    slow.get();
+    quick.get();
+    0
+}
+
+// partial def spin : IO Unit := do
+//   IO.sleep 100
+//   spin
+//
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let s ← IO.mapTask (sync := true) (fun _ => spin) r
+// let _w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait r
+//   IO.eprintln s!"waiter woke: {repr v}"
+// let o ← IO.asTask (prio := .dedicated) do
+//   IO.sleep 400
+//   IO.eprintln "other task finishes"
+// let keep ← IO.mkRef [o]
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln s!"not reached {← IO.hasFinished s} {(← keep.get).length}"
+fn sync_walk_stuck_unrelated_finish(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let s = map_task(
+        |_: Option<u64>| loop {
+            sleep(100);
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    // `_w` is unused: compiled Lean drops it at once.
+    drop(as_task(
+        move || {
+            let v = r.get();
+            eprintln(&format!("waiter woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    ));
+    let o = as_task(
+        || {
+            sleep(400);
+            eprintln("other task finishes");
+        },
+        PRIO_DEDICATED,
+    );
+    let keep = Ref::new(vec![o]);
+    sleep(100);
+    eprintln("resolving");
+    // The walk never ends; `o`'s finish wakes the waiter.
+    p.resolve(1);
+    eprintln(&format!(
+        "not reached {} {}",
+        has_finished(&s),
+        keep.get().len()
+    ));
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let slow ← IO.mapTask (sync := true) (fun _ => do IO.sleep 300; IO.eprintln "slow sync dep done") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.waitAny [r]
+//   IO.eprintln s!"waitAny woke: {repr v}"
+// let a ← IO.mapTask (fun _ => do IO.sleep 100; IO.eprintln "async dep done") r
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// let _ ← IO.wait w
+// let _ ← IO.wait slow
+// let _ ← IO.wait a
+fn wait_any_wakes_on_finish(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let slow = map_task(
+        |_: Option<u64>| {
+            sleep(300);
+            eprintln("slow sync dep done");
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let r2 = r.clone();
+    let w = as_task(
+        move || {
+            let v = wait_any(&[r2]);
+            eprintln(&format!("waitAny woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    );
+    let a = map_task(
+        |_: Option<u64>| {
+            sleep(100);
+            eprintln("async dep done");
+        },
+        r,
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    sleep(100);
+    eprintln("resolving");
+    // The walk queues `a` (no wake for `waitAny`), then sleeps in `slow`;
+    // `a`'s finish wakes `waitAny`.
+    p.resolve(1);
+    eprintln("resolved");
+    w.get();
+    slow.get();
+    a.get();
+    0
+}
+
+// let m ← Std.Mutex.new (0 : Nat)
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let s ← IO.mapTask (sync := true) (fun _ => do
+//   m.atomically (modify (· + 1))
+//   IO.eprintln "sync dep got the mutex") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   m.atomically do
+//     let v ← IO.wait r
+//     IO.eprintln s!"waiter woke holding the mutex: {repr v}"
+// let o ← IO.asTask (prio := .dedicated) do
+//   IO.sleep 400
+//   IO.eprintln "other task finishes"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// let _ ← IO.wait w
+// let _ ← IO.wait s
+// let _ ← IO.wait o
+// IO.eprintln "done"
+fn sync_walk_mutex_unrelated_finish(_: &[String]) -> u32 {
+    let m = Rc::new(Mutex::new());
+    let count = Ref::new(0u64);
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let (m1, c1) = (m.clone(), count.clone());
+    let s = map_task(
+        move |_: Option<u64>| {
+            m1.lock();
+            c1.modify(|n| n + 1);
+            m1.unlock();
+            eprintln("sync dep got the mutex");
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let m2 = m.clone();
+    let w = as_task(
+        move || {
+            m2.lock();
+            let v = r.get();
+            eprintln(&format!("waiter woke holding the mutex: {}", repr_opt(v)));
+            m2.unlock();
+        },
+        PRIO_DEDICATED,
+    );
+    let o = as_task(
+        || {
+            sleep(400);
+            eprintln("other task finishes");
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(100);
+    eprintln("resolving");
+    // The walk blocks in `s` on the mutex the waiter holds; `o`'s finish
+    // wakes the waiter, which releases it.
+    p.resolve(1);
+    eprintln("resolved");
+    w.get();
+    s.get();
+    o.get();
+    eprintln("done");
+    0
+}
+
+// `sync_walk_mutex_unrelated_finish` without the unrelated task: a deadlock,
+// natively and here (documented misuse, not LB-32).
+//
+// let m ← Std.Mutex.new (0 : Nat)
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let s ← IO.mapTask (sync := true) (fun _ => do
+//   m.atomically (modify (· + 1))
+//   IO.eprintln "sync dep got the mutex") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   m.atomically do
+//     let v ← IO.wait r
+//     IO.eprintln s!"waiter woke holding the mutex: {repr v}"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// let _ ← IO.wait w
+// let _ ← IO.wait s
+// IO.eprintln "done"
+fn sync_walk_mutex_alone(_: &[String]) -> u32 {
+    let m = Rc::new(Mutex::new());
+    let count = Ref::new(0u64);
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let (m1, c1) = (m.clone(), count.clone());
+    let s = map_task(
+        move |_: Option<u64>| {
+            m1.lock();
+            c1.modify(|n| n + 1);
+            m1.unlock();
+            eprintln("sync dep got the mutex");
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let m2 = m.clone();
+    let w = as_task(
+        move || {
+            m2.lock();
+            let v = r.get();
+            eprintln(&format!("waiter woke holding the mutex: {}", repr_opt(v)));
+            m2.unlock();
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(100);
+    eprintln("resolving");
+    // The walk blocks in `s` on the mutex the waiter holds, and no other
+    // task ever finishes to wake the waiter.
+    p.resolve(1);
+    eprintln("resolved");
+    w.get();
+    s.get();
+    eprintln("done");
+    0
+}
+
+// `sync_walk_stuck_unrelated_finish` without the unrelated task: the waiter
+// never wakes, natively and here (documented misuse, not LB-32).
+//
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let s ← IO.mapTask (sync := true) (fun _ => spin) r
+// let _w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.wait r
+//   IO.eprintln s!"waiter woke: {repr v}"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln s!"not reached {← IO.hasFinished s}"
+fn sync_walk_stuck_alone(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let s = map_task(
+        |_: Option<u64>| loop {
+            sleep(100);
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    // `_w` is unused: compiled Lean drops it at once.
+    drop(as_task(
+        move || {
+            let v = r.get();
+            eprintln(&format!("waiter woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    ));
+    sleep(100);
+    eprintln("resolving");
+    p.resolve(1);
+    eprintln(&format!("not reached {}", has_finished(&s)));
+    0
+}
+
+// `sync_walk_mutex_unrelated_finish` with the unrelated task unreferenced:
+// its finish notifies nobody (natively `m_deleted`), a deadlock natively and
+// here (documented misuse, not LB-32).
+//
+// let m ← Std.Mutex.new (0 : Nat)
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let s ← IO.mapTask (sync := true) (fun _ => do
+//   m.atomically (modify (· + 1))
+//   IO.eprintln "sync dep got the mutex") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   m.atomically do
+//     let v ← IO.wait r
+//     IO.eprintln s!"waiter woke holding the mutex: {repr v}"
+// let _ ← IO.asTask (prio := .dedicated) do
+//   IO.sleep 400
+//   IO.eprintln "other task finishes"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// let _ ← IO.wait w
+// let _ ← IO.wait s
+// IO.eprintln "done"
+fn sync_walk_mutex_unref_finish(_: &[String]) -> u32 {
+    let m = Rc::new(Mutex::new());
+    let count = Ref::new(0u64);
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let (m1, c1) = (m.clone(), count.clone());
+    let s = map_task(
+        move |_: Option<u64>| {
+            m1.lock();
+            c1.modify(|n| n + 1);
+            m1.unlock();
+            eprintln("sync dep got the mutex");
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let m2 = m.clone();
+    let w = as_task(
+        move || {
+            m2.lock();
+            let v = r.get();
+            eprintln(&format!("waiter woke holding the mutex: {}", repr_opt(v)));
+            m2.unlock();
+        },
+        PRIO_DEDICATED,
+    );
+    // `let _ ← IO.asTask`: the handle is dropped at once (`release`).
+    drop(as_task(
+        || {
+            sleep(400);
+            eprintln("other task finishes");
+        },
+        PRIO_DEDICATED,
+    ));
+    sleep(100);
+    eprintln("resolving");
+    p.resolve(1);
+    eprintln("resolved");
+    w.get();
+    s.get();
+    eprintln("done");
+    0
+}
+
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let slow ← IO.mapTask (sync := true) (fun _ => do IO.sleep 600; IO.eprintln "slow sync dep done") r
+// let w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.waitAny [r]
+//   IO.eprintln s!"waitAny woke: {repr v}"
+// IO.sleep 100
+// let _ ← IO.asTask (prio := .dedicated) do
+//   IO.sleep 200
+//   IO.eprintln "unreferenced task finishes"
+// let o ← IO.asTask (prio := .dedicated) do
+//   IO.sleep 400
+//   IO.eprintln "referenced task finishes"
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln "resolved"
+// let _ ← IO.wait w
+// let _ ← IO.wait slow
+// let _ ← IO.wait o
+fn wait_any_unref_finish(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let slow = map_task(
+        |_: Option<u64>| {
+            sleep(600);
+            eprintln("slow sync dep done");
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let w = as_task(
+        move || {
+            let v = wait_any(&[r]);
+            eprintln(&format!("waitAny woke: {}", repr_opt(v)));
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(100);
+    // Unreferenced: its finish notifies nobody.
+    drop(as_task(
+        || {
+            sleep(200);
+            eprintln("unreferenced task finishes");
+        },
+        PRIO_DEDICATED,
+    ));
+    let o = as_task(
+        || {
+            sleep(400);
+            eprintln("referenced task finishes");
+        },
+        PRIO_DEDICATED,
+    );
+    eprintln("resolving");
+    p.resolve(1);
+    eprintln("resolved");
+    w.get();
+    slow.get();
+    o.get();
+    0
+}
+
+// partial def spin : IO Unit := do
+//   IO.sleep 100
+//   spin
+//
+// let p ← IO.Promise.new (α := Nat)
+// let r := p.result?
+// let _s ← IO.mapTask (sync := true) (fun _ => spin) r
+// let x := r.map (fun o => o.getD 0 + 1)
+// let w ← IO.asTask (prio := .dedicated) do
+//   let v ← IO.waitAny [x]
+//   IO.eprintln s!"waitAny woke: {v}"
+// IO.sleep 100
+// IO.eprintln "resolving"
+// p.resolve 1
+// IO.eprintln s!"not reached {(← IO.wait w).isOk}"
+fn wait_any_pure_stalled(_: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    // `_s` is unused: compiled Lean drops it at once.
+    drop(map_task(
+        |_: Option<u64>| loop {
+            sleep(100);
+        },
+        r.clone(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    ));
+    let x = map_task(
+        |o: Option<u64>| o.unwrap_or(0) + 1,
+        r,
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let w = as_task(
+        move || {
+            let v = wait_any(&[x]);
+            eprintln(&format!("waitAny woke: {v}"));
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(100);
+    eprintln("resolving");
+    // The walk queues `x` (which wakes `waitAny`, which runs it), then
+    // stalls in the endless `sync` dependent.
+    p.resolve(1);
+    eprintln(&format!("not reached {}", has_finished(&w)));
     0
 }
 

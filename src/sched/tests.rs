@@ -40,6 +40,35 @@ fn entries(l: &Log) -> Vec<String> {
     l.borrow().clone()
 }
 
+/// Whether the host stalled during a sleep of `ms` begun at `t0`: it took a
+/// tenth longer than asked, or 2 ms, whichever is more. The hub wakes a
+/// sleeper whose deadline has passed before it starts a queued task, so
+/// after a stall as long as the sleep, a task meant to run while `main`
+/// slept may not have started yet, as natively a worker slower than the
+/// sleep would not have; the sleep then takes at least the stall, while
+/// without one it ends right at its deadline. A test then skips its check of
+/// what ran during the sleep, with a note, and checks only what holds
+/// whatever the timing (the review of the flaky `sched::` tests, sched-2;
+/// checked with injected stalls of 6 and 60 ms).
+fn stalled(t0: std::time::Instant, ms: u32) -> bool {
+    let took = t0.elapsed();
+    let slack = (u64::from(ms) / 10).max(2);
+    let late = took >= std::time::Duration::from_millis(u64::from(ms) + slack);
+    if late {
+        eprintln!(
+            "note: the host stalled ({took:?} for a {ms} ms sleep): a check of what ran during the sleep is skipped"
+        );
+    }
+    late
+}
+
+/// `sleep_ms(ms)`, then whether the host stalled meanwhile (`stalled`).
+fn sleep_or_stall(ms: u32) -> bool {
+    let t0 = std::time::Instant::now();
+    sleep_ms(ms);
+    stalled(t0, ms)
+}
+
 /// A translator's task reference: the last one releases the task.
 struct Handle(TaskId);
 
@@ -360,9 +389,11 @@ fn a_started_pure_task_runs_once_an_io_task_waits_for_it() {
     // dependent after it, as natively they would have by then. (A worker
     // context lets a context that can go on run first: the sleep must not
     // end before both have run.)
-    sleep_ms(50);
-    assert_eq!(entries(&l), ["pure", "io dependent"]);
+    if !sleep_or_stall(50) {
+        assert_eq!(entries(&l), ["pure", "io dependent"]);
+    }
     finish();
+    assert_eq!(entries(&l), ["pure", "io dependent"]);
 }
 
 #[test]
@@ -380,9 +411,11 @@ fn an_io_task_waiting_through_pure_tasks_starts_them() {
         let v = depend(u, job(&l2, "v"), 0, false, false);
         depend(v, job(&l2, "io"), 0, false, true);
     });
-    sleep_ms(50);
-    assert_eq!(entries(&l), ["t", "u", "v", "io"]);
+    if !sleep_or_stall(50) {
+        assert_eq!(entries(&l), ["t", "u", "v", "io"]);
+    }
     finish();
+    assert_eq!(entries(&l), ["t", "u", "v", "io"]);
 }
 
 #[test]
@@ -572,10 +605,13 @@ fn an_io_task_starts_on_a_context_while_main_sleeps() {
     start_test(2);
     let l = log();
     let id = spawn(job(&l, "io"), 0, true);
-    sleep_ms(5);
+    if !sleep_or_stall(50) {
+        assert_eq!(entries(&l), ["io"], "the IO task ran while main slept");
+        assert!(is_finished(id));
+    }
+    finish();
     assert_eq!(entries(&l), ["io"]);
     assert!(is_finished(id));
-    finish();
 }
 
 #[test]
@@ -650,8 +686,14 @@ fn a_caught_context_panic_leaves_main_usable() {
     // on in `main` and is caught there, `main` blocks and runs tasks again.
     start_test(2);
     spawn(Box::new(|| panic!("boom in a context")), 0, true);
-    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sleep_ms(5)));
-    assert!(r.is_err(), "the context's panic goes on in main");
+    let t0 = std::time::Instant::now();
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sleep_ms(50)));
+    if r.is_ok() {
+        // `main` woke before the context started: only a stall explains it,
+        // and the panicking task is still queued: nothing more to check.
+        assert!(stalled(t0, 50), "the context's panic goes on in main");
+        return;
+    }
     assert_eq!(current_context(), MAIN);
     with(|s| {
         assert_eq!(s.cx.ctxs[MAIN].status, ctx::Status::Running);
@@ -659,8 +701,10 @@ fn a_caught_context_panic_leaves_main_usable() {
         assert_eq!(s.cx.workers, 0);
     });
     let l = log();
-    spawn(job(&l, "after"), 0, true);
-    sleep_ms(5);
+    let after = spawn(job(&l, "after"), 0, true);
+    if sleep_or_stall(50) && entries(&l).is_empty() {
+        wait(after);
+    }
     assert_eq!(entries(&l), ["after"]);
 }
 
@@ -767,10 +811,18 @@ fn review2_need_through_bind_to_a_picked_task() {
         depend(b, job(&l3, "io"), 0, false, true);
         need_ok();
     });
-    sleep_ms(50);
+    let late = sleep_or_stall(50);
     need_ok();
-    assert_eq!(entries(&l), ["t", "b", "w", "b2", "io"]);
+    if !late {
+        assert_eq!(entries(&l), ["t", "b", "w", "b2", "io"]);
+    }
     finish();
+    need_ok();
+    // After a stall the final run takes the started `w` first: only the set
+    // of tasks that ran is the same.
+    let mut e = entries(&l);
+    e.sort();
+    assert_eq!(e, ["b", "b2", "io", "t", "w"]);
 }
 
 #[test]
@@ -805,7 +857,9 @@ fn review2_need_cycle_counts() {
     sid.set(Some(s));
     let io = depend(d, job(&l, "io"), 0, false, true);
     need_ok();
-    sleep_ms(30); // x0 and d run on a worker context; d now waits for s
+    // x0 and d run on a worker context; d now waits for s (after a stall,
+    // `main` runs them in `wait` instead).
+    let _ = sleep_or_stall(50);
     need_ok();
     wait(io);
     need_ok();
@@ -821,23 +875,31 @@ fn review2_caught_panic_through_an_inline_task() {
     start_test(2);
     let t1 = spawn(
         Box::new(|| {
-            sleep_ms(5);
+            sleep_ms(50);
             Outcome::Done
         }),
         0,
         true,
     );
     spawn(Box::new(|| panic!("boom in a context")), 0, true);
+    let t0 = std::time::Instant::now();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wait(t1)));
-    assert!(r.is_err());
+    if r.is_ok() {
+        // t1's sleep ended before the context started: only a stall explains
+        // it, and the panicking task is still queued: nothing more to check.
+        assert!(stalled(t0, 50), "the panic unwinds through t1's run");
+        return;
+    }
     assert_eq!(thread_number(), 0, "main's bookkeeping still holds t1");
     assert_eq!(with(|s| s.cx.in_use), 0, "a worker still counted in use");
     assert!(!is_finished(t1), "the abandoned task stays unfinished");
     need_ok();
     // `main` goes on.
     let l = log();
-    spawn(job(&l, "after"), 0, true);
-    sleep_ms(5);
+    let after = spawn(job(&l, "after"), 0, true);
+    if sleep_or_stall(50) && entries(&l).is_empty() {
+        wait(after);
+    }
     assert_eq!(entries(&l), ["after"]);
 }
 

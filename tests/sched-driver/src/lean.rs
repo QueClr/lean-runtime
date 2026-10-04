@@ -108,6 +108,15 @@ pub fn has_finished<T: Clone + 'static>(t: &Task<T>) -> bool {
     t.state() == TaskState::Finished
 }
 
+/// `toString` of an `IO.TaskState`.
+pub fn task_state_str(s: TaskState) -> &'static str {
+    match s {
+        TaskState::Waiting => "waiting",
+        TaskState::Running => "running",
+        TaskState::Finished => "finished",
+    }
+}
+
 /// `BaseIO.asTask act prio`.
 pub fn as_task<T: Clone + 'static>(act: impl FnOnce() -> T + 'static, prio: u64) -> Task<T> {
     Task::with_slot(|slot| sched::spawn(job_filling(slot, act), prio, true))
@@ -216,9 +225,25 @@ impl<T: Clone + 'static> Promise<T> {
         });
     }
 
-    /// `IO.Promise.result?`.
+    /// `IO.Promise.result?` (`lean_io_promise_result_opt`): another
+    /// reference to the promise's own task, the same at every call.
     pub fn result_opt(&self) -> Task<Option<T>> {
         self.result.clone()
+    }
+
+    /// `IO.Promise.result!`: `result?.map (sync := true)
+    /// Option.getOrBlock!`, whose function is `sched::option_get_or_block`
+    /// with the glue's forced panic report. On a resolved promise it runs at
+    /// once (`Task.pure` of the value); otherwise when the promise is
+    /// resolved or dropped, on that thread.
+    pub fn result_bang(&self) -> Task<T> {
+        map_task(
+            |o: Option<T>| sched::option_get_or_block(o, crate::glue::lean_panic_forced),
+            self.result_opt(),
+            PRIO_DEFAULT,
+            true,
+            false,
+        )
     }
 
     /// `promise_is_resolved`: the slot holds a value.
@@ -247,6 +272,11 @@ impl<T: Clone + 'static> UvPromise<T> {
     /// `IO.Promise.result?`.
     pub fn result_opt(&self) -> Task<Option<T>> {
         self.0.result_opt()
+    }
+
+    /// `IO.Promise.result!`.
+    pub fn result_bang(&self) -> Task<T> {
+        self.0.result_bang()
     }
 
     /// `IO.Promise.resolve`.

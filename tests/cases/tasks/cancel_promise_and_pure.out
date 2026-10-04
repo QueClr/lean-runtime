@@ -1,0 +1,4 @@
+state after cancel: running
+waitAny: some 3
+canceled promise deps: ok: true ok: true
+pure dep: ok: false

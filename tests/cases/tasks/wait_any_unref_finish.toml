@@ -1,0 +1,5 @@
+id = "wait_any_unref_finish"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review of lean-runtime sched-2, round 3 (RS2-08; probe WaitAnyUnref), 2026-10-04"
+streams = "separate"

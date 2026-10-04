@@ -1,0 +1,4 @@
+resolved first: finished, 7
+before resolve: waiting
+after resolve: finished, from main
+resolved by a task: 99

@@ -1,0 +1,6 @@
+id = "result_bang_dropped"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime sched-2 (IO.Promise.result?, IO.Option.getOrBlock!, Task.pure; io.cpp lean_option_get_or_block, object.cpp lean_io_promise_result_opt and lean_task_pure), 2026-10-04"
+streams = "separate"
+expect = { hang = 3 }

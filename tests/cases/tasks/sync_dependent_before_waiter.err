@@ -1,0 +1,4 @@
+resolving
+sync dep done some 1
+resolved
+waiter woke: some 1, sync dep finished: true

@@ -133,7 +133,10 @@ pub(crate) enum Wait {
     None,
     /// The task or promise with this entry and generation finishes.
     Cell(u32, u32),
-    /// Any task finishes (`IO.waitAny` when every task is running).
+    /// Something changed that `IO.waitAny`, a waiting walk or the final run
+    /// looks at: a task's finish notified, a task was queued, a context ended
+    /// (`source_wait`: a dependent the walk of its source has not queued yet;
+    /// `wait_any` tells a notification from the rest by `notify_seq`).
     Progress,
     /// `main` has returned and waits for the remaining tasks: woken when a
     /// context ends, a task finishes or is queued.
@@ -286,7 +289,7 @@ pub(crate) struct Contexts {
     pub(crate) sleepers: Vec<(Instant, CtxId)>,
     /// Contexts waiting for a task or promise (entry, generation).
     cell_waiters: HashMap<(u32, u32), Vec<CtxId>>,
-    /// Contexts waiting for any task to finish (`Wait::Progress`,
+    /// Contexts waiting for a task to finish or be queued (`Wait::Progress`,
     /// `Wait::FinalRun`).
     progress_waiters: Vec<CtxId>,
     pub(crate) blocked: u32,
@@ -395,12 +398,10 @@ impl Sched {
         }
     }
 
-    /// The task or promise (entry, generation) has finished: wake whoever
-    /// waits for it or for any task.
-    pub(crate) fn on_finish(&mut self, key: (u32, u32)) {
-        if self.cx.blocked == 0 {
-            return;
-        }
+    /// Wake the contexts blocked in `wait` on the task or promise (entry,
+    /// generation), which has its value (part of a notification,
+    /// `notify_all`).
+    pub(crate) fn wake_cell(&mut self, key: (u32, u32)) {
         if let Some(ws) = self.cx.cell_waiters.remove(&key) {
             for c in ws {
                 if self.cx.ctxs[c].wait == Wait::Cell(key.0, key.1) {
@@ -408,11 +409,15 @@ impl Sched {
                 }
             }
         }
-        self.wake_progress();
+    }
+
+    /// Whether some context waits for a particular task (`Wait::Cell`).
+    pub(crate) fn has_cell_waiters(&self) -> bool {
+        !self.cx.cell_waiters.is_empty()
     }
 
     /// Something changed that `Wait::Progress`/`Wait::FinalRun` waiters look
-    /// at: a task finished or was queued, a context ended.
+    /// at: a task's finish notified, a task was queued, a context ended.
     pub(crate) fn wake_progress(&mut self) {
         if self.cx.progress_waiters.is_empty() {
             return;

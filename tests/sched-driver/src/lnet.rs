@@ -30,9 +30,9 @@ pub fn wait<T: Clone + 'static>(p: &P<T>) -> Option<R<T>> {
     p.result_opt().get()
 }
 
-/// `IO.wait p.result!` of a promise the program knows resolves.
+/// `IO.wait p.result!`.
 pub fn wait_bang<T: Clone + 'static>(p: &P<T>) -> R<T> {
-    wait(p).expect("a resolved promise")
+    p.result_bang().get()
 }
 
 /// `IO.Promise.isResolved` (`IO.hasFinished p.result?`).

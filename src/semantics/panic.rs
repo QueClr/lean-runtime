@@ -13,7 +13,11 @@
 //!   default value. With `LEAN_ABORT_ON_PANIC` set (any value) or
 //!   exit-on-panic on, the lines go to the process's stderr directly
 //!   (`std::cerr`), then the process aborts (status 134) or exits with
-//!   status 1. `panic_fn_plan` gives the plan.
+//!   status 1. `panic_fn_plan` gives the plan. The runtime's own panics
+//!   (`lean_panic(msg, force_stderr)`) take the same path; with
+//!   `force_stderr`, which only `IO.Option.getOrBlock!` passes
+//!   (`sched::option_get_or_block`), the lines always go to the process's
+//!   stderr. `lean_panic_plan` gives both plans.
 //! - **`lean_internal_panic`** (the runtime's own limits and failures):
 //!   `INTERNAL PANIC: <msg>` and a newline on the C `stderr` saved at startup
 //!   (not Lean's stream), then `exit(1)`, which flushes C's `stdout`; under
@@ -199,10 +203,28 @@ pub struct PanicPlan {
 /// leanrs_rt `src/panic.rs` (`report`) and lean2rr's `l2r_panic_text` make
 /// the same decisions.
 pub fn panic_fn_plan(s: PanicSettings) -> PanicPlan {
+    lean_panic_plan(s, false)
+}
+
+/// The runtime's `lean_panic(msg, force_stderr)` (`lean_panic_impl`): as
+/// `panic_fn_plan`, but with `force_stderr` the lines always go to the
+/// process's stderr (`PanicStream::ProcessStderr`), which `IO.setStderr`
+/// does not redirect. Either way nothing is printed while messages are off
+/// (`g_panic_messages`). Two calls in Lean 4.34.0:
+/// - `Task.get` of an unfinished task in a `sync := true` task
+///   (`sched::GET_IN_SYNC_TASK`), without `force_stderr`;
+/// - `IO.Option.getOrBlock!` on `none` (`sched::PROMISE_DROPPED`), with
+///   `force_stderr`. There `PanicEnd::Return` means the thread then waits
+///   forever (`sched::option_get_or_block`).
+///
+/// Source: new, from `object.cpp` (`lean_panic_impl`, `panic_eprintln`:
+/// `force_stderr || g_exit_on_panic || should_abort_on_panic()` picks
+/// `std::cerr`) and `io.cpp` (`lean_option_get_or_block`).
+pub fn lean_panic_plan(s: PanicSettings, force_stderr: bool) -> PanicPlan {
     let ending = s.exit_on_panic || s.abort_on_panic;
     PanicPlan {
         print: s.messages,
-        stream: if ending {
+        stream: if ending || force_stderr {
             PanicStream::ProcessStderr
         } else {
             PanicStream::LeanStderr
@@ -285,5 +307,43 @@ mod tests {
             line,
             "INTERNAL PANIC: integer overflow in runtime computation\n"
         );
+    }
+
+    /// `force_stderr` (`IO.Option.getOrBlock!`): the process's stderr in
+    /// every case, the rest as without it; nothing when messages are off.
+    #[test]
+    fn forced_plans() {
+        let quiet = PanicSettings::from_env(None, Some(b"0"));
+        assert_eq!(
+            lean_panic_plan(quiet, true),
+            PanicPlan {
+                print: true,
+                stream: PanicStream::ProcessStderr,
+                backtrace: false,
+                end: PanicEnd::Return
+            }
+        );
+        let abort = PanicSettings::from_env(Some(b"1"), None);
+        assert_eq!(
+            lean_panic_plan(abort, true),
+            PanicPlan {
+                print: true,
+                stream: PanicStream::ProcessStderr,
+                backtrace: true,
+                end: PanicEnd::Abort
+            }
+        );
+        let silent = PanicSettings {
+            messages: false,
+            ..quiet
+        };
+        let plan = lean_panic_plan(silent, true);
+        assert_eq!(
+            (plan.print, plan.backtrace, plan.end),
+            (false, false, PanicEnd::Return)
+        );
+        for s in [quiet, abort, silent] {
+            assert_eq!(lean_panic_plan(s, false), panic_fn_plan(s));
+        }
     }
 }

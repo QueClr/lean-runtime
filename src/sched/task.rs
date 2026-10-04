@@ -54,7 +54,19 @@ pub enum Outcome {
 pub struct TaskId(u64);
 
 impl TaskId {
-    /// A finished task (`Task.pure`, or one that ran at once).
+    /// `Task.pure` (`lean_task_pure`) and every other finished task: the id
+    /// the glue passes for a task whose slot holds its value. Natively
+    /// `Task.pure a` is a task object holding `a` with no task-manager
+    /// state (`alloc_task(v)`, `m_imp` null), so `Task.pure` is glue: the
+    /// translator's task object, its slot filled with `a`, and this id. It
+    /// never enters the scheduler: `IO.getTaskState` is `finished`,
+    /// `Task.get` returns the value at once (no `GET_IN_SYNC_TASK`, no
+    /// polling point), `IO.cancel` does nothing, a dependent with `sync :=
+    /// true` runs at once (`dependent_runs_now`) and any other is queued as
+    /// the dependent of a finished task, and its drop calls nothing
+    /// (docs/sched.md, "The glue", item 3; case `tasks/task_pure_graph`).
+    /// A task that ran at once (a `spawn` without the task manager, a
+    /// dependent that `dependent_runs_now` applied) is such a task too.
     pub const FINISHED: TaskId = TaskId(0);
 
     fn new(i: u32, g: u32) -> TaskId {
@@ -137,6 +149,12 @@ const PICKED: u32 = 1 << 13;
 const DELETED: u32 = 1 << 14;
 /// Finished; the entry stays until its dependents are walked.
 const FINISHED: u32 = 1 << 15;
+/// The translator's last reference went before the task finished (`release`
+/// of an IO task: natively its keep-alive reference is the last one, so its
+/// finish deletes it, `m_deleted`): its finish notifies no waiter, as
+/// natively a deleted task's finish skips `resolve_core` (review RS2-08 of
+/// sched-2). A deleted pure task (`DELETED`) is unreferenced too.
+const UNREFERENCED: u32 = 1 << 16;
 
 struct Entry {
     /// 0 for a free slot.
@@ -191,6 +209,12 @@ struct Walk {
     /// dependents is the walk's, newest first, as Lean's `handle_finished`
     /// walks them.
     owner: u32,
+    /// The owner's generation: its waiters (`Wait::Cell`) wake at the end
+    /// of the first walk that ends after it finished (`notify_all`).
+    gen: u32,
+    /// The walk's end notifies (`notify_all`): not for a task the
+    /// translator no longer referenced (`UNREFERENCED`, `DELETED`).
+    notify: bool,
     /// The thread that finished the task (its `sync` dependents run there).
     thread: u64,
     /// The task finished before Lean's shutdown flag was set (natively).
@@ -251,6 +275,16 @@ pub(crate) struct Tasks {
     /// through pure tasks (`need_up`): started on a context as soon as one
     /// can be (`startable`).
     picked_io: Vec<(u32, u32)>,
+    /// The walks of dependents in progress, on every context: (owner,
+    /// generation). Their owners have their values, and their waiters wake at
+    /// the next `notify_all` (review RS2-10 of sched-2: no scan of the
+    /// contexts).
+    open_walks: Vec<(u32, u32)>,
+    /// The number of notifications so far (`notify_all`, and LB-32's wake):
+    /// `IO.waitAny` counts a finished task of its list only at its first
+    /// look and after a notification, as native's `wait_any` (review RS2-09
+    /// of sched-2).
+    pub(crate) notify_seq: u64,
 }
 
 /// How long a native worker takes to pick up a task after the enqueue that
@@ -284,6 +318,8 @@ impl Tasks {
             serial: 0,
             picked: VecDeque::new(),
             picked_io: Vec::new(),
+            open_walks: Vec::new(),
+            notify_seq: 0,
         }
     }
 }
@@ -746,10 +782,70 @@ impl Sched {
                 self.enqueue(d);
             }
             self.free_entry(w.owner);
+            self.close_walk((w.owner, w.gen));
+            if w.notify {
+                self.notify_all((w.owner, w.gen));
+            }
             if w.worker {
                 self.worker_idle();
             }
         }
+    }
+
+    /// A walk of dependents begins: its owner has its value.
+    fn open_walk(&mut self, w: Walk) {
+        self.tk.open_walks.push((w.owner, w.gen));
+        self.st().walks.push(w);
+    }
+
+    /// A walk of dependents is over (or abandoned).
+    fn close_walk(&mut self, key: (u32, u32)) {
+        if let Some(k) = self.tk.open_walks.iter().rposition(|&o| o == key) {
+            self.tk.open_walks.swap_remove(k);
+        }
+    }
+
+    /// Lean's `notify_all` at the end of `resolve_core`: the walk of the
+    /// dependents of task `key` is over. Natively every thread blocked in
+    /// `wait_for` or `wait_any` then looks again, so the waiters of every
+    /// task that has its value wake: `key`'s, and those of the tasks whose
+    /// walks are still in progress, on any context (a `sync` dependent that
+    /// finishes inside its source's walk wakes its source's waiters, as an
+    /// unrelated task's finish does; review RS2-05 of sched-2), and every
+    /// `IO.waitAny` looks again (`notify_seq`). Not for a task finished
+    /// after the translator's last reference went (`Walk::notify`).
+    fn notify_all(&mut self, key: (u32, u32)) {
+        self.tk.notify_seq = self.tk.notify_seq.wrapping_add(1);
+        if self.cx.blocked == 0 {
+            return;
+        }
+        self.wake_cell(key);
+        if self.has_cell_waiters() {
+            for k in 0..self.tk.open_walks.len() {
+                let o = self.tk.open_walks[k];
+                self.wake_cell(o);
+            }
+        }
+        self.wake_progress();
+    }
+
+    /// LB-32: the running context has reached the permanent block of
+    /// `Promise.result!` on a dropped promise (`option_get_or_block`), so the
+    /// walks in progress on it never end. Their owners have finished: their
+    /// waiters wake now, and every `IO.waitAny` looks again, where natively
+    /// they wake only when another task finishes, or never (`resolve_core`
+    /// notifies only after `handle_finished`).
+    fn wake_stuck_walk_waiters(&mut self) {
+        self.tk.notify_seq = self.tk.notify_seq.wrapping_add(1);
+        if self.cx.blocked == 0 {
+            return;
+        }
+        for k in 0..self.st_ref().walks.len() {
+            let w = &self.st_ref().walks[k];
+            let key = (w.owner, w.gen);
+            self.wake_cell(key);
+        }
+        self.wake_progress();
     }
 
     /// Task `i` (handed) starts running: its job, and whether it runs as on
@@ -773,9 +869,11 @@ impl Sched {
     }
 
     /// The running task `i` has finished: its dependents are to be walked
-    /// (`walk_next`). Whether the caller walks them now (0 in lean2rr's
-    /// `end`: the loop of the walk that handed this task continues with
-    /// them).
+    /// (`walk_next`), and its waiters wake at the end of the first walk that
+    /// ends from now on, its own or another's (`notify_all`), as Lean's
+    /// `resolve_core` notifies only after `handle_finished`. Whether the
+    /// caller walks them now (0 in lean2rr's `end`: the loop of the walk that
+    /// handed this task continues with them).
     fn end(&mut self, i: u32) -> bool {
         let r = self.st().running.pop();
         debug_assert_eq!(r, Some(i));
@@ -801,14 +899,15 @@ impl Sched {
         }
         let w = Walk {
             owner: i,
+            gen,
+            notify: flags & (UNREFERENCED | DELETED) == 0,
             thread,
             early,
             canceled: flags & CANCELED != 0,
             worker,
             base,
         };
-        self.st().walks.push(w);
-        self.on_finish((i, gen));
+        self.open_walk(w);
         base
     }
 
@@ -845,7 +944,8 @@ impl Sched {
     }
 
     /// Promise `i` has been resolved (the translator stored its value): its
-    /// dependents are to be walked on the resolving thread.
+    /// dependents are to be walked on the resolving thread, and its waiters
+    /// wake as a finished task's do (`end`).
     fn resolve_promise(&mut self, i: u32) {
         let early = match self.st_ref().running.last() {
             Some(&r) => self.early_now(r),
@@ -855,21 +955,23 @@ impl Sched {
         let canceled = self.ent(i).flags & CANCELED != 0;
         self.ent_mut(i).flags = FINISHED;
         let thread = self.cur_thread();
-        self.st().walks.push(Walk {
+        self.open_walk(Walk {
             owner: i,
+            gen,
+            notify: true,
             thread,
             early,
             canceled,
             worker: false,
             base: true,
         });
-        self.on_finish((i, gen));
     }
 
     /// The next step of the walk of the dependents of the task that finished
     /// last (`end`): a `sync` dependent is handed to the caller, which runs
     /// it on the finishing thread; the others are enqueued at their
-    /// priority. `None` when the walk is over.
+    /// priority. When a walk is over, Lean's `notify_all` follows
+    /// (`notify_all`). `None` when the base walk is over.
     fn walk_next(&mut self) -> Option<u32> {
         loop {
             let w = self.st_ref().walks.last()?;
@@ -878,6 +980,14 @@ impl Sched {
             if d == NONE {
                 let w = self.st().walks.pop().unwrap();
                 self.free_entry(owner);
+                self.close_walk((owner, w.gen));
+                if w.notify {
+                    self.notify_all((owner, w.gen));
+                } else if self.cx.blocked > 0 {
+                    // No notification, but the final run and the waits for
+                    // a walk look again (`Wait::Progress`).
+                    self.wake_progress();
+                }
                 if w.worker {
                     self.worker_idle();
                 }
@@ -1340,7 +1450,12 @@ impl Sched {
     fn deactivate(&mut self, id: TaskId) -> Option<Job> {
         let i = self.find(id)?;
         let flags = self.ent(i).flags;
-        if flags & PROMISE != 0 || flags & PURE == 0 {
+        if flags & PROMISE != 0 {
+            return None;
+        }
+        if flags & PURE == 0 {
+            // An IO task runs to completion; its finish notifies nobody.
+            self.ent_mut(i).flags |= UNREFERENCED;
             return None;
         }
         if flags & (RUNNING | PICKED) != 0 || self.tk.worker == i || self.ent(i).head_dep != NONE {
@@ -1595,16 +1710,33 @@ pub fn state(id: TaskId) -> TaskState {
 }
 
 /// `IO.waitAny` (`lean_io_wait_any_core`): the index of the first finished
-/// task of `ids`. If none has finished, the first pending one that can run
-/// (not waiting for an unresolved promise or a task on another context)
-/// runs: it finished first. If none can, wait until some task finishes, and
-/// look again.
+/// task of `ids`. Natively `wait_any` looks at its list, then sleeps on the
+/// condition variable that a task's finish notifies (`notify_all`) and looks
+/// again after each notification. Here:
+/// - a finished task of the list counts at the first look, and after a
+///   notification (`notify_seq` changed: the end of a walk of a referenced
+///   task, or LB-32's wake), as natively; a task whose value is set while
+///   its walk still runs is not seen until a notification (review RS2-06 of
+///   sched-2);
+/// - if none counts, the first pending task of the list that can run (not
+///   waiting for an unresolved promise or a task on another context) runs
+///   here, as a native worker would run it, and the list is looked at again
+///   (its finish notifies);
+/// - otherwise the context waits (`Wait::Progress`): a notification, an
+///   enqueue or a context's end wakes it, and an enqueue may have made a
+///   task of the list runnable (review RS2-09: a dependent queued by a walk
+///   that then stalls, which natively a worker runs).
 pub fn wait_any(ids: &[TaskId]) -> usize {
     assert!(!ids.is_empty(), "lean-runtime: IO.waitAny of an empty list");
+    let mut seen: Option<u64> = None;
     loop {
         let pick = with(|s| {
-            if let Some(k) = ids.iter().position(|&id| s.find(id).is_none()) {
-                return Ok(k);
+            let notified = seen != Some(s.tk.notify_seq);
+            seen = Some(s.tk.notify_seq);
+            if notified {
+                if let Some(k) = ids.iter().position(|&id| s.find(id).is_none()) {
+                    return Ok(k);
+                }
             }
             for (k, &id) in ids.iter().enumerate() {
                 if let Some(i) = s.find(id) {
@@ -1617,10 +1749,7 @@ pub fn wait_any(ids: &[TaskId]) -> usize {
         });
         match pick {
             Ok(k) => return k,
-            Err(Some(k)) => {
-                wait(ids[k]);
-                return k;
-            }
+            Err(Some(k)) => wait(ids[k]),
             Err(None) => block(Wait::Progress),
         }
     }
@@ -1651,7 +1780,9 @@ pub fn check_canceled() -> bool {
 
 /// Lean's `deactivate_task`: the translator's last reference to task `id`
 /// is gone. A pure task that has not started is deleted and never runs; any
-/// other task runs to completion (`deactivate`). Call it with no borrow of
+/// other task runs to completion (`deactivate`), and its finish notifies
+/// nobody (natively it is deleted then, `m_deleted`, without
+/// `resolve_core`'s `notify_all`). Call it with no borrow of
 /// the translator's own state that the task's job may need: the job is
 /// dropped here.
 pub fn release(id: TaskId) {
@@ -1690,9 +1821,20 @@ pub fn thread_number() -> u64 {
 // ---------------------------------------------------------------------------
 // Promises
 
-/// `IO.Promise.new` (`lean_promise_new`): a new unresolved promise's task.
-/// Before the task manager runs, Lean's internal panic
-/// (`PROMISE_BEFORE_MANAGER`), which the glue reports.
+/// `IO.Promise.new` (`lean_promise_new`), and the task that
+/// `IO.Promise.result?` (`lean_io_promise_result_opt`) returns: a new
+/// unresolved promise's task. Before the task manager runs, Lean's internal
+/// panic (`PROMISE_BEFORE_MANAGER`), which the glue reports.
+///
+/// The promise owns this task (Lean's `m_result`), and `result?` is glue:
+/// another reference to the promise's own task object, the same one at
+/// every call (`lean_io_promise_result_opt` increments its count). Its value
+/// is `Option α`: `some v` once `resolve` stores it, `none` once the
+/// promise is dropped unresolved. While unresolved, `IO.getTaskState`
+/// answers `running` (`state`: a promise's task has no closure), `wait`
+/// blocks until the resolution, and its dependents are walked at the
+/// resolution (docs/sched.md, "The glue", item 4; case
+/// `tasks/promise_result_opt`).
 pub fn promise_new() -> Result<TaskId, &'static str> {
     with(|s| {
         if !s.tk.started {
@@ -1707,7 +1849,9 @@ pub fn promise_new() -> Result<TaskId, &'static str> {
 /// `none` when the last reference to an unresolved promise goes
 /// (`deactivate_promise`): if the promise is unresolved, `store` stores its
 /// value in the translator's slot, then its dependents are walked on the
-/// resolving thread (its `sync` dependents run here) and its waiters wake.
+/// resolving thread (its `sync` dependents run here); its waiters wake at
+/// the end of the first walk that ends after it (`resolve_core`'s
+/// `notify_all`, docs/sched.md "Waiters wake after a walk").
 /// Only the first resolution counts: false (and `store` not called) if it
 /// was resolved already.
 pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool {
@@ -1730,6 +1874,60 @@ pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool {
         walk_loop();
     }
     ok
+}
+
+/// The message of the Lean panic of `IO.Option.getOrBlock!` on `none`
+/// (`lean_option_get_or_block`, `io.cpp`), passed to `lean_panic` with
+/// `force_stderr`: see `option_get_or_block`.
+pub const PROMISE_DROPPED: &str =
+    "PANIC: Promise.result!: promise has been dropped without ever being resolved";
+
+/// `IO.Option.getOrBlock!` (`lean_option_get_or_block`, `io.cpp`), the
+/// function that `Promise.result!` maps over `Promise.result?` with `sync :=
+/// true`: the value of `some`. On `none` (the promise was dropped without
+/// ever being resolved), `report` reports the Lean panic `PROMISE_DROPPED`
+/// as `lean_panic(msg, force_stderr = true)` does, by the plan
+/// `semantics::panic::lean_panic_plan(settings, true)`:
+/// - an effect point, as for any output (`effect`);
+/// - the lines on the process's stderr (`PanicStream::ProcessStderr`: C's
+///   `stdout` is flushed first, and `IO.setStderr` does not redirect them);
+/// - the abort or the exit the plan says, so `report` returns only for
+///   `PanicEnd::Return`.
+///
+/// Then the running context waits forever (`hang`), as natively the thread
+/// sleeps forever (`sleep_for(seconds::max())`) while the others go on.
+/// Before that, the waiters of the tasks whose walks of dependents are in
+/// progress on this context, `result?` among them, wake (LB-32 in
+/// docs/lean-bugs.md): those walks never end, and natively their waiters
+/// wake only when some other task finishes, or never (case
+/// `tasks/dropped_promise_waiter_wakes`).
+///
+/// The dependent that calls it runs on the thread that drops the promise
+/// (`deactivate_promise` resolves it with `none`, and its walk runs `sync`
+/// dependents there and then), so that context hangs:
+/// - `main`'s: the program hangs (case `tasks/result_bang_dropped`);
+/// - a task's: the others go on, and the process never exits, since the
+///   final run waits for that context (`tasks/result_bang_dropped_in_task`);
+/// - under `LEAN_ABORT_ON_PANIC`: the line, then an abort, status 134
+///   (`tasks/result_bang_dropped_abort`).
+///
+/// A `result!` task dropped before its promise is deleted (`release`) and
+/// never calls it (`tasks/result_bang_dropped_first`). On a promise already
+/// resolved, `result!` applies it at once and is `Task.pure` of the value
+/// (`tasks/result_bang_some`).
+pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str)) -> T {
+    match opt {
+        Some(v) => v,
+        None => {
+            report(PROMISE_DROPPED);
+            // LB-32: the walks in progress on this context never end; their
+            // tasks' waiters wake now, and see `none`.
+            if super::alive() {
+                with(|s| s.wake_stuck_walk_waiters());
+            }
+            super::hang()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

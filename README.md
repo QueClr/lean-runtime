@@ -72,7 +72,13 @@ other tasks run, as natively only their own thread waits) and adds the
 scheduler's event loop (epoll, timers, descriptor watches), with
 `Std.Internal.UV`'s loop, timers and signals on it (`sched::uv`); the cases
 of `tests/cases/taskio` and `uvloop` and the io cases with tasks pass
-through the driver.
+through the driver. Its third batch, sched-2, covers the last Task/Promise
+symbols: `Promise.result?` and `Task.pure` are glue (`docs/sched.md`, "The
+glue"), and `Option.getOrBlock!`, behind `Promise.result!`, is
+`sched::option_get_or_block`. A task's waiters wake at the end of the
+first walk of dependents that ends after its value is set (its own, a
+nested one or any other referenced task's), as natively, and also where
+`Promise.result!`'s permanent block would lose the wakeup (LB-32).
 
 `net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
 externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code

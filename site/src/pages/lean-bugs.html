@@ -72,6 +72,11 @@ Its promise never resolves, and the peer never reads the end of the stream.</td>
 If the connect fails, the shutdown fails with <code>operation canceled</code>.</td></tr>
 <tr><td colspan="3">The lean2rr-side judge confirmed LB-21 to LB-28 on 2026-10-04, in batch <code>net-1</code>.
 Their cases are in <code>net/</code> (<a href="net.html#bugs">net</a>).</td></tr>
+<tr id="lb-32"><td>LB-32</td><td>A thread that waits for a finished task wakes only after the task's <code>sync</code> dependents return.
+<code>Promise.result!</code> on a dropped promise never returns, so a wait on that promise's <code>result?</code> ends only when another task finishes, or never.</td><td>Waiters wake when a walk of dependents ends, or another task the program still holds finishes, as natively.
+When <code>result!</code> reaches its endless block, they also wake there and see <code>none</code> (<a href="sched.html#sync">sched</a>).
+A blocking <code>sync</code> continuation in the program is misuse and stays as native.
+The lean2rr-side judge confirmed it on 2026-10-04, in batch <code>sched-2</code>; its cases are <code>tasks/dropped_promise_waiter_*</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

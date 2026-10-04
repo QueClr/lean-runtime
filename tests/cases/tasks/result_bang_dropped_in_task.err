@@ -1,0 +1,4 @@
+PANIC: Promise.result!: promise has been dropped without ever being resolved
+main: dropping task finished: false
+another task runs
+main returns

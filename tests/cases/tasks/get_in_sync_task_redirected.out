@@ -1,0 +1,2 @@
+dependent got some 5
+captured: "`Task.get` called from a `(sync := true)` task\n"

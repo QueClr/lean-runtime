@@ -1,0 +1,3 @@
+result! pending: waiting
+promise resolved: false
+no panic

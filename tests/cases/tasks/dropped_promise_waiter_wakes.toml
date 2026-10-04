@@ -1,0 +1,13 @@
+id = "dropped_promise_waiter_wakes"
+area = "tasks"
+lean_version = "4.34.0"
+source = "LB-32 (docs/lean-bugs.md; review of lean-runtime sched-2, RS2-01 (a); lean2rr-side judge, 2026-10-04; probe LostWake)"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { lean2rr = "LB-32", leanrs = "LB-32" }
+native = { stdout = "", stderr = "dropping\nPANIC: Promise.result!: promise has been dropped without ever being resolved\n", code = "timeout" }
+# `expected` (the .out, .err and .code files) is the correct outcome,
+# written by hand from tests/sched-driver's twin: the waiter wakes with
+# `none` after the panic line, and `main` still hangs in `result!`.
+# Native Lean 4.34.0's outcome is `native`: the waiter never wakes
+# (reviewer 5/5, judge 2/2).

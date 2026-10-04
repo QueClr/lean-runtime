@@ -252,6 +252,13 @@ So <code>while !(← IO.hasFinished t) do pure ()</code> ends, as it does native
 <ul>
   <li><code>IO.Promise.new</code>, <code>resolve</code> and the drop of an unresolved promise follow Lean.
     Only the first resolution stores a value.</li>
+  <li><code>Promise.result?</code> needs no scheduler call: the glue returns the promise's own task.
+    <code>Task.pure</code> needs none either: the glue makes a finished task that holds the value.</li>
+  <li><code>Promise.result!</code> on a promise dropped without a value prints Lean's panic message.
+    Then the context waits forever (<code>option_get_or_block</code>), as the native thread does.</li>
+  <li>When a task finishes, its <code>sync</code> dependents run first.
+    The contexts that wait for it wake when that walk ends, or earlier when another task the program still holds finishes, as natively.
+    One exception is a Lean bug (<a href="lean-bugs.html#lb-32">LB-32</a>): when <code>result!</code> starts its endless wait, they wake at once.</li>
   <li><a href="../src/sched/sync.rs"><code>sched::sync</code></a> has Lean's <code>BaseMutex</code>, <code>Condvar</code>, <code>BaseRecursiveMutex</code> and <code>BaseSharedMutex</code>.</li>
   <li><code>Std.Channel</code>, <code>Barrier</code>, <code>Semaphore</code> and the rest of <code>Std.Sync</code> are Lean code over these and promises.
     They need nothing more.</li>

@@ -880,26 +880,43 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn a_repeating_timer_ticks_at_once_then_every_period() {
+        // Each extern catches the loop up, so a check that a tick has not
+        // happened yet holds only while less than a period has passed: the
+        // period is 100 ms, and after a host stall past the tick's earliest
+        // time such a check is skipped, with a note (review RS2-11 of
+        // sched-2). The first period starts at the first `next`, after `t0`,
+        // and each one lasts at least `PERIOD`.
+        const PERIOD: u64 = 100;
+        let before = |t0: Instant, periods: u64, what: &str| {
+            let on_time = t0.elapsed() < Duration::from_millis(PERIOD * periods);
+            if !on_time {
+                eprintln!("note: the host stalled past tick {periods}: {what} is not checked");
+            }
+            on_time
+        };
         start();
-        let t: Timer<P> = Timer::new(10, true);
+        let t: Timer<P> = Timer::new(PERIOD, true);
         let t0 = Instant::now();
         let p = t.next(P::new);
         assert_eq!(p.get(), Some(0));
         let a = t.next(P::new);
         assert!(!a.same(&p));
-        assert!(
-            t.next(P::new).same(&a),
-            "the same promise until it resolves"
-        );
+        let again = t.next(P::new);
+        if before(t0, 1, "the same promise until it resolves") {
+            assert!(again.same(&a), "the same promise until it resolves");
+        }
         assert_eq!(a.get(), Some(0));
-        assert!(t0.elapsed() >= Duration::from_millis(10));
+        assert!(t0.elapsed() >= Duration::from_millis(PERIOD));
         // cancel drops the promise; the timer ticks on
         let b = t.next(P::new);
         t.cancel();
+        let b_dropped_unresolved = before(t0, 2, "the cancel before the second tick");
         let c = t.next(P::new);
         assert!(!c.same(&b));
         assert_eq!(c.get(), Some(0));
-        assert!(!b.is_resolved());
+        if b_dropped_unresolved {
+            assert!(!b.is_resolved());
+        }
         t.stop();
         sched::finish();
     }
@@ -907,14 +924,31 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn a_cancelled_one_shot_timer_starts_anew() {
+        // `cancel` catches the loop up first: it drops `p` unresolved only if
+        // it comes before the timeout (100 ms; after a host stall past it,
+        // the timer may have fired first, and only the consistency of `p`
+        // and the next promise is checked, with a note; review RS2-11).
+        const TIMEOUT: u64 = 100;
         start();
-        let t: Timer<P> = Timer::new(10, false);
+        let t: Timer<P> = Timer::new(TIMEOUT, false);
+        let t0 = Instant::now();
         let p = t.next(P::new);
         t.cancel();
+        let on_time = t0.elapsed() < Duration::from_millis(TIMEOUT);
+        if !on_time {
+            eprintln!(
+                "note: the host stalled past the timeout: the cancel before it is not checked"
+            );
+        }
+        // After a stall the timer may have fired first: then the cancel did
+        // nothing, and the finished timer gives `p` again.
         let q = t.next(P::new);
-        assert!(!q.same(&p));
+        let fired = q.same(&p);
+        if on_time {
+            assert!(!fired, "a new promise after the cancel");
+        }
         assert_eq!(q.get(), Some(0));
-        assert!(!p.is_resolved());
+        assert_eq!(p.is_resolved(), fired);
         sched::finish();
     }
 

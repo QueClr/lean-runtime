@@ -1,0 +1,4 @@
+t: waiting
+dropping
+PANIC: Promise.result!: promise has been dropped without ever being resolved
+dep after: none

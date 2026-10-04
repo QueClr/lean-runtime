@@ -2,8 +2,9 @@
 //! can be: the suspend step (its one `unsafe` block), Lean's stack-overflow
 //! report for the scheduler's contexts, and the program's entry and exit.
 
-use lean_runtime::io::{exit, Handle};
+use lean_runtime::io::{debug, exit, Handle};
 use lean_runtime::sched::{self, CtxId, Glue, Suspend};
+use lean_runtime::semantics::panic::{self, PanicEnd, PanicSettings, PanicStream};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -45,11 +46,69 @@ pub fn eprintln(s: &str) {
     let _ = Handle::stderr().put_str(l.as_bytes());
 }
 
-/// A Lean panic's message (`lean_panic`, with `LEAN_BACKTRACE=0`): printed
-/// through Lean's stderr stream, so an effect point like other output; the
-/// program goes on.
+/// The settings `lean_panic_impl` reads (`LEAN_ABORT_ON_PANIC`,
+/// `LEAN_BACKTRACE`; exit-on-panic off and messages on, as in a program
+/// after its initializers).
+fn panic_settings() -> PanicSettings {
+    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
+    let backtrace = std::env::var_os("LEAN_BACKTRACE");
+    PanicSettings::from_env(
+        abort.as_ref().map(|v| v.as_encoded_bytes()),
+        backtrace.as_ref().map(|v| v.as_encoded_bytes()),
+    )
+}
+
+/// The runtime's `lean_panic(msg, force_stderr)`, by
+/// `lean_panic_plan(settings, force_stderr)`: an effect point, as for any
+/// output; the lines on Lean's current stderr (`io_eprintln`, which
+/// `IO.setStderr` redirects: `io::debug::runtime_eprintln`) or on the
+/// process's stderr (`std::cerr`: C's `stdout` flushed first, then
+/// `stderr`, whatever `IO.setStderr` set); then the abort or the exit the
+/// plan says; otherwise it returns. No backtrace frames: the frame line of
+/// a runtime without backtraces (`NO_BACKTRACE`).
+fn report_panic(msg: &str, force_stderr: bool) {
+    let plan = panic::lean_panic_plan(panic_settings(), force_stderr);
+    if plan.print {
+        sched::effect();
+        let mut lines = vec![msg];
+        if plan.backtrace {
+            lines.extend([panic::BACKTRACE_HEADER, panic::NO_BACKTRACE]);
+        }
+        match plan.stream {
+            PanicStream::LeanStderr => {
+                for l in lines {
+                    debug::runtime_eprintln(l.as_bytes());
+                }
+            }
+            PanicStream::ProcessStderr => {
+                let _ = Handle::stdout().flush();
+                let err = Handle::stderr();
+                for l in lines {
+                    let _ = err.put_str(l.as_bytes());
+                    let _ = err.put_str(b"\n");
+                }
+            }
+        }
+    }
+    match plan.end {
+        PanicEnd::Abort => std::process::abort(),
+        PanicEnd::Exit => exit::exit(panic::PANIC_EXIT_STATUS),
+        PanicEnd::Return => {}
+    }
+}
+
+/// A Lean panic of the runtime (`lean_panic(msg)`: `Task.get` in a `sync`
+/// task): on Lean's current stderr, which `IO.setStderr` redirects, unless
+/// the process is about to end; the program goes on.
 pub fn lean_panic(msg: &str) {
-    eprintln(msg);
+    report_panic(msg, false)
+}
+
+/// `lean_panic(msg, force_stderr = true)`, the report of
+/// `IO.Option.getOrBlock!` on `none` (`sched::option_get_or_block`): always
+/// on the process's stderr, never on the stream `IO.setStderr` set.
+pub fn lean_panic_forced(msg: &str) {
+    report_panic(msg, true)
 }
 
 /// `IO.Process.exit` (`lean_io_exit`): an effect point, then C's `exit`,

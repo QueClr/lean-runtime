@@ -1,0 +1,11 @@
+id = "wait_any_pure_stalled"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review of lean-runtime sched-2, round 3 (RS2-09; probe WaitAnyPureStalled), 2026-10-04"
+streams = "separate"
+expect = { hang = 3 }
+# The stalled walk is a blocking `sync` continuation, documented misuse:
+# `Task.map` with `sync := true` "should only be done when executing `f` is
+# cheap and non-blocking" (Init/Core.lean). Native's outcome is followed:
+# the queued `x` runs on a worker, and its finish (a referenced task's,
+# `resolve_core`'s `notify_all`) wakes `waitAny`.

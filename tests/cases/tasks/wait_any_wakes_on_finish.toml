@@ -1,0 +1,5 @@
+id = "wait_any_wakes_on_finish"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review of lean-runtime sched-2, round 2 (RS2-05, RS2-06; probes TwoSync, StuckWalk, WaitAnyEarly, MutexWalk), 2026-10-04"
+streams = "separate"

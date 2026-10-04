@@ -53,9 +53,9 @@ pub(crate) fn reactor_coop_on_for_tests() {
 }
 pub use task::{
     cancel, check_canceled, current_context, depend, dependent_runs_now, effect, finish,
-    in_sync_task, is_finished, manager_running, poll, promise_new, release, resolve, sleep_ms,
-    spawn, state, thread_number, wait, wait_any, Job, Outcome, TaskId, TaskState, GET_IN_SYNC_TASK,
-    PROMISE_BEFORE_MANAGER,
+    in_sync_task, is_finished, manager_running, option_get_or_block, poll, promise_new, release,
+    resolve, sleep_ms, spawn, state, thread_number, wait, wait_any, Job, Outcome, TaskId,
+    TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED,
 };
 
 use std::cell::{Cell, RefCell};

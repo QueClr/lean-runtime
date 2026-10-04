@@ -1,0 +1,7 @@
+before resolve: running, finished false, resolved false
+waiter finished before resolve: false
+after resolve: finished, some 41, again some 41, resolved true
+waiter got some 41
+before drop: running, resolved false
+after drop: finished, none, resultD 5
+done

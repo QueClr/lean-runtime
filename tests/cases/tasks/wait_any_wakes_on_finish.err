@@ -1,0 +1,5 @@
+resolving
+async dep done
+waitAny woke: some 1
+slow sync dep done
+resolved

@@ -1,0 +1,7 @@
+pure: finished, 5
+after cancel: finished, 5
+sync dependent of a pure task runs at once: 5
+after the sync dependent: finished
+waitAny: 55, slow finished: false
+m1 6, m2 some 10, b1 15, b2 some 25
+b3 some 36, b4 46, inner some 66

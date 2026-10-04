@@ -107,6 +107,61 @@ itself (`tasks/task_waits_own_dep`). `IO.waitAny` and the polling treat
 such a dependent as waiting: `IO.waitAny` returns when another task of its
 list finishes, as natively (review RS1S-17; `tasks/wait_any_own_dep`).
 
+**Waiters wake after a walk** (reviews RS2-01, RS2-05 and RS2-06 of
+sched-2). Natively the threads blocked in `Task.get`, `IO.wait` or
+`IO.waitAny` sleep on one condition variable, which `resolve_core`
+notifies (`notify_all`, `object.cpp` 927-935) after a task's value is set
+and its dependents walked, the `sync` ones run inline. Here the same:
+1. when a task finishes (a promise is resolved or dropped too), its value
+   is set: from now on `Task.get`, `IO.wait`, `IO.waitAny` and
+   `IO.getTaskState` see it finished at once;
+2. its dependents are walked;
+3. when that walk ends, and when any walk ends, its own or another
+   referenced task's (a `sync` dependent finishing inside a walk, an
+   unrelated task), on any context, every context blocked in `wait` on a
+   task that has its value wakes, and every `IO.waitAny` looks again
+   (`notify_all` in `src/sched/task.rs`, over the walks in progress,
+   `open_walks`).
+
+A task that finishes after the translator's last reference to it went (an
+IO task whose handle the program dropped, a pure task deleted while it
+ran) notifies nobody: natively its keep-alive reference is the last one,
+and its finish deletes it (`m_deleted`) without `resolve_core` (review
+RS2-08; `tasks/sync_walk_mutex_unref_finish`, `wait_any_unref_finish`).
+
+So a waiter wakes at the end of the first walk of a referenced task that
+ends after its task's value is set. A `sync` dependent that sleeps, blocks
+or suspends and then returns holds the waiters until it returns, unless
+another referenced task finishes meanwhile:
+- `tasks/sync_dependent_before_waiter`: no other task; the waiter sees the
+  dependent finished;
+- `tasks/waiter_wakes_after_nested_finish`: a newer, quick `sync`
+  dependent's finish wakes the waiter while an older one still sleeps;
+- `tasks/sync_walk_mutex_unrelated_finish`, `sync_walk_stuck_unrelated_finish`:
+  a `sync` dependent blocks on a mutex the waiter holds, or loops forever,
+  and an unrelated task's finish wakes the waiter.
+
+`IO.waitAny` counts a finished task of its list at its first look and
+after each notification (`notify_seq`), as native's `wait_any` looks
+again only when `resolve_core` notifies: a task whose value is set while
+its walk still runs is not seen until then (`tasks/wait_any_wakes_on_finish`:
+it wakes when a queued dependent finishes, before the walk ends; review
+RS2-06). An enqueue or a context's end also wakes it (`Wait::Progress`),
+but then it only runs a task of its list that has become runnable, as a
+native worker would run it (`tasks/wait_any_pure_stalled`: a dependent
+queued by a walk that then stalls; review RS2-09).
+
+A `sync` dependent that blocks for good keeps its source's waiters asleep
+until another referenced task finishes, or forever (`tasks/sync_walk_mutex_alone`,
+`sync_walk_stuck_alone`: native's deadlocks, followed). That is the
+program's misuse: `Task.map`'s `sync := true` "should only be done when
+executing `f` is cheap and non-blocking", and `Task.get` warns that
+"deadlocks may otherwise occur". The one exception is a Lean bug (LB-32 in
+`docs/lean-bugs.md`): when `Promise.result!` reaches its permanent block on
+a dropped promise (`option_get_or_block`), Lean's own code blocks the walk,
+and the waiters of the walks in progress on its context wake there, where
+natively they wake only when another referenced task finishes, or never.
+
 **Exit (decisions Q5 refinement A).** `finish` sets Lean's shutdown flag
 (`IO.checkCanceled` is true in tasks from then on). Then it runs the
 remaining tasks and waits, and only then returns; the glue then flushes the
@@ -616,12 +671,40 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
      `tasks/get_in_sync_task`), then `wait(id)` and read the slot;
    - `IO.getTaskState`: `state(id)`; `IO.waitAny`: `wait_any(ids)`;
    - `IO.cancel`: `cancel(id)`; `IO.checkCanceled`: `check_canceled()`;
-   - `IO.getTID` in a task: `main`'s id plus `thread_number()`.
+   - `IO.getTID` in a task: `main`'s id plus `thread_number()`;
+   - `Task.pure a` (`lean_task_pure`): no call, glue only. Natively it is
+     a task object that holds `a` and has no task-manager state
+     (`alloc_task(v)`, `object.cpp` 1180-1201: `m_value` set, `m_imp`
+     null). The glue makes its task object with `a` in the slot and the
+     id `TaskId::FINISHED`. It then behaves as every finished task:
+     - `IO.getTaskState` is `finished`, with no polling point;
+     - `Task.get` and `IO.wait` give `a` at once, with no
+       `GET_IN_SYNC_TASK`, even in a `sync` task;
+     - `IO.cancel` does nothing, and `IO.waitAny` takes it when it is
+       the first finished task of the list;
+     - a `sync := true` dependent runs at once (`dependent_runs_now` is
+       true), and its result is again such a task; another dependent is
+       queued at once (`depend` with `TaskId::FINISHED`), as Lean's
+       `add_dep` enqueues it;
+     - a bind function may return it: the bind task then finishes with
+       its value (`task_bind_fn1`);
+     - its drop calls nothing.
+
+     A task the glue finished at once is the same: a `spawn` without the
+     task manager, a dependent that `dependent_runs_now` applied. Cases
+     `tasks/task_pure_graph`, `pure_get_in_sync_task` (a `Task.get` in a
+     `sync` task, with no panic) and `cancel_promise_and_pure`.
 
    The job of a dependent holds its source's handle, as Lean's closures do.
    **When the last reference to an unfinished task goes, call
-   `release(id)`**: Lean's `deactivate_task`, which deletes a pure task that
-   has not started.
+   `release(id)`, for every task, IO tasks included**: Lean's
+   `deactivate_task`. It deletes a pure task that has not started; any other
+   task runs to completion, but is marked unreferenced, so that its finish
+   notifies nobody, as natively such a finish deletes the task
+   (`m_deleted`) without `resolve_core`'s `notify_all` (review RS2-08 of
+   sched-2; "Waiters wake after a walk"). A glue that skips `release` for
+   IO tasks wakes waiters where native does not
+   (`tasks/sync_walk_mutex_unref_finish`, `wait_any_unref_finish`).
 
    **The glue's slot comes first.** Once the slot holds the value, the task
    has finished, and its `TaskId` must not be passed to the scheduler again:
@@ -638,6 +721,27 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
      resolution stores.
    - Dropping the last reference to an unresolved promise:
      `resolve(id, || store none)` (Lean's `deactivate_promise`).
+   - `IO.Promise.result?` (`lean_io_promise_result_opt`): no call, glue
+     only. Natively the promise owns one task object (`m_result`), and
+     `result?` returns another reference to it (`object.cpp` 1347-1351),
+     the same object at every call. The glue's promise holds its task
+     object (the slot, of `Option α`, and `promise_new`'s id), and
+     `result?` returns another reference to that object. Its states:
+     - before the resolution, `IO.getTaskState` is `running`, since a
+       promise's task has no closure (`get_task_state`, `object.cpp`
+       1085); `wait` blocks, and dependents wait;
+     - after `resolve v`, it holds `some v`, and a second `resolve`
+       changes nothing;
+     - after the drop of the unresolved promise, it holds `none`;
+     - `IO.cancel` before the resolution cancels the dependents made
+       meanwhile when it is resolved (`handle_finished`), `sync` ones too;
+       `IO.waitAny` takes a finished task of its list first.
+
+     Cases `tasks/promise_result_opt` and `cancel_promise_and_pure`.
+   - `Promise.result!` is Lean code: `result?.map (sync := true)
+     Option.getOrBlock!`. Its function, the private `Option.getOrBlock!`
+     (`lean_option_get_or_block`), is `option_get_or_block(opt, report)`
+     ("`Promise.result!` on a dropped promise" below).
 5. **Yield points.**
    - `effect()` before output, flush, process spawn and `IO.Process.exit`.
      A Lean panic's message is output too (`lean_panic` prints it through
@@ -764,6 +868,53 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
     code that may do IO and wait. A translator resolves dropped promises
     (`sched::resolve`) after its drop walk has left the scope, so that this
     code runs with the cooperative IO it would have anywhere else.
+
+### `Promise.result!` on a dropped promise
+
+`Option.getOrBlock!` (`lean_option_get_or_block`, `io.cpp` 1639-1651)
+returns the value of `some`. On `none` it calls
+`lean_panic("PANIC: Promise.result!: promise has been dropped without ever
+being resolved", force_stderr = true)`, then sleeps forever
+(`sleep_for(seconds::max())`), "only reachable when using non-fatal
+panics". `sched::option_get_or_block(opt, report)` does the same:
+- `report(PROMISE_DROPPED)` is the glue's report, by the plan
+  `semantics::panic::lean_panic_plan(settings, true)`:
+  1. `effect()`, as for any output;
+  2. the lines on the process's stderr (`PanicStream::ProcessStderr`):
+     C's `stdout` is flushed first, as `std::cerr` is tied to it, and
+     Lean's current stderr is not used, so `IO.setStderr` does not catch
+     them (`force_stderr`, `panic_eprintln`, `object.cpp` 131-138);
+  3. the abort (`LEAN_ABORT_ON_PANIC`) or the exit (exit-on-panic) the
+     plan says. `report` returns only for `PanicEnd::Return`.
+- then the waiters of the tasks whose walks are in progress on the context
+  wake, `result?` among them (LB-32, "Waiters wake after a walk" above);
+- then the context waits forever (`hang`), while the others go on.
+
+The value is `none` only after the promise was dropped unresolved. So the
+function runs in the walk of `deactivate_promise`, on the context that
+dropped the promise, and that context hangs: on `main`, the program hangs;
+on a task, the program goes on, but the final run waits for that context,
+so the process never exits. A `result!` task dropped before its promise is
+deleted (`release`) and never runs. On a promise resolved before `result!`,
+the map runs at once and the task is `Task.pure` of the value
+(`lean_task_map_core`).
+
+The cases, recorded natively (5 runs each; the two LB-32 cases expect the
+correct outcome and keep native's in their `native` field) with twins in
+the driver:
+
+| Case | What the program does | Native |
+|---|---|---|
+| `tasks/result_bang_some` | `result!` of a promise resolved before, then by `main`, then by a dedicated task | the three values; the first task is finished at once |
+| `tasks/result_bang_dropped` | prints `before` to `stdout`, then `main` drops the promise | `before` (flushed by the panic), the panic line, then a hang |
+| `tasks/result_bang_dropped_in_task` | a dedicated task drops the promise; `main` waits, runs another task, prints, returns | the panic line, then `main`'s and the other task's lines on stderr; the exit hangs, so `main done` on `stdout` is never written |
+| `tasks/result_bang_dropped_abort` | `LEAN_ABORT_ON_PANIC=1`, Lean's stderr set to a buffer, then the drop | `before`, the panic line on the process's stderr, status 134 |
+| `tasks/result_bang_dropped_first` | the `result!` task is dropped before its promise | no panic |
+| `tasks/result_bang_dropped_redirected` | as `result_bang_dropped`, Lean's stderr set to a buffer first, no abort | the panic line on the process's stderr (with `LEAN_ABORT_ON_PANIC`, every panic goes there, so only this case tells the streams apart) |
+| `tasks/get_in_sync_task_redirected` | the contrast: `Task.get` in a `sync` task, a `lean_panic` without `force_stderr`, Lean's stderr set to a buffer | the line in the buffer |
+| `tasks/result_bang_dep_order` | dependents of `result?` made before and after `result!`, then the drop | the walk, newest first, queues the later one, then hangs in `result!`: the earlier one never runs |
+| `tasks/dropped_promise_waiter_wakes` | a task blocked in `IO.wait p.result?` when the drop's walk hangs in `result!` | natively the waiter never wakes; here it wakes with `none` (LB-32) |
+| `tasks/dropped_promise_waiter_unrelated_finish` | the same, with an unrelated task that finishes 1 s in | natively that finish wakes the waiter, 800 ms late; here it wakes at the drop (LB-32) |
 
 ## Why `Glue::suspend` is sound
 
@@ -1031,8 +1182,8 @@ argument is checked by:
   ```
   All 34 of the driver's tests passed at d0d6a0d (2026-10-04, after the
   third review of sched-1; 31 of 31 at 089fbc4 by its reviewer); the three
-  cases added in the fourth review and sched-io's fourteen have not run
-  under it yet. Leak
+  cases added in the fourth review, sched-io's fourteen and sched-2's
+  twenty-four have not run under it yet. Leak
   detection is off because the driver's glue leaks its 64 KiB alternate
   signal stack on purpose; that leak was the only report.
 

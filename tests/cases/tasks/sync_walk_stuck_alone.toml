@@ -1,0 +1,13 @@
+id = "sync_walk_stuck_alone"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review of lean-runtime sched-2, round 2 (RS2-05; lean2rr-side judge on the LB-32 scope, 2026-10-04; probe StuckWalkAlone)"
+streams = "separate"
+expect = { hang = 3 }
+# A blocking `sync` continuation, documented misuse: `Task.map` with
+# `sync := true` "should only be done when executing `f` is cheap and
+# non-blocking" (Init/Core.lean), and of a blocking wait in such a
+# continuation `Task.get` says "deadlocks may otherwise occur". Natively the
+# waiter of `r` wakes only when another task finishes (`resolve_core`'s
+# `notify_all`). Native's outcome is followed: not LB-32, which covers
+# `Promise.result!`'s permanent block only.
