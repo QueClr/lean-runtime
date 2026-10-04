@@ -458,8 +458,9 @@ fn rem_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
 /// `1 ^ e = 1`, also for an exponent of 2^64 or more. For a base of 2 or
 /// more the result's size is tested first (`check_result_bits`) against
 /// `bit_len(a) * e`, the size every backend allocates for it (exactly
-/// `j * e + 1` bits for a word base `2^j`, which is shifted instead of
-/// multiplied): above `MAX_BITS` the rule returns, for the caller to end
+/// `j * e + 1` bits for a base `2^j`, a word or a big number
+/// (`BigNat::trailing_zeros`), which is shifted instead of multiplied):
+/// above `MAX_BITS` the rule returns, for the caller to end
 /// the process with, native's `NatPowExponent` when `e >= 2^32` and
 /// `OutOfMemory` otherwise.
 ///
@@ -502,16 +503,23 @@ fn pow_slow<B: BigNat>(a: Nat<B>, e: Nat<B>) -> Result<Nat<B>, InternalPanic> {
         return Err(InternalPanic::NatPowExponent);
     };
     let e_wide = e > u64::from(u32::MAX);
-    let pow2 = a.to_u64().filter(|x| x.is_power_of_two());
+    // `Some(j)` when a = 2^j, a word or a big number
+    let pow2 = match &a {
+        Small(x) => x.is_power_of_two().then(|| u64::from(x.trailing_zeros())),
+        Big(b) => {
+            let j = b.bit_len() - 1;
+            (b.trailing_zeros() == j).then_some(j)
+        }
+    };
     let bits = match pow2 {
         // (2^j)^e = 2^(j e): exactly j e + 1 bits
-        Some(x) => u128::from(x.trailing_zeros()) * u128::from(e) + 1,
+        Some(j) => u128::from(j) * u128::from(e) + 1,
         // bit_len(a) * e bounds the result's bit length; backends size by it
         None => u128::from(bit_len(&a)) * u128::from(e),
     };
     check_result_bits::<B>(bits).map_err(|_| too_big(e_wide))?;
     Ok(Big(match pow2 {
-        Some(x) => B::from_u64(1).shl(u64::from(x.trailing_zeros()) * e),
+        Some(j) => B::from_u64(1).shl(j * e),
         None => a.into_big().pow(e),
     }))
 }
@@ -811,7 +819,7 @@ mod tests {
             Err(InternalPanic::OutOfMemory)
         );
         let e = |x: Result<Nat<N40>, InternalPanic>| x.err();
-        let big = |bits: u64| Big(N40(bits));
+        let big = |bits: u64| Big(N40::odd(bits));
         // 3^(2^63): bit_len * e = 2^64 (review RS2-01), refused with native's message
         assert_eq!(
             e(pow(Small(3), Small(1 << 63))),
@@ -834,7 +842,19 @@ mod tests {
             Some(InternalPanic::NatPowExponent)
         );
         assert_eq!(e(pow(Small(1 << 8), Small(1 << 32))), None);
-        assert!(matches!(pow(Small(1), Big(N40(100))), Ok(Small(1))));
+        assert!(matches!(pow(Small(1), Big(N40::odd(100))), Ok(Small(1))));
+        // a big power of two is sized exactly, (bit_len - 1) * e + 1: (2^64)^e
+        // has 64 e + 1 bits, not 65 e (leanrs's review of semantics-2)
+        let p64 = || Big(N40::pow2(65));
+        let e_max = (M - 1) / 64;
+        // e_max is above 2^32, so a refusal is native's exponent message
+        let refused = Some(InternalPanic::NatPowExponent);
+        assert_eq!(e(pow(p64(), Small(e_max))), None);
+        assert_eq!(e(pow(p64(), Small(e_max + 1))), refused);
+        assert!(65 * e_max > M);
+        assert_eq!(e(pow(big(65), Small(e_max))), refused);
+        // an odd base is sized by bit_len * e
+        assert_eq!(e(pow(big(65), Small(M / 65))), None);
         assert_eq!(e(shiftl(Small(1), Small(M - 1))), None);
         assert_eq!(
             e(shiftl(Small(1), Small(M))),

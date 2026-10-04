@@ -627,7 +627,7 @@ mod tests {
         assert_eq!(e(mul(big(M / 2), big(M / 2))), None);
         assert_eq!(e(mul(big(M / 2), big(M / 2 + 1))), oom);
         assert_eq!(e(mul(Small(i64::MIN), Small(i64::MIN))), None);
-        assert_eq!(e(neg_succ_of_nat(Nat::Big(N40(M - 1)))), None);
-        assert_eq!(e(neg_succ_of_nat(Nat::Big(N40(M)))), oom);
+        assert_eq!(e(neg_succ_of_nat(Nat::Big(N40::odd(M - 1)))), None);
+        assert_eq!(e(neg_succ_of_nat(Nat::Big(N40::odd(M)))), oom);
     }
 }

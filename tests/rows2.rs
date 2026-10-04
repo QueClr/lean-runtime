@@ -1049,6 +1049,9 @@ fn refbig_matches_wide_arithmetic() {
             a.to_string()
         );
         assert_eq!(n(a).bit_len(), 128 - u64::from(a.leading_zeros()));
+        if a != 0 {
+            assert_eq!(n(a).trailing_zeros(), u64::from(a.trailing_zeros()));
+        }
     }
     let big = RNat::from_decimal("340282366920938463463374607431768211457");
     assert_eq!(big.clone().gcd(RNat::from_u64(3)), RNat::from_u64(1));

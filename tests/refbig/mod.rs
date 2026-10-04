@@ -256,6 +256,12 @@ impl BigNat for RNat {
     fn bit_len(&self) -> u64 {
         bit_len_mag(&self.0)
     }
+    fn trailing_zeros(&self) -> u64 {
+        match self.0.iter().position(|&l| l != 0) {
+            Some(i) => 64 * i as u64 + u64::from(self.0[i].trailing_zeros()),
+            None => 0,
+        }
+    }
     fn compare(&self, o: &RNat) -> Ordering {
         cmp_mag(&self.0, &o.0)
     }

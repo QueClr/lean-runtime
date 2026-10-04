@@ -385,6 +385,9 @@ impl BigNat for ColdBig {
     fn bit_len(&self) -> u64 {
         cold_u64()
     }
+    fn trailing_zeros(&self) -> u64 {
+        cold_u64()
+    }
     fn compare(&self, _: &ColdBig) -> core::cmp::Ordering {
         cold_order()
     }

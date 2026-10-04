@@ -117,6 +117,12 @@ pub trait BigNat: Sized {
     /// (`mpz_sizeinbase(x, 2)` for a nonzero `x`).
     fn bit_len(&self) -> u64;
 
+    /// The number of trailing zero bits of a nonzero value: the exponent of
+    /// the largest power of two dividing it (`mpz_scan1(x, 0)`, malachite's
+    /// `trailing_zeros`). `nat::pow` asks it of a base of 2 or more, to
+    /// size a power of a power of two exactly.
+    fn trailing_zeros(&self) -> u64;
+
     /// The order of two values (`mpz_cmp`).
     fn compare(&self, o: &Self) -> Ordering;
 
@@ -305,23 +311,41 @@ pub trait BigInt: Sized {
     fn write_decimal<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result;
 }
 
-/// Backends for the rules' size tests: a value is only its bit length, so a
-/// test can hold a number of 2^40 bits; every operation returns a value of
-/// the bit length the rules expect of it. `MAX_BITS` is 2^40.
+/// Backends for the rules' size tests: a value is only its bit length (and,
+/// for a natural number, its trailing zeros), so a test can hold a number of
+/// 2^40 bits; every operation returns a value of the bit length the rules
+/// expect of it. `MAX_BITS` is 2^40.
 #[cfg(test)]
 pub(crate) mod test_backend {
     use super::{BigInt, BigNat};
     use core::cmp::Ordering;
     use core::fmt;
 
-    /// A natural number of `.0` bits.
+    /// A natural number of `bits` bits whose lowest set bit is bit `tz`.
     #[derive(Debug, PartialEq, Eq)]
-    pub struct N40(pub u64);
+    pub struct N40 {
+        pub bits: u64,
+        pub tz: u64,
+    }
+
+    impl N40 {
+        /// An odd number of `bits` bits.
+        pub fn odd(bits: u64) -> N40 {
+            N40 { bits, tz: 0 }
+        }
+        /// 2^(bits - 1).
+        pub fn pow2(bits: u64) -> N40 {
+            N40 { bits, tz: bits - 1 }
+        }
+    }
 
     impl BigNat for N40 {
         const MAX_BITS: u64 = 1 << 40;
         fn from_u64(v: u64) -> N40 {
-            N40(u64::from(64 - v.leading_zeros()))
+            N40 {
+                bits: u64::from(64 - v.leading_zeros()),
+                tz: u64::from(v.trailing_zeros()),
+            }
         }
         fn to_u64(&self) -> Option<u64> {
             None
@@ -330,16 +354,19 @@ pub(crate) mod test_backend {
             0
         }
         fn bit_len(&self) -> u64 {
-            self.0
+            self.bits
+        }
+        fn trailing_zeros(&self) -> u64 {
+            self.tz
         }
         fn compare(&self, o: &N40) -> Ordering {
-            self.0.cmp(&o.0)
+            self.bits.cmp(&o.bits)
         }
         fn add(self, o: N40) -> N40 {
-            N40(self.0.max(o.0) + 1)
+            N40::odd(self.bits.max(o.bits) + 1)
         }
         fn add_u64(self, _: u64) -> N40 {
-            N40(self.0 + 1)
+            N40::odd(self.bits + 1)
         }
         fn sub(self, _: N40) -> N40 {
             self
@@ -348,10 +375,13 @@ pub(crate) mod test_backend {
             self
         }
         fn mul(self, o: N40) -> N40 {
-            N40(self.0 + o.0)
+            N40 {
+                bits: self.bits + o.bits,
+                tz: self.tz + o.tz,
+            }
         }
         fn mul_u64(self, o: u64) -> N40 {
-            N40(self.0 + u64::from(64 - o.leading_zeros()))
+            N40::odd(self.bits + u64::from(64 - o.leading_zeros()))
         }
         fn div(self, _: N40) -> N40 {
             self
@@ -381,13 +411,19 @@ pub(crate) mod test_backend {
             self
         }
         fn shl(self, s: u64) -> N40 {
-            N40(self.0 + s)
+            N40 {
+                bits: self.bits + s,
+                tz: self.tz + s,
+            }
         }
         fn shr(self, s: u64) -> N40 {
-            N40(self.0.saturating_sub(s))
+            N40::odd(self.bits.saturating_sub(s))
         }
         fn pow(self, e: u64) -> N40 {
-            N40(self.0 * e)
+            N40 {
+                bits: self.bits * e,
+                tz: self.tz * e,
+            }
         }
         fn gcd(self, o: N40) -> N40 {
             o
@@ -410,10 +446,10 @@ pub(crate) mod test_backend {
             I40(u64::from(128 - v.unsigned_abs().leading_zeros()))
         }
         fn from_nat(n: N40) -> I40 {
-            I40(n.0)
+            I40(n.bits)
         }
         fn nat_abs(self) -> N40 {
-            N40(self.0)
+            N40::odd(self.0)
         }
         fn to_i64(&self) -> Option<i64> {
             None
