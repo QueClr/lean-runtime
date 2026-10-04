@@ -1,0 +1,688 @@
+# Row cases of area `repr` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/repr/repr.rows.toml`.
+# String results are shown as Lean's `repr` (quoted) of the text.
+
+[[row]]
+id = "repr/natrepr.0"
+area = "repr"
+fn = "Nat.repr"
+args = ["0"]
+expected = '"0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.7"
+area = "repr"
+fn = "Nat.repr"
+args = ["7"]
+expected = '"7"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.127"
+area = "repr"
+fn = "Nat.repr"
+args = ["127"]
+expected = '"127"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.128"
+area = "repr"
+fn = "Nat.repr"
+args = ["128"]
+expected = '"128"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.2^31"
+area = "repr"
+fn = "Nat.repr"
+args = ["2147483648"]
+expected = '"2147483648"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.2^63-1"
+area = "repr"
+fn = "Nat.repr"
+args = ["9223372036854775807"]
+expected = '"9223372036854775807"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.2^63"
+area = "repr"
+fn = "Nat.repr"
+args = ["9223372036854775808"]
+expected = '"9223372036854775808"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.2^64-1"
+area = "repr"
+fn = "Nat.repr"
+args = ["18446744073709551615"]
+expected = '"18446744073709551615"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.2^64"
+area = "repr"
+fn = "Nat.repr"
+args = ["18446744073709551616"]
+expected = '"18446744073709551616"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.1000000000000000000000000000000"
+area = "repr"
+fn = "Nat.repr"
+args = ["1000000000000000000000000000000"]
+expected = '"1000000000000000000000000000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/natrepr.1606938044258990275541962092341162602522202993782792835301376"
+area = "repr"
+fn = "Nat.repr"
+args = ["1606938044258990275541962092341162602522202993782792835301376"]
+expected = '"1606938044258990275541962092341162602522202993782792835301376"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/usizerepr.0"
+area = "repr"
+fn = "USize.repr"
+args = ["0"]
+expected = '"0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/usizerepr.9"
+area = "repr"
+fn = "USize.repr"
+args = ["9"]
+expected = '"9"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/usizerepr.2^63"
+area = "repr"
+fn = "USize.repr"
+args = ["9223372036854775808"]
+expected = '"9223372036854775808"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/usizerepr.2^64-1"
+area = "repr"
+fn = "USize.repr"
+args = ["18446744073709551615"]
+expected = '"18446744073709551615"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Nat.repr (Nat.reprFast: lean_string_of_usize below 2^64) and USize.repr"
+
+[[row]]
+id = "repr/intrepr.0"
+area = "repr"
+fn = "Int.repr"
+args = ["0"]
+expected = '"0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.-1"
+area = "repr"
+fn = "Int.repr"
+args = ["(-1)"]
+expected = '"-1"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.5"
+area = "repr"
+fn = "Int.repr"
+args = ["5"]
+expected = '"5"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.2^31"
+area = "repr"
+fn = "Int.repr"
+args = ["2147483648"]
+expected = '"2147483648"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.-2^31+1"
+area = "repr"
+fn = "Int.repr"
+args = ["(-2147483649)"]
+expected = '"-2147483649"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.-2^63"
+area = "repr"
+fn = "Int.repr"
+args = ["(-9223372036854775808)"]
+expected = '"-9223372036854775808"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.2^63"
+area = "repr"
+fn = "Int.repr"
+args = ["9223372036854775808"]
+expected = '"9223372036854775808"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.-2^64"
+area = "repr"
+fn = "Int.repr"
+args = ["(-18446744073709551616)"]
+expected = '"-18446744073709551616"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.1000000000000000000000000000000"
+area = "repr"
+fn = "Int.repr"
+args = ["1000000000000000000000000000000"]
+expected = '"1000000000000000000000000000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intrepr.-1000000000000000000000000000000"
+area = "repr"
+fn = "Int.repr"
+args = ["(-1000000000000000000000000000000)"]
+expected = '"-1000000000000000000000000000000"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.-5.0"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["(-5)", "0"]
+expected = '"-5"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.-5.1023"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["(-5)", "1023"]
+expected = '"-5"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.-5.1024"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["(-5)", "1024"]
+expected = '"(-5)"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.-5.2000"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["(-5)", "2000"]
+expected = '"(-5)"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.5.1024"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["5", "1024"]
+expected = '"5"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.0.1024"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["0", "1024"]
+expected = '"0"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/intreprprec.-2^64.1024"
+area = "repr"
+fn = "Int.reprPrec"
+args = ["(-18446744073709551616)", "1024"]
+expected = '"(-18446744073709551616)"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Int.repr and reprPrec (Repr.addAppParen at max_prec 1024)"
+
+[[row]]
+id = "repr/charquote.61"
+area = "repr"
+fn = "Char.quote"
+args = ["'a'"]
+expected = "\"'a'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.20"
+area = "repr"
+fn = "Char.quote"
+args = ["' '"]
+expected = "\"' '\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.a"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\n'"]
+expected = "\"'\\\\n'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.9"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\t'"]
+expected = "\"'\\\\t'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.5c"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\\\'"]
+expected = "\"'\\\\\\\\'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.22"
+area = "repr"
+fn = "Char.quote"
+args = ["'\"'"]
+expected = "\"'\\\\\\\"'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.27"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\''"]
+expected = "\"'\\\\''\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.0"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\x00'"]
+expected = "\"'\\\\x00'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.1"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\x01'"]
+expected = "\"'\\\\x01'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.1f"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\x1f'"]
+expected = "\"'\\\\x1f'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.7f"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\x7f'"]
+expected = "\"'\\\\x7f'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.80"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\u0080'"]
+expected = "\"''\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.9f"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\u009f'"]
+expected = "\"''\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.e9"
+area = "repr"
+fn = "Char.quote"
+args = ["'é'"]
+expected = "\"'é'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.20ac"
+area = "repr"
+fn = "Char.quote"
+args = ["'€'"]
+expected = "\"'€'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.ffff"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\uffff'"]
+expected = "\"'￿'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.1f600"
+area = "repr"
+fn = "Char.quote"
+args = ["'😀'"]
+expected = "\"'😀'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.10ffff"
+area = "repr"
+fn = "Char.quote"
+args = ["'􏿿'"]
+expected = "\"'􏿿'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charquote.d"
+area = "repr"
+fn = "Char.quote"
+args = ["'\\x0d'"]
+expected = "\"'\\\\x0d'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charrepr.61"
+area = "repr"
+fn = "Char.repr"
+args = ["'a'"]
+expected = "\"'a'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charrepr.a"
+area = "repr"
+fn = "Char.repr"
+args = ["'\\n'"]
+expected = "\"'\\\\n'\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/charrepr.27"
+area = "repr"
+fn = "Char.repr"
+args = ["'\\''"]
+expected = "\"'\\\\''\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/chartostring.61"
+area = "repr"
+fn = "Char.toString"
+args = ["'a'"]
+expected = '"a"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/chartostring.a"
+area = "repr"
+fn = "Char.toString"
+args = ["'\\n'"]
+expected = '"\n"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/chartostring.1f600"
+area = "repr"
+fn = "Char.toString"
+args = ["'😀'"]
+expected = '"😀"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/chartostring.0"
+area = "repr"
+fn = "Char.toString"
+args = ["'\\x00'"]
+expected = '"\x00"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Char.quote/Char.repr (Char.quoteCore: \\n \\t \\\\ \\\" \\', \\xNN below U+0020 and at U+007F, nothing else escaped) and Char.toString"
+
+[[row]]
+id = "repr/stringquote.empty"
+area = "repr"
+fn = "String.quote"
+args = ['""']
+expected = '"\"\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.abc"
+area = "repr"
+fn = "String.quote"
+args = ['"abc"']
+expected = '"\"abc\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.dquote"
+area = "repr"
+fn = "String.quote"
+args = ['"a\"b"']
+expected = '"\"a\\\"b\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.squote"
+area = "repr"
+fn = "String.quote"
+args = ["\"it's\""]
+expected = "\"\\\"it's\\\"\""
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.tab"
+area = "repr"
+fn = "String.quote"
+args = ['"a\tb"']
+expected = '"\"a\\tb\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.nl"
+area = "repr"
+fn = "String.quote"
+args = ['"a\nb"']
+expected = '"\"a\\nb\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.cr"
+area = "repr"
+fn = "String.quote"
+args = ['"a\x0db"']
+expected = '"\"a\\x0db\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.ctl"
+area = "repr"
+fn = "String.quote"
+args = ['"\x00\x1f\x7f"']
+expected = '"\"\\x00\\x1f\\x7f\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.backslash"
+area = "repr"
+fn = "String.quote"
+args = ['"a\\b"']
+expected = '"\"a\\\\b\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.unicode"
+area = "repr"
+fn = "String.quote"
+args = ['"é😀￿"']
+expected = '"\"é😀￿\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/stringquote.c1"
+area = "repr"
+fn = "String.quote"
+args = ['""']
+expected = '"\"\""'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: String.quote (Char.quoteCore inString: ' is not escaped)"
+
+[[row]]
+id = "repr/boolrepr.true.0"
+area = "repr"
+fn = "Bool.repr"
+args = ["true", "0"]
+expected = '"true"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
+
+[[row]]
+id = "repr/boolrepr.true.1024"
+area = "repr"
+fn = "Bool.repr"
+args = ["true", "1024"]
+expected = '"true"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
+
+[[row]]
+id = "repr/booltostring.true"
+area = "repr"
+fn = "toString"
+args = ["true"]
+expected = '"true"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
+
+[[row]]
+id = "repr/boolrepr.false.0"
+area = "repr"
+fn = "Bool.repr"
+args = ["false", "0"]
+expected = '"false"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
+
+[[row]]
+id = "repr/boolrepr.false.1024"
+area = "repr"
+fn = "Bool.repr"
+args = ["false", "1024"]
+expected = '"false"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
+
+[[row]]
+id = "repr/booltostring.false"
+area = "repr"
+fn = "toString"
+args = ["false"]
+expected = '"false"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
+
+[[row]]
+id = "repr/unitrepr"
+area = "repr"
+fn = "Unit.repr"
+args = []
+expected = '"()"'
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Bool and Unit text"
