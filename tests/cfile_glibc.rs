@@ -334,7 +334,9 @@ fn run_case(seed: u64, mode: FsMode, steps: usize) {
         );
     }
     drop(g);
-    m.0.close();
+    // `fclose`: dropping the model's stream writes its pending output and
+    // closes its descriptor (it is not a handle's)
+    drop(m);
     assert_eq!(
         file_bytes(&pa),
         file_bytes(&pb),

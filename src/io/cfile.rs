@@ -140,8 +140,8 @@ impl CFile {
     }
 
     /// `fdopen(fd, mode)` with the C mode of a Lean `IO.FS.Mode` (`"r"`, `"w"`,
-    /// `"w"`, `"r+"`, `"a"`); the stream owns `fd` and closes it in
-    /// [`CFile::close`].
+    /// `"w"`, `"r+"`, `"a"`); the stream holds `fd`, which closes when the
+    /// stream is dropped (`fclose`) and no `Handle` keeps a clone of it.
     pub fn fdopen(fd: OwnedFd, mode: FsMode) -> CFile {
         CFile::with(Fd::Owned(std::sync::Arc::new(fd)), mode_flags(mode))
     }
@@ -914,10 +914,15 @@ impl CFile {
         self.fd.clone()
     }
 
-    /// `fclose`: write pending output, close the descriptor (errors ignored,
-    /// as Lean's handle finalizer ignores them). A standard stream's
-    /// descriptor is left open.
-    pub fn close(&mut self) {
+    /// `fclose`: write pending output and drop this stream's hold on the
+    /// descriptor (errors ignored, as Lean's handle finalizer ignores them).
+    /// The descriptor closes when its last holder goes: at once for a stream
+    /// made by [`CFile::fdopen`] alone, but for a handle's stream only when the
+    /// handle's file drops (it keeps a shared clone for `flock`); a standard
+    /// stream's descriptor is never closed. Crate-internal (review RIO1-11):
+    /// closing a handle's stream through `Handle::file()` would leave its
+    /// descriptor open; a stream closes when it is dropped.
+    pub(crate) fn close(&mut self) {
         if matches!(self.fd, Fd::Closed) {
             return;
         }

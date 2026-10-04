@@ -226,7 +226,11 @@ impl Handle {
         Handle(Repr::File(f))
     }
 
-    /// The handle's `FILE`, locked (`flockfile`).
+    /// The handle's `FILE`, locked (`flockfile`). A handle's descriptor
+    /// closes only when its open file goes away (the last clone of the
+    /// `Handle` dropped), never through the guard: the file keeps a shared
+    /// clone of the descriptor for the calls made without the stream's lock
+    /// (review RIO1-11).
     #[inline]
     pub fn file(&self) -> MutexGuard<'_, CFile> {
         match &self.0 {
