@@ -26,9 +26,12 @@ translator can wrap them without converting values.
 
 ## Status
 
-The first part of `semantics` is in: hashing, `Float`/`Float32` formatting
-and conversions, the libm rows, the fixed-width integer rows and the `String`
-position functions, checked by the rows in `tests/cases/*/*.rows.toml`
+`semantics` has hashing, `Float`/`Float32` formatting and conversions, the
+libm rows, the fixed-width integer rows and the `String` position functions
+(batch 1), and the `Nat`/`Int` rules over the big-number traits of
+`semantics::bignum`, the array edge rules, the panic texts and exit
+statuses, and the text of leaf values (batch 2), checked by the rows in
+`tests/cases/*/*.rows.toml`
 (expected values from native Lean 4.34.0, `scripts/gen_rows.py`), with one
 micro-benchmark per public function and its native-Lean twin in `benches/`
 (`scripts/gen_benches.py`; not timed yet). The two projects are finishing a
