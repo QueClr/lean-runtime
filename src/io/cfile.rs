@@ -813,11 +813,13 @@ impl CFile {
     /// [`CFile::read`] of up to `n` bytes appended to `out`, which first gets
     /// room for `n` (`reserve_exact`, the array Lean allocates); the count
     /// read. The bytes copied out of the stream's buffer are appended with no
-    /// zero pass; a direct read (a buffer or more) goes into the spare
-    /// capacity with no zero pass when it reaches the end of the `n` bytes,
-    /// and into zeroed bytes otherwise: a `memset` of the block-aligned part,
-    /// up to `n` bytes (see `sys::VecDest`, and the module comment of
-    /// `lean_runtime::io` for the `read_uninit` route).
+    /// zero pass. With `want = n - have` still wanted after the `have`
+    /// buffered bytes, a direct read happens when `want >= bufsize`, of
+    /// `want - want % bufsize` bytes: into the spare capacity, with no zero
+    /// pass, when that fills it exactly (`want % bufsize == 0` and room for
+    /// only the `n` bytes), and otherwise into zeroed bytes, a `memset` of the
+    /// direct part (`sys::VecDest`; the module comment of `lean_runtime::io`
+    /// has the rule with an example and the `read_uninit` route).
     pub fn read_vec(&mut self, n: usize, out: &mut Vec<u8>) -> Result<usize, i32> {
         out.reserve_exact(n);
         let start = out.len();

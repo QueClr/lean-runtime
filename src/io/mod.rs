@@ -40,16 +40,25 @@
 //! Only the cold error path owns data: [`IoError`] holds its file name and
 //! details as `String`s.
 //!
-//! **`read_vec`'s zero pass** (review RIO1-02). A read of `n` bytes at least
-//! one buffer long (4096 bytes for most files and pipes) reads its
-//! block-aligned part, `n - n % 4096` bytes after the buffered ones, straight
-//! from the descriptor. Safe Rust can only grow a `Vec` over bytes a read
-//! initialized through rustix's `spare_capacity`, which reads into *all* of
-//! the spare capacity; so `read_vec` uses it only when that part ends exactly
-//! at the end of the `n` bytes, and otherwise reads into zeroed bytes: a
-//! `memset` of the block-aligned part, about as fast as copying it once.
-//! That is the usual `IO.FS.readBinFile` (`read size` of a file whose size is
-//! not a multiple of 4096: a 1 MiB + 1 file zeroes 1 MiB). Glue whose
+//! **`read_vec`'s zero pass** (reviews RIO1-02, RIO1-13). `read n` (glibc's
+//! `_IO_file_xsgetn`) first copies the `have` bytes the stream's buffer
+//! holds; `want = n - have` bytes are then still wanted. If `want < bufsize`,
+//! the buffer is refilled and copied from, with no zero pass. Otherwise the
+//! direct part, `want - want % bufsize` bytes, is read straight from the
+//! descriptor into the caller's `Vec`, and the remaining `want % bufsize`
+//! come through a refill. `bufsize` is the stream's buffer size: the
+//! descriptor's `st_blksize`, or 8192 when that is 8192 or more (4096 for
+//! ext4 files and pipes here). Safe Rust can grow a `Vec` only over bytes a
+//! read initialized through rustix's `spare_capacity`, which reads into
+//! *all* of the spare capacity; so the direct part goes there only when it
+//! fills the spare capacity exactly (`want % bufsize == 0`, the `Vec` having
+//! room for no more than the `n` bytes), and otherwise into zeroed bytes: a
+//! `memset` of the direct part, about as fast as copying it once. Example:
+//! `IO.FS.readBinFile` of a 1 MiB + 1 byte ext4 file reads `n = 1048577` on
+//! an empty buffer: `have = 0`, `want = 1048577`, the direct part is 1048576
+//! bytes, short of `want`, so 1 MiB is zeroed, then the last byte comes
+//! through a refill; a file of exactly 1 MiB has `want % 4096 == 0` and no
+//! zero pass. Glue whose
 //! `ByteArray` is a `Vec` and that accepts one performance-justified `unsafe`
 //! avoids it: reserve `n`, call [`Handle::read_uninit`] on
 //! `&mut v.spare_capacity_mut()[..n]`, then `v.set_len(len + count)` (sound:
