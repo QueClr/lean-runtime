@@ -6,6 +6,9 @@ use super::*;
 use crate::io::{Handle, IoError};
 use rustix::fs::OFlags;
 
+/// A pipe; every test writes at most a few bytes into it before reading, far
+/// below one page, the smallest capacity the kernel gives (a user over
+/// `fs.pipe-user-pages-soft` gets one-page pipes), or writes non-blocking.
 fn pipe() -> (OwnedFd, OwnedFd) {
     let (r, w) = std::io::pipe().unwrap();
     (r.into(), w.into())
@@ -45,8 +48,10 @@ fn pending_output_is_the_put_area() {
 fn bounded_pipe_reports_epipe() {
     let (_r, w) = pipe();
     rustix::fs::fcntl_setfl(&w, OFlags::NONBLOCK).unwrap();
+    // more than the pipe holds, whatever its capacity
+    let cap = rustix::pipe::fcntl_getpipe_size(&w).unwrap();
     let h = Handle::fdopen_bounded_pipe(w);
-    let big = vec![b'x'; 1 << 20];
+    let big = vec![b'x'; cap + 4096];
     assert_eq!(
         h.write(&big),
         Err(IoError::ResourceVanished(32, "broken pipe".into()))
@@ -54,6 +59,8 @@ fn bounded_pipe_reports_epipe() {
     // an ordinary non-blocking pipe reports EAGAIN
     let (_r2, w2) = pipe();
     rustix::fs::fcntl_setfl(&w2, OFlags::NONBLOCK).unwrap();
+    let cap = rustix::pipe::fcntl_getpipe_size(&w2).unwrap();
+    let big = vec![b'x'; cap + 4096];
     let h2 = Handle::fdopen(w2, FsMode::Write);
     assert_eq!(
         h2.write(&big),

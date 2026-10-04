@@ -242,6 +242,8 @@ fn child_with_stdin(test: &str, case: &str, input: &[u8]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut proc = c.spawn().expect("child test process");
+    // the inputs are a few bytes, far below one page (the smallest pipe)
+    assert!(input.len() < 4096);
     proc.stdin
         .take()
         .expect("stdin pipe")
@@ -1716,15 +1718,42 @@ fn io_fifo_write_after_read() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut proc = c.spawn().expect("child test process");
+    // read the child's output while it runs: a pipe may hold only one page
+    let drain = |r: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut v = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut v);
+            }
+            v
+        })
+    };
+    let out_t = drain(
+        proc.stdout
+            .take()
+            .map(|r| Box::new(r) as Box<dyn std::io::Read + Send>),
+    );
+    let err_t = drain(
+        proc.stderr
+            .take()
+            .map(|r| Box::new(r) as Box<dyn std::io::Read + Send>),
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
-    while proc.try_wait().expect("child status").is_none() {
+    let status = loop {
+        if let Some(st) = proc.try_wait().expect("child status") {
+            break st;
+        }
         if Instant::now() > deadline {
             let _ = proc.kill();
             panic!("the child did not finish within 10 s: a getLine waits on the FIFO");
         }
         std::thread::sleep(Duration::from_millis(20));
-    }
-    let out = proc.wait_with_output().expect("child output");
+    };
+    let out = Output {
+        status,
+        stdout: out_t.join().unwrap(),
+        stderr: err_t.join().unwrap(),
+    };
     assert_eq!(
         results(&out),
         vec![

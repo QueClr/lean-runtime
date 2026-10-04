@@ -344,14 +344,43 @@ fn run_case(seed: u64, mode: FsMode, steps: usize) {
     let _ = std::fs::remove_file(&pb);
 }
 
-/// A read-only stream on a pipe holding `data` (at most 64 KiB, so the
-/// writes cannot block), write end closed: stdin from a pipe.
+/// A read-only stream on a pipe that a writer thread fills with `data`, then
+/// closes: stdin from a pipe. A pipe's capacity is not to be relied on: a
+/// user over `fs.pipe-user-pages-soft` gets pipes of one page, so the pipe is
+/// shrunk to one page (`F_SETPIPE_SZ`) and written concurrently. If the reader
+/// closes first, the writer's `write` fails with `EPIPE` (Rust ignores
+/// SIGPIPE) and the thread ends.
 fn pipe_with(data: &[u8]) -> OwnedFd {
     let (r, mut w) = std::io::pipe().unwrap();
-    std::io::Write::write_all(&mut w, data).unwrap();
-    drop(w);
+    let _ = rustix::pipe::fcntl_setpipe_size(&w, 4096);
+    let data = data.to_vec();
+    std::thread::spawn(move || {
+        let _ = std::io::Write::write_all(&mut w, &data);
+    });
     r.into()
 }
+
+/// Runs `body` on a thread of its own and fails if it runs longer than
+/// `secs` seconds, so that a pipe test that blocks (a write nobody reads)
+/// fails instead of hanging.
+fn with_deadline(secs: u64, body: impl FnOnce() + Send + 'static) {
+    use std::sync::mpsc::RecvTimeoutError;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let h = std::thread::spawn(move || {
+        body();
+        let _ = tx.send(());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(secs)) {
+        Ok(()) => h.join().unwrap(),
+        Err(RecvTimeoutError::Disconnected) => std::panic::resume_unwind(h.join().unwrap_err()),
+        Err(RecvTimeoutError::Timeout) => {
+            panic!("blocked for more than {secs} s: a pipe write that nobody reads?")
+        }
+    }
+}
+
+/// The deadline of the pipe tests (they take about a second).
+const PIPE_DEADLINE: u64 = 120;
 
 fn run_pipe_case(seed: u64, steps: usize) {
     let mut rng = Rng(seed * 40503 + 977);
@@ -431,7 +460,13 @@ fn read_entry_points_agree() {
         at += got;
     }
     let _ = std::fs::remove_file(&p);
-    for &n in &sizes {
+    with_deadline(PIPE_DEADLINE, move || {
+        read_entry_points_on_pipes(&data, &sizes)
+    });
+}
+
+fn read_entry_points_on_pipes(data: &[u8], sizes: &[usize]) {
+    for &n in sizes {
         let mut a = CFile::fdopen(pipe_with(&data[..40_000]), FsMode::Read);
         let mut b = CFile::fdopen(pipe_with(&data[..40_000]), FsMode::Read);
         let mut c = CFile::fdopen(pipe_with(&data[..40_000]), FsMode::Read);
@@ -445,9 +480,11 @@ fn read_entry_points_agree() {
 
 #[test]
 fn differential_against_glibc_pipes() {
-    for seed in 1..=300u64 {
-        run_pipe_case(seed, 60);
-    }
+    with_deadline(PIPE_DEADLINE, || {
+        for seed in 1..=300u64 {
+            run_pipe_case(seed, 60);
+        }
+    });
 }
 
 #[test]
