@@ -38,14 +38,25 @@ use super::panic::InternalPanic;
 
 /// An `Int` as the rules see it: a word, or a big number of the backend `B`.
 /// Either form may hold any value (see the module comment of
-/// `semantics::nat`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// `semantics::nat`), so `==` is the value's equality (`dec_eq`).
+#[derive(Clone, Debug)]
 pub enum Int<B> {
     Small(i64),
     Big(B),
 }
 
 use Int::{Big, Small};
+
+/// Equality of the values, whatever their forms (`dec_eq`), never of the
+/// representations (leanrs's review of semantics-2).
+impl<B: BigInt> PartialEq for Int<B> {
+    #[inline]
+    fn eq(&self, o: &Int<B>) -> bool {
+        dec_eq(self, o)
+    }
+}
+
+impl<B: BigInt> Eq for Int<B> {}
 
 impl<B: BigInt> Int<B> {
     /// The value when it is in the `i64` range.

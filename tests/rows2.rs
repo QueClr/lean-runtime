@@ -1057,3 +1057,30 @@ fn refbig_matches_wide_arithmetic() {
         "147808829414345923316083210206383297601"
     );
 }
+
+/// `==` on `Nat` and `Int` is the values' equality across forms: a word and
+/// a big number of the same value are equal (leanrs's review of semantics-2).
+#[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
+fn equality_is_semantic() {
+    for v in [0u128, 5, 1 << 63, u64::MAX as u128, 1 << 64] {
+        let big = Nat::<RNat>::Big(RNat::from_u128(v));
+        let word = u64::try_from(v).map(Nat::Small);
+        if let Ok(w) = word {
+            assert!(w == big && big == w, "{v}");
+            assert!(w != Nat::Small(w.low_u64().wrapping_add(1)));
+        }
+        assert!(big == Nat::Big(RNat::from_u128(v)));
+        let ibig = Int::<RInt>::Big(RInt::from_i128(-(v as i128)));
+        if let Ok(x) = i64::try_from(-(v as i128)) {
+            assert!(Int::Small(x) == ibig && ibig == Int::Small(x), "-{v}");
+        }
+        assert!(ibig != Int::Big(RInt::from_i128(v as i128 + 1)));
+    }
+}

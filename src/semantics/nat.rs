@@ -56,14 +56,26 @@ use super::bignum::BigNat;
 use super::panic::InternalPanic;
 
 /// A `Nat` as the rules see it: a word, or a big number of the backend `B`.
-/// Either form may hold any value (see the module comment).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Either form may hold any value (see the module comment), so `==` is the
+/// value's equality (`dec_eq`): `Small(5) == Big(5)`.
+#[derive(Clone, Debug)]
 pub enum Nat<B> {
     Small(u64),
     Big(B),
 }
 
 use Nat::{Big, Small};
+
+/// Equality of the values, whatever their forms (`dec_eq`), never of the
+/// representations (leanrs's review of semantics-2).
+impl<B: BigNat> PartialEq for Nat<B> {
+    #[inline]
+    fn eq(&self, o: &Nat<B>) -> bool {
+        dec_eq(self, o)
+    }
+}
+
+impl<B: BigNat> Eq for Nat<B> {}
 
 impl<B: BigNat> Nat<B> {
     /// The value when it is below 2^64.
@@ -783,8 +795,11 @@ mod tests {
             (shiftr_small(u64::MAX, 63), shiftr_small(u64::MAX, 64)),
             (1, 0)
         );
-        // the result-size tests, against a backend of 2^40 bits
+        // `==` is the values' equality, across forms
         use crate::semantics::bignum::test_backend::N40;
+        assert!(Nat::<N40>::Small(5) == Small(5));
+        assert!(Nat::<N40>::Small(5) != Small(6));
+        // the result-size tests, against a backend of 2^40 bits
         const M: u64 = N40::MAX_BITS;
         assert_eq!(check_result_bits::<N40>(M.into()), Ok(M));
         assert_eq!(
