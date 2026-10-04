@@ -1,0 +1,124 @@
+# Row cases of area `panic` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/panic/panic.rows.toml`.
+# `panic` is `panic (msg) : Nat`, whose default is 0.
+
+[[row]]
+id = "panic/panic.boom"
+area = "panic"
+fn = "panic"
+args = ['"boom"']
+expected = "panic: boom"
+default = "0"
+stderr = "boom\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_panic_fn (object.cpp lean_panic_impl): the message on Lean's stderr stream, the default returned; LEAN_BACKTRACE=0 as the oracle runs"
+
+[[row]]
+id = "panic/panic.empty"
+area = "panic"
+fn = "panic"
+args = ['""']
+expected = "panic: "
+default = "0"
+stderr = "\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_panic_fn (object.cpp lean_panic_impl): the message on Lean's stderr stream, the default returned; LEAN_BACKTRACE=0 as the oracle runs"
+
+[[row]]
+id = "panic/panic.twolines"
+area = "panic"
+fn = "panic"
+args = ['"a\nb"']
+expected = "panic: a"
+default = "0"
+stderr = "a\nb\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_panic_fn (object.cpp lean_panic_impl): the message on Lean's stderr stream, the default returned; LEAN_BACKTRACE=0 as the oracle runs"
+
+[[row]]
+id = "panic/panic.unicode"
+area = "panic"
+fn = "panic"
+args = ['"é😀"']
+expected = "panic: é😀"
+default = "0"
+stderr = "é😀\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_panic_fn (object.cpp lean_panic_impl): the message on Lean's stderr stream, the default returned; LEAN_BACKTRACE=0 as the oracle runs"
+
+[[row]]
+id = "panic/panic.prefix"
+area = "panic"
+fn = "panic"
+args = ['"PANIC at f M:1:2: x"']
+expected = "panic: PANIC at f M:1:2: x"
+default = "0"
+stderr = "PANIC at f M:1:2: x\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_panic_fn (object.cpp lean_panic_impl): the message on Lean's stderr stream, the default returned; LEAN_BACKTRACE=0 as the oracle runs"
+
+[[row]]
+id = "panic/panic.abort"
+area = "panic"
+fn = "panic"
+args = ['"boom"']
+env = { LEAN_ABORT_ON_PANIC = "1" }
+expected = "ends"
+ends = { stderr = "boom\n", code = 134 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: LEAN_ABORT_ON_PANIC set (any value, even empty): the message on the process's stderr, then abort, status 134"
+
+[[row]]
+id = "panic/panic.abort.empty"
+area = "panic"
+fn = "panic"
+args = ['"boom"']
+env = { LEAN_ABORT_ON_PANIC = "" }
+expected = "ends"
+ends = { stderr = "boom\n", code = 134 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: LEAN_ABORT_ON_PANIC set (any value, even empty): the message on the process's stderr, then abort, status 134"
+
+[[row]]
+id = "panic/sorry"
+area = "panic"
+fn = "sorryAx"
+args = []
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: executed 'sorry'\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_internal_panic: 'INTERNAL PANIC: ' and the message on the saved C stderr, exit status 1, or 134 under LEAN_ABORT_ON_PANIC"
+
+[[row]]
+id = "panic/sorry.abort"
+area = "panic"
+fn = "sorryAx"
+args = []
+env = { LEAN_ABORT_ON_PANIC = "1" }
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: executed 'sorry'\n", code = 134 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_internal_panic: 'INTERNAL PANIC: ' and the message on the saved C stderr, exit status 1, or 134 under LEAN_ABORT_ON_PANIC"
+
+[[row]]
+id = "panic/pow.abort"
+area = "panic"
+fn = "Nat.pow"
+args = ["2", "4294967296"]
+env = { LEAN_ABORT_ON_PANIC = "1" }
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: Nat.pow exponent is too big\n", code = 134 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_internal_panic: 'INTERNAL PANIC: ' and the message on the saved C stderr, exit status 1, or 134 under LEAN_ABORT_ON_PANIC"
+
+[[row]]
+id = "panic/replicate.abort"
+area = "panic"
+fn = "Array.replicate"
+args = ["18446744073709551616", "7"]
+env = { LEAN_ABORT_ON_PANIC = "1" }
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 134 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: lean_internal_panic: 'INTERNAL PANIC: ' and the message on the saved C stderr, exit status 1, or 134 under LEAN_ABORT_ON_PANIC"

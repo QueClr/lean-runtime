@@ -1,0 +1,1086 @@
+# Row cases of area `array` (format: tests/cases/README.md). Expected values
+# from native Lean 4.34.0 through scripts/oracle; rebuild them with
+# `scripts/gen_rows.py tests/cases/array/array.rows.toml`.
+# The `ends` rows end the process with INTERNAL PANIC, as natively. The LB-06 rows
+# (`deviations`) expect the definition's result; `native` records native's panic.
+
+[[row]]
+id = "array/getbang.0"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[10, 20, 30]", "0"]
+expected = "10"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.0"
+area = "array"
+fn = "Array.set!"
+args = ["#[10, 20, 30]", "0", "9"]
+expected = "#[9, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/getbang.2"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[10, 20, 30]", "2"]
+expected = "30"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.2"
+area = "array"
+fn = "Array.set!"
+args = ["#[10, 20, 30]", "2", "9"]
+expected = "#[10, 20, 9]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/getbang.3"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[10, 20, 30]", "3"]
+expected = "panic: Error: index out of bounds"
+default = "0"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.3"
+area = "array"
+fn = "Array.set!"
+args = ["#[10, 20, 30]", "3", "9"]
+expected = "panic: Error: index out of bounds"
+default = "#[10, 20, 30]"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/getbang.2^63-1"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[10, 20, 30]", "9223372036854775807"]
+expected = "panic: Error: index out of bounds"
+default = "0"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.2^63-1"
+area = "array"
+fn = "Array.set!"
+args = ["#[10, 20, 30]", "9223372036854775807", "9"]
+expected = "panic: Error: index out of bounds"
+default = "#[10, 20, 30]"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/getbang.2^63"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[10, 20, 30]", "9223372036854775808"]
+expected = "panic: Error: index out of bounds"
+default = "0"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.2^63"
+area = "array"
+fn = "Array.set!"
+args = ["#[10, 20, 30]", "9223372036854775808", "9"]
+expected = "panic: Error: index out of bounds"
+default = "#[10, 20, 30]"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/getbang.2^64"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[10, 20, 30]", "18446744073709551616"]
+expected = "panic: Error: index out of bounds"
+default = "0"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.2^64"
+area = "array"
+fn = "Array.set!"
+args = ["#[10, 20, 30]", "18446744073709551616", "9"]
+expected = "panic: Error: index out of bounds"
+default = "#[10, 20, 30]"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/getbang.empty.0"
+area = "array"
+fn = "Array.get!Internal"
+args = ["#[]", "0"]
+expected = "panic: Error: index out of bounds"
+default = "0"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/setbang.empty.0"
+area = "array"
+fn = "Array.set!"
+args = ["#[]", "0", "9"]
+expected = "panic: Error: index out of bounds"
+default = "#[]"
+stderr = "Error: index out of bounds\n"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.get!Internal (xs[i]!) and Array.set! out of bounds print lean_panic_fn's 'Error: index out of bounds' (object.cpp); indices up to 2^64"
+
+[[row]]
+id = "array/swap.0.2"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "0", "2"]
+expected = "#[30, 20, 10]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.2.0"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "2", "0"]
+expected = "#[30, 20, 10]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.1.1"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "1", "1"]
+expected = "#[10, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.0.3"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "0", "3"]
+expected = "#[10, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.3.0"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "3", "0"]
+expected = "#[10, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.3.3"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "3", "3"]
+expected = "#[10, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.2^64.0"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "18446744073709551616", "0"]
+expected = "#[10, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/swap.0.2^63"
+area = "array"
+fn = "Array.swapIfInBounds"
+args = ["#[10, 20, 30]", "0", "9223372036854775808"]
+expected = "#[10, 20, 30]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/pop.0"
+area = "array"
+fn = "Array.pop"
+args = ["#[]"]
+expected = "#[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/pop.1"
+area = "array"
+fn = "Array.pop"
+args = ["#[1]"]
+expected = "#[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/pop.2"
+area = "array"
+fn = "Array.pop"
+args = ["#[1, 2]"]
+expected = "#[1]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: Array.swapIfInBounds (lean_array_swap) and Array.pop (lean_array_pop) out of bounds and empty: unchanged, no message"
+
+[[row]]
+id = "array/bytesget.0"
+area = "array"
+fn = "ByteArray.get!"
+args = ["(ByteArray.mk #[1, 2, 3])", "0"]
+expected = "1"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesset.0"
+area = "array"
+fn = "ByteArray.set!"
+args = ["(ByteArray.mk #[1, 2, 3])", "0", "7"]
+expected = "[7, 2, 3]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesget.2"
+area = "array"
+fn = "ByteArray.get!"
+args = ["(ByteArray.mk #[1, 2, 3])", "2"]
+expected = "3"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesset.2"
+area = "array"
+fn = "ByteArray.set!"
+args = ["(ByteArray.mk #[1, 2, 3])", "2", "7"]
+expected = "[1, 2, 7]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesget.3"
+area = "array"
+fn = "ByteArray.get!"
+args = ["(ByteArray.mk #[1, 2, 3])", "3"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesset.3"
+area = "array"
+fn = "ByteArray.set!"
+args = ["(ByteArray.mk #[1, 2, 3])", "3", "7"]
+expected = "[1, 2, 3]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesget.2^63"
+area = "array"
+fn = "ByteArray.get!"
+args = ["(ByteArray.mk #[1, 2, 3])", "9223372036854775808"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesset.2^63"
+area = "array"
+fn = "ByteArray.set!"
+args = ["(ByteArray.mk #[1, 2, 3])", "9223372036854775808", "7"]
+expected = "[1, 2, 3]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesget.2^64"
+area = "array"
+fn = "ByteArray.get!"
+args = ["(ByteArray.mk #[1, 2, 3])", "18446744073709551616"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesset.2^64"
+area = "array"
+fn = "ByteArray.set!"
+args = ["(ByteArray.mk #[1, 2, 3])", "18446744073709551616", "7"]
+expected = "[1, 2, 3]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/bytesget.empty.0"
+area = "array"
+fn = "ByteArray.get!"
+args = ["(ByteArray.mk #[])", "0"]
+expected = "0"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsget.0"
+area = "array"
+fn = "FloatArray.get!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "0"]
+bits = { result = "0x3ff8000000000000" }
+expected = "1.500000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsset.0"
+area = "array"
+fn = "FloatArray.set!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "0", "7.5"]
+bits = { args = ["0x401e000000000000"] }
+expected = "[7.500000, -2.250000]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsget.1"
+area = "array"
+fn = "FloatArray.get!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "1"]
+bits = { result = "0xc002000000000000" }
+expected = "-2.250000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsset.1"
+area = "array"
+fn = "FloatArray.set!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "1", "7.5"]
+bits = { args = ["0x401e000000000000"] }
+expected = "[1.500000, 7.500000]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsget.2"
+area = "array"
+fn = "FloatArray.get!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "2"]
+bits = { result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsset.2"
+area = "array"
+fn = "FloatArray.set!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "2", "7.5"]
+bits = { args = ["0x401e000000000000"] }
+expected = "[1.500000, -2.250000]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsget.2^63"
+area = "array"
+fn = "FloatArray.get!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "9223372036854775808"]
+bits = { result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsset.2^63"
+area = "array"
+fn = "FloatArray.set!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "9223372036854775808", "7.5"]
+bits = { args = ["0x401e000000000000"] }
+expected = "[1.500000, -2.250000]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsget.2^64"
+area = "array"
+fn = "FloatArray.get!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "18446744073709551616"]
+bits = { result = "0x0000000000000000" }
+expected = "0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/floatsset.2^64"
+area = "array"
+fn = "FloatArray.set!"
+args = ["(FloatArray.mk #[1.5, -2.25])", "18446744073709551616", "7.5"]
+bits = { args = ["0x401e000000000000"] }
+expected = "[1.500000, -2.250000]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.get!/set! and FloatArray.get!/set! out of bounds are silent in C (0, 0.0, the array unchanged), unlike their Lean definitions; ByteArray and FloatArray results are shown as `repr x.toList` (neither has a Repr instance)"
+
+[[row]]
+id = "array/replicate.0"
+area = "array"
+fn = "Array.replicate"
+args = ["0", "7"]
+expected = "#[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/mkempty.0"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["0"]
+expected = "#[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/bytesempty.0"
+area = "array"
+fn = "ByteArray.emptyWithCapacity"
+args = ["0"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/floatsempty.0"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["0"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/replicate.3"
+area = "array"
+fn = "Array.replicate"
+args = ["3", "7"]
+expected = "#[7, 7, 7]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/mkempty.3"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["3"]
+expected = "#[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/bytesempty.3"
+area = "array"
+fn = "ByteArray.emptyWithCapacity"
+args = ["3"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/floatsempty.3"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["3"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: the allocators on small sizes"
+
+[[row]]
+id = "array/replicate.2^61-4"
+area = "array"
+fn = "Array.replicate"
+args = ["2305843009213693948", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/replicate.2^61-3"
+area = "array"
+fn = "Array.replicate"
+args = ["2305843009213693949", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/replicate.2^63-1"
+area = "array"
+fn = "Array.replicate"
+args = ["9223372036854775807", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/replicate.2^63"
+area = "array"
+fn = "Array.replicate"
+args = ["9223372036854775808", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/replicate.2^64-1"
+area = "array"
+fn = "Array.replicate"
+args = ["18446744073709551615", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/replicate.2^64"
+area = "array"
+fn = "Array.replicate"
+args = ["18446744073709551616", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/replicate.2^100"
+area = "array"
+fn = "Array.replicate"
+args = ["1267650600228229401496703205376", "7"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr fix-xt e7848d3 (tests/runtime RtAllocBigNat, cross-test XT-5): huge sizes end with INTERNAL PANIC, integer overflow when 24 + 8n exceeds 2^64 - 1, out of memory for a size that is not a word or an allocation that fails"
+
+[[row]]
+id = "array/mkempty.2^61-4"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["2305843009213693948"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/floatsempty.2^61-4"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["2305843009213693948"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/mkempty.2^61-3"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["2305843009213693949"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/floatsempty.2^61-3"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["2305843009213693949"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/mkempty.2^63-1"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["9223372036854775807"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/floatsempty.2^63-1"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["9223372036854775807"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/mkempty.2^63"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["9223372036854775808"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/floatsempty.2^63"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["9223372036854775808"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/mkempty.2^64"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["18446744073709551616"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/floatsempty.2^64"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["18446744073709551616"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/bytesempty.2^63-1"
+area = "array"
+fn = "ByteArray.emptyWithCapacity"
+args = ["9223372036854775807"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/bytesempty.2^63"
+area = "array"
+fn = "ByteArray.emptyWithCapacity"
+args = ["9223372036854775808"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/bytesempty.2^64"
+area = "array"
+fn = "ByteArray.emptyWithCapacity"
+args = ["18446744073709551616"]
+expected = "ends"
+ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+lean_version = "4.34.0"
+source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
+deviations = { leanrs = "DV17 (d)" }
+
+[[row]]
+id = "array/copyslice.0.0.0.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "0", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.0.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "0", "false"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.2.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "2", "true"]
+expected = "[1, 2, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.2.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "2", "false"]
+expected = "[1, 2, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.1.1.2.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "1", "(ByteArray.mk #[10, 11, 12])", "1", "2", "true"]
+expected = "[10, 2, 3]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.1.1.2.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "1", "(ByteArray.mk #[10, 11, 12])", "1", "2", "false"]
+expected = "[10, 2, 3]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.5.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "5", "true"]
+expected = "[1, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.5.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "5", "false"]
+expected = "[1, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.9.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "9", "true"]
+expected = "[1, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.0.9.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "0", "9", "false"]
+expected = "[1, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2.3.3.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "2", "(ByteArray.mk #[10, 11, 12])", "3", "3", "true"]
+expected = "[10, 11, 12, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2.3.3.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "2", "(ByteArray.mk #[10, 11, 12])", "3", "3", "false"]
+expected = "[10, 11, 12, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2.2.3.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "2", "(ByteArray.mk #[10, 11, 12])", "2", "3", "true"]
+expected = "[10, 11, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2.2.3.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "2", "(ByteArray.mk #[10, 11, 12])", "2", "3", "false"]
+expected = "[10, 11, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2.9.2.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "2", "(ByteArray.mk #[10, 11, 12])", "9", "2", "true"]
+expected = "[10, 11, 12, 3, 4]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2.9.2.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "2", "(ByteArray.mk #[10, 11, 12])", "9", "2", "false"]
+expected = "[10, 11, 12, 3, 4]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.5.0.3.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "5", "(ByteArray.mk #[10, 11, 12])", "0", "3", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.5.0.3.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "5", "(ByteArray.mk #[10, 11, 12])", "0", "3", "false"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.6.0.3.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "6", "(ByteArray.mk #[10, 11, 12])", "0", "3", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.6.0.3.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "6", "(ByteArray.mk #[10, 11, 12])", "0", "3", "false"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.4.1.1.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "4", "(ByteArray.mk #[10, 11, 12])", "1", "1", "true"]
+expected = "[10, 5, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.4.1.1.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "4", "(ByteArray.mk #[10, 11, 12])", "1", "1", "false"]
+expected = "[10, 5, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.3.5.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "3", "5", "true"]
+expected = "[10, 11, 12, 1, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.3.5.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "3", "5", "false"]
+expected = "[10, 11, 12, 1, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.3.0.0.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "3", "(ByteArray.mk #[10, 11, 12])", "0", "0", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.3.0.0.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "3", "(ByteArray.mk #[10, 11, 12])", "0", "0", "false"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2^63.0.1.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "9223372036854775808", "(ByteArray.mk #[10, 11, 12])", "0", "1", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2^63.0.1.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "9223372036854775808", "(ByteArray.mk #[10, 11, 12])", "0", "1", "false"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.2^63.2.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "9223372036854775808", "2", "true"]
+expected = "[10, 11, 12, 1, 2]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.0.2^63.2.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "9223372036854775808", "2", "false"]
+expected = "[10, 11, 12, 1, 2]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.1.0.2^63.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "1", "(ByteArray.mk #[10, 11, 12])", "0", "9223372036854775808", "true"]
+expected = "[2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.1.0.2^63.false"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "1", "(ByteArray.mk #[10, 11, 12])", "0", "9223372036854775808", "false"]
+expected = "[2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.empty.0.0.3.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[])", "0", "(ByteArray.mk #[])", "0", "3", "true"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "lean-runtime batch 2: ByteArray.copySlice (lean_byte_array_copy_slice): offsets inside, at and past each end, lengths past the source, a destination grown, exact true and false"
+
+[[row]]
+id = "array/copyslice.2^64.0.2.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "18446744073709551616", "(ByteArray.mk #[10, 11, 12])", "0", "2", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "LB-06 (docs/lean-bugs.md), owner 2026-10-03: copySlice with an offset or a length of 2^64 or more gives the Lean definition's result, where native ends with INTERNAL PANIC: out of memory (lean_nat_to_size_t)"
+deviations = { lean2rr = "LB-06", leanrs = "LB-06" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+
+[[row]]
+id = "array/copyslice.1.0.2^64.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "1", "(ByteArray.mk #[10, 11, 12])", "0", "18446744073709551616", "true"]
+expected = "[2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "LB-06 (docs/lean-bugs.md), owner 2026-10-03: copySlice with an offset or a length of 2^64 or more gives the Lean definition's result, where native ends with INTERNAL PANIC: out of memory (lean_nat_to_size_t)"
+deviations = { lean2rr = "LB-06", leanrs = "LB-06" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+
+[[row]]
+id = "array/copyslice.0.2^64.2.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "0", "(ByteArray.mk #[10, 11, 12])", "18446744073709551616", "2", "true"]
+expected = "[10, 11, 12, 1, 2]"
+lean_version = "4.34.0"
+source = "LB-06 (docs/lean-bugs.md), owner 2026-10-03: copySlice with an offset or a length of 2^64 or more gives the Lean definition's result, where native ends with INTERNAL PANIC: out of memory (lean_nat_to_size_t)"
+deviations = { lean2rr = "LB-06", leanrs = "LB-06" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+
+[[row]]
+id = "array/copyslice.2^64.2^64.2^64.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "18446744073709551616", "(ByteArray.mk #[10, 11, 12])", "18446744073709551616", "18446744073709551616", "true"]
+expected = "[10, 11, 12]"
+lean_version = "4.34.0"
+source = "LB-06 (docs/lean-bugs.md), owner 2026-10-03: copySlice with an offset or a length of 2^64 or more gives the Lean definition's result, where native ends with INTERNAL PANIC: out of memory (lean_nat_to_size_t)"
+deviations = { lean2rr = "LB-06", leanrs = "LB-06" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+
+[[row]]
+id = "array/copyslice.1.1.2^100.true"
+area = "array"
+fn = "ByteArray.copySlice"
+args = ["(ByteArray.mk #[1, 2, 3, 4, 5])", "1", "(ByteArray.mk #[10, 11, 12])", "1", "1267650600228229401496703205376", "true"]
+expected = "[10, 2, 3, 4, 5]"
+lean_version = "4.34.0"
+source = "LB-06 (docs/lean-bugs.md), owner 2026-10-03: copySlice with an offset or a length of 2^64 or more gives the Lean definition's result, where native ends with INTERNAL PANIC: out of memory (lean_nat_to_size_t)"
+deviations = { lean2rr = "LB-06", leanrs = "LB-06" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }

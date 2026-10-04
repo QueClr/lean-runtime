@@ -24,6 +24,7 @@
 //! another target, code that calls them fails to compile until a port for
 //! that platform is added and checked against its native Lean.
 
+pub mod array;
 pub mod bignum;
 pub mod float;
 pub mod float32;

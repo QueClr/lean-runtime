@@ -19,8 +19,6 @@
 //! that end the process as data (the internal panic or abort they print),
 //! and runs each `Nat`/`Int` row under three representations.
 
-#![allow(dead_code)] // some helpers serve areas whose rows come in later commits
-
 mod common;
 mod refbig;
 
@@ -32,7 +30,7 @@ use lean_runtime::semantics::bignum::{BigInt, BigNat};
 use lean_runtime::semantics::int::{self, Int};
 use lean_runtime::semantics::nat::{self, Nat};
 use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
-use lean_runtime::semantics::repr;
+use lean_runtime::semantics::{array, repr};
 use refbig::{RInt, RNat};
 
 // ------------------------------------------------------------------ rows
@@ -540,6 +538,8 @@ fn registry() -> Registry {
     let mut r = Registry(HashMap::new());
     nat_fns(&mut r);
     int_fns(&mut r);
+    array_fns(&mut r);
+    panic_fns(&mut r);
     repr_fns(&mut r);
     r
 }
@@ -613,6 +613,117 @@ fn int_fns(r: &mut Registry) {
     });
     r.add("Int.negSucc", |a, rp, _| {
         int_text(&int::neg_succ_of_nat::<RInt>(nat(&a[0], rp)))
+    });
+}
+
+fn array_fns(r: &mut Registry) {
+    r.add("Array.get!Internal", |a, _, env| {
+        let xs = array_arg(&a[0]);
+        match array::get_bang(xs.len(), sat(&a[1])) {
+            Ok(i) => Out::from(xs[i].to_string()),
+            Err(o) => panic_fn(o.message(), "0".into(), env),
+        }
+    });
+    r.add("Array.set!", |a, _, env| {
+        let mut xs = array_arg(&a[0]).to_vec();
+        match array::set_bang(xs.len(), sat(&a[1])) {
+            Ok(i) => {
+                xs[i] = nat_value(&a[2]).to_u64().unwrap();
+                Out::from(array_repr(&xs))
+            }
+            Err(o) => panic_fn(o.message(), array_repr(&xs), env),
+        }
+    });
+    r.add("Array.swapIfInBounds", |a, _, _| {
+        let mut xs = array_arg(&a[0]).to_vec();
+        if let Some((i, j)) = array::swap_if_in_bounds(xs.len(), sat(&a[1]), sat(&a[2])) {
+            xs.swap(i, j);
+        }
+        array_repr(&xs)
+    });
+    r.add("Array.pop", |a, _, _| {
+        let mut xs = array_arg(&a[0]).to_vec();
+        if let Some(n) = array::pop(xs.len()) {
+            xs.truncate(n);
+        }
+        array_repr(&xs)
+    });
+    r.add("Array.replicate", |a, _, env| {
+        let v = nat_value(&a[1]).to_u64().unwrap();
+        ending(
+            array::replicate_len(nat_value(&a[0]).to_u64()).map(|n| array_repr(&vec![v; n])),
+            env,
+        )
+    });
+    r.add("Array.mkEmpty", |a, _, env| {
+        ending(
+            array::empty_with_capacity(array::WORD_ELEMENT_BYTES, sat(&a[0])).map(|_| "#[]".into()),
+            env,
+        )
+    });
+    r.add("ByteArray.emptyWithCapacity", |a, _, env| {
+        ending(
+            array::empty_with_capacity(array::BYTE_ELEMENT_BYTES, sat(&a[0])).map(|_| "[]".into()),
+            env,
+        )
+    });
+    r.add("FloatArray.emptyWithCapacity", |a, _, env| {
+        ending(
+            array::empty_with_capacity(array::WORD_ELEMENT_BYTES, sat(&a[0])).map(|_| "[]".into()),
+            env,
+        )
+    });
+    r.add("ByteArray.get!", |a, _, _| {
+        array::byte_array_get(bytes(&a[0]), sat(&a[1])).to_string()
+    });
+    r.add("ByteArray.set!", |a, _, _| {
+        let mut b = bytes(&a[0]).to_vec();
+        if let Some(i) = array::byte_array_set(b.len(), sat(&a[1])) {
+            b[i] = nat_value(&a[2]).low_u64() as u8;
+        }
+        list_repr(&b, |x| x.to_string())
+    });
+    r.add("FloatArray.get!", |a, _, _| {
+        let x = array::float_array_get(floats(&a[0]), sat(&a[1]));
+        Out {
+            value: f64_str(x),
+            bits: Some(format!("0x{:016x}", x.to_bits())),
+            ..Out::default()
+        }
+    });
+    r.add("FloatArray.set!", |a, _, _| {
+        let mut f = floats(&a[0]).to_vec();
+        if let Some(i) = array::float_array_set(f.len(), sat(&a[1])) {
+            f[i] = f64a(&a[2]);
+        }
+        list_repr(&f, |x| f64_str(*x))
+    });
+    r.add("ByteArray.copySlice", |a, _, _| {
+        let (src, dest) = (bytes(&a[0]), bytes(&a[2]));
+        let _exact = boolean(&a[5]);
+        let out = match array::copy_slice(src.len(), sat(&a[1]), dest.len(), sat(&a[3]), sat(&a[4]))
+        {
+            None => dest.to_vec(),
+            Some(p) => {
+                let mut out = dest[..p.dest_start].to_vec();
+                out.extend_from_slice(&src[p.src_start..p.src_start + p.len]);
+                if p.dest_start + p.len < dest.len() {
+                    out.extend_from_slice(&dest[p.dest_start + p.len..]);
+                }
+                assert_eq!(out.len(), p.new_len);
+                out
+            }
+        };
+        list_repr(&out, |x| x.to_string())
+    });
+}
+
+fn panic_fns(r: &mut Registry) {
+    r.add("panic", |a, _, env| {
+        panic_fn(string(&a[0]), "0".into(), env)
+    });
+    r.add("sorryAx", |_, _, env| {
+        internal_end(InternalPanic::Sorry, env)
     });
 }
 
@@ -766,6 +877,16 @@ fn nat_rows() {
 #[test]
 fn int_rows() {
     run("int", include_str!("cases/int/int.rows.toml"), 0);
+}
+
+#[test]
+fn array_rows() {
+    run("array", include_str!("cases/array/array.rows.toml"), 5);
+}
+
+#[test]
+fn panic_rows() {
+    run("panic", include_str!("cases/panic/panic.rows.toml"), 0);
 }
 
 #[test]
