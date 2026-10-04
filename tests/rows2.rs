@@ -804,9 +804,6 @@ fn mismatch(row: &Row, out: &Out) -> Option<String> {
     }
 }
 
-/// The rows are compiled in (`include_str!`), so the tests read no files and
-/// also run under Miri, on a sample (`miri_sample`) without the rows whose
-/// arguments are 2^(2^32)-sized.
 /// Every `MIRI_STRIDE`-th row of a file (the header kept), cut out of the
 /// text before it is parsed: Miri interprets the reader too, and the full
 /// files hold over 3000 rows.
@@ -823,6 +820,13 @@ fn miri_sample(text: &str) -> String {
     out
 }
 
+/// The rows are compiled in (`include_str!`), so the tests read no files and
+/// also run under Miri, on a sample (`miri_sample`) without the rows whose
+/// arguments are 2^(2^32)-sized. Under Miri they run in one configuration of
+/// `scripts/check.sh`, `--features unsafe-fast`, and are ignored in the
+/// others (each test's `cfg_attr`): the default build has
+/// `forbid(unsafe_code)` and no dependencies, so Miri cannot find undefined
+/// behaviour in it, and `io` and `sched` do not change `semantics`.
 fn run(file: &str, text: &str, deviations: usize) {
     let sample;
     let text = if cfg!(miri) {
@@ -870,26 +874,61 @@ fn run(file: &str, text: &str, deviations: usize) {
 }
 
 #[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
 fn nat_rows() {
     run("nat", include_str!("cases/nat/nat.rows.toml"), 2);
 }
 
 #[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
 fn int_rows() {
     run("int", include_str!("cases/int/int.rows.toml"), 0);
 }
 
 #[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
 fn array_rows() {
     run("array", include_str!("cases/array/array.rows.toml"), 5);
 }
 
 #[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
 fn panic_rows() {
     run("panic", include_str!("cases/panic/panic.rows.toml"), 0);
 }
 
 #[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
 fn repr_rows() {
     run("repr", include_str!("cases/repr/repr.rows.toml"), 0);
 }
@@ -897,6 +936,13 @@ fn repr_rows() {
 /// `refbig` against `u128`/`i128` arithmetic, on values around every limb
 /// boundary, so that a row failure points at the crate, not the backend.
 #[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
 fn refbig_matches_wide_arithmetic() {
     let edges: Vec<u128> = [
         0u128,
