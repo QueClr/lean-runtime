@@ -1,0 +1,5 @@
+putStr: invalid argument (error code: 9, bad file descriptor)
+realPath ., getLine: unsupported operation (error code: 34, result too large)
+realPath x.txt, getLine: invalid argument (error code: 22, invalid argument)
+realPath /, getLine: invalid argument (error code: 22, invalid argument)
+realPath ., getLine: unsupported operation (error code: 34, result too large)

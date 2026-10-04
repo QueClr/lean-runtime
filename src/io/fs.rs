@@ -139,11 +139,21 @@ pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
 /// `ENAMETOOLONG`, ...), is `mk_file_not_found_error`: `noFileOrDirectory path
 /// 2 ""`, with `realpath`'s own code as the modelled `errno`. A success leaves
 /// it at `EINVAL` when glibc's walk called `readlink` on a component that is
-/// not a symbolic link (`walk_reads_non_link`; leanrs review F2).
+/// not a symbolic link (`walk_reads_non_link`; leanrs review F2), else at
+/// `ERANGE` for a relative path in a working directory of 1024 bytes or more
+/// (glibc's first `getcwd` into a 1024-byte buffer; review RIO1-16).
 pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoError> {
     let path = c_path(p)?;
     match std::fs::canonicalize(path) {
         Ok(r) if r.as_os_str().len() < PATH_MAX => {
+            // a relative path starts from `getcwd` into glibc's 1024-byte
+            // scratch buffer, which fails with ERANGE first for a longer
+            // working directory (then grows; review RIO1-16)
+            if path.is_relative()
+                && std::env::current_dir().is_ok_and(|d| d.as_os_str().len() + 1 > 1024)
+            {
+                set_errno(ERANGE);
+            }
             if walk_reads_non_link(path) {
                 set_errno(EINVAL);
             }

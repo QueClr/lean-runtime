@@ -550,6 +550,22 @@ fn lock_during_read(args: &[String]) -> R<()> {
     println("done")
 }
 
+fn realpath_errno(args: &[String]) -> R<()> {
+    let h = open(&args[0], FsMode::Read)?;
+    if let Err(e) = h.put_str(b"x") {
+        println(&format!("putStr: {}", to_string(&e)))?;
+    }
+    for p in &args[1..] {
+        let mut out = Vec::new();
+        lfs::real_path(p.as_bytes(), &mut out)?;
+        match get_line(&h) {
+            Ok(l) => println(&format!("realPath {p}, getLine ok {}", quote(&l)))?,
+            Err(e) => println(&format!("realPath {p}, getLine: {}", to_string(&e)))?,
+        }
+    }
+    Ok(())
+}
+
 /// A twin: the case's program over its arguments.
 type Twin = fn(&[String]) -> R<()>;
 
@@ -574,6 +590,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("lock_blocked", lock_blocked),
     ("lock_exit", lock_exit),
     ("lock_during_read", lock_during_read),
+    ("realpath_errno", realpath_errno),
 ];
 
 /// Twins whose cases are in another branch (cases-xt) until it merges: they

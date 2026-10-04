@@ -1,0 +1,1 @@
+d=$(printf "%0200d" 0); mkdir -p $d/$d/$d/$d/$d/$d && cd $d/$d/$d/$d/$d/$d && echo hi > x.txt && $BIN $ARGS

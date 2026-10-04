@@ -1,0 +1,5 @@
+id = "realpath_errno"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime review io-1 RIO1-16 (review-io1/native/RealPathErrno.lean); leanrs review F2"
+streams = "separate"
