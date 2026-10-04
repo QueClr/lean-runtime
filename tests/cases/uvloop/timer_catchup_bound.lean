@@ -7,7 +7,10 @@ ms (and re-subscribes): the loop is always behind. How long does an extern
 current iteration only (review RSIOB-13). The bounds are generous, for a
 loaded host: natively `Timer.mk` takes a few ms and about 30 ticks come in
 `main`'s 100 ms sleep. The first argument is the native busy loop's length;
-the second is the twin's, in ms. -/
+the second is the twin's, in ms. The dependent subscribes again only on
+`some`: `t.stop` releases the pending promise, whose dependent then reads
+`none` and ends (re-subscribing on `none` would never end, as on Lean
+master; 4.34.0 ended only through LB-33). -/
 
 def busy (n : Nat) : Nat := Id.run do
   let mut acc := 0
@@ -17,10 +20,10 @@ def busy (n : Nat) : Nat := Id.run do
 
 partial def arm (t : Timer) (n : IO.Ref Nat) (work : Nat) : IO Unit := do
   let p ← t.next
-  let _ ← IO.mapTask (sync := true) (fun _ => do
+  let _ ← IO.mapTask (sync := true) (fun v => do
       if busy work == 1000004 then IO.println "never"
       n.modify (· + 1)
-      arm t n work) p.result?
+      if v.isSome then arm t n work) p.result?
 
 def main (args : List String) : IO Unit := do
   let work := args[0]!.toNat!

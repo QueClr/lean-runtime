@@ -634,6 +634,31 @@ its own.
     again); `stop` drops it (a finished timer's too, as timer.cpp 243-246)
     and finishes the timer. After `stop`, `next` gives a new promise that
     nothing resolves (it reads `none` once the program drops it).
+- **`stop` and `cancel` change the state before they release the
+  promise** (LB-33, LB-34). The handle's promise is taken out and its new
+  state set first (`stop`: the loop's timer or the listening stopped, then
+  finished; `cancel` of a one-shot handle: stopped, then initial again), and
+  only then is the promise released. If the handle held the last reference,
+  the promise reads `none`, and its `sync` dependents run there, inside the
+  extern, and see the handle after the operation, as every later dependent
+  does:
+  - after `stop`, `next` gives a new promise that the handle does not hold,
+    which reads `none` once dropped, so a dependent that subscribes again
+    on every value runs again each time (cases
+    `uvloop/timer_oneshot_stop_resubscribe`, `timer_stop_rearm_async_dependent`,
+    `signal_stop_drops_promise`, natively the same);
+  - after `cancel` of a repeating handle, `next` gives a promise that the
+    handle keeps and the next tick or signal resolves; after `cancel` of a
+    one-shot handle, `next` starts it again.
+
+  This is Lean master's `stop` (PR #14793, in no release yet, not in
+  4.35.0-rc1). Lean 4.34.0 releases first, while the handle still runs and
+  stores the promise (timer.cpp 243-252 and 271-284, signal.cpp 236-241 and
+  263-273): a dependent's `next` frees the promise twice and stores a new
+  one that is then lost, or, on a one-shot handle, gets the promise being
+  freed. The order for `cancel` is lean-runtime's own correction: master's
+  `cancel` is unchanged. A timer that does not run lets go of its promise
+  on `stop`, as in 4.34.0 (timer.cpp 243-246; master returns early).
 - **Signals** follow `signal.cpp`'s: Lean's signal numbers (its table;
   others become 0, which `next` refuses with `UV_EINVAL`, leaving the
   watcher running with a promise that never resolves, as natively), one-shot
@@ -750,10 +775,25 @@ promise only the program holds then resolves with `none`.
   `timer_cancel_in_sync_dependent`, `signal_stop_in_sync_dependent`,
   `signal_cancel_in_sync_dependent` (the correct outcome is native's own
   for the same program with `sync := false`).
+- **LB-33, LB-34**: natively `stop` and `cancel` release the promise while
+  the timer or watcher still runs and stores it, so a `sync` dependent's
+  `next` frees it twice and its new promise is lost (the process can hang
+  at exit), or, on a one-shot handle, gets the promise being freed. Here
+  the state changes first (above). Cases `uvloop/timer_stop_rearm_in_sync_dependent`,
+  `timer_cancel_rearm_in_sync_dependent`,
+  `timer_oneshot_stop_keep_in_sync_dependent`,
+  `timer_oneshot_cancel_keep_in_sync_dependent`,
+  `timer_oneshot_cancel_resubscribe`, `signal_stop_rearm_in_sync_dependent`,
+  `signal_cancel_rearm_in_sync_dependent`,
+  `signal_oneshot_stop_keep_in_sync_dependent`,
+  `signal_oneshot_cancel_keep_in_sync_dependent`; the controls
+  `timer_oneshot_stop_resubscribe`, `timer_stop_rearm_async_dependent` and
+  `signal_stop_drops_promise` follow native.
 
 Cases `tests/cases/uvloop` (recorded natively, 5 runs, with twins in the
 driver): `loop_configure`, `timer_oneshot`, `timer_repeating`,
-`timer_cancel_reset`, `timer_due_stop`, `timer_catchup_bound`,
+`timer_cancel_reset`, `timer_due_stop`, `timer_catchup_bound` (its
+dependent subscribes again only on `some`: LB-33),
 `signal_rearm_in_sync_dependent`, `signal_rearm_in_async_dependent`,
 `signal_usr1` (SIGUSR1 sent by
 `kill`, a child, to the program: one-shot, repeating, `cancel`, an unknown
@@ -775,6 +815,14 @@ is `t.next(|| new_promise())`, then `reset`, `stop`, `cancel`;
 `lean_uv_event_loop_alive` are `uv::loop_configure` and `uv::loop_alive`. A
 failure is a libuv error code, which the glue turns into Lean's error with
 `io::IoError::decode_uv_error(code, None)` (`lean_decode_uv_error`).
+Every extern, `Timer::new` and `Signal::new` included, first catches the
+loop up, so it may run due callbacks and their `sync` dependents, and let
+other contexts run. For a value to leave behind in a `mem::take`-style
+move, use `Timer::placeholder()` or `Signal::placeholder()` (review AR-22):
+they do not catch up and let nothing run. They are not `Timer.mk` or
+`Signal.mk`: an initial one-shot timer with timeout 0, an initial one-shot
+watcher of no signal. Never give one to the program or use it as a timer
+or a watcher; that is the glue's error.
 
 ## The glue
 
@@ -1757,6 +1805,15 @@ program.
 ## Costs to measure (O12, owner-approved timing session)
 
 None of these has been timed.
+- **The hooks inline into the translator's code** (review AR-23), so a
+  crate built without LTO calls nothing on its hot path: `before_publish`
+  and `before_task_value` are one relaxed load (the count of running
+  writers); `poll` and `effect` are that load and `coop_possible()`'s until
+  the program has a task, a promise, a timer or a watch; `ref_read` is the
+  flag's load, then the countdown; `release` of a finished task's id is a
+  comparison; the no-suspend scope is a thread-local counter. What follows
+  is out of line (`#[inline(never)]`, and `#[cold]` for the writers' wait
+  and every 1000th read).
 - **Polling points.** `ref_read` is an atomic load when off, and a
   thread-local countdown when on; every 1000th read, and every `poll`, costs
   a thread-local `RefCell` borrow and checks on the sleepers, runnable

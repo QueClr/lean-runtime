@@ -1,0 +1,6 @@
+cancel: begin
+dependent: value none
+cancel: end
+aliased: false
+kept resolved: false
+kept resolved after resolving the fresh promises: false

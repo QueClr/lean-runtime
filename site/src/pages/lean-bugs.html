@@ -86,6 +86,18 @@ A judge confirmed LB-29 to LB-31 on 2026-10-04; the case of LB-30 and LB-31 is <
 When <code>result!</code> reaches its endless block, they also wake there and see <code>none</code> (<a href="sched.html#sync">sched</a>).
 A blocking <code>sync</code> continuation in the program is misuse and stays as native.
 The lean2rr-side judge confirmed it on 2026-10-04, in batch <code>sched-2</code>; its cases are <code>tasks/dropped_promise_waiter_*</code>.</td></tr>
+<tr id="lb-33"><td>LB-33</td><td>A timer's <code>stop</code> or <code>cancel</code> releases its promise while the timer still runs and stores it.
+A <code>sync</code> dependent of that promise then runs inside the extern.
+If it calls <code>next</code>, the promise is freed twice, and the new promise is lost.
+On a one-shot timer, <code>next</code> gives the promise being freed.
+The process can hang at exit.</td><td>The timer's state changes first, and only then is the promise released.
+So every dependent sees the timer after the operation (<a href="sched.html#uv">sched</a>).
+For <code>stop</code>, this is Lean master's order (PR #14793, in no release yet).
+For <code>cancel</code>, it is our own correction.</td></tr>
+<tr id="lb-34"><td>LB-34</td><td>The same defect for a signal watcher's <code>stop</code> and <code>cancel</code>.
+The double free makes the process hang at exit.</td><td>The same order as LB-33.
+A judge confirmed LB-33 and LB-34 on 2026-10-04, and leanrs agreed.
+Their cases are <code>uvloop/*_rearm_*</code>, <code>uvloop/*_keep_in_sync_dependent</code> and <code>uvloop/timer_oneshot_cancel_resubscribe</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

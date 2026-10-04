@@ -293,11 +293,18 @@ pub fn check_canceled() -> bool {
 /// finish of a task released before it finished notifies nobody (natively
 /// it is deleted then, `m_deleted`, without `resolve_core`'s `notify_all`).
 /// A deleted task's job is dropped here, outside the scheduler's lock, so it
-/// may release its own source in turn. Nothing for a finished task's id.
+/// may release its own source in turn. Nothing for a finished task's id:
+/// inlined down to that comparison (review AR-23).
+#[inline]
 pub fn release(id: TaskId) {
-    if id == TaskId::FINISHED {
-        return;
+    if id != TaskId::FINISHED {
+        release_live(id);
     }
+}
+
+/// [`release`] of a task that may still have an entry.
+#[inline(never)]
+fn release_live(id: TaskId) {
     let job = task::with_shared(|sh| sh.and_then(|sh| task::release(sh, id)));
     drop(job);
 }

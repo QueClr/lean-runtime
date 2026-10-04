@@ -2041,8 +2041,18 @@ pub fn check_canceled() -> bool {
 /// nobody (natively it is deleted then, `m_deleted`, without
 /// `resolve_core`'s `notify_all`). Call it with no borrow of
 /// the translator's own state that the task's job may need: the job is
-/// dropped here.
+/// dropped here. Nothing for a finished task's id (`TaskId::FINISHED`, as
+/// `Task.pure`'s): inlined down to that comparison (review AR-23).
+#[inline]
 pub fn release(id: TaskId) {
+    if id != TaskId::FINISHED {
+        release_live(id);
+    }
+}
+
+/// [`release`] of a task that may still have an entry.
+#[inline(never)]
+fn release_live(id: TaskId) {
     if !super::alive() {
         return;
     }
@@ -2233,9 +2243,21 @@ fn finish_tasks() {
 /// `IO.checkCanceled`, clock reads, and `ST.Ref` reads in programs with
 /// tasks (`ref_read`). Natively other threads go on while the program polls,
 /// so they do now: due sleepers, the contexts able to run, a queued task if a
-/// worker is free (on a context of its own).
+/// worker is free (on a context of its own). Inlined down to two relaxed
+/// loads (writers, `coop_possible`) until the program has a task, a
+/// promise, a timer or a watch, which is when something can be pending
+/// (review AR-23); the check is out of line.
+#[inline]
 pub fn poll() {
     super::writers_point();
+    if super::reactor::coop_possible() {
+        poll_check();
+    }
+}
+
+/// [`poll`] once a task, a promise, a timer or a watch exists.
+#[inline(never)]
+fn poll_check() {
     let go = with(|s| {
         if !s.tk.started
             || (s.cx.sleepers.is_empty()
@@ -2269,8 +2291,18 @@ pub fn poll() {
 /// while ago; then, round after round, what those release. What runs in
 /// those rounds happened before natively: its own effect points start no
 /// tasks, and let go first only what is due or able to run for a while.
+/// Inlined down to two relaxed loads, as [`poll`] (review AR-23).
+#[inline]
 pub fn effect() {
     super::writers_point();
+    if super::reactor::coop_possible() {
+        effect_check();
+    }
+}
+
+/// [`effect`] once a task, a promise, a timer or a watch exists.
+#[inline(never)]
+fn effect_check() {
     let slow = with(|s| {
         s.tk.started
             && (!s.cx.sleepers.is_empty()

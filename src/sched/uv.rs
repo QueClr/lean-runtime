@@ -112,6 +112,20 @@ impl<P: LoopPromise> Timer<P> {
     /// `Timer.mk timeout repeating` (`lean_uv_timer_mk`): an initial timer.
     pub fn new(timeout: u64, repeating: bool) -> Timer<P> {
         catch_up();
+        Timer::initial(timeout, repeating)
+    }
+
+    /// A placeholder for the glue only (a value to leave behind in a
+    /// `mem::take`-style move), not Lean's `Timer.mk`: an initial one-shot
+    /// timer with timeout 0, made without `catch_up`, so it never lets the
+    /// loop or another context run (review AR-22). The glue must never give
+    /// it to the program or use it as a timer; its externs act on it as on
+    /// any initial timer, and doing so is the glue's error.
+    pub fn placeholder() -> Timer<P> {
+        Timer::initial(0, false)
+    }
+
+    fn initial(timeout: u64, repeating: bool) -> Timer<P> {
         Timer(Rc::new(RefCell::new(TimerState {
             timeout,
             repeating,
@@ -232,6 +246,19 @@ impl<P: LoopPromise> Timer<P> {
     /// `Timer.stop` (`lean_uv_timer_stop`): the timer lets go of its promise
     /// (which resolves only through the program's own references now); a
     /// running one stops and is finished.
+    ///
+    /// The state changes before the release, as on Lean master (PR #14793,
+    /// in no release yet, not in 4.35.0-rc1): the loop's timer stopped, the
+    /// promise taken out and the timer finished under the loop's lock, the
+    /// promise released after it. The last reference resolves the promise
+    /// with `none` and runs its `sync` dependents here: they see a finished
+    /// timer, whose `next` gives a new promise that the timer does not hold,
+    /// as after any `stop`. Lean 4.34.0 releases the promise first, while
+    /// the timer still runs and stores it (timer.cpp 243-252): a dependent's
+    /// `next` frees it twice and stores a promise that is then lost, or, on a
+    /// one-shot timer, gets the promise being freed (LB-33). A timer that
+    /// does not run lets go of its promise too, as in 4.34.0 (243-246;
+    /// master returns early, 246-249).
     pub fn stop(&self) {
         catch_up();
         let (p, id) = {
@@ -255,6 +282,18 @@ impl<P: LoopPromise> Timer<P> {
 
     /// `Timer.cancel` (`lean_uv_timer_cancel`): a running timer with a promise
     /// lets go of it; a one-shot one also stops and is initial again.
+    ///
+    /// As `stop`, the state changes before the release, as every later
+    /// dependent sees it (native's outcome with `sync := false`): the `sync`
+    /// dependents of the released promise see a running repeating timer
+    /// without a promise, whose `next` gives one that the next tick
+    /// resolves, or an initial one-shot timer, whose `next` starts it again.
+    /// This order is lean-runtime's own correction: Lean master's `cancel`
+    /// is unchanged (LB-33). Natively they see the timer as it was (271-284):
+    /// a repeating timer's `next` frees the promise being released twice and
+    /// stores a new one, which 274 overwrites without a release (it never
+    /// resolves, though the timer ticks on), and a one-shot timer's `next`
+    /// gives the promise being released (191-195 during 278: LB-33).
     pub fn cancel(&self) {
         catch_up();
         let (p, id) = {
@@ -369,14 +408,29 @@ impl<P: LoopPromise> Signal<P> {
     /// does not have it.
     pub fn new(signum: i32, repeating: bool) -> Signal<P> {
         catch_up();
+        Signal::initial(native_signum(signum), repeating, signals::next_seq())
+    }
+
+    /// A placeholder for the glue only (a value to leave behind in a
+    /// `mem::take`-style move), not Lean's `Signal.mk`: an initial one-shot
+    /// watcher of no signal (`next` would fail with `UV_EINVAL`), made
+    /// without `catch_up`, so it never lets the loop or another context run
+    /// (review AR-22). The glue must never give it to the program or use it
+    /// as a watcher; its externs act on it as on any initial watcher of no
+    /// signal, and doing so is the glue's error.
+    pub fn placeholder() -> Signal<P> {
+        Signal::initial(0, false, 0)
+    }
+
+    fn initial(signum: i32, repeating: bool, seq: u64) -> Signal<P> {
         Signal(Rc::new(RefCell::new(SignalState {
-            signum: native_signum(signum),
+            signum,
             repeating,
             state: State::Initial,
             promise: None,
             listening: false,
             starts: 0,
-            seq: signals::next_seq(),
+            seq,
         })))
     }
 
@@ -445,6 +499,16 @@ impl<P: LoopPromise> Signal<P> {
     /// the signal is left, the signal has its default action again
     /// (`uv__signal_unregister_handler` restores `SIG_DFL`). Never fails
     /// (`uv_signal_stop` gives 0).
+    ///
+    /// The state changes before the release, as on Lean master (PR #14793,
+    /// in no release yet, not in 4.35.0-rc1): the handle stopped, the
+    /// promise taken out and the watcher finished under the loop's lock, the
+    /// promise released after it. The `sync` dependents of the released
+    /// promise see a finished watcher, whose `next` gives a new promise that
+    /// the watcher does not hold. Lean 4.34.0 releases the promise first,
+    /// while the watcher still runs and stores it (signal.cpp 236-241): a
+    /// dependent's `next` frees it twice, and the process hangs at exit, or,
+    /// on a one-shot watcher, gets the promise being freed (LB-34).
     pub fn stop(&self) -> Result<(), i32> {
         catch_up();
         let p = {
@@ -462,7 +526,12 @@ impl<P: LoopPromise> Signal<P> {
 
     /// `Signal.cancel` (`lean_uv_signal_cancel`): a running watcher with a
     /// promise lets go of it; a one-shot one also stops listening and is
-    /// initial again.
+    /// initial again. As `stop`, the state changes before the release: a
+    /// repeating watcher's `sync` dependent gets a promise from `next` that
+    /// the watcher keeps and the next signal resolves; a one-shot watcher's
+    /// starts listening again (natively it is lost, or the promise being
+    /// freed: signal.cpp 263-273, LB-34). This order is lean-runtime's own
+    /// correction: Lean master's `cancel` is unchanged.
     pub fn cancel(&self) {
         catch_up();
         let p = {
@@ -949,6 +1018,169 @@ mod tests {
         }
         assert_eq!(q.get(), Some(0));
         assert_eq!(p.is_resolved(), fired);
+        sched::finish();
+    }
+
+    /// A translator's promise as a counted reference (the glue's): the last
+    /// reference to go resolves it with `none` (`deactivate_promise`). The
+    /// slot holds `Some(value)` once it has resolved.
+    #[derive(Clone)]
+    struct Q(Rc<QObj>);
+
+    struct QObj {
+        id: TaskId,
+        slot: Rc<Cell<Option<Option<i64>>>>,
+    }
+
+    impl Drop for QObj {
+        fn drop(&mut self) {
+            let slot = self.slot.clone();
+            sched::resolve(self.id, move || slot.set(Some(None)));
+        }
+    }
+
+    impl Q {
+        fn new() -> Q {
+            Q(Rc::new(QObj {
+                id: sched::promise_new().unwrap(),
+                slot: Rc::new(Cell::new(None)),
+            }))
+        }
+    }
+
+    impl LoopPromise for Q {
+        fn is_resolved(&self) -> bool {
+            self.0.slot.get().is_some()
+        }
+        fn resolve(&self, v: i64) {
+            let slot = self.0.slot.clone();
+            sched::resolve(self.0.id, move || slot.set(Some(Some(v))));
+        }
+    }
+
+    /// What a re-subscribing dependent saw: the values, the promises it
+    /// subscribed to, and in each run whether two `next`s gave the same
+    /// promise (one the timer holds) or two new ones (a finished timer).
+    #[derive(Clone, Default)]
+    struct Seen {
+        values: Rc<RefCell<Vec<Option<i64>>>>,
+        promises: Rc<RefCell<Vec<TaskId>>>,
+        held: Rc<RefCell<Vec<bool>>>,
+    }
+
+    /// `arm` of case `uvloop/timer_oneshot_stop_resubscribe`: `next`, then a
+    /// `sync` dependent of the promise that subscribes again, whatever the
+    /// value, at most `cap` times; the promise is dropped at once, as
+    /// compiled Lean drops it after `result?`.
+    fn subscribe(t: &Timer<Q>, seen: &Seen, cap: usize) {
+        let p = t.next(Q::new);
+        seen.promises.borrow_mut().push(p.0.id);
+        let (t2, seen2, slot) = (t.clone(), seen.clone(), p.0.slot.clone());
+        sched::depend(
+            p.0.id,
+            Box::new(move || {
+                seen2
+                    .values
+                    .borrow_mut()
+                    .push(slot.get().expect("resolved"));
+                let (a, b) = (t2.next(Q::new), t2.next(Q::new));
+                seen2.held.borrow_mut().push(Rc::ptr_eq(&a.0, &b.0));
+                drop((a, b));
+                if seen2.values.borrow().len() < cap {
+                    subscribe(&t2, &seen2, cap);
+                }
+                sched::Outcome::Done
+            }),
+            0,
+            true,
+            true,
+        );
+    }
+
+    /// Each run of the dependent saw `none` and a finished timer (no promise
+    /// held), and every promise it subscribed to has read `none`.
+    fn ran_on_a_finished_timer(seen: &Seen, cap: usize) {
+        assert_eq!(*seen.values.borrow(), vec![None; cap]);
+        assert_eq!(*seen.held.borrow(), vec![false; cap]);
+        assert_eq!(seen.promises.borrow().len(), cap);
+        assert!(seen
+            .promises
+            .borrow()
+            .iter()
+            .all(|&p| sched::is_finished(p)));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_stopped_timer_is_finished_before_its_promise_is_released() {
+        // LB-33: as on Lean master (PR #14793), `stop` finishes the timer,
+        // then releases the promise. The `sync` dependent that the release
+        // runs sees a finished timer: its `next` gives a promise the timer
+        // does not hold, which reads `none` when dropped, so a dependent that
+        // subscribes again runs again, up to its cap (natively, 4.34.0, it
+        // ran once and its new promise was lost).
+        start();
+        let t: Timer<Q> = Timer::new(3_600_000, true);
+        // the 0th tick resolves at once; the next one is an hour away
+        let p0 = t.next(Q::new);
+        if p0.0.slot.get().is_none() {
+            sched::wait(p0.0.id);
+        }
+        assert_eq!(p0.0.slot.get(), Some(Some(0)));
+        let seen = Seen::default();
+        subscribe(&t, &seen, 5);
+        assert!(seen.values.borrow().is_empty());
+        t.stop();
+        ran_on_a_finished_timer(&seen, 5);
+        sched::finish();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_stopped_one_shot_timer_is_finished_before_its_promise_is_released() {
+        // The same for a one-shot timer stopped before it fires (natively the
+        // dependent's `next` gives the promise being released, which has
+        // read `none`: the same runs, through a use after free).
+        start();
+        let t: Timer<Q> = Timer::new(3_600_000, false);
+        let seen = Seen::default();
+        subscribe(&t, &seen, 5);
+        assert!(seen.values.borrow().is_empty());
+        t.stop();
+        ran_on_a_finished_timer(&seen, 5);
+        sched::finish();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_placeholder_lets_nothing_run() {
+        // AR-22: `Timer::new` and `Signal::new` catch the loop up, so a due
+        // timer's `sync` dependent runs there; a placeholder runs nothing.
+        start();
+        let t: Timer<Q> = Timer::new(1, false);
+        let p = t.next(Q::new);
+        let ran = Rc::new(Cell::new(false));
+        let r2 = ran.clone();
+        sched::depend(
+            p.0.id,
+            Box::new(move || {
+                r2.set(true);
+                sched::Outcome::Done
+            }),
+            0,
+            true,
+            true,
+        );
+        // due now, but nothing has looked at the loop yet
+        std::thread::sleep(Duration::from_millis(5));
+        let _a: Timer<Q> = Timer::placeholder();
+        let _b: Signal<Q> = Signal::placeholder();
+        assert!(!ran.get(), "a placeholder ran the due timer's dependent");
+        assert!(!p.is_resolved());
+        // the check sees a catch-up: `Timer::new` runs it
+        let _c: Timer<Q> = Timer::new(1, false);
+        assert!(ran.get());
+        assert_eq!(p.0.slot.get(), Some(Some(0)));
         sched::finish();
     }
 

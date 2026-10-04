@@ -1,0 +1,15 @@
+id = "signal_stop_rearm_in_sync_dependent"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "LB-34 (docs/lean-bugs.md; lean2rr-side judge 2026-10-04, leanrs cross-check agreed; the judge's cases list, judge/lb33/LB-34.md); probe signal_stop_probe (lean-runtime-work/fixes-2/probes)"
+streams = "separate"
+expect = { hang = 5 }
+deviations = { lean2rr = "LB-34", leanrs = "LB-34; DV2" }
+# leanrs: DV2 until it adopts sched/ (it refuses Std.Internal.UV's timers and signals at translation, so it has no executable for uvloop's cases).
+native = { stdout = "stop: begin\ndependent 1: value none\nstop: end\ndependent runs: 1\n", stderr = "", code = "timeout" }
+# `expected` is the correct outcome: the watcher is finished before the
+# promise is released (Lean master's `stop`, PR #14793, in no release yet),
+# so each re-subscription reads `none` once dropped and the dependent runs
+# up to its cap, inside `stop`. Native Lean 4.34.0's outcome, recorded over 5
+# runs, is `native`: the dependent runs once and its `next` frees the promise
+# a second time; the process hangs at exit.

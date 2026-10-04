@@ -3,5 +3,5 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "shared-runtime decisions, checklist for the sched/ step (stack overflow in a task); lean-runtime sched batch 1"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: the task runs at its creation on the program thread's 4 GiB stack (chapter 04 S2), so it does not overflow
+deviations = { leanrs = "DV6" }
+# leanrs DV6 (stack depth): leanrs turns `deep` into a loop through tail calls, so it never overflows

@@ -292,6 +292,11 @@ impl<T: Clone + 'static> UvPromise<T> {
     pub fn resolve(&self, v: T) {
         self.0.resolve(v)
     }
+
+    /// `ptrAddrUnsafe` of the promise: its object's address.
+    pub fn addr(&self) -> usize {
+        Rc::as_ptr(&self.0) as usize
+    }
 }
 
 impl lean_runtime::sched::uv::LoopPromise for UvPromise<()> {

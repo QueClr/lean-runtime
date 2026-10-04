@@ -227,9 +227,18 @@ pub fn ref_read() {
             }
         });
         if due {
-            poll();
+            ref_read_poll();
         }
     }
+}
+
+/// Every `REF_READS_PER_POLL`-th read of [`ref_read`]: out of line, so the
+/// reads in between inline down to the flag's load and the countdown
+/// (review AR-23).
+#[cold]
+#[inline(never)]
+fn ref_read_poll() {
+    poll();
 }
 
 /// Block the running context until another wakes it (`wake`): the waiting

@@ -1,0 +1,14 @@
+id = "signal_oneshot_cancel_keep_in_sync_dependent"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "LB-34 (docs/lean-bugs.md; lean2rr-side judge 2026-10-04, leanrs cross-check agreed; the judge's cases list, judge/lb33/LB-34.md); probe SignalVariants.lean oneshot-cancel"
+streams = "separate"
+deviations = { lean2rr = "LB-34", leanrs = "LB-34; DV2" }
+# leanrs: DV2 until it adopts sched/ (it refuses Std.Internal.UV's timers and signals at translation, so it has no executable for uvloop's cases).
+native = { stdout = "cancel: begin\ndependent: value none\ncancel: end\naliased: true\nkept resolved: false\nkept resolved after resolving the fresh promises: true\n", stderr = "", code = "0" }
+# `expected` is the correct outcome: the watcher is initial again before
+# the release (lean-runtime's own order for `cancel`: Lean master's `cancel`
+# is unchanged), so the dependent's `next` starts it listening again and
+# gives its new promise, which no signal resolves. Native Lean 4.34.0's
+# outcome, recorded over 5 runs, is `native`: `next` gives the promise being
+# freed (a use after free); a fresh promise takes its memory.

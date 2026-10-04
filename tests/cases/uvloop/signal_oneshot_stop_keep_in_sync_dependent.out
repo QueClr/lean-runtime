@@ -1,0 +1,6 @@
+stop: begin
+dependent: value none
+stop: end
+aliased: false
+kept resolved: false
+kept resolved after resolving the fresh promises: false

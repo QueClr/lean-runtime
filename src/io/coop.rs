@@ -631,11 +631,20 @@ pub(crate) enum JoinAt {
 /// Otherwise (no other context, off the scheduler's thread, an exit in a
 /// no-suspend scope) the thread waits on a condition variable the writers
 /// notify. Other contexts' writers are not waited for. One relaxed load
-/// when no writer runs.
+/// when no writer runs: inlined into every caller, the rest out of line
+/// (review AR-23: a translator's crate built without LTO calls nothing
+/// on its hot path).
+#[inline]
 pub(crate) fn join_own_writers(at: JoinAt) {
-    if RUNNING_WRITERS.load(Ordering::Relaxed) == 0 {
-        return;
+    if RUNNING_WRITERS.load(Ordering::Relaxed) != 0 {
+        join_own_writers_slow(at);
     }
+}
+
+/// [`join_own_writers`] once a writer runs.
+#[cold]
+#[inline(never)]
+fn join_own_writers_slow(at: JoinAt) {
     if at == JoinAt::End
         && (sched::in_no_suspend()
             || std::thread::panicking()

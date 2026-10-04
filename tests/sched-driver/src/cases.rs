@@ -120,6 +120,26 @@ pub fn lookup(id: &str) -> Option<Case> {
         "signal_stop_in_sync_dependent" => (no_init, lb20_probe),
         "signal_cancel_in_sync_dependent" => (no_init, lb20_probe),
         "timer_catchup_bound" => (no_init, timer_catchup_bound),
+        "timer_oneshot_stop_resubscribe" => (no_init, timer_oneshot_stop_resubscribe),
+        "timer_stop_rearm_in_sync_dependent" => (no_init, timer_stop_rearm_in_sync_dependent),
+        "timer_cancel_rearm_in_sync_dependent" => (no_init, timer_cancel_rearm_in_sync_dependent),
+        "timer_oneshot_stop_keep_in_sync_dependent" => {
+            (no_init, timer_oneshot_keep_in_sync_dependent)
+        }
+        "timer_oneshot_cancel_keep_in_sync_dependent" => {
+            (no_init, timer_oneshot_keep_in_sync_dependent)
+        }
+        "timer_oneshot_cancel_resubscribe" => (no_init, timer_oneshot_cancel_resubscribe),
+        "timer_stop_rearm_async_dependent" => (no_init, timer_stop_rearm_async_dependent),
+        "signal_stop_rearm_in_sync_dependent" => (no_init, signal_stop_rearm_in_sync_dependent),
+        "signal_cancel_rearm_in_sync_dependent" => (no_init, signal_cancel_rearm_in_sync_dependent),
+        "signal_oneshot_stop_keep_in_sync_dependent" => {
+            (no_init, signal_oneshot_keep_in_sync_dependent)
+        }
+        "signal_oneshot_cancel_keep_in_sync_dependent" => {
+            (no_init, signal_oneshot_keep_in_sync_dependent)
+        }
+        "signal_stop_drops_promise" => (no_init, signal_stop_drops_promise),
         "signal_rearm_in_sync_dependent" => (no_init, signal_rearm_in_dependent),
         "signal_rearm_in_async_dependent" => (no_init, signal_rearm_in_dependent),
         // tests/cases/io: the cases with tasks
@@ -3838,21 +3858,19 @@ fn lb20_probe(args: &[String]) -> u32 {
 }
 
 // tests/cases/uvloop/timer_catchup_bound.lean: `arm` re-subscribes from a
-// `sync` dependent of each tick (the twin skips the `none` resolution of a
-// dropped promise: in Lean the dependent's task is the promise itself, so
-// it is never dropped while the dependent waits).
+// `sync` dependent of each tick, on `some` only (LB-33: at `t.stop` the
+// dependent reads `none` once and returns).
 fn catchup_arm(t: UTimer, n: Ref<u64>, work_ms: u64) {
     let p = t.next(UvPromise::new);
     let task = p.result_opt();
     drop(p);
     let _ = map_task(
         move |v: Option<()>| {
-            if v.is_none() {
-                return;
-            }
             spin_ms(work_ms);
             n.modify(|k| k + 1);
-            catchup_arm(t, n, work_ms);
+            if v.is_some() {
+                catchup_arm(t, n, work_ms);
+            }
         },
         task,
         PRIO_DEFAULT,
@@ -3878,6 +3896,378 @@ fn timer_catchup_bound(args: &[String]) -> u32 {
     ));
     t.stop();
     drop(u);
+    0
+}
+
+// The cases of LB-33 and LB-34 (tests/cases/uvloop/*_rearm_*, *_keep_*,
+// *_resubscribe, signal_stop_drops_promise): `say` is `IO.println` and a
+// flush.
+fn say(s: &str) {
+    println(s);
+    let _ = Handle::stdout().flush();
+}
+
+fn some_none<T>(v: &Option<T>) -> &'static str {
+    if v.is_some() {
+        "some"
+    } else {
+        "none"
+    }
+}
+
+/// `showV` of the signal cases.
+fn show_v(v: &Option<i64>) -> String {
+    match v {
+        Some(s) => format!("some {s}"),
+        None => "none".into(),
+    }
+}
+
+/// Lean's `toString` of an `Array String`.
+fn show_array(a: &[String]) -> String {
+    format!("#[{}]", a.join(", "))
+}
+
+/// `arm` of the timer cases: a `sync` dependent that prints its value and
+/// subscribes again on any value, at most `cap` times.
+fn timer_arm_capped(t: UTimer, n: Ref<u64>, cap: u64) {
+    let p = t.next(UvPromise::new);
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<()>| {
+            n.modify(|k| k + 1);
+            let k = n.get();
+            say(&format!("dependent {k}: value {}", some_none(&v)));
+            if k < cap {
+                timer_arm_capped(t, n, cap);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+/// `arm` of the timer cases that record values: a dependent (`sync` or not)
+/// that records its value and subscribes again while it has fewer than
+/// `cap` values, then resolves `done`.
+fn timer_arm_record(
+    t: UTimer,
+    values: Ref<Vec<String>>,
+    cap: usize,
+    done: UvPromise<()>,
+    sync: bool,
+) {
+    let p = t.next(UvPromise::new);
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<()>| {
+            values.modify(|mut a| {
+                a.push(some_none(&v).into());
+                a
+            });
+            if values.get().len() < cap {
+                timer_arm_record(t, values, cap, done, sync);
+            } else {
+                done.resolve(());
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        sync,
+        true,
+    );
+}
+
+// tests/cases/uvloop/timer_stop_rearm_in_sync_dependent.lean (LB-33)
+fn timer_stop_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let (period, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(period, true);
+    let p0 = t.next(UvPromise::new);
+    let r = p0.result_opt().get();
+    drop(p0);
+    say(&format!("0th tick: {}", some_none(&r)));
+    timer_arm_capped(t.clone(), n.clone(), cap);
+    say("stop: begin");
+    t.stop();
+    say("stop: end");
+    sleep(100);
+    say(&format!("dependent runs: {}", n.get()));
+    say("main: end");
+    0
+}
+
+// tests/cases/uvloop/timer_cancel_rearm_in_sync_dependent.lean (LB-33):
+// the dependent subscribes again in its first run only, and its second
+// run resolves `done`.
+fn timer_cancel_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let period = to_nat(&args[0]);
+    let values = Ref::new(Vec::<String>::new());
+    let done: UvPromise<()> = UvPromise::new();
+    let t: UTimer = Timer::new(period, true);
+    let p0 = t.next(UvPromise::new);
+    let r = p0.result_opt().get();
+    drop(p0);
+    say(&format!("0th tick: {}", some_none(&r)));
+    timer_arm_record(t.clone(), values.clone(), 2, done.clone(), true);
+    say("cancel: begin");
+    t.cancel();
+    say("cancel: end");
+    let _ = done.result_opt().get();
+    say(&format!("dependent values: {}", show_array(&values.get())));
+    t.stop();
+    say("stop: end");
+    0
+}
+
+// tests/cases/uvloop/timer_oneshot_{stop,cancel}_keep_in_sync_dependent.lean
+// (LB-33)
+fn timer_oneshot_keep_in_sync_dependent(args: &[String]) -> u32 {
+    let op = args[0].clone();
+    let (ms, count) = (to_nat(&args[1]), to_nat(&args[2]));
+    let kept: Ref<Option<UvPromise<()>>> = Ref::new(None);
+    let t: UTimer = Timer::new(ms, false);
+    let p = t.next(UvPromise::new);
+    let (t2, kept2) = (t.clone(), kept.clone());
+    let _ = map_task(
+        move |v: Option<()>| {
+            let q = t2.next(UvPromise::new);
+            say(&format!("dependent: value {}", some_none(&v)));
+            kept2.set(Some(q));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    say(&format!("{op}: begin"));
+    if op == "cancel" {
+        t.cancel()
+    } else {
+        t.stop()
+    }
+    say(&format!("{op}: end"));
+    let fresh: Vec<UvPromise<()>> = (0..count).map(|_| UvPromise::new()).collect();
+    let Some(q) = kept.get() else {
+        say("nothing kept");
+        crate::glue::process_exit(0)
+    };
+    let a = q.addr();
+    say(&format!("aliased: {}", fresh.iter().any(|f| f.addr() == a)));
+    say(&format!("kept resolved: {}", finished(&q)));
+    for f in &fresh {
+        f.resolve(());
+    }
+    say(&format!(
+        "kept resolved after resolving the fresh promises: {}",
+        finished(&q)
+    ));
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/uvloop/timer_oneshot_cancel_resubscribe.lean (LB-33)
+fn timer_oneshot_cancel_resubscribe(args: &[String]) -> u32 {
+    let (ms, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(ms, false);
+    timer_arm_capped(t.clone(), n.clone(), cap);
+    say("cancel: begin");
+    t.cancel();
+    say("cancel: end");
+    sleep(100);
+    say(&format!("dependent runs: {}", n.get()));
+    say("stop: begin");
+    t.stop();
+    say("stop: end");
+    0
+}
+
+// tests/cases/uvloop/timer_oneshot_stop_resubscribe.lean (a control of
+// LB-33; review RF2-L-01)
+fn timer_oneshot_stop_resubscribe(args: &[String]) -> u32 {
+    let (ms, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(ms, false);
+    timer_arm_capped(t.clone(), n.clone(), cap);
+    say("stop: begin");
+    t.stop();
+    say("stop: end");
+    sleep(100);
+    say(&format!("dependent runs: {}", n.get()));
+    0
+}
+
+// tests/cases/uvloop/timer_stop_rearm_async_dependent.lean (a control of
+// LB-33)
+fn timer_stop_rearm_async_dependent(args: &[String]) -> u32 {
+    let (period, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let values = Ref::new(Vec::<String>::new());
+    let done: UvPromise<()> = UvPromise::new();
+    let t: UTimer = Timer::new(period, true);
+    let p0 = t.next(UvPromise::new);
+    let r = p0.result_opt().get();
+    drop(p0);
+    say(&format!("0th tick: {}", some_none(&r)));
+    timer_arm_record(t.clone(), values.clone(), cap as usize, done.clone(), false);
+    t.stop();
+    say("stop: end");
+    let _ = done.result_opt().get();
+    say(&format!("dependent values: {}", show_array(&values.get())));
+    0
+}
+
+/// `arm` of the signal cases: as `timer_arm_capped`.
+fn signal_arm_capped(s: USignal, n: Ref<u64>, cap: u64) {
+    let p = uv_ok(s.next(UvPromise::new));
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<i64>| {
+            n.modify(|k| k + 1);
+            let k = n.get();
+            say(&format!("dependent {k}: value {}", some_none(&v)));
+            if k < cap {
+                signal_arm_capped(s, n, cap);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+// tests/cases/uvloop/signal_stop_rearm_in_sync_dependent.lean (LB-34)
+fn signal_stop_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let cap = to_nat(&args[1]);
+    let n = Ref::new(0u64);
+    let s: USignal = Signal::new(num as i32, true);
+    signal_arm_capped(s.clone(), n.clone(), cap);
+    say("stop: begin");
+    uv_ok(s.stop());
+    say("stop: end");
+    say(&format!("dependent runs: {}", n.get()));
+    0
+}
+
+/// `arm` of `signal_cancel_rearm_in_sync_dependent`: records each value,
+/// subscribes again in the first run only.
+fn signal_arm_record(s: USignal, values: Ref<Vec<String>>) {
+    let p = uv_ok(s.next(UvPromise::new));
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<i64>| {
+            values.modify(|mut a| {
+                a.push(show_v(&v));
+                a
+            });
+            if values.get().len() == 1 {
+                signal_arm_record(s, values);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+// tests/cases/uvloop/signal_cancel_rearm_in_sync_dependent.lean (LB-34)
+fn signal_cancel_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let values = Ref::new(Vec::<String>::new());
+    let s: USignal = Signal::new(num as i32, true);
+    signal_arm_record(s.clone(), values.clone());
+    say("cancel: begin");
+    s.cancel();
+    say("cancel: end");
+    let q = uv_ok(s.next(UvPromise::new));
+    kill_self("USR1");
+    let r = q.result_opt().get();
+    drop(q);
+    say(&format!("main's next after cancel: {}", show_v(&r)));
+    say(&format!("dependent values: {}", show_array(&values.get())));
+    uv_ok(s.stop());
+    say("stop: end");
+    0
+}
+
+// tests/cases/uvloop/signal_oneshot_{stop,cancel}_keep_in_sync_dependent.lean
+// (LB-34)
+fn signal_oneshot_keep_in_sync_dependent(args: &[String]) -> u32 {
+    let op = args[0].clone();
+    let num: i64 = args[1].parse().expect("an Int");
+    let count = to_nat(&args[2]);
+    let kept: Ref<Option<UvPromise<i64>>> = Ref::new(None);
+    let s: USignal = Signal::new(num as i32, false);
+    let p = uv_ok(s.next(UvPromise::new));
+    let (s2, kept2) = (s.clone(), kept.clone());
+    let _ = map_task(
+        move |v: Option<i64>| {
+            let q = uv_ok(s2.next(UvPromise::new));
+            say(&format!("dependent: value {}", some_none(&v)));
+            kept2.set(Some(q));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    say(&format!("{op}: begin"));
+    if op == "cancel" {
+        s.cancel()
+    } else {
+        uv_ok(s.stop())
+    }
+    say(&format!("{op}: end"));
+    let fresh: Vec<UvPromise<i64>> = (0..count).map(|_| UvPromise::new()).collect();
+    let Some(q) = kept.get() else {
+        say("nothing kept");
+        crate::glue::process_exit(0)
+    };
+    let a = q.addr();
+    say(&format!("aliased: {}", fresh.iter().any(|f| f.addr() == a)));
+    say(&format!("kept resolved: {}", finished(&q)));
+    for f in &fresh {
+        f.resolve(7);
+    }
+    say(&format!(
+        "kept resolved after resolving the fresh promises: {}",
+        finished(&q)
+    ));
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/uvloop/signal_stop_drops_promise.lean (a control of LB-34)
+fn signal_stop_drops_promise(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let n = Ref::new(0u64);
+    let s: USignal = Signal::new(num as i32, true);
+    let p = uv_ok(s.next(UvPromise::new));
+    let n2 = n.clone();
+    let _ = map_task(
+        move |v: Option<i64>| {
+            n2.modify(|k| k + 1);
+            say(&format!("dependent {}: value {}", n2.get(), some_none(&v)));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    say("stop: begin");
+    uv_ok(s.stop());
+    say("stop: end");
+    say(&format!("dependent runs: {}", n.get()));
     0
 }
 
