@@ -87,29 +87,13 @@ impl TaskId {
     }
 }
 
-/// `IO.TaskState`, its constructors in Lean's order.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TaskState {
-    Waiting = 0,
-    Running = 1,
-    Finished = 2,
-}
-
-/// The message of the Lean panic that native `Task.get` prints when it waits
-/// for an unfinished task inside a `sync := true` task
-/// (`task_manager::wait_for`, `src/runtime/object.cpp`): see `in_sync_task`.
-pub const GET_IN_SYNC_TASK: &str = "`Task.get` called from a `(sync := true)` task";
-
-/// The message of Lean's internal panic for `IO.Promise.new` before the task
-/// manager runs (`lean_promise_new`); the glue reports it as Lean's
-/// `lean_internal_panic` does.
-pub const PROMISE_BEFORE_MANAGER: &str = "`IO.Promise.new` called before the task manager is running; this typically happens when called (directly or transitively, e.g. via `IO.CancelToken.new`) from an `initialize` block. Construct lazily on first use instead.";
+pub(crate) use super::common::{priority, PRIOS};
+pub use super::common::{TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED};
 
 pub(crate) const NONE: u32 = u32::MAX;
 
-/// Priorities: Lean's 0..=8 (`Task.Priority.max`), and 9 for dedicated
-/// tasks (a thread of their own natively, so always started).
-const PRIOS: usize = 10;
+/// The priority of dedicated tasks (a thread of their own natively, so
+/// always started), after Lean's 0..=8 (`common::PRIOS`).
 const DEDICATED: usize = PRIOS - 1;
 
 // Entry flags.
@@ -344,17 +328,6 @@ impl Drop for Tasks {
                 std::mem::forget(job);
             }
         }
-    }
-}
-
-/// Lean passes `lean_unbox(prio)` as an `unsigned`: the priority modulo
-/// 2^32, where 2^32-1 is `LEAN_SYNC_PRIO` and above 8 is dedicated.
-pub(crate) fn priority(prio: u64) -> (u8, bool) {
-    let p = prio as u32;
-    if p == u32::MAX {
-        (0, true)
-    } else {
-        ((p as u64).min(PRIOS as u64 - 1) as u8, false)
     }
 }
 
@@ -2160,12 +2133,6 @@ pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool {
     }
     ok
 }
-
-/// The message of the Lean panic of `IO.Option.getOrBlock!` on `none`
-/// (`lean_option_get_or_block`, `io.cpp`), passed to `lean_panic` with
-/// `force_stderr`: see `option_get_or_block`.
-pub const PROMISE_DROPPED: &str =
-    "PANIC: Promise.result!: promise has been dropped without ever being resolved";
 
 /// `IO.Option.getOrBlock!` (`lean_option_get_or_block`, `io.cpp`), the
 /// function that `Promise.result!` maps over `Promise.result?` with `sync :=

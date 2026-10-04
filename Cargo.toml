@@ -29,6 +29,8 @@ path = "src/lib.rs"
 # - `stack-overflow`: nix (its `sigaction` and re-exported libc, for the
 #   native quirk of Lean's stack-overflow report, `sched::stack_overflow`;
 #   AR-11).
+# `threads` (threads mode, `sched::mt`) has no dependency: std's threads,
+# locks, condition variables and atomics only.
 # The requirements are carets compatible with leanrs's offline registry (nix
 # 0.31.3, rustix 1.1.4, io-uring 0.7.13, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
 # uses; leanrs resolves them in its own workspace. lean-runtime's own builds
@@ -49,8 +51,24 @@ dns-lookup = { version = "=2.1.1", optional = true, default-features = false }
 default = []
 # OS-level IO mirroring Lean's C runtime (files, handles, standard streams).
 io = ["dep:rustix", "dep:nix", "dep:io-uring"]
-# The deferred task scheduler, promises and Std.Sync.
+# The deferred task scheduler, promises and Std.Sync, on one thread
+# (coroutines; docs/sched.md).
 sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
+# Threads mode (docs/threads.md): `sched::mt`, Lean's task manager on real
+# threads (a pool of `LEAN_NUM_THREADS` workers, a thread per dedicated
+# task), promises, Std.Sync and the 4.35 ref rule, with `Send` jobs and a
+# `Send + Sync` glue; `sched::` re-exports it, with the single-thread
+# scheduler's names. It excludes `sched` (and so `net`, which turns `sched`
+# on): a build has one scheduler, and both on is a compile error. With `io`
+# (allowed), the io layer takes its plain blocking path, as without `sched`:
+# a blocking call blocks its own thread, as natively; the io items of
+# threads mode (the working directory's lock rule, `Std.Internal.UV`'s
+# timers and signals) are batch T2. Until then, where `unshare(CLONE_FS)` is
+# refused (Docker's default seccomp profile), a spawn with a `cwd` moves the
+# process's working directory while other tasks' relative path operations
+# take no lock (review RT1-04). With `stack-overflow`, every worker and
+# dedicated thread installs Lean's report at its entry.
+threads = []
 # Networking (Std.Internal.UV.TCP/UDP/DNS, Std.Net.interfaceAddresses) on the
 # scheduler's event loop: an optional module a translator admits per program.
 net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
@@ -69,7 +87,10 @@ proc-title = ["io"]
 # `Stack overflow detected. Aborting.` (status 134). lean2rr enables it.
 # Without it, a task that overflows its context's stack ends with a plain
 # SIGSEGV (status 139), and the hub updates no record (no cost).
-stack-overflow = ["sched", "dep:nix"]
+# It needs a scheduler: enable it with `sched` or with `threads` (it no
+# longer turns `sched` on, since threads mode excludes `sched`; alone, it is
+# a compile error).
+stack-overflow = ["dep:nix"]
 # Opt-in faster implementations that use `unsafe` (see UNSAFE.md and
 # docs/development.md).
 unsafe-fast = []
@@ -93,6 +114,12 @@ required-features = ["io"]
 name = "io2_cases"
 harness = false
 required-features = ["io"]
+
+# Review RT1-03's check (scripts/check.sh runs it): with a C-style entry, the
+# alternate signal stacks of the threads that threads mode ends are reused.
+[[example]]
+name = "threads_altstack_reuse"
+required-features = ["threads", "stack-overflow"]
 
 # tests/sched-driver: the tasks/ and sync/ cases as Rust programs over
 # `sched`, with the glue a translator provides (`cargo test -p

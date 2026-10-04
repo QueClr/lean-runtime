@@ -62,8 +62,12 @@
 //!    remain there:
 //!    - another thread's relative path operation during the spawn (an open,
 //!      a metadata query, a directory listing, a removal: every call that
-//!      takes a path relative to the working directory) still sees `cwd`
-//!      (the runtime runs Lean code on one thread today);
+//!      takes a path relative to the working directory) still sees `cwd`.
+//!      The single-thread scheduler runs Lean code on one thread, so there
+//!      only a translator's own threads can do that; in threads mode
+//!      (feature `threads`) every other task can, until batch T2 takes
+//!      `CWD_LOCK` for reading around those calls (docs/threads.md, 0.2 and
+//!      3.2; review RT1-04);
 //!    - the way back, checked before leaving, fails only if another process
 //!      changes the directory's mode (or moves it, where the way back is a
 //!      path), and the process then stays in `cwd`;

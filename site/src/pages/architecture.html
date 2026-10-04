@@ -40,6 +40,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     One <code>unsafe</code> step stays in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>.</li>
+  <li><strong><code>threads</code>.</strong> Threads mode, in place of <code>sched</code>: Lean's task manager on real threads (<code>sched::mt</code>).
+    It has no dependency and no <code>unsafe</code> code.
+    It excludes <code>sched</code> and <code>net</code>: a build has one scheduler.
+    The design and its status are in <a href="repo:docs/threads.md">docs/threads.md</a>.</li>
   <li><strong><code>net</code>.</strong> Turns on <code>io</code> and <code>sched</code>.
     Its sockets use the net features of rustix and nix.
     Its name lookups call glibc through dns-lookup, pinned at 2.1.1.
@@ -48,7 +52,7 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
     <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).
     lean2rr turns it on.
     Without it, <code>setProcessTitle</code> fails with <code>ENOBUFS</code>.</li>
-  <li><strong><code>stack-overflow</code>.</strong> Turns on <code>sched</code>, and adds a native quirk in a file of its own, with nix's <code>sigaction</code>.
+  <li><strong><code>stack-overflow</code>.</strong> Needs <code>sched</code> or <code>threads</code>, and adds a native quirk in a file of its own, with nix's <code>sigaction</code>.
     <code>sched::stack_overflow</code> is Lean's stack-overflow report for the stacks of the contexts (<a href="sched.html#overflow">sched</a>).
     lean2rr turns it on.
     Without it, a task that overflows its stack ends with a plain SIGSEGV (status 139).</li>

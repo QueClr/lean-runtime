@@ -11,7 +11,10 @@
 # LEAN_RUNTIME_MIRI=1, Miri where the unsafe code can be.
 #
 # The feature configurations: the default build; `io,sched` and `net`, which
-# compile no `unsafe` code of the crate (the root forbids it); `io,proc-title`,
+# compile no `unsafe` code of the crate (the root forbids it); `threads`
+# (threads mode, docs/threads.md, which excludes `sched` and `net`), also
+# with every feature that may go with it
+# (`io,threads,proc-title,stack-overflow,unsafe-fast`); `io,proc-title`,
 # with the native quirk of the process title (src/io/argv_title.rs: its unit
 # tests and the twins of the cases that set a title), and `io` without
 # `sched`; `sched,stack-overflow`, with the native quirk of Lean's
@@ -36,7 +39,8 @@ if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
 fi
 TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
 FEATURE_SETS=("" "io,sched" "net" "io,proc-title" "sched,stack-overflow" "unsafe-fast"
-  "io,sched,proc-title,stack-overflow,unsafe-fast")
+  "io,sched,proc-title,stack-overflow,unsafe-fast" "threads"
+  "io,threads,proc-title,stack-overflow,unsafe-fast")
 
 # Every test run has a deadline (LEAN_RUNTIME_TEST_TIMEOUT seconds, default
 # 3600), so a test that blocks fails the check instead of hanging it. It is
@@ -91,16 +95,24 @@ for tc in "${TOOLCHAINS[@]}"; do
     echo "== $tc clippy features=[${f}]"
     cargo +"$tc" clippy --offline --quiet --all-targets ${f:+--features "$f"} -- -D warnings
   done
+  # Threads mode with a C-style entry: the alternate signal stacks of ended
+  # threads are reused (review RT1-03).
+  echo "== $tc example threads_altstack_reuse"
+  capped "${TEST_TIMEOUT[@]}" cargo +"$tc" run --offline --quiet --features threads,stack-overflow \
+    --example threads_altstack_reuse
   # Constant folding of libm calls happens only in optimized builds.
   echo "== $tc release test libm_folding"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --release --offline --quiet --test libm_folding
   # A driver without cargo builds the dependency-free configuration with
   # plain rustc; `io` needs its dependencies' build scripts and `sched`
   # corosensei, so they are built with cargo, offline and from Cargo.lock.
+  # `threads` has no dependency, so it builds with plain rustc too.
   echo "== $tc plain rustc"
   out=$(mktemp -d)
   rustc +"$tc" --edition 2021 --crate-type rlib --crate-name lean_runtime \
     --out-dir "$out" src/lib.rs
+  rustc +"$tc" --edition 2021 --crate-type rlib --crate-name lean_runtime \
+    --cfg 'feature="threads"' --out-dir "$out" src/lib.rs
   rm -rf "$out"
   echo "== $tc cargo build --offline --locked --features io,sched,net"
   capped cargo +"$tc" build --offline --locked --quiet --features io,sched,net
@@ -119,7 +131,9 @@ last="${TOOLCHAINS[${#TOOLCHAINS[@]}-1]}"
 cargo +"$last" fmt --all --check
 
 # Miri runs where `unsafe` can be: the unsafe-fast configurations, and with
-# `proc-title` the native quirk's unit tests (UNSAFE.md). It is opt-in
+# `proc-title` the native quirk's unit tests (UNSAFE.md); and on threads
+# mode's unit tests (`sched::mt`, feature `threads`: std's threads, locks and
+# condition variables, where Miri finds data races and leaks). It is opt-in
 # (LEAN_RUNTIME_MIRI=1): the default build has no `unsafe`, so Miri checks
 # little there for a large CPU cost on the shared host (owner, 2026-10-04).
 # Run it when an `unsafe` item changes (docs/development.md).
@@ -143,6 +157,11 @@ elif cargo +"$last" miri --version >/dev/null 2>&1; then
     capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet ${f:+--features "$f"} \
       ${filter:+--lib -- "$filter"}
   done
+  if [[ -z "$filter" ]]; then
+    echo "== miri features=[threads] unit tests of sched::mt"
+    capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet --features threads \
+      --lib -- sched::mt
+  fi
 else
   echo "warning: Miri is not installed for $last; skipped" >&2
 fi

@@ -31,7 +31,8 @@ once.
   native quirk of the crate (below). The crate root denies
   `unsafe_code` (`#![deny(unsafe_code)]`), and forbids it in a build with
   none of `proc-title`, `stack-overflow` and `unsafe-fast`: the default
-  build, `io`, `sched` and `net` compile no `unsafe` code of the crate.
+  build, `io`, `sched`, `threads` and `net` compile no `unsafe` code of the
+  crate.
 - **Native quirks.** A native behaviour that no safe API can reproduce, and
   that each glue would otherwise write on its own, may be written with
   `unsafe` in the crate (owner, 2026-10-04), behind a feature of its own,
@@ -49,10 +50,11 @@ once.
   lean2rr enables it; a translator that leaves it off gets `ENOBUFS` from
   `setProcessTitle` (`getProcessTitle` still gives `argv[0]`;
   `docs/native-quirks.md`, "Without the feature"). And
-  `src/sched/stack_overflow.rs`, feature `stack-overflow` (which turns on
-  `sched`; AR-11): Lean's stack-overflow report for the scheduler's
-  contexts. lean2rr enables it; without it, a task that overflows its
-  context's stack ends with a plain SIGSEGV (status 139).
+  `src/sched/stack_overflow.rs`, feature `stack-overflow` (with `sched` or
+  `threads`; AR-11): Lean's stack-overflow report for the scheduler's
+  contexts, and in threads mode for the task manager's threads. lean2rr
+  enables it; without it, a task that overflows its context's stack ends
+  with a plain SIGSEGV (status 139).
 - **`unsafe-fast`.** Every `unsafe` item has its own
   `#[allow(unsafe_code)]` (the crate root denies it). An implementation
   behind this feature must:
@@ -81,7 +83,9 @@ once.
   works from a clean checkout, the versions pinned by
   the committed `Cargo.lock` and the crates taken from cargo's local
   registry cache (`cargo fetch --locked` fills it once; `scripts/check.sh`
-  says so when a crate is missing). Nothing is vendored.
+  says so when a crate is missing). Nothing is vendored. `threads` (threads
+  mode) has no dependency, so `rustc --cfg 'feature="threads"'` builds it
+  too; it excludes `sched` and `net` (a compile error when both are on).
 - **Dependencies.** Requirements are carets compatible with leanrs's
   offline registry, which leanrs resolves in its own workspace (it ignores
   `Cargo.lock`), with only the features the crate uses. Before adding a

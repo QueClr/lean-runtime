@@ -1,19 +1,29 @@
-# Real threads for `sched` (design)
+# Real threads for `sched` (threads mode)
 
-Status: design only (2026-10-04). Nothing here is implemented. The owner's
+Status (2026-10-04): T1 is implemented: `sched::mt`, behind the cargo
+feature `threads` (`src/sched/threads.rs`, `src/sched/mt/`). T2 (io and
+`Std.Internal.UV` in threads mode) and T3 (the second driver, the recorded
+cases, the site) are open (section 5). The design below was written at main
+1c36a58; section 0 says where main e95ca47 and T1 changed it. The owner's
 direction (2026-10-03): "parallelism will be supported, not the focus now".
-Implementation starts after sched-io (cooperative blocking IO).
 
-The owner's decisions so far (2026-10-04):
+The owner's decisions (2026-10-04):
 - lean2rr stays single-threaded for now: "reussir no change yet. lean2rr
   can just not support it if it cant for now";
-- the model (native's pool, 1.2) and the value sharing (everything atomic,
-  2.1) await the owner's confirmation.
+- **the model is native's worker pool** (1.2), confirmed ("ok, then worker
+  pool is fine. go ahead"): `LEAN_NUM_THREADS` OS workers; a thread per
+  dedicated task; one more worker while a pool task waits (`wait_for`), and
+  `IO.waitAny` keeps its worker, as natively; one lock over the task table;
+  no coroutines and no `Glue::suspend` in this mode;
+- **everything atomic in threads mode** (2.1), confirmed. Type-directed
+  coloring comes later, only after measurement.
 
 leanrs reviewed this design (2026-10-04). Its answers to the open questions
-are folded in (section 6).
+are folded in (section 6). Its seven constraints for T1 (2026-10-04, from
+what its adoption of `sched` uses) are answered point by point in 0.3.
 
 This file is the implementors' reference. It covers:
+0. what changed since the design, T1's choices, and leanrs's constraints;
 1. the model, and how each rule of `sched` carries over;
 2. the contract a translator meets so that values can cross threads;
 3. the crate's shared state that needs locks or atomics;
@@ -27,7 +37,171 @@ lean2rr: `runtime/leanrt/src/` and `docs/translation-plan.md`, 2026-10-04.
 Reussir: `docs/design/thread-safety.md` and
 `crates/reussir-codegen/src/lower/mod.rs` of lean2rr's checkout. leanrs:
 `rt/leanrs_rt/src/`, snapshot e3ff2ad2 (2026-10-03). This crate: main at
-1c36a58 (sched-1, io-2, semantics-3, cleanup-1).
+1c36a58 (sched-1, io-2, semantics-3, cleanup-1) for sections 1 to 6;
+section 0 at e95ca47 and T1.
+
+## 0. Since the design: main e95ca47, and T1
+
+### 0.1 What main gained, and what it means for the pool
+
+Since 1c36a58 main gained sched-io (cooperative IO, the event loop, UV
+timers and signals), sched-2 (native's wake order, LB-32), sched-3 (what a
+waiter or a poller runs on its own stack, AR-9 and AR-10; the stack-overflow
+report, AR-11), sched-4 (the workers a context holds, AR-15 and AR-16;
+LSCHED-01), net-1, net-2, fixes-1 and the io batches (AR-1 to AR-20).
+
+**Carried over to the pool.** Native's task manager does these itself, so
+`sched::mt` ports native's code and needs no emulation:
+- sched-2's wake order: one condition variable, notified at the end of
+  each walk of a referenced task (`resolve_core`, `object.cpp` 927-935);
+  `IO.waitAny` looks again at each notification; a task released before it
+  finished notifies nobody (review RS2-08).
+- LB-32 stays fixed: `option_get_or_block` wakes every waiter before its
+  thread blocks for good. Waiters of other finished tasks wake too, which a
+  spurious wake-up of native's condition variable also gives.
+- AR-10 (ii): `IO.waitAny` keeps its worker. AR-15: `wait` in a pool task
+  raises the pool's limit by one, also a wait that never ends. AR-16: a
+  worker stays busy through its task's walk, whose `sync` dependents run on
+  it, and a `sync` task's wait raises nothing (`wait_for`'s `in_pool`).
+- LB-13 stays fixed (`finish`; `spawn_worker` also during the shutdown).
+- AR-11: each thread the manager makes installs Lean's stack-overflow
+  report at its entry. Its record holds the thread's own guard; there is no
+  context guard.
+- fixes-1's exit order: `finish`, then `io::exit::after_main` (AR-6), then
+  the glue's flush and exit. `IO.Process.exit` and an internal panic join
+  nothing (LB-29). `exit_lock`'s rule for a holder on another thread (a
+  plain wait) applies.
+
+**Gone in threads mode.** These emulate threads on one thread:
+- sched-io's cooperative IO: the reactor, `poll_fds`, `wait_fd`, the
+  stream locks parked at a switch, `io::coop`. io's cooperative code is
+  `cfg(feature = "sched")`, so with `threads` io compiles its plain path: a
+  blocking call blocks its own thread, as natively.
+- fixes-1's writer hand-offs (AR-8): a dropped stream's close blocks the
+  dropping thread, as natively, so no writer thread exists. "A context's
+  own writers" become "a thread's own", and a thread has none.
+  `before_task_value` and `before_publish` stay callable, as no-ops.
+- sched-3's runs on a waiter's or poller's stack (AR-9, AR-10) and the
+  polling threshold: a waiter blocks, a worker runs the task, and
+  `IO.getTaskState` gives native's answer at once.
+- sched-4's `holds_worker` bookkeeping, and LSCHED-01 with the pure-task
+  rule: a runaway pure task takes its worker, as natively, so
+  `tasks/runaway_pure_task_before_io` should give native's outcome, not its
+  `alt1` (T3's driver runs it).
+- The yield points (`effect`, `poll`, `ref_read`, `set_ref_read_yields`),
+  `STALE`, `LATENCY_*`, `POLL_QUERIES` and `EARLY`: no-ops, or nothing.
+- The no-suspend scope stays callable (leanrs's point 1): a depth per
+  thread, which changes no behaviour, since nothing suspends.
+
+**New in threads mode:**
+- `release`, `resolve` and `cancel` work from any thread. Ids are 64-bit
+  serials, never reused within a run, so a finished task's id stays
+  harmless.
+- Two threads that resolve one promise: the first claims it and stores;
+  the second waits until the value is stored, then returns false (natively
+  it waits for the lock, which the first holds until `m_value` is set,
+  `resolve`, 995-1007).
+- After `finish` there is no task manager, as natively:
+  `lean_finalize_task_manager` sets `g_task_manager` to null (`object.cpp`
+  1129-1133), so later tasks run at once there too (`lean_task_spawn_core`,
+  `lean_task_map_core`). The deviation is only where native dereferences
+  the null manager: `resolve` (`lean_promise_resolve`, 1333), `Task.get` or
+  `IO.wait` of an unfinished task (`lean_task_get`, 1226), `IO.cancel`,
+  `IO.getTaskState` and `IO.waitAny` of one (1293-1308), and the drop of an
+  unfinished task (`deactivate_task`, 1152-1160). There `sched::mt` gives
+  safe answers: a promise resolved then (a translator's value dropped at
+  the exit) runs its dependents at once on the resolving thread, a bind
+  task's `Continue` then runs at once, and no thread is made (review
+  RT1-02).
+- A Rust panic in a job, a glue hook, or the destructor of a value the
+  crate drops on a thread it made (a task's continuation, the glue)
+  aborts the process, on any thread (1.4; review RT1-01).
+- A thread the manager cannot make: native's `failed to create thread:
+  <strerror>`, then an abort (`thread.cpp` 128-133).
+- `sched::Ref`: the 4.35 rule of 3.1 as a lock and a condition variable.
+
+**A native data race the port avoids.** `task_bind_fn1` stores a bind
+task's continuation without the task manager's lock (`imp->m_closure =
+c`, `object.cpp` 1268), while `deactivate_task_core` reads and clears the
+same field under the lock (813, 815), and `get_task_state` reads it
+(1085-1097). Its effects are a leaked continuation (a queued inner pure
+task then runs to completion) and a `waiting` or `running` answer that
+can flip mid-transition; both are within native's schedules, so it is no
+LB (no wrong output). `sched::mt` returns the continuation in the job's
+result (`Outcome::Continue`) and stores it, or drops it for a released
+task, under the lock (both reviews of T1, 2026-10-04).
+
+**Not in threads mode yet (T2).** `sched::uv` (`Std.Internal.UV`'s loop,
+timers and signals) and `net`, both on the single-thread event loop; the
+working directory's lock rule and the routing of signals (3.2). `net` turns
+`sched` on, so `net` with `threads` is a compile error.
+
+### 0.2 Features (T1)
+
+| Features | T1 | Why |
+|---|---|---|
+| `threads` with `sched` | Compile error | A build has one scheduler (2.5) |
+| `threads` with `net` | Compile error | `net` turns `sched` on; the network needs the event loop, T2 |
+| `threads` with `io` | Allowed | io takes its plain path by the existing `cfg(feature = "sched")`, as without `sched`. One gap until T2 (review RT1-04): where `unshare(CLONE_FS)` is refused (Docker's default seccomp profile), a spawn with a `cwd` moves the whole process's working directory meanwhile (`fallback_spawn`, under `CWD_LOCK`), and another task's relative path operation, which takes no lock, resolves against the child's `cwd`. T2 adds the working directory's rule of 3.2 and `Std.Internal.UV` |
+| `threads` with `stack-overflow` | Allowed | `stack-overflow` no longer turns `sched` on; alone it is a compile error. Every worker and dedicated thread installs the report at its entry |
+| `threads` with `proc-title`, `unsafe-fast` | Allowed | Nothing shared with the scheduler |
+
+A build without `threads` is unchanged: the same items and bounds, no
+`Arc` (`src/sched/mod.rs` and its files compile as before; only the shared
+plain items moved to `src/sched/common.rs`, re-exported under their old
+names). `check.sh` builds and tests `threads` and every feature that may go
+with it.
+
+### 0.3 leanrs's constraints for T1
+
+1. **The same glue entry points.** `sched` re-exports `sched::mt` under
+   the single-thread scheduler's names: `start`, `start_with`, `finish`,
+   `spawn`, `depend`, `dependent_runs_now`, `wait`, `wait_any`, `state`,
+   `is_finished`, `cancel`, `check_canceled`, `release` (for every task, IO
+   tasks included), `in_sync_task`, `promise_new`, `resolve`,
+   `option_get_or_block`, `hang`, `before_task_value`, `before_publish`,
+   `effect`, `poll`, `ref_read`, `set_ref_read_yields`, `sleep_ms`,
+   `enter_no_suspend`, `leave_no_suspend`, `no_suspend`, `in_no_suspend`,
+   `io_cooperative`, `Job`, `Outcome`, `TaskId`, `TaskState`, `sync::*`.
+   `io::exit::after_main` is io's, unchanged. leanrs's DrainScope stays
+   correct on a worker: the crate drops no translator value under its lock,
+   and `resolve` runs a promise's walk on whatever thread calls it, after
+   the drop walk. Not met in T1: `sched::uv::LoopPromise`, which comes with
+   `sched::uv` in threads mode (T2).
+2. **`Send` in one place.** `sched::Job` is `Box<dyn FnOnce() -> Outcome +
+   Send>` in threads mode (`'static` is implied), and has no `Send` in the
+   single-thread build.
+3. **The 4.35 rule** for refs: `sched::Ref` (`src/sched/mt/refs.rs`), a
+   lock and a condition variable, with `get`, `take`, `put`, `set`, `swap`,
+   `modify` and `modify_get`.
+4. **Stack overflow.** Every worker and dedicated thread calls
+   `install_stack_overflow_handler()` at its entry, after std's start.
+5. **Thunks and lazy constants** block the OS thread with std's
+   `OnceLock`: no crate API.
+6. **The exit order** of D34 (c): `finish` joins the IO tasks and the
+   started or referenced pure tasks, then `io::exit::after_main`, then the
+   glue flushes (stdout first) and exits. There are no writer hand-offs to
+   join. `IO.Process.exit` and panics join nothing (LB-29).
+7. **Process-wide and per-thread state:** the table in 0.4.
+
+### 0.4 State in threads mode
+
+| State | Where | In threads mode |
+|---|---|---|
+| Task table, queues, worker counts | `sched::mt`, `State` | Process-wide, under one lock |
+| The tasks running on a thread (`check_canceled`, `in_sync_task`, `wait`'s pool rule) | `sched::mt`, `CURRENT` | Per thread |
+| Thread number, no-suspend depth | `sched::mt` | Per thread |
+| Current standard streams | `io/streams.rs`, `CURRENT` | Per thread. The glue gives each task with `own_thread` fresh slots (`swap_context`) |
+| errno model | `io/error.rs`, `ERRNO` | Per thread |
+| Standard streams' `FILE`s, open-handle registry | `io/handle.rs`, `STDIN` & co., `OPEN` | Process-wide, a lock each |
+| Writer hand-offs of dropped streams | `io/coop.rs` | None: `io::coop` is `sched`'s |
+| `IO.Process.output`'s drains | `io/process.rs`, `DRAINS` | Process-wide; `finish` joins them (`after_main`) |
+| Working directory | The process's; `io/process.rs`, `CWD_LOCK` | Process-wide, as natively. Changes (`setCurrentDir`, `uv_chdir`) and reads (`currentDir`, `uv_cwd`) take `CWD_LOCK`; relative path operations take nothing, so where `unshare(CLONE_FS)` is refused a spawn with a `cwd` moves them too until T2 (RT1-04) |
+| `environ` copy | `io/environ.rs`, `ENVIRON` | Process-wide, under a lock; the C environment changes through `std::env::set_var` (3.2) |
+| Spawner thread | `io/process.rs`, `SPAWNER`, `NO_PRIVATE_CWD` | Process-wide: one long-lived thread for the spawns with a `cwd`, which queue on it |
+| Stack-overflow records | `sched/stack_overflow.rs` | One per registered thread |
+| Alternate signal stacks the crate makes | `sched/stack_overflow.rs`, `FREE_ALTSTACKS` | One per live registered thread that std gave none; given back to a process-wide free list when the thread ends, and reused (RT1-03) |
+| `Std.Sync` objects, `Ref`s | The translator's handles | Shared, a lock each |
 
 ## Summary
 
@@ -43,7 +217,8 @@ Reussir: `docs/design/thread-safety.md` and
 - **Two modes, chosen per program when it is built.** The single-thread
   scheduler (`sched`, today's) stays the default and does not change.
   Threads mode is a separate module, `sched::mt`, behind the cargo feature
-  `threads`. It has the same functions, with `Send` bounds.
+  `threads`. It has the same functions, with `Send` bounds, and a threads
+  build re-exports it as `sched` (0.3).
   - The feature selects at compile time, never per call: a build without it
     is byte-identical to today's (no `Arc`, no `Send` or `Sync` bounds).
   - A build has one scheduler: `threads` and the coroutine `sched` exclude
@@ -171,21 +346,31 @@ context to its worker (see `docs/sched.md`, "Toward real threads").
          wait/wait_any ◄──       unlock; run its job (it fills the glue's
  mt::finish(): set shutdown,     slot); lock; mark it finished; walk its
    wait until no task is         dependents; notify the waiters
-   queued or running and      dedicated threads: one task each, then exit
+   queued, no worker and      dedicated threads: one task each, then exit
    no dedicated thread is
-   left, then join workers    state: static Mutex<State> and Condvars
- glue: flush, exit              (queue, finished, quiescent), as m_mutex
+   left, then join them       state: one Mutex<State> and Condvars
+ glue: flush, exit              (queue, finished, quiet), as m_mutex
 ```
 
 Each OS thread keeps its running tasks (innermost last) in a thread-local,
 as native's `g_current_task_object` (`object.cpp` 730). `check_canceled`,
-`in_sync_task` and the glue's `task_begin` read it.
+`in_sync_task` and `wait` (whether it raises the pool's limit) read it.
 
 **The lock rule.** No translator code runs under the scheduler's lock:
 jobs, the `store` of `resolve`, the drop of a job, glue hooks. Native does
 the same (`run_task` unlocks around the closure, `deactivate_task_core`
 drops the closure unlocked, `resolve` drops `v` unlocked, 1002). So a
 translator destructor that calls `release` or `resolve` cannot deadlock.
+
+**In T1** (`src/sched/mt/task.rs`, module comment): one `Mutex<State>`
+and three condition variables. `queue_cv` wakes idle workers (an enqueue,
+a raised limit, the shutdown); `finished_cv` wakes `wait`, `wait_any` and a
+resolver that lost the race (the end of a walk of a referenced task, LB-32's
+wake, a contended resolution); `quiet_cv` wakes `finish` (a worker or a
+dedicated thread ended). The other locks (a `Ref`'s, a `Std.Sync` object's)
+are never held together with it. The only atomics: the shutdown and
+started flags, and a running task's cancellation flag, read without the
+lock by `check_canceled`.
 
 **The slot.** The job writes the glue's slot before it returns. The
 scheduler then marks the task finished under the lock. So whoever learns
@@ -210,15 +395,15 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | `IO.cancel` | A flag; passed on to the dependents when the task finishes | The same (`cancel`, 1074; `handle_finished`) |
 | `IO.checkCanceled` | The flag, or shutdown with the `EARLY` emulation | The flag, or the shutdown flag (`lean_io_check_canceled_core`, 1284) |
 | Promises | `promise_new`, `resolve`; dependents walked on the resolving context | The same, on the resolving thread. The first resolution wins under the lock (`resolve`, 995) |
-| Exit | `finish` runs what is left on `main`; LB-13 is not copied | `finish` sets the shutdown flag. It waits until no task is queued or running and no dedicated thread is left, then joins the workers. An enqueue during shutdown still gets a worker, so LB-13 is not copied |
+| Exit | `finish` runs what is left on `main`; LB-13 is not copied | `finish` sets the shutdown flag. It waits until no task is queued, no standard worker is left (each ends once the queue is empty) and no dedicated thread is left, then joins them. An enqueue during shutdown still gets a worker, so LB-13 is not copied. Afterwards there is no task manager: tasks run at once |
 | `IO.Process.exit` | From any context | From any thread. The other threads run until the process ends, as natively |
 | `Std.Sync` | Contexts block. The owner is a context plus a task's thread number | Threads block on condition variables. The owner is the OS thread |
 | A thunk forced on two threads | The glue's waiter list (`block_sync`, `wake`). Forced inside itself: `hang` | A blocking once-cell in the glue. Forced inside itself: its thread hangs (LB-08) |
-| Stack overflow | The crate's report (`install_stack_overflow_handler`, feature `stack-overflow`, AR-11): the guard of the registered thread's stack or of the context running on it | The guard of each OS thread. Each worker and each dedicated task's thread registers (`mt::Glue::thread_start` calls `install_stack_overflow_handler`): its alternate signal stack and its record; the table grows with the live threads (review RS3-01) |
+| Stack overflow | The crate's report (`install_stack_overflow_handler`, feature `stack-overflow`, AR-11): the guard of the registered thread's stack or of the context running on it | The guard of each OS thread. Each worker and each dedicated task's thread calls `install_stack_overflow_handler` at its entry, before the glue's `thread_start` (leanrs's point 4): its alternate signal stack and its record; the table grows with the live threads (review RS3-01) |
 | Current streams | Swapped per context; a task starts with the process's streams | Per OS thread. `task_begin` still starts each pool task with the process's streams |
-| `IO.getTID` | `main`'s id plus `thread_number()` | The thread's `gettid` (`lean_io_get_tid`, `process.cpp` 340) |
+| `IO.getTID` | `main`'s id plus `thread_number()` | `main`'s id plus `thread_number()`: 0 on `start`'s thread, a number of its own on any other. A glue may give the thread's `gettid` instead, native's answer (`lean_io_get_tid`, `process.cpp` 340) |
 | `LEAN_NUM_THREADS=0` | Tasks run at once | The same |
-| A Rust panic in a job | Goes on as `main`'s panic | Aborts the process after Rust's message, since no thread can take it over (leanrs agrees, 6) |
+| A Rust panic in a job | Goes on as `main`'s panic | Aborts the process after Rust's message, since no thread can take it over (leanrs agrees, 6). So does a panic in a glue hook, on any thread, `main`'s included, and in the destructor of a value the crate drops (a released task's continuation, the glue; review RT1-01) |
 
 Starting each task with fresh streams is one of native's schedules. A
 native worker keeps its slots from one task to the next (`io.cpp` 115-117,
@@ -234,14 +419,19 @@ and more pool tasks could run than `LEAN_NUM_THREADS`. leanrs agrees (6).
 ### 1.5 What changes in the code
 
 The single-thread files do not change. Threads mode is new code in
-`src/sched/mt/`. It shares only plain items with `sched`:
-- `TaskState`, `priority()`;
-- the messages (`GET_IN_SYNC_TASK`, `PROMISE_BEFORE_MANAGER`);
-- `env.rs` (`lean_num_threads`, `thread_stack_size`).
+`src/sched/mt/`, and `src/sched/threads.rs` is the module `sched` of a
+threads build (`src/lib.rs` picks it with `#[path]`). It shares only plain
+items with `sched`:
+- `src/sched/common.rs`: `TaskState`, `priority()` and the messages
+  (`GET_IN_SYNC_TASK`, `PROMISE_BEFORE_MANAGER`, `PROMISE_DROPPED`), moved
+  out of `task.rs`, which re-exports them;
+- `env.rs` (`lean_num_threads`, `thread_stack_size`);
+- `stack_overflow.rs` (feature `stack-overflow`), whose context guard stays
+  0 in threads mode.
 
 | Piece | Today (`src/sched/`) | Threads mode (`src/sched/mt/`) |
 |---|---|---|
-| State | `thread_local! SCHED: RefCell<Sched>` (`mod.rs`) | One `static Mutex<State>` and its condition variables |
+| State | `thread_local! SCHED: RefCell<Sched>` (`mod.rs`) | One `Shared` per task manager, a `Mutex<State>` and three condition variables: the process's (`start`), or a unit test's own |
 | Task table | A slab per thread; `TaskId` is a 32-bit generation and an index (`task.rs`, `TaskId::new`) | One table. Ids are valid on every thread. A 64-bit serial is never reused within a run, so the 2^32 reuse caveat goes |
 | Run queue | Ten queues per thread, with the lone worker emulated (`Tasks::queues`, `worker`, `wake`) | The same ten FIFO queues, shared; real workers take from them |
 | Contexts | `Contexts`: coroutines, the hub, `cur`, `CtxId`, the stack pool (`ctx.rs`) | None. Each OS thread has a thread-local stack of its running tasks |
@@ -375,12 +565,13 @@ just not support it if it cant for now". lean2rr stays on the single-thread
 ### 2.4 The crate's API in threads mode
 
 ```rust
-// lean_runtime::sched::mt, feature "threads" (std only, no unsafe)
+// lean_runtime::sched::mt, feature "threads" (std only, no unsafe),
+// re-exported as lean_runtime::sched (src/sched/mt/mod.rs, T1)
 pub type Job = Box<dyn FnOnce() -> Outcome + Send>;
 pub enum Outcome { Done, Continue(TaskId, Job) }
 pub trait Glue: Send + Sync {
-    fn thread_start(&self) {}           // a new worker or dedicated thread:
-    fn thread_end(&self) {}             //   signal stack, guard bounds
+    fn thread_start(&self) {}           // a new worker or dedicated thread
+    fn thread_end(&self) {}
     fn task_begin(&self, _own_thread: bool) {}  // streams, as in sched
     fn task_end(&self, _own_thread: bool) {}
 }
@@ -390,17 +581,28 @@ pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId;
 pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool;
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId;
 pub fn wait(id: TaskId);
+pub fn is_finished(id: TaskId) -> bool;
 pub fn state(id: TaskId) -> TaskState;
 pub fn wait_any(ids: &[TaskId]) -> usize;
 pub fn cancel(id: TaskId);
-pub fn check_canceled() -> bool;
+pub fn check_canceled() -> bool;            // no lock
 pub fn release(id: TaskId);                 // from any thread
 pub fn in_sync_task() -> bool;
+pub fn thread_number() -> u64;
+pub fn manager_running() -> bool;
 pub fn promise_new() -> Result<TaskId, &'static str>;
 pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool;  // store runs here
+pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str)) -> T;
+pub fn hang() -> !;  pub fn hang_thread() -> !;
 pub fn finish();
-pub fn effect() {}  pub fn poll() {}  pub fn ref_read() {}
+pub fn effect() {}  pub fn poll() {}  pub fn ref_read() {}  // no-ops
+pub fn set_ref_read_yields(_on: bool) {}
+pub fn before_task_value() {}  pub fn before_publish() {}  // no-ops
 pub fn sleep_ms(ms: u32);
+pub fn enter_no_suspend();  pub fn leave_no_suspend();     // a depth per thread
+pub fn no_suspend() -> NoSuspendGuard;  pub fn in_no_suspend() -> bool;
+pub fn io_cooperative() -> bool;  pub fn coop_possible() -> bool;  // false
+pub struct Ref<T>;  // the 4.35 rule (3.1)
 pub mod sync { /* Mutex, Condvar, RecursiveMutex, SharedMutex: Send + Sync */ }
 ```
 
@@ -414,8 +616,8 @@ The bounds, and why each is needed:
 - **`TaskId`** is a plain `Copy` word.
 - **A worker or dedicated thread** is made with
   `std::thread::Builder::stack_size(stack_size)`. If that fails, the crate
-  reports native's `failed to create thread` message and aborts, as
-  `thread_create_failed` does today.
+  reports native's `failed to create thread: <strerror>` message (the
+  error's text) and aborts.
 
 ### 2.5 A translator that cannot provide these yet
 
@@ -425,13 +627,15 @@ The bounds, and why each is needed:
   byte-identical to today's: no `sched::mt`, no `Arc`, no `Send` or `Sync`
   bound, and the IO layer's paths as sched-io leaves them.
 - With it, the IO layer takes the blocking path by `cfg`, never by a
-  per-call branch (3.2). So `threads` and the coroutine `sched` exclude each
-  other (a `compile_error!` when both are on): a build has one scheduler.
-  Each translator builds a program for one mode.
+  per-call branch (3.2): io's cooperative code is `cfg(feature = "sched")`.
+  So `threads` and the coroutine `sched` exclude each other (a
+  `compile_error!` when both are on): a build has one scheduler. Each
+  translator builds a program for one mode.
 - A translator chooses threads mode per program, and only if it emits
   atomic values, behind a feature of its own. The glue's call sites keep
-  their names (`spawn`, `wait`, `effect`, ...), so switching modes changes
-  only the module path.
+  their names and paths (`sched::spawn`, `sched::wait`, `sched::effect`,
+  ...): a threads build re-exports `sched::mt` as `sched`. Only the glue's
+  `Glue` implementation and its `start` call differ.
 
 ## 3. Shared state in the crate
 
@@ -500,7 +704,13 @@ agrees (6). The crate gives:
 - the semantics (this section);
 - the program cases of `refs/`: `lost_update` and `set_during_modify`
   (LB-01), `swap_during_modify` (LB-18), `get_during_modify`;
-- a reference implementation in the drivers (`tests/sched-driver`).
+- a reference implementation in the drivers (`tests/sched-driver`);
+- in threads mode, the rule as a generic type, `sched::Ref<T>` (T1,
+  `src/sched/mt/refs.rs`; leanrs's point 3): a `Mutex<Option<T>>` and a
+  `Condvar`, which a translator's ref may wrap or copy. It holds the
+  translator's value as `Std.Sync`'s objects sit in its handles; it clones
+  under its own lock and drops a replaced value after the unlock. Its unit
+  tests are the `refs/` cases on real threads.
 
 **The rule holds in single-thread mode too.** `modify`'s function can block
 (a `Task.get` in it), and another context then runs. A reader that found
@@ -517,7 +727,7 @@ its own refs (6).
 | Scheduler state | `sched/mod.rs` `SCHED` | Thread-local `RefCell` | `sched::mt`: a global `Mutex` (1.5) |
 | Ref-read polling | `sched/mod.rs` `REF_YIELDS`, `REF_READS_LEFT` | An atomic flag and a thread-local count | Not used: `ref_read` is a no-op |
 | Thread numbers | `sched/ctx.rs` `NEXT_THREAD` | A process-wide atomic | Unchanged |
-| Running stack bounds, hub flag | `sched/ctx.rs` `RUN_LO`/`HI`/`TOP`, `IN_HUB_HOOK`; the stack-overflow report's records (`sched/stack_overflow.rs`) | Thread-locals; a record per registered thread | Not used. Each thread registers its own guard in `thread_start` |
+| Running stack bounds, hub flag | `sched/ctx.rs` `RUN_LO`/`HI`/`TOP`, `IN_HUB_HOOK`; the stack-overflow report's records (`sched/stack_overflow.rs`) | Thread-locals; a record per registered thread | Not used. Each thread the manager makes registers its own guard at its entry (T1) |
 | `Std.Sync` objects | `sched/sync.rs` | `RefCell` state, `CtxId` waiters | `Mutex` state and a `Condvar` per object |
 | `IO.Ref` | The translator's | `modify`'s function can block with the reference empty (3.1). `get`, `take`, `set` and `swap` of an empty reference must block until `modify`'s store: a glue duty (`docs/sched.md`, The glue, item 7; LB-01, LB-18) | A lock and a condition variable per reference, with the rule of 3.1 |
 | Standard streams' `FILE`s | `io/handle.rs` `STDIN`, `STDOUT`, `STDERR` | `static Mutex<CFile>`: glibc locks each `FILE` | Unchanged |
@@ -532,7 +742,7 @@ its own refs (6).
 | Spawner thread | `io/process.rs` `SPAWNER`, `NO_PRIVATE_CWD` | `Mutex<Option<Sender>>`; one long-lived thread | Unchanged. Spawns with a `cwd` queue on it, where native's forks run in parallel: a speed difference only |
 | Modelled pids | `io/process.rs` `NEXT_MODELLED_PID` | `AtomicU32` | Unchanged |
 | `output`'s drains | `io/process.rs` `DRAINS` | A `Mutex<Vec<JoinHandle>>`; one thread per failed `output`, joined after `main` (AR-6); it keeps its bytes and may end the process with the out-of-memory panic (RFX1-04) | Unchanged |
-| Dropped streams' writers | `io/coop.rs` `WRITERS`, `hand_off` | A `Mutex<Vec<JoinHandle>>`; one thread per hand-off, holding bytes and a descriptor only, joined by the exit (AR-8) | Unchanged |
+| Dropped streams' writers | `io/coop.rs` `WRITERS`, `hand_off` | A `Mutex<Vec<JoinHandle>>`; one thread per hand-off, holding bytes and a descriptor only, joined by the exit (AR-8) | None: `io::coop` is `sched`'s, so a dropped stream's close blocks the dropping thread, as natively (T1) |
 | `environ` copy | `io/environ.rs` `ENVIRON`, `set`, `unset` | A `Mutex`; the C environment changes through `std::env::set_var` and `remove_var` | Unchanged. C code that reads the environment on another thread races with `setenv`, as natively (`lean_uv_os_setenv`, `uv/system.cpp` 320, calls libuv's `uv_os_setenv`). The crate is on edition 2021, where `set_var` is safe |
 | Process title | `io/uvsys.rs` `TITLE` | `Mutex` | Unchanged |
 | Startup descriptors | `io/startup.rs` `DESCRIPTORS` | `OnceLock` | Unchanged |
@@ -546,7 +756,8 @@ thread running Lean code. Threads mode decides the spawn path at
 `CWD_LOCK` for reading for the rest of the run (one uncontended read lock
 per call); if it works, the common case, nothing changes. The real fix stays
 the one `process.rs` names, `posix_spawn_file_actions_addchdir_np`, which
-nix does not wrap and the crate cannot call without `unsafe`.
+nix does not wrap and the crate cannot call without `unsafe`. T1 does not
+have this rule yet: it is a T2 item (review RT1-04; 0.2).
 
 **Signals under threads.** `sched::uv`'s signal delivery keeps each
 signal's `arrived` flag process-wide, while the watcher lists are per
@@ -561,8 +772,10 @@ descriptor in the scheduler's event loop, `reactor::poll_fds`, then the same
 system call; the stream locks parked at every switch; the no-suspend scope)
 is for the single-thread scheduler only. In threads mode every call takes the plain
 blocking path, which blocks its own thread, as natively. The choice is a
-compile-time `cfg` on the feature `threads`, not a branch per call, so a
-build without the feature is unchanged (2.5).
+compile-time `cfg`, not a branch per call, so a build without the feature
+is unchanged (2.5). Since T1 it is io's existing `cfg(feature = "sched")`:
+a threads build has no `sched` feature, so io compiles the path it has
+without `sched`.
 
 ## 4. Determinism and testing
 
@@ -597,11 +810,19 @@ workers are made on demand, as native's). If it shows the other schedule
 becomes a hand-written `alt1`.
 
 **How the tests run both modes:**
-- **Unit tests of `sched::mt`** (small sizes): the task table, deletion,
-  the walk of dependents, cancellation, `waitAny`, promises, exit with late
-  tasks, the pool growing by one while a pool task waits. They run under
-  Miri too, which runs std threads, locks and condition variables and
-  reports data races (it cannot run corosensei's stack switch).
+- **Unit tests of `sched::mt`** (small sizes; T1, `src/sched/mt/tests.rs`):
+  the task table, deletion, the walk of dependents, cancellation,
+  `waitAny`, promises (a contended resolution too), exit with late tasks
+  (LB-13), the pool growing by one while a pool task waits and `waitAny`
+  keeping its worker, LB-32's wake, `Std.Sync` under real contention, the
+  `refs/` cases on `sched::Ref`, the stack-overflow registration of the
+  manager's threads, and the regression tests of T1's review (`rt1_*`: a
+  panicking destructor aborts, nothing is enqueued and no thread is made
+  after `finish`; the reuse of the crate's alternate stacks, with the
+  example `threads_altstack_reuse`). They run under Miri too, which runs std threads,
+  locks and condition variables and reports data races (it cannot run
+  corosensei's stack switch): `cargo miri test --features threads --lib --
+  sched::mt`, in `check.sh` with `LEAN_RUNTIME_MIRI=1`.
 - **A second driver**, `tests/sched-driver-mt`, a package of its own:
   `threads` and the coroutine `sched` exclude each other in one build (2.5),
   so cargo builds it in a separate invocation. Its glue is over
@@ -640,8 +861,8 @@ needs brute force.
 | Step | What | Depends on | Size | In the crate alone? |
 |---|---|---|---|---|
 | T0 | sched-io lands: cooperative IO in the single-thread mode | — | (its own batch) | — |
-| T1 | `sched::mt`: the task manager (spawn, depend, wait, waitAny, state, cancel, release, promises, exit without LB-13), `mt::sync`, `mt::Glue`, worker and dedicated threads with Lean's stack size | T0: the IO switch, and the order the owner set | About 1,200 lines and 500 of unit tests | Yes, with Miri |
-| T2 | io in threads mode: the blocking path instead of sched-io's cooperative one, by `cfg` (3.2); the `CWD_LOCK` rule of 3.2; per-task streams | T1 | About 150 lines | Yes |
+| T1 | Done (2026-10-04, branch threads-1). `sched::mt`: the task manager (spawn, depend, wait, waitAny, state, cancel, release, promises, exit without LB-13), `mt::sync`, `mt::Glue`, `sched::Ref`, worker and dedicated threads with Lean's stack size, the stack-overflow report on them | T0: the IO switch, and the order the owner set | About 1,300 lines and 900 of unit tests | Yes, with Miri |
+| T2 | io in threads mode: the blocking path (since T1, io's plain path by `cfg`); the `CWD_LOCK` rule of 3.2, with `with_cwd_read` around every relative-path system call in threads builds where `unshare(CLONE_FS)` is refused (review RT1-04); per-task streams (the glue's `task_begin`, with `io::streams::swap_context`); `sched::uv` on threads (a loop thread for timers and signals, `LoopPromise` with `Send` bounds, the routing of signals of 3.2), then `net` | T1 | About 400 lines | Yes |
 | T3 | The second driver (`tests/sched-driver-mt`), `check.sh`, the new cases recorded natively, the docs (`sched.md`, the site) | T1, T2 | About 700 lines, and the cases | Yes |
 | L1 | leanrs adopts the single-thread `sched` (already planned) | sched-io | leanrs's | No |
 | L2 | leanrs threads mode, behind a feature of leanrs's own: an `Arc` alias; twins of `Nat` (Lem-NT), `Shared` (Lem-SC), `Task`, `Thunk` and `IO.Ref`; `Lazy` for constants; the glue over `sched::mt` | T3, L1 | Medium to large | No |
@@ -713,11 +934,10 @@ Miri.
 
 ### Open questions for the owner
 
-1. **The model.** Native's pool, with no coroutines in threads mode
-   (recommended, 1.2)? Awaiting the owner's confirmation.
-2. **Atomic values.** Everything atomic in threads-mode programs, and
-   type-directed coloring only after measurement (2.1)? Awaiting the
-   owner's confirmation.
+1. **The model.** Answered (2026-10-04): native's pool, no coroutines in
+   threads mode.
+2. **Atomic values.** Answered (2026-10-04): everything atomic in
+   threads-mode programs; type-directed coloring only after measurement.
 3. **Choosing the mode.** A translator flag per program, or automatic for
    programs that create tasks once measurement says so (2.5)?
 4. **The translators' refs.** Does each translator's `get`, `take`, `set`

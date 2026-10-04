@@ -20,7 +20,7 @@ values.
 |---|---|
 | `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
 | `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error`; with the feature `proc-title` (it turns on `io`), `setProcessTitle`'s write into the arguments' memory, a native quirk written with `unsafe` (without it, `setProcessTitle` fails with `ENOBUFS`) | The memory protocol: reference counting, ownership, freeing |
-| `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour; with the feature `stack-overflow` (it turns on `sched`), Lean's stack-overflow report for the contexts' stacks, a native quirk written with `unsafe` (without it, a task's stack overflow is a plain SIGSEGV, status 139) | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
+| `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour; or, with the feature `threads` instead (threads mode, `docs/threads.md`), Lean's task manager on real threads, with the same functions and `Send` bounds; with the feature `stack-overflow` (with `sched` or `threads`), Lean's stack-overflow report for the scheduler's stacks, a native quirk written with `unsafe` (without it, a task's stack overflow is a plain SIGSEGV, status 139) | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
 | `net` (feature `net`, with `io` and `sched`): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
 
 Functions take views (`&[u8]`, `&str`) and plain data (`u64`, `f64`), and
@@ -96,6 +96,15 @@ free it (AR-16); and it records lean-runtime's first known difference of
 the deferred model, LSCHED-01 (`docs/sched.md`, "Known differences from
 native").
 
+Threads mode (feature `threads`, which excludes `sched` and `net`) has its
+first batch, T1: `sched::mt`, Lean 4.34.0's task manager on real threads
+(a pool of `LEAN_NUM_THREADS` workers, a thread per dedicated task, one
+more worker while a pool task waits, one lock), promises, `Std.Sync`, the
+4.35 rule for refs (`sched::Ref`) and the exit without LB-13, re-exported as
+`sched` with the single-thread scheduler's names. With `io`, io takes its
+plain blocking path. Its unit tests run under Miri too. io's own items in
+threads mode and `Std.Internal.UV` come next (T2). See `docs/threads.md`.
+
 `net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
 externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code
 over non-blocking sockets, on the scheduler's event loop), `DNS` (glibc's
@@ -123,8 +132,8 @@ that order. See `docs/development.md`, the rules for implementors.
   `docs/native-quirks.md`), or a faster implementation behind the opt-in
   feature `unsafe-fast`, with the same behaviour as its safe twin. Without
   `proc-title`, `stack-overflow` and `unsafe-fast` (the default build, `io`,
-  `sched`, `net`), the crate's own code contains no `unsafe`, and the root
-  forbids it.
+  `sched`, `threads`, `net`), the crate's own code contains no `unsafe`, and
+  the root forbids it.
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
   on). The ports of glibc's `cbrt` and `cbrtf` give glibc 2.39's aarch64
@@ -138,7 +147,7 @@ that order. See `docs/development.md`, the rules for implementors.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
   `io` uses rustix, nix and io-uring, `sched` corosensei, rustix and
-  signal-hook, `stack-overflow` nix, and `net` dns-lookup (pinned exactly;
+  signal-hook, `threads` nothing, `stack-overflow` nix, and `net` dns-lookup (pinned exactly;
   its `unsafe` audited in
   `UNSAFE.md`), pinned by `Cargo.lock` and built offline from cargo's local
   registry cache.

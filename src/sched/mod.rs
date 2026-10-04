@@ -23,6 +23,7 @@
 //! - calls the yield points (`effect`, `poll`, `ref_read`, `sleep_ms`) from
 //!   its externs.
 
+mod common;
 mod ctx;
 mod env;
 mod reactor;

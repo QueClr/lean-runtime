@@ -453,8 +453,8 @@ and corosensei 0.3.4's `DefaultStack`, a reader can check the item
 (AR-11). It replaces the earlier contract, under which each glue wrote its
 own SIGSEGV handler (lean2rr's `rt.rs`, the driver's `glue.rs`) and leanrs
 had none. The file is compiled only with the feature `stack-overflow`
-(which turns on `sched`); lean2rr enables it, and leanrs decides at its
-adoption of `sched` (its DV6 until then).
+(with `sched`, or with `threads` in threads mode); lean2rr enables it, and
+leanrs decides at its adoption of `sched` (its DV6 until then).
 
 ### What native does
 
@@ -492,11 +492,14 @@ handler:
   set to ignore is left alone. `sched::start` registers its thread too,
   once the handler is installed.
 - **Registering a thread** gives it an alternate signal stack if it has
-  none (Rust gives its own threads one), and a record in the table: the
+  none (Rust gives its own threads one where std installed its handler at
+  its runtime start), and a record in the table: the
   thread's key (the address of its `errno`), the guard below its own stack
   (`pthread_getattr_np`, as Lean computes it), and the guard of the context
   running on it. A thread's `Registration`, a thread-local with a
-  destructor, frees the record for reuse when the thread ends. The table
+  destructor, frees the record for reuse when the thread ends, and gives
+  the crate's alternate stack, if it made one, back to a free list for the
+  next registration (I6, review RT1-03). The table
   is a list of chunks of 64 records: a thread that finds every record taken
   appends a chunk (`OnceLock<Box<Chunk>>`, allocated at registration, never
   freed), so the table grows with the number of live registered threads,
@@ -510,6 +513,14 @@ handler:
   key, with atomic loads, and when the fault's address lies in either of
   its guards, writes Lean's message and aborts. Otherwise it forwards the
   fault to the previous action.
+- **Threads mode** (feature `threads`, `docs/threads.md`). A task runs on
+  its thread's own stack, as natively: there is no context. Every thread
+  the task manager makes (a standard worker, a dedicated task's thread)
+  calls `install_stack_overflow_handler()` at its entry, after std's
+  start, as each native `lthread` builds its `stack_guard`. Its record
+  holds its own guard; the context guard stays 0, since `running_stack()`
+  is always `None` and nothing calls `publish`. So I4 holds vacuously, and
+  A1 holds for an overflow of a thread's own stack.
 
 ### The `unsafe` operations
 
@@ -532,6 +543,8 @@ All are in `src/sched/stack_overflow.rs`:
   `sigemptyset`, `sigaddset` and `pthread_sigmask` on local `sigset_t`s
   (its mask blocked, the signal unblocked under `SA_NODEFER`, then the
   mask before restored).
+- **U14.** `sigaltstack` with `SS_DISABLE`, at a thread's end, before its
+  block goes to the free list (review RT1-03); U11's query comes first.
 
 ### What it relies on
 
@@ -620,7 +633,17 @@ All are in `src/sched/stack_overflow.rs`:
   calls `ensure_altstack` before it claims the record. An alternate stack
   the crate makes is `AT_MINSIGSTKSZ` (the kernel's largest signal frame on
   this machine, at least `SIGSTKSZ`) plus 64 KiB, a heap block kept for the
-  life of the process, never referenced by Rust code.
+  life of the process, never referenced by Rust code. **A block is the
+  alternate stack of at most one live thread** (review RT1-03): a new one,
+  or one taken from the free list (`FREE_ALTSTACKS`), which holds only
+  blocks that no thread has as its alternate stack. A thread puts its block
+  there in its `Registration`'s destructor, and only after the kernel no
+  longer uses it for that thread: if the block is still the thread's
+  alternate stack, the thread disables it first (U14), and it never does so
+  while it runs on it (`SS_ONSTACK`). This assumes that no code re-installs
+  the crate's block on that thread afterwards, in a later destructor. So
+  the blocks number at most the largest count of threads alive at once
+  with one of the crate's.
 - **I7. An append-only table.** A chunk is reached from the static first
   chunk through `OnceLock`s that are set once, at a registration, and
   never cleared; a chunk is never freed. The handler walks the chunks with
@@ -750,10 +773,18 @@ All are in `src/sched/stack_overflow.rs`:
   and only then restored.
 - **U11** passes a null new stack and a `MaybeUninit<stack_t>` to write,
   read only on success. **U12** gives the kernel `size` bytes of a block
-  allocated for that and leaked (`Box::into_raw`): valid for the rest of
-  the process, and no Rust reference points into it, so the kernel's
-  writes alias nothing. It is set only when the thread had no alternate
-  stack (`SS_DISABLE`), so the thread does not run on one at that moment.
+  allocated for that and leaked (`Box::into_raw`), or of such a block from
+  the free list: valid for the rest of the process, no Rust reference
+  points into it, so the kernel's writes alias nothing, and no other thread
+  has it as its alternate stack (I6). It is set only when the thread had no
+  alternate stack (`SS_DISABLE`), so the thread does not run on one at that
+  moment. A block whose `sigaltstack` fails goes back to the free list.
+- **U14** (RT1-03) disables the calling thread's alternate stack in its
+  `Registration`'s destructor, outside any handler, after U11 showed that
+  the block is the current one and that the thread does not run on it
+  (`SS_ONSTACK` clear). Disabling hands the kernel no memory. From then on
+  the kernel delivers no signal of this thread on the block, so another
+  thread may take it from the free list (I6).
 
 ### What is outside the proof, as natively
 
@@ -777,8 +808,15 @@ All are in `src/sched/stack_overflow.rs`:
 - **Another handler installed later** (by the program or a library)
   replaces `on_fault`; the report is then that handler's business.
 - **The alternate stacks the crate makes** are kept for the life of the
-  process: one per registered thread that had none (Rust's threads have
-  one, so none in the translators' programs).
+  process and reused: one per registered thread that had none, given back
+  to a free list when the thread ends (I6, review RT1-03). A thread has
+  none when std installed no handler at its runtime start, so it spawns its
+  threads without one: a C-style entry (lean2rr's `leanrt`), SIGSEGV or
+  SIGBUS ignored when the program started, or another handler installed
+  before std's start. Otherwise std gives its threads one, and the crate
+  makes none. The blocks number at most the largest count of such threads
+  alive at once; in threads mode, which makes a thread per dedicated task,
+  they no longer grow with the number of ended threads.
 
 ### How it is checked
 

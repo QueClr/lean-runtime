@@ -1,9 +1,11 @@
 //! Lean's stack-overflow report (`src/runtime/stack_overflow.cpp`) for the
 //! scheduler's contexts and the threads that run them: an opt-in SIGSEGV and
 //! SIGBUS handler, one implementation for both translators (AR-11), built
-//! only with the feature `stack-overflow` (which turns on `sched`). Without
-//! it, a task that overflows its context's stack ends with a plain SIGSEGV
-//! (status 139), and the hub updates no record.
+//! only with the feature `stack-overflow` (with `sched`, or with `threads`:
+//! threads mode, `src/sched/threads.rs`, has no context, and every thread
+//! its task manager makes calls [`install_stack_overflow_handler`] at its
+//! entry). Without it, a task that overflows its context's stack ends with
+//! a plain SIGSEGV (status 139), and the hub updates no record.
 //!
 //! This file holds one of the crate's `unsafe` items, a native quirk that no
 //! safe API can reproduce: `UNSAFE.md` has its entry, and
@@ -35,6 +37,9 @@
 //!   number of live registered threads: the thread's key (the address of its
 //!   `errno`), the guard below its own stack, and the guard of the context
 //!   running on it, which the hub updates at every switch ([`publish`]).
+//!   When the thread ends, its record is freed, and the crate's alternate
+//!   stack, if it gave one, is disabled and kept on a free list for the next
+//!   thread that needs one (review RT1-03).
 //! - The handler finds the faulting thread's record by its key, with atomic
 //!   loads only (no thread-local, no lock, no allocation), and reports Lean's
 //!   message when the address lies in either guard.
@@ -184,7 +189,11 @@ thread_local! {
     /// (`publish`, `register_thread`), and in the registration's
     /// destructor.
     static SLOT: Cell<Option<&'static Record>> = const { Cell::new(None) };
-    /// Frees the record when the thread ends (`Registration::drop`).
+    /// The alternate signal stack the crate gave this thread
+    /// (`ensure_altstack`): its block's address (exposed) and size.
+    static OWN_ALTSTACK: Cell<Option<(usize, usize)>> = const { Cell::new(None) };
+    /// Frees the record, and gives the crate's alternate stack back, when the
+    /// thread ends (`Registration::drop`).
     static REGISTRATION: Registration = const { Registration };
 }
 
@@ -195,7 +204,58 @@ impl Drop for Registration {
         if let Ok(Some(r)) = SLOT.try_with(|s| s.replace(None)) {
             r.release();
         }
+        if let Ok(Some((addr, size))) = OWN_ALTSTACK.try_with(Cell::take) {
+            give_back_altstack(addr, size);
+        }
     }
+}
+
+/// The alternate stacks of ended threads, for `ensure_altstack` to reuse
+/// (review RT1-03): (address, size) of blocks the crate made. A block is
+/// never freed; it is here only while no thread has it as its alternate
+/// stack (I6). So the crate's blocks number at most the largest count of
+/// threads alive at once with one of them, where threads mode would
+/// otherwise leave one behind per ended thread (a thread per dedicated
+/// task). Taken outside the handler only (registration, a thread's end).
+static FREE_ALTSTACKS: std::sync::Mutex<Vec<(usize, usize)>> = std::sync::Mutex::new(Vec::new());
+
+fn free_altstacks() -> std::sync::MutexGuard<'static, Vec<(usize, usize)>> {
+    FREE_ALTSTACKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The thread ends (its `Registration`'s destructor): the block `addr` of
+/// `size` bytes, its alternate stack from the crate, goes to the free list
+/// once the kernel no longer uses it for this thread. If it is still the
+/// thread's alternate stack, it is disabled first; if the thread runs on it
+/// (never in a destructor) or the query fails, it is kept, as before RT1-03.
+fn give_back_altstack(addr: usize, size: usize) {
+    let mut cur = MaybeUninit::<libc::stack_t>::uninit();
+    // SAFETY: (U11) a null new stack only reads the current one into `cur`,
+    // valid for a write of a `stack_t`.
+    if unsafe { libc::sigaltstack(std::ptr::null(), cur.as_mut_ptr()) } != 0 {
+        return;
+    }
+    // SAFETY: `sigaltstack` succeeded, so it wrote `cur`.
+    let cur = unsafe { cur.assume_init() };
+    if cur.ss_flags & libc::SS_DISABLE == 0 && cur.ss_sp.addr() == addr {
+        if cur.ss_flags & libc::SS_ONSTACK != 0 {
+            return;
+        }
+        let off = libc::stack_t {
+            ss_sp: std::ptr::null_mut(),
+            ss_flags: libc::SS_DISABLE,
+            ss_size: 0,
+        };
+        // SAFETY: (U14) disabling the calling thread's alternate stack, which
+        // it does not run on (`SS_ONSTACK` clear): the kernel then delivers
+        // no signal of this thread on the block.
+        if unsafe { libc::sigaltstack(&off, std::ptr::null_mut()) } != 0 {
+            return;
+        }
+    }
+    free_altstacks().push((addr, size));
 }
 
 /// The calling thread's key: the address of its `errno`, which no other
@@ -348,7 +408,8 @@ fn set_mask_for(sig: c_int, mask: u64, nodefer: bool, saved: *mut libc::sigset_t
 /// any Lean code runs on it (the process's main thread for the
 /// initializers, `main`'s thread if it is another one); the contexts need
 /// nothing more, and `sched::start` registers its own thread too once this
-/// has run. Calling it again is harmless.
+/// has run. In threads mode every thread the task manager makes calls it at
+/// its entry. Calling it again is harmless.
 ///
 /// Call it from `main` (or later), after Rust's runtime has started, never
 /// from an ELF constructor: std's runtime start installs Rust's handler,
@@ -532,23 +593,39 @@ fn ensure_altstack() {
     // SAFETY: (U10) `getauxval` has no precondition (0 when unknown).
     let min = unsafe { libc::getauxval(libc::AT_MINSIGSTKSZ) } as usize;
     let size = ALTSTACK_EXTRA + min.max(libc::SIGSTKSZ);
-    // A block no Rust reference ever points to: only the kernel writes it,
-    // when it delivers a signal on it. Kept for the life of the process.
-    let block: *mut [u8] = Box::into_raw(vec![0u8; size].into_boxed_slice());
+    // An ended thread's block, if one is free and large enough (RT1-03);
+    // else a new one. A block no Rust reference ever points to: only the
+    // kernel writes it, when it delivers a signal on it. Kept for the life of
+    // the process.
+    let reused = {
+        let mut free = free_altstacks();
+        free.iter()
+            .rposition(|&(_, s)| s >= size)
+            .map(|k| free.swap_remove(k))
+    };
+    let (addr, size) = reused.unwrap_or_else(|| {
+        let block: *mut [u8] = Box::into_raw(vec![0u8; size].into_boxed_slice());
+        (block.cast::<u8>().expose_provenance(), size)
+    });
     let ss = libc::stack_t {
-        ss_sp: block.cast::<c_void>(),
+        ss_sp: std::ptr::with_exposed_provenance_mut::<c_void>(addr),
         ss_flags: 0,
         ss_size: size,
     };
     // SAFETY: (U12) `ss` describes `size` bytes of a block that stays
     // allocated for the rest of the process and that nothing else reads or
-    // writes; the thread does not run on an alternate stack now (none was
-    // set).
-    unsafe { libc::sigaltstack(&ss, std::ptr::null_mut()) };
+    // writes: a new one, or one from the free list, which no thread has as
+    // its alternate stack (I6); the thread does not run on an alternate
+    // stack now (none was set).
+    if unsafe { libc::sigaltstack(&ss, std::ptr::null_mut()) } == 0 {
+        let _ = OWN_ALTSTACK.try_with(|c| c.set(Some((addr, size))));
+    } else {
+        free_altstacks().push((addr, size));
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -578,8 +655,10 @@ mod tests {
 
     /// The tests that register threads run one at a time: a thread that ends
     /// frees its record, and a later thread may get the same `errno` address
-    /// (glibc reuses a thread's stack and its thread-local block).
-    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// (glibc reuses a thread's stack and its thread-local block). Threads
+    /// mode's tests take it too: every thread its task manager makes
+    /// registers.
+    pub(crate) static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// More live registered threads than a chunk holds (review RS3-01):
     /// each has its record, in a second chunk for the later ones, and each
@@ -622,6 +701,83 @@ mod tests {
         for (key, _) in results {
             assert!(record_of(key).is_none(), "freed at the thread's end");
         }
+    }
+
+    /// The base address of the calling thread's alternate signal stack, 0
+    /// if it has none.
+    fn current_altstack() -> usize {
+        let mut cur = MaybeUninit::<libc::stack_t>::uninit();
+        // SAFETY: test plumbing: a query into a valid `stack_t`.
+        let rc = unsafe { libc::sigaltstack(std::ptr::null(), cur.as_mut_ptr()) };
+        assert_eq!(rc, 0);
+        // SAFETY: written on success.
+        let cur = unsafe { cur.assume_init() };
+        if cur.ss_flags & libc::SS_DISABLE != 0 {
+            0
+        } else {
+            cur.ss_sp.addr()
+        }
+    }
+
+    /// As on a thread that std gave no alternate stack (a C-style entry,
+    /// SIGSEGV ignored at the start, a foreign handler first): std's is
+    /// disabled, then the thread registers and gets the crate's.
+    fn register_without_std_altstack() -> usize {
+        let off = libc::stack_t {
+            ss_sp: std::ptr::null_mut(),
+            ss_flags: libc::SS_DISABLE,
+            ss_size: 0,
+        };
+        // SAFETY: test plumbing: disabling the thread's alternate stack (std
+        // unmaps its own block at the thread's end, whatever is current).
+        let rc = unsafe { libc::sigaltstack(&off, std::ptr::null_mut()) };
+        assert_eq!(rc, 0);
+        assert_eq!(current_altstack(), 0);
+        register_thread();
+        let a = current_altstack();
+        assert_ne!(a, 0, "the crate's alternate stack");
+        a
+    }
+
+    /// Review RT1-03: the alternate stacks the crate makes are given back
+    /// when their threads end, and reused: three threads alive at once,
+    /// then five one after the other, use three blocks, not eight (threads
+    /// mode makes a thread per dedicated task, so a block per ended thread
+    /// would grow without bound; the review's example: 81,916 bytes per
+    /// task).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn ended_threads_give_their_alternate_stacks_back() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let mut seen: std::collections::HashSet<usize> = (0..3)
+            .map(|_| {
+                let b = barrier.clone();
+                std::thread::Builder::new()
+                    .stack_size(256 << 10)
+                    .spawn(move || {
+                        let a = register_without_std_altstack();
+                        // all three alive at once
+                        b.wait();
+                        a
+                    })
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        assert_eq!(seen.len(), 3, "three live threads, three blocks");
+        for _ in 0..5 {
+            let a = std::thread::Builder::new()
+                .stack_size(256 << 10)
+                .spawn(register_without_std_altstack)
+                .unwrap()
+                .join()
+                .unwrap();
+            seen.insert(a);
+        }
+        assert_eq!(seen.len(), 3, "the blocks of ended threads are reused");
     }
 
     /// Registration and the publication of the running context, on a thread

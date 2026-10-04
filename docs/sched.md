@@ -8,6 +8,10 @@ translators. It is lean2rr's model (its `leanrt`: `sched.rs`, `task.rs`,
 - the stack switch is corosensei's instead of hand-written assembly;
 - one rule for pure tasks is new ("The pure-task rule").
 
+Threads mode, Lean's task manager on real threads, is the feature `threads`
+instead (`sched::mt`, re-exported as `sched` with the same names; it
+excludes `sched`): `docs/threads.md`.
+
 This file covers:
 - the model;
 - blocking IO and the event loop (sched-io);
@@ -31,6 +35,8 @@ This file covers:
 | `src/sched/reactor.rs` | The event loop (sched-io): descriptors and timers on epoll, the cooperative `poll_fds`, the loop context and its callbacks |
 | `src/sched/uv.rs` | `Std.Internal.UV`'s loop, timers and signals on the event loop |
 | `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
+| `src/sched/common.rs` | The plain items both modes share: `TaskState`, the messages, the priorities |
+| `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt` |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
 | `src/io/coop.rs` | sched-io in the io layer (features `io` and `sched`): the cooperative reads, writes, `flock` and `waitpid`, and the stream locks |
 | `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included) |
@@ -961,9 +967,10 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    (LB-18). The driver's `Ref` (`tests/sched-driver/src/lean.rs`) is an
    example.
 8. **Stack overflow.** Lean's report (`src/runtime/stack_overflow.cpp`) is
-   the crate's (AR-11), behind the feature `stack-overflow` (it turns on
-   `sched`; lean2rr enables it, leanrs decides at its adoption of `sched`,
-   its DV6 until then). The glue calls
+   the crate's (AR-11), behind the feature `stack-overflow` (with `sched`,
+   or with `threads`, where every thread the task manager makes installs it
+   at its entry; lean2rr enables it, leanrs decides at its adoption of
+   `sched`, its DV6 until then). The glue calls
    `sched::install_stack_overflow_handler()` once per OS thread that runs
    Lean code, at that thread's entry, before any Lean code runs on it: the
    process's main thread for the initializers, and `main`'s thread if it is
@@ -1654,7 +1661,10 @@ machine's speed" (above) and "The limits of one thread" (below).
 
 The owner's direction (2026-10-03): parallelism will be supported later.
 The model stays single-threaded for now, and nothing here should block
-real threads.
+real threads. Since T1, threads mode exists beside it, as a separate
+scheduler (feature `threads`, `docs/threads.md`); this section is what the
+single-thread scheduler does per thread, and what threads mode had to
+change.
 
 **The one helper thread pair today: DNS lookups (`net`).** `net::dns` runs
 glibc's `getaddrinfo` and `getnameinfo` on two threads of its own, started
