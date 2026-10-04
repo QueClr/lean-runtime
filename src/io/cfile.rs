@@ -932,14 +932,19 @@ impl CFile {
     /// The descriptor closes when its last holder goes: at once for a stream
     /// made by [`CFile::fdopen`] alone, but for a handle's stream only when the
     /// handle's file drops (it keeps a shared clone for `flock`); a standard
-    /// stream's descriptor is never closed. Crate-internal (review RIO1-11):
+    /// stream's descriptor is never closed. While `exit::force_exit` ends the
+    /// process (`_Exit`), the pending output is discarded instead (leanrs
+    /// review F3). Crate-internal (review RIO1-11):
     /// closing a handle's stream through `Handle::file()` would leave its
     /// descriptor open; a stream closes when it is dropped.
     pub(crate) fn close(&mut self) {
         if matches!(self.fd, Fd::Closed) {
             return;
         }
-        if self.flags & NO_WRITES == 0 && self.in_put_mode() {
+        if self.flags & NO_WRITES == 0
+            && self.in_put_mode()
+            && !super::exit::exiting_without_flush()
+        {
             let _ = self.do_flush();
         }
         self.fd = Fd::Closed;

@@ -24,6 +24,7 @@
 //! leanrs's `rt/leanrs_rt/src/io/env.rs` (`uncaught`, `process_force_exit`).
 
 use super::handle::{lock, open_files_newest_first, STDERR, STDIN, STDOUT};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::PoisonError;
 
 /// The streams' part of C's `exit` in a native Lean program (see the module
@@ -32,6 +33,9 @@ use std::sync::PoisonError;
 /// stream's lock; `_IO_unbuffer_all` skips a stream another thread holds (glibc
 /// gives it two tries).
 pub fn exit_flush() {
+    if exiting_without_flush() {
+        return;
+    }
     let _ = lock(&STDOUT).flush();
     let open = open_files_newest_first();
     for f in &open {
@@ -78,8 +82,24 @@ pub fn exit(code: i32) -> ! {
 /// The crate registers none of these. A translator whose glue registers any,
 /// or links C or C++ code that buffers output, and needs `_Exit` exactly,
 /// calls `_exit` from its glue.
+///
+/// Before `std::process::exit`, a process-wide flag is set that makes every
+/// later `fclose` (a handle dropped by a thread-local destructor, a translator
+/// keeping handles in thread-locals) and [`exit_flush`] discard pending output
+/// instead of writing it, as `_Exit` would never have written it (leanrs
+/// review F3).
 pub fn force_exit(code: i32) -> ! {
+    EXITING_WITHOUT_FLUSH.store(true, Ordering::SeqCst);
     std::process::exit(code)
+}
+
+/// Set by [`force_exit`]: the process is ending as `_Exit` ends it.
+static EXITING_WITHOUT_FLUSH: AtomicBool = AtomicBool::new(false);
+
+/// Whether [`force_exit`] is ending the process: no stream writes its pending
+/// output any more.
+pub(crate) fn exiting_without_flush() -> bool {
+    EXITING_WITHOUT_FLUSH.load(Ordering::SeqCst)
 }
 
 /// `lean_io_result_show_error` for an uncaught error whose text is `msg`

@@ -1685,6 +1685,39 @@ fn io_process_force_exit() {
     }
 }
 
+thread_local! {
+    /// A handle kept in a thread-local, as a translator may keep handles (a
+    /// thread-local file table, a lazily initialized global).
+    static HELD: std::cell::RefCell<Option<Handle>> = const { std::cell::RefCell::new(None) };
+}
+
+/// `forceExit` (`_Exit`) loses the pending output of a handle the program
+/// still holds, also when the handle lives in a thread-local that
+/// `std::process::exit`'s TLS destructors drop (leanrs review F3); `exit`
+/// writes it.
+#[test]
+fn io_force_exit_drops_thread_local_handles() {
+    if let Some(case) = child_case() {
+        let f = std::env::var("IO_TEST_FILE").unwrap();
+        let h = open(&f, FsMode::Write).unwrap();
+        put(&h, "pending").unwrap();
+        HELD.with(|c| *c.borrow_mut() = Some(h));
+        if case == "force" {
+            exit::force_exit(3);
+        }
+        exit::exit(4);
+    }
+    let d = setup("force-exit-tls");
+    for (case, code, file) in [("force", 3, ""), ("exit", 4, "pending")] {
+        let f = p(&d, &format!("{case}.txt"));
+        let out = child("io_force_exit_drops_thread_local_handles", case, |c| {
+            c.env("IO_TEST_FILE", &f);
+        });
+        assert_eq!(out.status.code(), Some(code), "{case}");
+        assert_eq!(fs::read_to_string(&f).unwrap(), file, "{case}");
+    }
+}
+
 /// Lean's probe `uncaught`: an uncaught `userError "a\x00b"` prints
 /// `uncaught exception: a` (a C string stops at the NUL byte) and exits 1;
 /// pending standard output is flushed first.
