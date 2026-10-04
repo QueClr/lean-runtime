@@ -97,6 +97,10 @@ pub struct CFile {
     /// A write that fails with `EAGAIN` reports `EPIPE`
     /// ([`CFile::fdopen_bounded_pipe`]).
     eagain_is_epipe: bool,
+    /// The last `new_do_write` returned at its seek back over read-ahead
+    /// (`ESPIPE` on a FIFO opened `readWrite`), writing nothing and setting
+    /// no error indicator.
+    seek_failed: bool,
 }
 
 /// The `fdopen` flags of a mode (`lean_io_prim_handle_mk`): `read` is `"r"`,
@@ -126,6 +130,7 @@ impl CFile {
             offset: POS_BAD,
             used: false,
             eagain_is_epipe: false,
+            seek_failed: false,
         }
     }
 
@@ -289,11 +294,13 @@ impl CFile {
     /// then empty the buffer. A failed seek returns before the reset, so the
     /// bytes stay buffered (and no error indicator is set).
     fn new_do_write(&mut self, from: usize, user: Option<&[u8]>, to_do: usize) -> usize {
+        self.seek_failed = false;
         if self.flags & IS_APPENDING != 0 {
             self.offset = POS_BAD;
         } else if self.re != self.wb {
             let np = self.sysseek(self.wb as i64 - self.re as i64, SEEK_CUR);
             if np == POS_BAD {
+                self.seek_failed = true;
                 return 0;
             }
             self.offset = np;
@@ -567,9 +574,13 @@ impl CFile {
                 continue;
             }
             // LB-02: glibc's `_IO_setp` below would forget the pending bytes;
-            // `fflush` first (`_IO_new_file_sync`). A failure ends the read, as
-            // a failing `_IO_switch_to_get_mode` ends a small one.
-            if self.wp > self.wb && self.sync() == EOF {
+            // `fflush` first (`_IO_new_file_sync`). A failed write ends the
+            // read, as a failing `_IO_switch_to_get_mode` ends a small one. A
+            // failed seek back over read-ahead (`new_do_write` returns before
+            // writing, no error indicator) is no failed write: the bytes are
+            // dropped below and the read goes on, as glibc's direct read does
+            // (leanrs review F1).
+            if self.wp > self.wb && self.sync() == EOF && !self.seek_failed {
                 break;
             }
             self.setg(0, 0, 0);

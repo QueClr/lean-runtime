@@ -86,9 +86,13 @@ impl Glibc {
         if n == 0 {
             return Ok(Vec::new());
         }
-        // LB-02: the pending output is written before a direct read
+        // LB-02: the pending output is written before a direct read; a failed
+        // write ends the read, a failed seek back over read-ahead (`ESPIPE`,
+        // which no write gives) does not: glibc's direct read then drops the
+        // bytes (leanrs review F1)
         let flushed = !(n >= self.bufsize && unsafe { __fpending(self.f) } > 0)
-            || unsafe { fflush(self.f) } == 0;
+            || unsafe { fflush(self.f) } == 0
+            || c_errno() == 29;
         let got = if flushed {
             unsafe { fread(v.as_mut_ptr() as *mut c_void, 1, n, self.f) }
         } else {

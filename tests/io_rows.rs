@@ -22,7 +22,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{IsTerminal, Write as _};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -1704,6 +1704,153 @@ fn io_read_after_write() {
     put(&h, "XYZ").unwrap();
     drop(h);
     assert_eq!(fs::read(&g).unwrap(), b"abc3456789XYZ");
+}
+
+/// When the pending bytes cannot be written out before a read, the read
+/// fails with that write's error and reads nothing (LB-02). Below a buffer
+/// this is native's own refill path (`/dev/full` opened `readWrite`:
+/// `putStr "abc"`, `read 10` fails with ENOSPC; `read 10` again gives ten
+/// zero bytes; `flush` succeeds; `putStr "def"`, `getLine` fails the same way;
+/// `flush` succeeds). A direct read (4096, 5000) fails the same way, where
+/// glibc drops the bytes and reads zeros. From leanrs's
+/// `io_read_after_failed_write_out` (`local/follow-native`).
+#[test]
+fn io_read_after_failed_write_out() {
+    if !std::path::Path::new("/dev/full").exists() {
+        eprintln!("io_read_after_failed_write_out: no /dev/full, skipped");
+        return;
+    }
+    let enospc = IoError::ResourceExhausted(None, 28, "no space left on device".into());
+    for n in [10, 4096, 5000] {
+        let rd = |h: &Handle| read(h, n).map(|v| (v.len(), v.iter().all(|&b| b == 0)));
+        let h = open("/dev/full", FsMode::ReadWrite).unwrap();
+        put(&h, "abc").unwrap();
+        assert_eq!(rd(&h), Err(enospc.clone()), "read {n}");
+        assert_eq!(rd(&h), Ok((n, true)), "read {n} again");
+        h.flush().unwrap();
+        put(&h, "def").unwrap();
+        assert_eq!(get_line(&h), Err(enospc.clone()), "getLine after {n}");
+        h.flush().unwrap();
+    }
+}
+
+/// The same on standard output redirected to `/dev/full` (native: `putStr
+/// "abc"`, `read 10` fails with ENOSPC; `putStr "abc"`, `read 5000` fails with
+/// EBADF, glibc having dropped the bytes and read the write-only descriptor 1;
+/// `read 5000` again fails with EBADF; `flush` succeeds). Here the first
+/// `read 5000` fails with ENOSPC, the write-out's error (LB-02). From leanrs's
+/// `io_stdout_read_after_failed_write_out`.
+#[test]
+fn io_stdout_read_after_failed_write_out() {
+    let test = "io_stdout_read_after_failed_write_out";
+    if child_case().as_deref() == Some(test) {
+        // descriptor 1 becomes /dev/full here, after the harness's own output
+        let full = fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        rustix::stdio::dup2_stdout(&full).unwrap();
+        let h = Handle::stdout();
+        let len = |v: Vec<u8>| v.len().to_string();
+        let lines = [
+            r("putStr", put(&h, "abc"), unit),
+            r("read 10", read(&h, 10), len),
+            r("putStr 2", put(&h, "abc"), unit),
+            r("read 5000", read(&h, 5000), len),
+            r("read 5000 again", read(&h, 5000), len),
+            r("flush", h.flush(), unit),
+        ];
+        let mut text = String::from("\n");
+        for l in &lines {
+            text.push_str(&format!("RESULT: {l}\n"));
+        }
+        let _ = std::io::stderr().write_all(text.as_bytes());
+        exit::force_exit(0);
+    }
+    if !std::path::Path::new("/dev/full").exists() {
+        eprintln!("{test}: no /dev/full, skipped");
+        return;
+    }
+    let out = child(test, test, |_| {});
+    let lines: Vec<String> = String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .filter_map(|l| l.strip_prefix("RESULT: ").map(str::to_owned))
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            "putStr: ok ()",
+            r#"read 10: err ResourceExhausted(None, 28, "no space left on device")"#,
+            "putStr 2: ok ()",
+            r#"read 5000: err ResourceExhausted(None, 28, "no space left on device")"#,
+            r#"read 5000 again: err InvalidArgument(None, 9, "bad file descriptor")"#,
+            "flush: ok ()",
+        ],
+        "{out:?}"
+    );
+}
+
+/// On a FIFO opened `readWrite`, a direct read (a buffer or more) after a
+/// write after a read: the seek back over the bytes read ahead fails
+/// (`ESPIPE`), which is no failed write-out, so the pending bytes are dropped
+/// and the read goes on, as glibc's direct read does (leanrs review F1;
+/// native, leanrs's probe: `abc\n` then 8192 `z` in the FIFO, `getLine` gives
+/// `abc\n`, `putStr "ghi\n"`, `read 4096` gives 4096 `z`, `read 4` gives
+/// `zzzz`, the flush succeeds). A writer thread feeds the FIFO (it may hold
+/// only one page), and `getLine` waits until a whole buffer is in it, as in
+/// the native run. Under a deadline. From leanrs's
+/// `io_fifo_direct_read_after_write_after_read`.
+#[test]
+fn io_fifo_direct_read_after_write_after_read() {
+    let d = setup("fifo-direct-read");
+    let fifo = p(&d, "fifo");
+    if !Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|st| st.success())
+    {
+        eprintln!("io_fifo_direct_read_after_write_after_read: no mkfifo, skipped");
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let h = open(&fifo, FsMode::ReadWrite).unwrap();
+        let watch = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+            .open(&fifo)
+            .unwrap();
+        let w = fifo.clone();
+        std::thread::spawn(move || {
+            let mut f = fs::OpenOptions::new().write(true).open(&w).unwrap();
+            let _ = f.write_all(format!("abc\n{}", "z".repeat(8192)).as_bytes());
+        });
+        while rustix::io::ioctl_fionread(&watch).unwrap_or(0) < 4096 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let zs = |v: Vec<u8>| format!("{} all z {}", v.len(), v.iter().all(|&b| b == b'z'));
+        let lines = vec![
+            r("line", get_line(&h), |t| q(&t)),
+            r("putStr 2", put(&h, "ghi\n"), unit),
+            r("read 4096", read(&h, 4096), zs),
+            r("read 4", read(&h, 4), zs),
+            r("flush 2", h.flush(), unit),
+        ];
+        let _ = tx.send(lines);
+    });
+    let lines = rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the scenario did not finish within 30 s");
+    assert_eq!(
+        lines,
+        vec![
+            r#"line: ok "abc\n""#,
+            "putStr 2: ok ()",
+            "read 4096: ok 4096 all z true",
+            "read 4: ok 4 all z true",
+            "flush 2: ok ()",
+        ]
+    );
 }
 
 /// A write after a read moves the descriptor back over the unread bytes when
