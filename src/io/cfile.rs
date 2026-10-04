@@ -586,9 +586,16 @@ impl CFile {
             // failed seek back over read-ahead (`new_do_write` returns before
             // writing, no error indicator) is no failed write: the bytes are
             // dropped below and the read goes on, as glibc's direct read does
-            // (leanrs review F1).
-            if self.wp > self.wb && self.sync() == EOF && !self.seek_failed {
-                break;
+            // (leanrs review F1). Native never makes that `lseek`, so the
+            // modelled `errno` it set is put back (review RIO1-17).
+            if self.wp > self.wb {
+                let saved = errno();
+                if self.sync() == EOF {
+                    if !self.seek_failed {
+                        break;
+                    }
+                    set_errno(saved);
+                }
             }
             self.setg(0, 0, 0);
             self.setp(0, 0);

@@ -2074,8 +2074,16 @@ fn io_fifo_direct_read_after_write_after_read() {
         eprintln!("io_fifo_direct_read_after_write_after_read: no mkfifo, skipped");
         return;
     }
+    // a read-only handle with its error indicator set: its `getLine` shows
+    // the modelled `errno` after the direct read (native: EBADF, from the
+    // failed `putStr`; the dropped `lseek` is never made natively, review
+    // RIO1-17, the reviewer's FifoErrno)
+    let xf = p(&d, "x.txt");
+    fs::write(&xf, "hi\n").unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
+        let x = open(&xf, FsMode::Read).unwrap();
+        assert!(put(&x, "x").is_err());
         let h = open(&fifo, FsMode::ReadWrite).unwrap();
         let watch = fs::OpenOptions::new()
             .read(true)
@@ -2095,6 +2103,7 @@ fn io_fifo_direct_read_after_write_after_read() {
             r("line", get_line(&h), |t| q(&t)),
             r("putStr 2", put(&h, "ghi\n"), unit),
             r("read 4096", read(&h, 4096), zs),
+            r("x getLine", get_line(&x), |t| q(&t)),
             r("read 4", read(&h, 4), zs),
             r("flush 2", h.flush(), unit),
         ];
@@ -2109,6 +2118,7 @@ fn io_fifo_direct_read_after_write_after_read() {
             r#"line: ok "abc\n""#,
             "putStr 2: ok ()",
             "read 4096: ok 4096 all z true",
+            r#"x getLine: err InvalidArgument(None, 9, "bad file descriptor")"#,
             "read 4: ok 4 all z true",
             "flush 2: ok ()",
         ]
