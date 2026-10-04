@@ -54,8 +54,9 @@
 //!   conversions (`mpz_get_str`, `mpz_set_str`) through `mpz`, and the rest
 //!   through `mpn` functions on its own blocks, whose cap is `MAX_LIMBS`
 //!   (`i32::MAX` limbs, then `INTERNAL PANIC: out of memory`).
-//! - **malachite** has no limit below the address space; an allocation
-//!   failure is Rust's allocation-failure abort. Its `pow` sizes the result
+//! - **malachite** has no limit below the address space; leanrs's glue ends
+//!   an allocation failure with `INTERNAL PANIC: out of memory`, exit 1, as
+//!   native ends one (LB-05). Its `pow` sizes the result
 //!   as `bit_len * e` in 64 bits, which the size test keeps from wrapping
 //!   (review RS2-01: `3^(2^63)` gave 1).
 //!
