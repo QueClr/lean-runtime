@@ -1,0 +1,5 @@
+id = "handoff_then_write"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs's FIFO probe (review of lean-runtime fixes-1, the join at a stream lock's entry); AR-8"
+streams = "separate"

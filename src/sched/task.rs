@@ -1556,6 +1556,9 @@ pub(crate) fn run_task(i: u32) {
     };
     let out = job();
     guard.ran = true;
+    // the streams the job handed to writer threads: natively its thread was
+    // in their `fclose` until the writes ended (review RFX1-07)
+    super::writers_point();
     let leftover = match out {
         Outcome::Done => {
             if with(|s| s.end(i)) {
@@ -1629,6 +1632,7 @@ impl Drop for WalkUnwound {
 /// task is finished; at priority `LEAN_SYNC_PRIO` it runs at once as a task
 /// on the current thread; otherwise it is deferred.
 pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
+    super::writers_point();
     if !with(|s| s.tk.started) {
         let _ = job();
         return TaskId::FINISHED;
@@ -1658,6 +1662,7 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
 /// dependent runs there and then on the finishing thread, the others are
 /// queued. Requires `!dependent_runs_now(src, sync)`.
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId {
+    super::writers_point();
     let (i, now, id) = with(|s| {
         let (i, _) = s.register(job, prio, keep_alive, true);
         let now = s.depend(src, i, sync);
@@ -1675,6 +1680,7 @@ pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) ->
 /// context, or an unresolved promise, is waited for while other contexts
 /// run; a task needed by its own computation waits forever, as natively.
 pub fn wait(id: TaskId) {
+    super::writers_point();
     let mut chain = None;
     loop {
         match with(|s| s.wait_step(id, &mut chain)) {
@@ -1728,6 +1734,7 @@ pub fn state(id: TaskId) -> TaskState {
 ///   that then stalls, which natively a worker runs).
 pub fn wait_any(ids: &[TaskId]) -> usize {
     assert!(!ids.is_empty(), "lean-runtime: IO.waitAny of an empty list");
+    super::writers_point();
     let mut seen: Option<u64> = None;
     loop {
         let pick = with(|s| {
@@ -1759,6 +1766,7 @@ pub fn wait_any(ids: &[TaskId]) -> usize {
 /// unfinished task. When a canceled task finishes, its dependents created
 /// while it was unfinished are canceled too (`handle_finished`).
 pub fn cancel(id: TaskId) {
+    super::writers_point();
     with(|s| {
         if let Some(i) = s.find(id) {
             s.ent_mut(i).flags |= CANCELED;
@@ -1855,6 +1863,7 @@ pub fn promise_new() -> Result<TaskId, &'static str> {
 /// Only the first resolution counts: false (and `store` not called) if it
 /// was resolved already.
 pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool {
+    super::writers_point();
     if !super::alive() {
         return false;
     }
@@ -1946,7 +1955,21 @@ pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str))
 /// Dropped pure tasks were deleted (`release`) and never run. Only then does the glue flush the standard streams and exit
 /// (decisions Q5 refinement A): a runaway task keeps the process alive, and
 /// its buffered output is never flushed, as natively.
+///
+/// With the feature `io`, it then waits for the io layer's dedicated tasks
+/// (`io::exit::after_main`: `IO.Process.output`'s standard-output readers),
+/// as `~task_manager` waits for the dedicated workers, also in a program
+/// that started no task.
 pub fn finish() {
+    // `main`'s own hand-offs: natively its `fclose`s ended before it returned
+    super::writers_point();
+    finish_tasks();
+    #[cfg(feature = "io")]
+    crate::io::exit::after_main();
+}
+
+/// [`finish`]'s run of the remaining tasks.
+fn finish_tasks() {
     if !with(|s| s.tk.started) {
         return;
     }
@@ -1969,6 +1992,7 @@ pub fn finish() {
 /// so they do now: due sleepers, the contexts able to run, a queued task if a
 /// worker is free (on a context of its own).
 pub fn poll() {
+    super::writers_point();
     let go = with(|s| {
         if !s.tk.started
             || (s.cx.sleepers.is_empty()
@@ -2003,6 +2027,7 @@ pub fn poll() {
 /// those rounds happened before natively: its own effect points start no
 /// tasks, and let go first only what is due or able to run for a while.
 pub fn effect() {
+    super::writers_point();
     let slow = with(|s| {
         s.tk.started
             && (!s.cx.sleepers.is_empty()
@@ -2072,6 +2097,7 @@ fn effect_slow() {
 /// `IO.sleep ms` and `dbgSleep` (`ms` as Lean passes it). Other contexts and
 /// queued tasks run meanwhile, as other threads would.
 pub fn sleep_ms(ms: u32) {
+    super::writers_point();
     with(|s| {
         s.settle_worker();
         s.tk.epoch = s.tk.epoch.wrapping_add(1);

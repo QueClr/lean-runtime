@@ -99,7 +99,10 @@
 //! waits for it without blocking the thread ([`StreamGuard`]). Regular
 //! files, a program that has created no task, promise, timer or watch, and
 //! a no-suspend scope (`sched::enter_no_suspend`, the translators' free and
-//! drop paths) keep the plain calls. The module `coop` (private) has the rules;
+//! drop paths) keep the plain calls; in such a scope, a dropped stream whose
+//! last bytes would block goes to an internal writer thread, which writes
+//! them and closes it (bytes and a descriptor only, never a Lean value; the
+//! exit joins it: AR-8). The module `coop` (private) has the rules;
 //! `docs/sched.md`, "Blocking IO and the event loop", the design and the
 //! cases.
 
@@ -132,6 +135,27 @@ pub mod time;
 pub mod uvsys;
 
 pub use error::IoError;
+
+/// The entry of an io call with an effect outside the process (a child
+/// process started or killed, a file or directory created, removed, renamed
+/// or changed, the working directory, the environment, the process title or
+/// priority, a network connection or send): the calling context's
+/// handed-off streams end first (`coop::join_own_writers`, AR-8), as
+/// natively its thread was in their `fclose` until then and could not act
+/// before (leanrs's re-check of 78edede: `Child.kill` after a drop killed
+/// the reader before it read; case `process/handoff_then_kill`). Calls that
+/// only take a stream lock, `flock` or `waitpid` wait there already. One
+/// relaxed load when no writer runs; nothing without the feature `sched`.
+/// Also at the entry of the calls that allocate a descriptor (a directory
+/// listing, `/dev/urandom`, the `/proc` and `/etc` reads of the system
+/// queries, a socket, a name lookup, the interface list): natively the
+/// handed-off descriptor was closed at the drop, so they get native's
+/// numbers and hit `EMFILE` no sooner (leanrs's note on 4baa7db).
+#[inline]
+pub(crate) fn effect_point() {
+    #[cfg(feature = "sched")]
+    coop::join_own_writers(coop::JoinAt::End);
+}
 pub use handle::{FsMode, Handle, StreamGuard};
 
 /// A growable byte buffer a translator implements on its own object, so that
@@ -142,9 +166,30 @@ pub use handle::{FsMode, Handle, StreamGuard};
 /// `lean_runtime::io` (the lock is not recursive: a deadlock) and must not end
 /// the process (`exit` would wait for that lock). Allocation failure may
 /// abort, as Lean's own allocation does.
+///
+/// A sink whose storage cannot grow, and that may not end the process where
+/// it is called (leanrs's fallible reservation), drops the bytes and says so
+/// through [`ByteSink::stopped`]; the glue ends the process once the crate's
+/// function has returned.
 pub trait ByteSink {
     /// Append `bytes`.
     fn extend_from_slice(&mut self, bytes: &[u8]);
+
+    /// Whether the sink has stopped taking bytes (its storage could not
+    /// grow): it drops the bytes of every later `extend_from_slice`, and the
+    /// glue ends the process with Lean's `INTERNAL PANIC: out of memory` once
+    /// the call returns. False by default.
+    ///
+    /// Read by [`process::output`], which reads another process without
+    /// bound: it then stops reading and returns at once, as native's process
+    /// ends in the failed allocation (AR-5). The other functions that append
+    /// to a sink ignore it: their results are bounded (a path, a name, an
+    /// environment value), or the sink is infallible in both translators
+    /// (`getLine`'s).
+    #[inline]
+    fn stopped(&self) -> bool {
+        false
+    }
 }
 
 impl ByteSink for Vec<u8> {

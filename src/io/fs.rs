@@ -85,16 +85,19 @@ fn uv_err(e: &std::io::Error, fname: &[u8]) -> IoError {
 
 /// `IO.FS.createDir` (`lean_io_create_dir`, `mkdir(p, 0777)`).
 pub fn create_dir(p: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     std::fs::create_dir(c_path(p)?).map_err(c_err(p))
 }
 
 /// `IO.FS.removeDir` (`lean_io_remove_dir`, `rmdir`).
 pub fn remove_dir(p: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     std::fs::remove_dir(c_path(p)?).map_err(c_err(p))
 }
 
 /// `IO.FS.removeFile` (`lean_io_remove_file`, libuv's `uv_fs_unlink`).
 pub fn remove_file(p: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     let path = c_path(p)?;
     set_errno(0);
     std::fs::remove_file(path).map_err(|e| uv_err(&e, p))
@@ -103,6 +106,7 @@ pub fn remove_file(p: &[u8]) -> Result<(), IoError> {
 /// `IO.FS.rename` (`lean_io_rename`, `rename`): the paths are checked in
 /// order; an error names both, `<from> and/or <to>`.
 pub fn rename(from: &[u8], to: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     let a = c_path(from)?;
     let b = c_path(to)?;
     std::fs::rename(a, b).map_err(|e| {
@@ -116,6 +120,7 @@ pub fn rename(from: &[u8], to: &[u8]) -> Result<(), IoError> {
 /// `IO.FS.hardLink` (`lean_io_hard_link`, libuv's `uv_fs_link`): an error
 /// names the original.
 pub fn hard_link(orig: &[u8], link: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     let a = c_path(orig)?;
     let b = c_path(link)?;
     set_errno(0);
@@ -124,6 +129,7 @@ pub fn hard_link(orig: &[u8], link: &[u8]) -> Result<(), IoError> {
 
 /// `IO.Prim.setAccessRights` (`lean_chmod`, `chmod(p, mode)`).
 pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
+    super::effect_point();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(c_path(p)?, std::fs::Permissions::from_mode(mode)).map_err(c_err(p))
 }
@@ -236,6 +242,8 @@ fn walk_reads_non_link(path: &Path) -> bool {
 /// (Lean does not check it). The caller builds each `DirEntry` from the
 /// directory (its argument) and the name.
 pub fn read_dir(p: &[u8], mut entry: impl FnMut(&[u8])) -> Result<(), IoError> {
+    // a descriptor is allocated: the context's handed-off streams end first
+    super::effect_point();
     let dir = std::fs::read_dir(c_path(p)?).map_err(c_err(p))?;
     for e in dir {
         match e {
@@ -347,6 +355,7 @@ pub fn process_current_dir<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoEr
 /// whole path. Never during a spawn that has the process in its `cwd`
 /// (`process::with_cwd_change`).
 pub fn set_current_dir(p: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     let cut = p.iter().position(|&b| b == 0).unwrap_or(p.len());
     super::process::with_cwd_change(|| nix::unistd::chdir(os_path(&p[..cut]))).map_err(|e| {
         set_errno(e as i32);

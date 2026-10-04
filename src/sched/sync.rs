@@ -81,6 +81,7 @@ impl Mutex {
 
     /// `lean_io_basemutex_lock`.
     pub fn lock(&self) {
+        super::writers_point();
         self.lock_as(me());
     }
 
@@ -96,8 +97,15 @@ impl Mutex {
         }
     }
 
-    /// `lean_io_basemutex_unlock`. Does not switch.
+    /// `lean_io_basemutex_unlock`. It switches only to let the context's
+    /// handed-off streams end first (`writers_point`), before releasing.
     pub fn unlock(&self) {
+        super::writers_point();
+        self.unlock_inner();
+    }
+
+    /// The release itself; does not switch.
+    fn unlock_inner(&self) {
         let next = {
             let mut m = self.st.borrow_mut();
             match m.waiters.pop_front() {
@@ -135,23 +143,28 @@ impl Condvar {
     /// `lean_io_condvar_wait`: release `m`, wait to be notified, then take
     /// `m` again (natively `condition_variable::wait` on the adopted lock).
     pub fn wait(&self, m: &Mutex) {
+        super::writers_point();
         let who = me();
-        m.unlock();
+        m.unlock_inner();
         self.waiters.borrow_mut().push_back(current_context());
         block_sync();
         m.lock_as(who);
     }
 
-    /// `lean_io_condvar_notify_one`. Does not switch.
+    /// `lean_io_condvar_notify_one`. It switches only to let the context's
+    /// handed-off streams end first (`writers_point`).
     pub fn notify_one(&self) {
+        super::writers_point();
         let w = self.waiters.borrow_mut().pop_front();
         if let Some(c) = w {
             wake(c);
         }
     }
 
-    /// `lean_io_condvar_notify_all`. Does not switch.
+    /// `lean_io_condvar_notify_all`. It switches only to let the context's
+    /// handed-off streams end first (`writers_point`).
     pub fn notify_all(&self) {
+        super::writers_point();
         let ws = std::mem::take(&mut *self.waiters.borrow_mut());
         for c in ws {
             wake(c);
@@ -183,6 +196,7 @@ impl RecursiveMutex {
 
     /// `lean_io_baserecmutex_lock`.
     pub fn lock(&self) {
+        super::writers_point();
         let who = me();
         {
             let mut m = self.st.borrow_mut();
@@ -220,8 +234,10 @@ impl RecursiveMutex {
         }
     }
 
-    /// `lean_io_baserecmutex_unlock`. Does not switch.
+    /// `lean_io_baserecmutex_unlock`. It switches only to let the context's
+    /// handed-off streams end first (`writers_point`).
     pub fn unlock(&self) {
+        super::writers_point();
         let next = {
             let mut m = self.st.borrow_mut();
             if m.count > 1 {
@@ -277,6 +293,7 @@ impl SharedMutex {
 
     /// `lean_io_basesharedmutex_write`.
     pub fn write(&self) {
+        super::writers_point();
         loop {
             {
                 let mut m = self.st.borrow_mut();
@@ -311,8 +328,10 @@ impl SharedMutex {
         }
     }
 
-    /// `lean_io_basesharedmutex_unlock_write`. Does not switch.
+    /// `lean_io_basesharedmutex_unlock_write`. It switches only to let the
+    /// context's handed-off streams end first (`writers_point`).
     pub fn unlock_write(&self) {
+        super::writers_point();
         let ws = {
             let mut m = self.st.borrow_mut();
             m.write_entered = false;
@@ -326,6 +345,7 @@ impl SharedMutex {
 
     /// `lean_io_basesharedmutex_read`.
     pub fn read(&self) {
+        super::writers_point();
         loop {
             {
                 let mut m = self.st.borrow_mut();
@@ -350,8 +370,10 @@ impl SharedMutex {
         }
     }
 
-    /// `lean_io_basesharedmutex_unlock_read`. Does not switch.
+    /// `lean_io_basesharedmutex_unlock_read`. It switches only to let the
+    /// context's handed-off streams end first (`writers_point`).
     pub fn unlock_read(&self) {
+        super::writers_point();
         let w = {
             let mut m = self.st.borrow_mut();
             m.readers = m.readers.saturating_sub(1);

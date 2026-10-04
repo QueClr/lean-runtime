@@ -203,6 +203,24 @@ pub trait BigNat: Sized {
     /// so `e` may be 2^32 or more.
     fn pow(self, e: u64) -> Self;
 
+    /// `2^k` (`nat::pow` of a power of two: `(2^j)^e` is `2^(j e)`), where
+    /// `k + 1 <= MAX_BITS`. The default is `from_u64(1).shl(k)`; a backend
+    /// overrides it to build the result in one allocation (AR-3: GMP's
+    /// `mpz_setbit` on a zero, or its own block with one bit set), without
+    /// the one-limb number first.
+    fn pow2(k: u64) -> Self {
+        Self::from_u64(1).shl(k)
+    }
+
+    /// `b ^ e` of a word base (`mpz_ui_pow_ui`), where `b >= 2` is not a
+    /// power of two (`nat::pow` takes [`BigNat::pow2`] for those), `e >= 1`
+    /// and `bit_len(b) * e <= MAX_BITS`, as for `pow`. The default is
+    /// `from_u64(b).pow(e)`; a backend overrides it to compute from the word
+    /// without building a one-limb number first (AR-3).
+    fn pow_u64(b: u64, e: u64) -> Self {
+        Self::from_u64(b).pow(e)
+    }
+
     /// The greatest common divisor, with `gcd 0 x = x` (`mpz_gcd`).
     fn gcd(self, o: Self) -> Self;
 

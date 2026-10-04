@@ -356,8 +356,14 @@ one case another context cannot wait for.
 
 So a task blocked writing to a full standard output (a slow reader at the
 other end of the pipe) keeps standard output, and `main`'s next `println`
-waits for it, as natively; so does the exit's flush (`_IO_flush_all` waits
-for each stream's lock).
+waits for it, as natively. So does the exit's flush (`_IO_flush_all` waits
+for each stream's lock): a stream whose holder is writing is waited for,
+cooperatively, so the writer and the tasks that drain its reader run during
+the exit, and every byte is delivered, as natively; but a stream whose
+holder is blocked reading is skipped (LB-29: natively the exit waits for
+that read, forever when the input never comes). Each stream records what
+its holder is blocked in, under its lock (`cfile`'s idle, input and output
+states).
 
 **The event loop** (`src/sched/reactor.rs`). It is the scheduler's own, one
 per scheduler (per thread):
@@ -651,7 +657,10 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
      `LEANRS_STACK_SIZE_KB`, or 4 GiB).
    - `set_ref_read_yields(true)` if the program creates tasks.
    - Run `main`.
-   - `sched::finish()`.
+   - `sched::finish()`. With `io`, it also waits for the io layer's
+     dedicated tasks (`io::exit::after_main`: the standard-output readers
+     `IO.Process.output` leaves running when it fails; AR-6). A glue without
+     `sched` calls `io::exit::after_main()` itself once `main` has returned.
    - Flush, then exit with `main`'s result.
    - `IO.Process.exit` from anywhere, a task's context included: `effect()`,
      flush, and C's `exit`, as `lean_io_exit`. The task manager is not
@@ -660,7 +669,15 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
 3. **Tasks.** The task's value lives in the translator's own object. The
    `Job` fills it and returns `Outcome::Done`, or
    `Outcome::Continue(t2, job2)` when a bind function returned an unfinished
-   task. The calls:
+   task. Right before it stores the value, the job calls
+   `before_task_value()`, which waits (letting the others run) for the
+   writer threads of the streams the context's drops handed off (item 11):
+   natively the task's thread was in their `fclose` until then, so a waiter
+   of the task sees their bytes delivered (one relaxed load when there is
+   none; the scheduler's own points wait the same way, item 11). A glue
+   that does not call it lets a waiter see the value before the wait at
+   the end of `run_task`, that is with the bytes still on their way. The
+   calls:
    - `Task.spawn`/`IO.asTask`: `spawn(job, prio, keep_alive)`;
    - `Task.map`/`bind`, `IO.mapTask`/`bindTask`: when
      `dependent_runs_now(src, sync)` is true, apply `f` at once; otherwise
@@ -774,6 +791,10 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
      `swap` with the result dropped.
    - `modify`'s store fills the reference and wakes the waiters.
    - Without this, a reader sees the empty cell, a placeholder, at once.
+   - A write (`set`, `swap`, `take`, `modify`) first calls
+     `before_publish()`: the context's handed-off streams end before
+     another context can see the write (item 11; one relaxed load when
+     there is none).
    - The cost, as in 4.35: a `modify` whose function waits for a task that
      uses the same reference deadlocks.
    - A Lean panic in modify's function returns its default, so the store
@@ -818,7 +839,13 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    code over a descriptor, a translator's own IO) waits first with
    `sched::wait_fd(fd, interest)` or `sched::poll_fds(items, timeout)`,
    which are plain `poll(2)` when `io_cooperative()` is false; any state of
-   its own that another context may need, it releases first.
+   its own that another context may need, it releases first. At exit, a
+   stream whose guard a suspended context holds across such a wait is
+   treated as held by a writer (the crate cannot tell what the glue waits
+   for): the exit's flush waits for the guard, cooperatively, and waits for
+   good if the context never lets it go (LB-29 skips only a holder blocked
+   in the crate's own read). A glue drops its guards before a wait that may
+   last.
 10. **The event loop's callbacks** (the UV externs, the network, `net`):
     `timer_start(deadline, callback)` and `timer_stop`, and `watch(fd,
     interest, callback)`, `watch_modify(id, interest)` and `unwatch(id)`
@@ -840,13 +867,10 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
       what the descriptor takes without blocking (`pwritev2(RWF_NOWAIT)`
       for pipes and sockets; `PIPE_BUF` bytes to a FIFO, or the whole rest
       to a terminal, once `poll(2)` says it is writable). If the descriptor
-      would block, the stream is set aside, its pending bytes intact, and
-      flushed and closed when the outermost scope ends (the
-      `leave_no_suspend` that brings the depth to 0), where the flush may
-      wait cooperatively; the exit's flush (`io::exit::exit_flush`) closes
-      the streams still set aside. So a pipe whose reader is a task of the
-      same program gets every byte, as natively. Streams of regular files
-      flush as usual;
+      would block, the rest of the bytes and the descriptor are handed to
+      an internal writer thread (below), and the drop returns at once. So a
+      pipe whose reader is a task of the same program gets every byte, as
+      natively. Streams of regular files flush as usual;
     - the io layer's other waits are plain system calls that block the
       thread;
     - a stream that a suspended context holds, needed in the scope, is a
@@ -856,11 +880,127 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
       the others in it: every switch sets the depth aside and gives it back
       when the context goes on (review RSIO-10).
 
-    **The end of the outermost scope may suspend** (review RSIO-14): the
-    `leave_no_suspend` (or the guard's drop) that brings the depth to 0
-    flushes and closes the streams set aside, and that flush may wait
-    cooperatively. So a translator ends its outermost scope only where the
-    context may suspend: after its free or drop walk, never inside it.
+    **Leaving the scope never suspends** (AR-8, which replaces RSIO-14's
+    close at the outermost leave): `leave_no_suspend` (or the guard's drop)
+    only decrements the counter, so a drop walk may end anywhere, in any
+    `Drop` and during a panic's unwinding.
+
+    **The hand-off of a dropped stream** (`io::coop::hand_off`, AR-8;
+    reviews RFX1-01 to RFX1-03). Natively the drop's `fclose` blocks its
+    thread until the pipe takes the last bytes. Here the bytes (a
+    `Vec<u8>`) and the descriptor go to a writer thread of their own,
+    `lean-runtime-close`, which makes the blocking writes (as glibc's
+    `fclose` makes them: until every byte is written or a write fails,
+    `EPIPE` once the reader has gone) and closes the descriptor. The drop
+    never suspends, never waits for a stream lock, and needs no later
+    scheduling point, so the bytes reach the child whatever the dropping
+    context does next (reads a handle a task drains, polls
+    `Child.tryWait`, waits in the glue's `block_sync`). It is an internal
+    helper, not parallelism a Lean program can see: the thread holds plain
+    data only, never a Lean value, and runs no Lean code. One thread per
+    hand-off, started then, so a pipe that never drains blocks no other
+    stream's close. Where no thread can start (`EAGAIN`), the dropping
+    thread writes and closes itself, blocking as the plain `fclose` does:
+    no panic, no byte lost.
+
+    **Who waits for a writer** (reviews RFX1-07, RFX1-09, RFX1-12; leanrs's
+    re-check of a771e57). Each hand-off records the context that dropped
+    the stream, whose thread natively would still be in `fclose` until the
+    writes end, unable to do anything another context could see:
+    - that context waits for its writers at every point where it publishes
+      or may suspend (`sched::writers_point`): its effect points (output,
+      flush, process spawn, `IO.Process.exit`), polls, sleeps, waits
+      (`wait`, `wait_any`, `hang`), promise resolutions, task creations
+      (`spawn`, `depend`), `Std.Sync` operations (a lock, an unlock, a
+      `Condvar` wait or notify; so `Std.Channel` and the rest of `Std.Sync`
+      too), the glue's reference writes (`before_publish`, item 7), the end
+      of a task's job (`before_task_value`, item 3, and `run_task`) and of
+      `main` (`finish`), `IO.cancel`, the entry of every stream lock (so a
+      write through another descriptor of the same pipe comes after the
+      handed-off bytes), of `flock` and of `Child.wait`, and the entry of
+      every io call with an effect outside the process (`io::effect_point`:
+      a child spawned or killed, `IO.Process.output`, a file or directory
+      created, removed, renamed or changed, `Handle.mk`, a temporary file
+      or directory, the working directory, the environment, the process
+      title or priority; `net`'s connections, binds, listens, sends,
+      shutdowns and multicast memberships). So a context that
+      learns of the drop through any of these (a promise, a lock, a
+      reference, the task's value, the pipe itself, the child's fate) sees
+      every byte delivered (`rfx2_causal_handoff`, `rfx3_promise_handoff`,
+      `process/handoff_then_resolve`, `process/handoff_then_write`,
+      `process/handoff_then_kill`, `rfx4_fs_signal`). Not at
+      the glue's `block_sync`: the glue has registered the context as a
+      waiter by then, and a wait there could lose its wake-up.
+      Not while the context holds a stream lock (the wait could need that
+      stream, review RFX1-02's shape), in a no-suspend scope, or while a
+      panic unwinds: the next point waits instead. The writer is a thread,
+      so its pipe drains without the context, and a context that reaches no
+      point (one that only polls `Child.tryWait`) never stops it;
+    - its exit (`IO.Process.exit`, an internal panic, `forceExit`) waits for
+      its writers first, before standard output's flush;
+    - other contexts' writers still running at an exit are not waited for:
+      natively glibc unlinks a stream from its list before `fclose` flushes
+      it, so `exit` never waits for another thread's `fclose` in progress
+      (`rfx2_exit_unrelated_handoff`: exit at once, as natively in 0.31 s).
+
+    The wait is the scheduler's: the waiting context looks again every 1
+    to 16 ms, woken by the event loop's timers (so it sees a writer's end
+    up to 16 ms late; review RFX1-20), and the other contexts run
+    meanwhile; with no other context, or off the scheduler's thread, the
+    thread waits on a condition variable the writers notify. It takes no
+    descriptor: each writer thread removes its own entry when it has
+    written and closed, so a hand-off leaves nothing open after its writer
+    (review RFX1-19).
+    So a task of this program that drains the
+    writer's pipe goes on, as natively the program's other threads ran
+    while the drop's `fclose` waited: other contexts run briefly at a job's
+    end and during the exit, also during `forceExit`'s wait
+    (`rsio_exit_join`, `rfx2_exit_handoff`). An exit off the scheduler's
+    thread (the drain's out-of-memory end) or in a no-suspend scope waits
+    plainly; a job's end in a no-suspend scope does not wait (a later end,
+    or the exit, does). An abort (`LEAN_ABORT_ON_PANIC`) waits for nothing,
+    as native's `abort` flushes nothing. Only running writers cost
+    anything: a count of them, which each writer lowers when it ends, is the
+    one relaxed load at every point (review RFX1-16). An exit must not come
+    from a context that holds a stream's guard (`Handle::file()`): that
+    stream is skipped, its pending output unwritten (review RFX1-17).
+    Limits:
+    - a later write to the same pipe through another descriptor may still
+      overtake the handed-off bytes where the dropping context does not
+      wait first: a write by another context, a write made in a no-suspend
+      scope or while the context holds another stream's lock (where its
+      wait is put off), a child's write; natively the drop's `fclose` had
+      finished first;
+    - an effect made inside the same no-suspend drop walk as a hand-off
+      cannot wait for its writer, and may overtake the handed-off bytes
+      (review RFX1-21): a later drop in the walk whose flush succeeds and
+      closes its own pipe, a socket closed by its `Drop`, a pure thunk that
+      drops a handle and whose value the glue then stores. Only the order
+      between channels changes; no byte is lost. A glue calls
+      `before_publish()` where it stores a thunk's value, outside the walk;
+    - the `errno` of a failing write or close in the writer is the
+      writer's own: natively a failing `fclose` at the drop sets the
+      program's `errno` (review RFX1-06), which a later `getLine` on a
+      stream with its error indicator set could report;
+    - the handed-off descriptor itself stays open until its writer has
+      finished, where natively the drop closed it (reviews RFX1-13,
+      RFX1-19; inherent to the hand-off, and the only descriptor it
+      holds): its number is not free for reuse at once (a program near its
+      descriptor limit can get `EMFILE` sooner than natively), and a
+      `flock` lock on it is released only then (a context waiting in
+      `flock` looks again within 16 ms); once the writer has ended,
+      nothing is left open (`rfx4_fd_after`);
+    - where no writer thread can start, the dropping thread writes in
+      place and blocks; if the pipe's reader is a task of this program,
+      that task cannot run, and the program waits for good (review
+      RFX1-11; natively the reader's own thread would drain it). Writer
+      threads take a 64 KiB stack (the system's minimum where larger), so
+      this needs the thread limit or the memory exhausted.
+
+    Cases: `rsio_drop_no_suspend`, `rsio_ns_*`, `rsio_ns_unwind`,
+    `rsio_ns_force_exit`, `rsio_exit_join`, `rfx1_shared_read`,
+    `rfx1_trywait`, `rfx2_*` in `tests/sched-driver`; the unit tests of
+    `io::coop` (the hand-off into a full pipe; no thread to start).
 
     **Promise walks and `sync` dependents run outside the scope.** Dropping
     the last reference to an unresolved promise resolves it
@@ -1259,8 +1399,8 @@ The limits of one thread (lean2rr plan §10, "Tasks") hold here too:
   free), so it can block the thread until the terminal drains, as natively
   the writing thread blocks;
 - in a no-suspend scope (item 11 of "The glue") every io wait blocks the
-  thread, but for a dropped stream's flush, which is set aside until the
-  scope ends.
+  thread, but for a dropped stream's flush, which is handed to a writer
+  thread when it would block.
 
 ## The checklist of decisions Q5
 

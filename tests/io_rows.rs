@@ -1419,36 +1419,48 @@ fn io_mono_clock() {
     );
 }
 
-/// `fail_as_native` ends the process as native Lean's startup does: SIGSEGV
-/// (139) after a failed loop, though Rust's std has a SIGSEGV handler that
-/// returns from the first raise (review RIO1-08); SIGABRT (134) at the signal
-/// lock. In children, without core dumps.
+/// `end_startup` (and its old name `fail_as_native`) ends the process in
+/// order where native crashes (LB-30: SIGSEGV after a failed loop; LB-31:
+/// SIGABRT at the signal lock): `INTERNAL PANIC: Failed to initialize event
+/// loop: <libuv's message>`, status 1, nothing on stdout; under
+/// `LEAN_ABORT_ON_PANIC`, the line then an abort (134). In children, without
+/// core dumps.
 #[test]
-fn io_startup_fail_as_native() {
-    use lean_runtime::io::startup::{fail_as_native, StartupFailure};
+fn io_startup_end() {
+    use lean_runtime::io::startup::{end_startup, fail_as_native, StartupFailure};
     use std::os::unix::process::ExitStatusExt;
     match child_case().as_deref() {
-        Some("loop") => fail_as_native(StartupFailure::LoopInit),
-        Some("lock") => fail_as_native(StartupFailure::SignalLock),
+        Some("loop") | Some("loop-abort") => end_startup(StartupFailure::LoopInit(24)),
+        Some("lock") => fail_as_native(StartupFailure::SignalLock(23)),
         _ => {}
     }
-    for (case, signal) in [("loop", 11), ("lock", 6)] {
+    for (case, abort, code, signal, msg) in [
+        ("loop", false, Some(1), None, "too many open files"),
+        ("lock", false, Some(1), None, "file table overflow"),
+        ("loop-abort", true, None, Some(6), "too many open files"),
+    ] {
         let exe = std::env::current_exe().expect("test binary path");
-        let out = Command::new("/bin/sh")
-            .args([
-                "-c",
-                "ulimit -c 0; exec \"$0\" io_startup_fail_as_native --exact --nocapture",
-            ])
-            .arg(&exe)
-            .env(CHILD_VAR, case)
-            .stdin(Stdio::null())
-            .output()
-            .expect("child");
-        assert_eq!(
-            out.status.signal(),
-            Some(signal),
-            "{case}: {:?}",
-            out.status
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args([
+            "-c",
+            "ulimit -c 0; exec \"$0\" io_startup_end --exact --nocapture --test-threads=1",
+        ])
+        .arg(&exe)
+        .env(CHILD_VAR, case)
+        .env_remove("LEAN_ABORT_ON_PANIC")
+        .stdin(Stdio::null());
+        if abort {
+            cmd.env("LEAN_ABORT_ON_PANIC", "1");
+        }
+        let out = cmd.output().expect("child");
+        assert_eq!(out.status.code(), code, "{case}: {:?}", out.status);
+        assert_eq!(out.status.signal(), signal, "{case}: {:?}", out.status);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.ends_with(&format!(
+                "INTERNAL PANIC: Failed to initialize event loop: {msg}\n"
+            )),
+            "{case}: {err:?}"
         );
     }
 }
@@ -1469,6 +1481,54 @@ fn io_get_random_bytes() {
     assert_eq!(
         desc(&random(usize::MAX).unwrap_err()),
         r#"ResourceExhausted(None, 12, "not enough memory")"#
+    );
+}
+
+/// `env::open_random` then `RandomSource::fill` (AR-1): the same results as
+/// `check_random_size` and `get_random_bytes`, the open first.
+fn random_opened_first(n: usize) -> Result<Vec<u8>, IoError> {
+    let src = env::open_random(n)?;
+    let mut v = vec![0u8; n];
+    src.fill(&mut v)?;
+    Ok(v)
+}
+
+#[test]
+fn io_open_random() {
+    let d = setup("random-first");
+    check(
+        &d,
+        r("random 0", random_opened_first(0), |b| b.len().to_string()),
+    );
+    check(
+        &d,
+        r("random 33", random_opened_first(33), |b| {
+            b.len().to_string()
+        }),
+    );
+    assert_ne!(
+        random_opened_first(32).unwrap(),
+        random_opened_first(32).unwrap()
+    );
+    assert_eq!(
+        desc(&env::open_random(usize::MAX).unwrap_err()),
+        r#"ResourceExhausted(None, 12, "not enough memory")"#
+    );
+    // a source opened for 0 bytes and given more opens `/dev/urandom` then
+    let mut v = vec![0u8; 64];
+    env::open_random(0).unwrap().fill(&mut v).unwrap();
+    assert!(v.iter().any(|&b| b != 0));
+    use std::mem::MaybeUninit;
+    let mut u = vec![MaybeUninit::new(0u8); 4096];
+    env::open_random(u.len())
+        .unwrap()
+        .fill_uninit(&mut u)
+        .unwrap();
+    // SAFETY: every element was initialized above, and again by the call.
+    let bytes: Vec<u8> = u.iter().map(|b| unsafe { b.assume_init() }).collect();
+    assert!(
+        bytes.iter().filter(|&&b| b == 0).count() < 64,
+        "the bytes look unwritten"
     );
 }
 

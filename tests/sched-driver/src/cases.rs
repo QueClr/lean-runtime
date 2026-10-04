@@ -110,6 +110,13 @@ pub fn lookup(id: &str) -> Option<Case> {
         "lock_blocked" => (no_init, lock_blocked),
         "lock_exit" => (no_init, lock_exit),
         "lock_during_read" => (no_init, lock_during_read),
+        // tests/cases/process: the cases with tasks
+        "exit_while_reading" => (no_init, exit_while_reading),
+        "exit_while_writing" => (no_init, exit_while_writing),
+        "exit_while_writing_stalled" => (no_init, exit_while_writing),
+        "handoff_then_resolve" => (no_init, handoff_then_resolve),
+        "handoff_then_write" => (no_init, handoff_then_write),
+        "handoff_then_kill" => (no_init, handoff_then_kill),
         // Not Lean programs: the regression programs of sched-io's reviews.
         "rsio_poll_fds_with_stream_lock" => {
             (no_init, crate::review::rsio_poll_fds_with_stream_lock)
@@ -121,6 +128,19 @@ pub fn lookup(id: &str) -> Option<Case> {
         "rsio_ns_leak" => (no_init, crate::review::rsio_ns_leak),
         "rsio_ns_leak_panic" => (no_init, crate::review::rsio_ns_leak_panic),
         "rsio_ns_partial" => (no_init, crate::review::rsio_ns_partial),
+        "rsio_ns_unwind" => (no_init, crate::review::rsio_ns_unwind),
+        "rsio_ns_force_exit" => (no_init, crate::review::rsio_ns_force_exit),
+        "rfx1_shared_read" => (no_init, crate::review::rfx1_shared_read),
+        "rfx1_trywait" => (no_init, crate::review::rfx1_trywait),
+        "rsio_exit_join" => (no_init, crate::review::rsio_exit_join),
+        "rfx2_exit_handoff" => (no_init, crate::review::rfx2_exit_handoff),
+        "rfx2_exit_unrelated_handoff" => (no_init, crate::review::rfx2_exit_unrelated_handoff),
+        "rfx2_exit_writer_held" => (no_init, crate::review::rfx2_exit_writer_held),
+        "rfx2_causal_handoff" => (no_init, crate::review::rfx2_causal_handoff),
+        "rfx3_promise_handoff" => (no_init, crate::review::rfx3_promise_handoff),
+        "rfx3_exit_contexts" => (no_init, crate::review::rfx3_exit_contexts),
+        "rfx4_fs_signal" => (no_init, crate::review::rfx4_fs_signal),
+        "rfx4_fd_after" => (no_init, crate::review::rfx4_fd_after),
         // Not a Lean program: a Rust panic (a translator's or the runtime's
         // bug) in a task on a context of its own.
         "rust_panic_in_task" => (no_init, rust_panic_in_task),
@@ -2981,6 +3001,158 @@ fn lock_exit(args: &[String]) -> u32 {
     println("main: exiting with the task still in b.lock");
     let _held = (&a, &b);
     crate::glue::process_exit(0)
+}
+
+// tests/cases/process/exit_while_reading.lean (LB-29: the exit does not wait
+// for the task's read)
+fn exit_while_reading(args: &[String]) -> u32 {
+    let secs = args.first().cloned().unwrap_or_else(|| "10".to_owned());
+    let _t = as_task(
+        move || -> R<()> {
+            let child = lio::spawn(
+                "sleep",
+                &[&secs],
+                StdioConfig {
+                    stdin: Stdio::Null,
+                    stdout: Stdio::Piped,
+                    stderr: Stdio::Null,
+                },
+            )?;
+            let s = lio::read_to_end(child.stdout.as_ref().expect("piped"))?;
+            println(&format!("read {}", s.chars().count()));
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(300);
+    println("exiting with 3");
+    lean_runtime::sched::effect();
+    ok(Handle::stdout().flush());
+    crate::glue::process_exit(3)
+}
+
+// tests/cases/process/exit_while_writing{,_stalled}.lean (LB-29's scope: the
+// exit waits for a writer, here cooperatively)
+fn exit_while_writing(args: &[String]) -> u32 {
+    let (mode, size, out) = (args[0].clone(), to_nat(&args[1]) as usize, args[2].clone());
+    let script = format!(
+        "import sys, time\nn = 0\nwhile True:\n    b = sys.stdin.buffer.read1(65536)\n    if not b: break\n    n += len(b)\n    time.sleep(0.05)\nopen('{out}', 'w').write(str(n))\n"
+    );
+    let (cmd, cargs): (&str, Vec<&str>) = if mode == "slow" {
+        ("python3", vec!["-c", &script])
+    } else {
+        ("sleep", vec!["30"])
+    };
+    let child = ok(lio::spawn(
+        cmd,
+        &cargs,
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    let _t = as_task(
+        move || -> R<()> {
+            stdin.write(&vec![120u8; size])?;
+            stdin.flush()
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(300);
+    println(&format!("exiting with 3 ({size} bytes being written)"));
+    lean_runtime::sched::effect();
+    ok(Handle::stdout().flush());
+    crate::glue::process_exit(3)
+}
+
+// tests/cases/process/handoff_then_resolve.lean (AR-8: the task's resolution
+// waits for its handed-off stream's writer, as natively its `fclose`)
+fn handoff_then_resolve(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]) as usize;
+    let p: Rc<Promise<()>> = Rc::new(Promise::new());
+    let p2 = p.clone();
+    let _a = as_task(
+        move || -> R<()> {
+            let child = lio::spawn(
+                "sh",
+                &["-c", "sleep 1; cat > out; echo done > marker"],
+                StdioConfig {
+                    stdin: Stdio::Piped,
+                    stdout: Stdio::Inherit,
+                    stderr: Stdio::Inherit,
+                },
+            )?;
+            let stdin = child.stdin.expect("piped");
+            stdin.put_str(&vec![b'a'; n])?;
+            {
+                // the translator's free path
+                let _scope = lean_runtime::sched::no_suspend();
+                drop(stdin);
+            }
+            p2.resolve(());
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    let _ = p.result_opt().get();
+    println("main: resolved, exiting");
+    lean_runtime::sched::effect();
+    ok(Handle::stdout().flush());
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/process/handoff_then_write.lean (AR-8: the second handle's
+// lock waits for the first handle's writer, as natively its `fclose`)
+fn handoff_then_write(args: &[String]) -> u32 {
+    let (f, n) = (args[0].clone(), to_nat(&args[1]) as usize);
+    let mk = ok(lio::spawn("mkfifo", &[&f], lio::INHERIT));
+    let _ = mk.process.wait();
+    // a program with tasks
+    let _t = as_task(|| (), PRIO_DEFAULT);
+    let script = format!("exec 3<{f}; sleep 1; cat <&3 > out; echo done > marker");
+    let _child = ok(lio::spawn("sh", &["-c", &script], lio::INHERIT));
+    let h1 = ok(Handle::open(f.as_bytes(), FsMode::Write));
+    let h2 = ok(Handle::open(f.as_bytes(), FsMode::Write));
+    ok(h1.put_str(&vec![b'X'; n]));
+    {
+        // the translator's free path
+        let _scope = lean_runtime::sched::no_suspend();
+        drop(h1);
+    }
+    ok(h2.put_str(b"Y"));
+    ok(h2.flush());
+    println("written");
+    0
+}
+
+// tests/cases/process/handoff_then_kill.lean (AR-8: `kill` waits for the
+// handed-off stream's writer, as natively the drop's `fclose` returned first)
+fn handoff_then_kill(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]) as usize;
+    // a program with tasks
+    let _t = as_task(|| (), PRIO_DEFAULT);
+    let child = ok(lio::spawn(
+        "sh",
+        &["-c", "sleep 1; cat > out; echo done > marker"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    ok(stdin.put_str(&vec![b'a'; n]));
+    {
+        // the translator's free path
+        let _scope = lean_runtime::sched::no_suspend();
+        drop(stdin);
+    }
+    ok(child.process.kill());
+    let code = ok(child.process.wait());
+    println(&format!("killed, exit {code}"));
+    0
 }
 
 // tests/cases/io/lock_during_read.lean

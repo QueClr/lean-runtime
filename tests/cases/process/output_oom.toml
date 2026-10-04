@@ -1,0 +1,9 @@
+id = "output_oom"
+area = "process"
+lean_version = "4.34.0"
+source = "AR-5 (leanrs adopt-io-2: `IO.Process.output` kept reading after its sink's reservation failed, a hang at 100% CPU); lean-runtime fixes-1"
+streams = "separate"
+# The address-space limit makes the failure deterministic. Native's process
+# needs more than 2 GB of address space at startup with 8 MiB thread stacks
+# (`ulimit -v 2000000` fails to create a thread); at 3000000 KB the reads stop
+# near 1 GB, under the runner's 4G memory cap.

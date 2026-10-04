@@ -1,0 +1,5 @@
+id = "handoff_then_kill"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs's re-check of lean-runtime fixes-1 (78edede): io calls with external effects were not writer-wait points; AR-8"
+streams = "separate"

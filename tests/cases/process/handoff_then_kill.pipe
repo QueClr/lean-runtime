@@ -1,0 +1,1 @@
+$BIN $ARGS; st=$?; sleep 2; if [ -e out ]; then echo "status $st, out has $(wc -c < out) bytes"; else echo "status $st, no out"; fi

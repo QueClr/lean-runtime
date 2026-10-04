@@ -123,6 +123,7 @@ pub(crate) fn from_entries(es: &[Entry]) -> Vec<InterfaceAddress> {
 
 /// `Std.Net.interfaceAddresses` (`lean_uv_interface_addresses`).
 pub fn interface_addresses() -> Result<Vec<InterfaceAddress>, IoError> {
+    crate::io::effect_point();
     let raw = nix::ifaddrs::getifaddrs().map_err(|_| {
         IoError::InvalidArgument(None, 22, "failed to get interface addresses".to_owned())
     })?;

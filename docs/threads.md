@@ -524,13 +524,15 @@ its own refs (6).
 | Open files | `io/handle.rs` `FileStream::file` | `Mutex<CFile>`; `Handle` is an `Arc` | Unchanged; already `Send + Sync` |
 | `Handle.lock` | `io/handle.rs` `Handle::flock` | Waits in `flock` without the stream's lock (review RIO1-01) | Unchanged |
 | A sink under a stream's lock | `io/mod.rs` `ByteSink` | The sink must not call `io` or exit | Unchanged; the rule is per thread |
-| Open-handle list | `io/handle.rs` `OPEN`, `release` | `Mutex<Vec<Arc<FileStream>>>`; every release under it | Unchanged. Opens racing the exit's walk behave as with glibc's list lock |
+| Open-handle list | `io/handle.rs` `OPEN`, `release` | `Mutex<BTreeMap<serial, Arc<FileStream>>>` (AR-7); every release under it | Unchanged. Opens racing the exit's walk behave as with glibc's list lock |
 | Current streams | `io/streams.rs` `CURRENT` | Thread-local, swapped per context (`swap_context`) | One set per real thread, as natively. `task_begin` gives each pool task fresh slots |
 | Route of the runtime's stderr lines | `io/streams.rs` `StderrPut` | An `Rc` in the thread-local | Unchanged: it never leaves its thread |
 | errno model | `io/error.rs` `ERRNO` | Thread-local, shared by all contexts | Per thread, as C's `errno` |
 | Working directory | `io/process.rs` `CWD_LOCK` (`RwLock`) | Held for writing by the fallback spawn (`fallback_spawn`) and by `setCurrentDir` and `uv_chdir` (`with_cwd_change`); held for reading by `getcwd`, `uv_cwd` (`with_cwd_read`) and spawns without a `cwd`. Relative path operations take nothing. Gap documented: "another thread's relative path operation during the spawn ... still sees `cwd`" (module comment, item 4) | The gap becomes reachable (below) |
 | Spawner thread | `io/process.rs` `SPAWNER`, `NO_PRIVATE_CWD` | `Mutex<Option<Sender>>`; one long-lived thread | Unchanged. Spawns with a `cwd` queue on it, where native's forks run in parallel: a speed difference only |
 | Modelled pids | `io/process.rs` `NEXT_MODELLED_PID` | `AtomicU32` | Unchanged |
+| `output`'s drains | `io/process.rs` `DRAINS` | A `Mutex<Vec<JoinHandle>>`; one thread per failed `output`, joined after `main` (AR-6); it keeps its bytes and may end the process with the out-of-memory panic (RFX1-04) | Unchanged |
+| Dropped streams' writers | `io/coop.rs` `WRITERS`, `hand_off` | A `Mutex<Vec<JoinHandle>>`; one thread per hand-off, holding bytes and a descriptor only, joined by the exit (AR-8) | Unchanged |
 | `environ` copy | `io/environ.rs` `ENVIRON`, `set`, `unset` | A `Mutex`; the C environment changes through `std::env::set_var` and `remove_var` | Unchanged. C code that reads the environment on another thread races with `setenv`, as natively (`lean_uv_os_setenv`, `uv/system.cpp` 320, calls libuv's `uv_os_setenv`). The crate is on edition 2021, where `set_var` is safe |
 | Process title | `io/uvsys.rs` `TITLE` | `Mutex` | Unchanged |
 | Startup descriptors | `io/startup.rs` `DESCRIPTORS` | `OnceLock` | Unchanged |

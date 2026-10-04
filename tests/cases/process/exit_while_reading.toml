@@ -1,0 +1,11 @@
+id = "exit_while_reading"
+area = "process"
+lean_version = "4.34.0"
+source = "LB-29 (docs/lean-bugs.md; lean2rr-side judge, 2026-10-04: ExitWhileReading.lean, from the fixes-1 review of IO.Process.output's out-of-memory end)"
+streams = "separate"
+deviations = { lean2rr = "LB-29", leanrs = "LB-29" }
+native = { stdout = "exiting with 3\n", stderr = "", code = "timeout" }
+expect = { hang = 3 }
+# Natively the exit waits for the task's read, which returns when `sleep 10` ends: past the
+# 3-second bound, so native's code is `timeout`. The expected files are the correct outcome,
+# written by hand. Its twin is in tests/sched-driver (the program creates a task).

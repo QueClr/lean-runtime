@@ -20,12 +20,14 @@
 //! `rt/leanrs_rt/src/io/handle.rs` (`FsMode`, the `Handle` and slot design,
 //! the tests in `tests/io_rows.rs`).
 
-use super::cfile::CFile;
+use super::cfile::{CFile, BUSY_INPUT};
 use super::error::{IoError, ENOMEM, EWOULDBLOCK};
 use super::{sys, ByteSink};
 use rustix::fd::OwnedFd;
 use rustix::fs::{FlockOperation, OFlags};
+use std::collections::BTreeMap;
 use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// Lean's `IO.FS.Mode` (`Init/System/IO.lean`), its constructors in Lean's
@@ -113,12 +115,14 @@ impl std::ops::DerefMut for StreamGuard<'_> {
     }
 }
 
-#[cfg(feature = "sched")]
 impl Drop for StreamGuard<'_> {
     #[inline]
     fn drop(&mut self) {
+        // what the holder was doing ends with the hold (LB-29)
+        self.g.unmark();
         // The waiters are woken before `g` unlocks, which is fine: waking
         // switches nothing, and `g` drops right after this.
+        #[cfg(feature = "sched")]
         if self.key != 0 {
             super::coop::released(self.key);
         }
@@ -157,26 +161,61 @@ pub(crate) struct FileStream {
     /// The descriptor, reachable without the lock (`fileno(fp)`), for the
     /// calls that take no `FILE` lock natively (`flock`, `isatty`).
     fd: sys::Fd,
+    /// Its key in the open list ([`OPEN`]): the order of its opening.
+    serial: u64,
+    /// What the holder of `file`'s lock is doing (LB-29), readable without
+    /// the lock: a clone of the stream's cell.
+    busy: Option<Arc<AtomicU8>>,
 }
 
-/// The open files, oldest first: glibc's `_IO_list_all`, reversed (new
-/// streams are linked at its head, and the exit walks it from there). Each
-/// slot is a strong reference, held besides the stream's `Handle`s (no
-/// non-owning reference: leanrs's ownership rule S4 forbids std's in
-/// runtime code). Every other reference is let go through [`release`],
-/// under this lock, so the one that leaves the slot alone with it sees a
-/// count of 2 and empties the slot, and the stream closes.
-static OPEN: Mutex<Vec<Arc<FileStream>>> = Mutex::new(Vec::new());
+impl FileStream {
+    /// Whether the holder of the stream's lock is blocked reading it (LB-29).
+    pub(crate) fn busy_reading(&self) -> bool {
+        self.busy
+            .as_ref()
+            .is_some_and(|c| c.load(AtomicOrdering::Acquire) == BUSY_INPUT)
+    }
+}
+
+/// The open files (see [`OPEN`]).
+struct OpenList {
+    /// Each open file under its serial, so oldest first: glibc's
+    /// `_IO_list_all`, reversed (new streams are linked at its head, and the
+    /// exit walks it from there).
+    files: BTreeMap<u64, Arc<FileStream>>,
+    /// The next file's serial (a `u64` never wraps: one per opening).
+    next: u64,
+}
+
+/// The open files. Each slot is a strong reference, held besides the
+/// stream's `Handle`s (no non-owning reference: leanrs's ownership rule S4
+/// forbids std's in runtime code). Every other reference is let go through
+/// [`release`], under this lock, so the one that leaves the slot alone with
+/// it sees a count of 2 and empties the slot, and the stream closes.
+///
+/// A map keyed by the opening's serial, not a `Vec` searched at each
+/// release (AR-7): opening, closing and the exit's walk keep the `Vec`'s
+/// order, and closing is O(log N), where the `Vec`'s search and removal
+/// made the drop of N open handles O(N^2) (leanrs: 200000 handles in 7.91 s
+/// against native's 0.66 s, which unlinks a `FILE` from glibc's list).
+static OPEN: Mutex<OpenList> = Mutex::new(OpenList {
+    files: BTreeMap::new(),
+    next: 0,
+});
 
 impl Drop for FileStream {
     fn drop(&mut self) {
         let file = self.file.get_mut().unwrap_or_else(PoisonError::into_inner);
         // In a no-suspend scope (a translator's drop path), a flush that
-        // would wait for a pipe this program drains is set aside until the
-        // scope ends (review RSIO-09).
+        // would wait for a pipe (perhaps one this program drains) hands the
+        // rest and the descriptor to a writer thread, which closes it
+        // (review RSIO-09; AR-8). The descriptor closes there, so a context
+        // waiting in `flock` sees the release when it next looks (within
+        // 16 ms).
         #[cfg(feature = "sched")]
         if crate::sched::coop_possible() && crate::sched::in_no_suspend() && !file.flush_nowait() {
-            super::coop::defer_close(std::mem::replace(file, CFile::closed()));
+            let (bytes, fd) = file.hand_off();
+            super::coop::hand_off(bytes, fd);
             return;
         }
         file.close();
@@ -199,15 +238,15 @@ fn release(f: Arc<FileStream>) {
     debug_assert!(Arc::strong_count(&f) >= 2);
     let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
     if Arc::strong_count(&f) == 2 {
-        let slot = open.iter().rposition(|g| Arc::ptr_eq(g, &f));
-        debug_assert!(slot.is_some(), "an open file's last reference has its slot");
-        if let Some(i) = slot {
-            let slot = open.remove(i);
-            drop(open);
-            drop(slot);
-            drop(f);
-            return;
-        }
+        let slot = open.files.remove(&f.serial);
+        debug_assert!(
+            slot.as_ref().is_some_and(|g| Arc::ptr_eq(g, &f)),
+            "an open file's last reference has its slot"
+        );
+        drop(open);
+        drop(slot);
+        drop(f);
+        return;
     }
     drop(f);
 }
@@ -235,7 +274,7 @@ impl Drop for OpenFiles {
 /// The open files, newest first (see [`OpenFiles`]).
 pub(crate) fn open_files_newest_first() -> OpenFiles {
     let open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-    OpenFiles(open.iter().rev().cloned().collect())
+    OpenFiles(open.files.values().rev().cloned().collect())
 }
 
 /// `IO.FS.Handle`: a standard stream or an open file (see the module
@@ -328,6 +367,7 @@ impl Handle {
     /// `O_CLOEXEC` and permissions `0666`, whose failure is decoded with the
     /// path, and `fdopen` with `"r"`, `"w"`, `"w"`, `"r+"` or `"a"`.
     pub fn open(path: &[u8], mode: FsMode) -> Result<Handle, IoError> {
+        super::effect_point();
         if path.contains(&0) {
             return Err(IoError::embedded_nul(path));
         }
@@ -355,13 +395,18 @@ impl Handle {
 
     fn register(file: CFile) -> Handle {
         let fd = file.descriptor();
+        let busy = file.busy_arc();
+        let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+        let serial = open.next;
+        open.next += 1;
         let f = Arc::new(FileStream {
             file: Mutex::new(file),
             fd,
+            serial,
+            busy,
         });
-        OPEN.lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(f.clone());
+        open.files.insert(serial, f.clone());
+        drop(open);
         Handle(Repr::File(f))
     }
 

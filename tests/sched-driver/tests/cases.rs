@@ -28,9 +28,19 @@ use std::time::{Duration, Instant};
 /// The areas whose cases all run through `sched`.
 const AREAS: &[&str] = &["tasks", "sync", "refs", "taskio", "uvloop", "net"];
 
-/// The cases of `tests/cases/io` that create tasks, which run through
-/// `sched` too.
-const IO_WITH_TASKS: &[&str] = &["lock_blocked", "lock_exit", "lock_during_read"];
+/// The cases of other areas that create tasks, which run through `sched`
+/// too, with their areas.
+const WITH_TASKS: &[(&str, &str)] = &[
+    ("io", "lock_blocked"),
+    ("io", "lock_exit"),
+    ("io", "lock_during_read"),
+    ("process", "exit_while_reading"),
+    ("process", "exit_while_writing"),
+    ("process", "exit_while_writing_stalled"),
+    ("process", "handoff_then_resolve"),
+    ("process", "handoff_then_write"),
+    ("process", "handoff_then_kill"),
+];
 
 fn cases_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../cases")
@@ -39,8 +49,8 @@ fn cases_root() -> PathBuf {
 /// The directory of case `id`, if it is a case (the driver's own programs,
 /// `rust_panic_in_task` and the `adv_*` checks, are not).
 fn find_case_dir(id: &str) -> Option<PathBuf> {
-    if IO_WITH_TASKS.contains(&id) {
-        return Some(cases_root().join("io"));
+    if let Some((area, _)) = WITH_TASKS.iter().find(|(_, c)| *c == id) {
+        return Some(cases_root().join(area));
     }
     AREAS
         .iter()
@@ -130,14 +140,31 @@ fn run_with(
     hang: Option<u64>,
     merged: bool,
 ) -> Outcome {
-    let cwd = std::env::temp_dir().join(format!("sched-driver-{}-{id}", std::process::id()));
-    std::fs::create_dir_all(&cwd).unwrap();
-    let exe = env!("CARGO_BIN_EXE_sched-cases");
     // `ID.pipe`: a bash line run with pipefail instead of the executable,
     // with `$BIN` (here the executable and the case's id) and `$ARGS`, as
     // `scripts/cases.py` runs it.
     let pipe =
         find_case_dir(id).and_then(|d| std::fs::read_to_string(d.join(format!("{id}.pipe"))).ok());
+    run_full(id, args, env, hang, merged, pipe)
+}
+
+/// The driver's program `id` run by the bash line `line` (with `$BIN`), as a
+/// case's `.pipe`.
+fn run_line(id: &str, line: &str, hang: Option<u64>) -> Outcome {
+    run_full(id, &[], &[], hang, false, Some(line.to_owned()))
+}
+
+fn run_full(
+    id: &str,
+    args: &[String],
+    env: &[(String, String)],
+    hang: Option<u64>,
+    merged: bool,
+    pipe: Option<String>,
+) -> Outcome {
+    let cwd = std::env::temp_dir().join(format!("sched-driver-{}-{id}", std::process::id()));
+    std::fs::create_dir_all(&cwd).unwrap();
+    let exe = env!("CARGO_BIN_EXE_sched-cases");
     let mut cmd = match &pipe {
         Some(line) => {
             let mut c = Command::new("/bin/bash");
@@ -399,8 +426,9 @@ fn rsio_watch_spin() {
 }
 
 /// RSIO-03 and RSIO-09: no other context runs during a handle's drop in a
-/// no-suspend scope (its flush waits for the scope's end); without the
-/// scope, other contexts run during the drop. The child gets every byte.
+/// no-suspend scope (its flush waits for the context's next scheduling
+/// point, AR-8); without the scope, other contexts run during the drop. The
+/// child gets every byte.
 #[test]
 fn rsio_drop_no_suspend() {
     let got = run_with("rsio_drop_no_suspend", &[], &[], Some(10), false);
@@ -419,7 +447,8 @@ fn rsio_drop_no_suspend() {
 
 /// RSIO-09 (round 2): a handle dropped unflushed in a no-suspend scope,
 /// its pipe full until a task of this program drains the child: the flush
-/// waits for the scope's end, then completes (natively it completes too).
+/// waits for `main`'s next scheduling point, then completes (natively it
+/// completes too).
 #[test]
 fn rsio_ns_drop_deadlock() {
     for a in [&[][..], &["plain".to_string()][..]] {
@@ -469,6 +498,221 @@ fn rsio_ns_leak_panic() {
     assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
     assert_eq!(err_of(&got), "main: printing (no scope here)\nmain: done\n");
     assert_eq!(out_of(&got), "main: printed\n");
+}
+
+/// AR-8: a drop walk ending inside a panic's unwinding with a stream set
+/// aside: the leave does not suspend (no tick, the panic in flight), and the
+/// child gets every byte at `main`'s next scheduling point, or once `main`
+/// has returned (`exit`).
+#[test]
+fn rsio_ns_unwind() {
+    for (a, out) in [
+        (vec![], "65636\nmain: after the unwind\n"),
+        (vec!["exit".to_string()], "65636\n"),
+    ] {
+        let got = run_with("rsio_ns_unwind", &a, &[], Some(10), false);
+        assert_eq!(got.code, "0", "{a:?}: stderr {:?}", err_of(&got));
+        assert_eq!(
+            err_of(&got),
+            "drop walk: panicking true, ticks during the leave 0\n",
+            "{a:?}"
+        );
+        assert_eq!(out_of(&got), out, "{a:?}");
+    }
+}
+
+/// AR-8 (leanrs's review of fixes-1): `force_exit` right after a drop that
+/// set a stream aside writes the stream's bytes first (natively the drop's
+/// `fclose` wrote them), and nothing else: the child gets 65636 bytes, and
+/// `main`'s buffered line is lost.
+#[test]
+fn rsio_ns_force_exit() {
+    let got = run_with("rsio_ns_force_exit", &[], &[], Some(10), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "65636\n");
+}
+
+/// RFX1-01 and RFX1-02 (review of fixes-1): a stream handed off by a drop in
+/// a no-suspend scope, then `main` reads a handle a task drains (waiting for
+/// its lock, or taking it between the task's reads), with the scope and
+/// without: every mode ends, as natively (`SharedRead.lean`).
+#[test]
+fn rfx1_shared_read() {
+    for mode in ["", "sleepy", "plain", "sleepy-plain"] {
+        let got = run_with(
+            "rfx1_shared_read",
+            &[mode.to_string()],
+            &[],
+            Some(20),
+            false,
+        );
+        assert_eq!(got.code, "0", "{mode:?}: stderr {:?}", err_of(&got));
+        assert_eq!(
+            out_of(&got),
+            "main read Ok(true); reader read some: true\nexit Some(0)\n",
+            "{mode:?}"
+        );
+        assert_eq!(
+            err_of(&got),
+            "main: dropped, reading\nmain: read Ok(true)\n",
+            "{mode:?}"
+        );
+    }
+}
+
+/// RFX1-03: after the drop, `main` only polls `Child.tryWait`; the handed-off
+/// bytes reach `wc -c` anyway, and the loop ends (`TryWait.lean`).
+#[test]
+fn rfx1_trywait() {
+    let got = run_with("rfx1_trywait", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "65636\nchild exited 0 (spun: true)\n");
+}
+
+/// LB-29's scope (the judge's ruling): `IO.Process.exit` (or, with `force`,
+/// `forceExit`) right after a drop handed a stream to a writer thread, whose
+/// pipe's reader (`wc -c`) reads only once a task of this program has
+/// drained its 300000-byte standard output. The exit's join of the writer
+/// lets that task run (cooperatively, as natively the other threads run
+/// during the drop's `fclose` and the exit): the exit completes and `wc`
+/// gets every byte.
+#[test]
+fn rsio_exit_join() {
+    for (a, out) in [("exit", "main: exiting\n"), ("force", "")] {
+        let got = run_with("rsio_exit_join", &[a.to_string()], &[], Some(20), false);
+        assert_eq!(got.code, "0", "{a}: stderr {:?}", err_of(&got));
+        assert_eq!(out_of(&got), out, "{a}");
+        assert_eq!(err_of(&got).trim(), "65636", "{a}");
+    }
+}
+
+/// RFX1-07 (round 2 of the fixes-1 review): `main` hands off a stream whose
+/// reader reads only after a task has drained the child's 600000-byte
+/// standard output (with a 0.5 s pause), then ends: returns (`finish` waits
+/// for `main`'s writer), `IO.Process.exit 0` or `forceExit 0` (both wait for
+/// the exiting context's writer, letting the task run). Natively the drop's
+/// `fclose` waits, and each ends after about 0.5 s; here each ends.
+#[test]
+fn rfx2_exit_handoff() {
+    for mode in ["return", "exit", "force"] {
+        let got = run_with(
+            "rfx2_exit_handoff",
+            &[mode.to_string()],
+            &[],
+            Some(20),
+            false,
+        );
+        assert_eq!(got.code, "0", "{mode}: stderr {:?}", err_of(&got));
+        assert_eq!(err_of(&got), format!("main: dropped, ending ({mode})\n"));
+    }
+}
+
+/// RFX1-09: a task hands off a stream to `sleep 30`, which never reads; its
+/// job waits for its writer (as natively its thread is in `fclose`). `main`
+/// exits 3 after 300 ms without waiting for that writer, as native's `exit`
+/// does not wait for another thread's `fclose` in progress (native: 0.31 s).
+#[test]
+fn rfx2_exit_unrelated_handoff() {
+    let t0 = Instant::now();
+    let got = run_with("rfx2_exit_unrelated_handoff", &[], &[], Some(10), false);
+    assert_eq!(got.code, "3", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "main: exiting\n");
+    // waiting for the writer would take the 30 s of `sleep`
+    assert!(t0.elapsed() < Duration::from_secs(10), "{:?}", t0.elapsed());
+}
+
+/// RFX1-07, the causal case: a task hands off a stream to `sleep 0.3; wc -c`
+/// and ends; `main` waits for the task, then exits at once. The task's job
+/// ended only when its writer had (natively its `fclose` returned first), so
+/// `wc` gets every byte.
+#[test]
+fn rfx2_causal_handoff() {
+    let got = run_with("rfx2_causal_handoff", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got).trim(), "65636");
+}
+
+/// RFX1-08 under LB-29's narrowed rule: a task is suspended writing a
+/// 200001-byte line to standard output, a pipe whose reader starts after
+/// 1 s, when `main` calls `IO.Process.exit 0`: the exit waits for the
+/// writer (cooperatively: the task finishes its write), then flushes, and
+/// the reader counts every byte, as natively.
+#[test]
+fn rfx2_exit_writer_held() {
+    let got = run_line("rfx2_exit_writer_held", "$BIN | (sleep 1; wc -c)", Some(20));
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got).trim(), "200001");
+}
+
+/// RFX1-14 (round 3; leanrs's causal gap): a task hands off a stream, then
+/// resolves a promise and goes on; `main` waits for the promise, then exits
+/// or returns. The resolution waits for the task's writer (as natively its
+/// `fclose` had returned), so `wc` counts 65636 either way
+/// (`PromiseHandoff.lean`).
+#[test]
+fn rfx3_promise_handoff() {
+    for mode in ["exit", "return"] {
+        let got = run_with(
+            "rfx3_promise_handoff",
+            &[mode.to_string()],
+            &[],
+            Some(20),
+            false,
+        );
+        assert_eq!(got.code, "0", "{mode}: stderr {:?}", err_of(&got));
+        assert_eq!(out_of(&got).trim(), "65636", "{mode}");
+    }
+}
+
+/// RFX1-17 (round 3): `IO.Process.exit` from an event-loop callback while a
+/// task is suspended writing 200001 bytes to standard output (`callback`),
+/// or two contexts exiting while it does (`two`: 4 or 5): the exit waits for
+/// the writer, and every byte is delivered, as natively.
+#[test]
+fn rfx3_exit_contexts() {
+    for (mode, codes) in [("callback", &["0"][..]), ("two", &["4", "5"][..])] {
+        let got = run_line(
+            "rfx3_exit_contexts",
+            &format!("$BIN {mode} | (sleep 1; wc -c)"),
+            Some(20),
+        );
+        assert!(
+            codes.contains(&got.code.as_str()),
+            "{mode}: code {} stderr {:?}",
+            got.code,
+            err_of(&got)
+        );
+        assert_eq!(out_of(&got).trim(), "200001", "{mode}");
+    }
+}
+
+/// RFX1-18 (round 4; leanrs's io-entry gap): a task hands off, then tells
+/// `main` through the file system (`createDir`); `main` polls for the
+/// directory, then exits. The directory's creation waits for the task's
+/// writer, so `wc` counts 65636, as native's `FsSignal.lean`.
+#[test]
+fn rfx4_fs_signal() {
+    let got = run_with("rfx4_fs_signal", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got).trim(), "65636");
+}
+
+/// RFX1-19: a hand-off leaves no descriptor open once its writer has ended
+/// (natively the drop closed the pipe): as many descriptors after the
+/// writer, and after a scheduling point, as before the spawn.
+#[test]
+fn rfx4_fd_after() {
+    let got = run_with("rfx4_fd_after", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    let out = out_of(&got);
+    let n: Vec<&str> = out
+        .trim()
+        .trim_start_matches("descriptors: ")
+        .split(", ")
+        .map(|p| p.rsplit(' ').next().unwrap_or(""))
+        .collect();
+    assert_eq!(n.len(), 3, "{out:?}");
+    assert!(n[0] == n[1] && n[1] == n[2], "{out:?}");
 }
 
 /// RSIO-12 and RSIO-13 (round 3): a handle dropped with bytes the full pipe
@@ -637,4 +881,10 @@ cases!(
     shutdown_during_connect,
     shutdown_after_queued_write,
     shutdown_after_connect,
+    exit_while_reading,
+    exit_while_writing,
+    exit_while_writing_stalled,
+    handoff_then_resolve,
+    handoff_then_write,
+    handoff_then_kill,
 );

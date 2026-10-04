@@ -72,6 +72,15 @@ Its promise never resolves, and the peer never reads the end of the stream.</td>
 If the connect fails, the shutdown fails with <code>operation canceled</code>.</td></tr>
 <tr><td colspan="3">The lean2rr-side judge confirmed LB-21 to LB-28 on 2026-10-04, in batch <code>net-1</code>.
 Their cases are in <code>net/</code> (<a href="net.html#bugs">net</a>).</td></tr>
+<tr id="lb-29"><td>LB-29</td><td>An internal panic or <code>IO.Process.exit</code> waits for every stream that another thread holds.
+A thread that is blocked reading a pipe or stdin holds its stream until the read returns, though the stream has nothing to flush.
+So the exit is late, or never comes: <code>IO.Process.output</code> of <code>yes</code> under a memory limit prints the panic and then hangs.</td><td>The process ends with its status without waiting for a stream that a reader holds.
+A stream that a writer holds is waited for and flushed, as natively: <code>exit</code> must deliver unwritten data (<a href="io.html#processes">io</a>).
+Its cases are in <code>process/</code>.</td></tr>
+<tr id="lb-30"><td>LB-30</td><td>With too few descriptors for the event loop (<code>ulimit -n</code> 8 to 10), every program crashes with SIGSEGV before <code>main</code>.
+Lean uses the null loop that libuv returns.</td><td>Startup ends in order: <code>INTERNAL PANIC: Failed to initialize event loop: too many open files</code>, status 1.</td></tr>
+<tr id="lb-31"><td>LB-31</td><td>With fewer descriptors (<code>ulimit -n</code> 4 to 7), libuv cannot make its signal lock pipe and calls <code>abort()</code> (status 134).</td><td>The same orderly end as LB-30.
+A judge confirmed LB-29 to LB-31 on 2026-10-04; the case of LB-30 and LB-31 is <code>io/startup_fd_exhausted</code>.</td></tr>
 <tr id="lb-32"><td>LB-32</td><td>A thread that waits for a finished task wakes only after the task's <code>sync</code> dependents return.
 <code>Promise.result!</code> on a dropped promise never returns, so a wait on that promise's <code>result?</code> ends only when another task finishes, or never.</td><td>Waiters wake when a walk of dependents ends, or another task the program still holds finishes, as natively.
 When <code>result!</code> reaches its endless block, they also wake there and see <code>none</code> (<a href="sched.html#sync">sched</a>).

@@ -1,0 +1,1 @@
+$BIN slow 2097155 count.txt; st=$?; sleep 1; echo "status $st, child got $(cat count.txt)"

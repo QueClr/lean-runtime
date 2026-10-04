@@ -462,7 +462,9 @@ fn rem_slow<B: BigNat>(a: Nat<B>, b: Nat<B>) -> Nat<B> {
 /// (`BigNat::trailing_zeros`), which is shifted instead of multiplied):
 /// above `MAX_BITS` the rule returns, for the caller to end
 /// the process with, native's `NatPowExponent` when `e >= 2^32` and
-/// `OutOfMemory` otherwise.
+/// `OutOfMemory` otherwise. A power of two is `BigNat::pow2`, and another
+/// word base `BigNat::pow_u64`, so a backend can build the result without a
+/// one-limb number first (AR-3).
 ///
 /// Source: leanrs_rt `src/nat.rs` (`Nat::pow`, `pow_slow`) and lean2rr leanrt
 /// `src/nat.rs` (`nat_pow`, the power-of-two case), merged; without native's
@@ -518,9 +520,10 @@ fn pow_slow<B: BigNat>(a: Nat<B>, e: Nat<B>) -> Result<Nat<B>, InternalPanic> {
         None => u128::from(bit_len(&a)) * u128::from(e),
     };
     check_result_bits::<B>(bits).map_err(|_| too_big(e_wide))?;
-    Ok(Big(match pow2 {
-        Some(j) => B::from_u64(1).shl(j * e),
-        None => a.into_big().pow(e),
+    Ok(Big(match (pow2, a) {
+        (Some(j), _) => B::pow2(j * e),
+        (None, Small(x)) => B::pow_u64(x, e),
+        (None, Big(b)) => b.pow(e),
     }))
 }
 

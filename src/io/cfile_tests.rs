@@ -150,6 +150,105 @@ fn open_list_release_after_walk() {
     assert_eq!(read_to_end(&r), b"late");
 }
 
+/// The open list's order after closes in any order and a later opening
+/// (AR-7: the list is a map keyed by the opening's serial, closing is
+/// O(log N)): newest first, as the `Vec` it replaced kept it, every closed
+/// file gone, the new one first. 256 handles on `/dev/null`, closed in a
+/// mixed order, then the rest oldest first.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn open_list_order_after_closes() {
+    let _alone = walks_alone();
+    let open = || Some(Handle::open(b"/dev/null", FsMode::Write).unwrap());
+    let mut hs: Vec<Option<Handle>> = (0..256).map(|_| open()).collect();
+    for i in (0..256).rev().step_by(3) {
+        hs[i] = None;
+    }
+    for i in (0..256).step_by(7) {
+        hs[i] = None;
+    }
+    hs.push(open());
+    let mine: Vec<&std::sync::Arc<_>> = hs
+        .iter()
+        .rev()
+        .flatten()
+        .map(|h| h.file_stream().unwrap())
+        .collect();
+    assert!(mine.len() > 100);
+    let walk = crate::io::handle::open_files_newest_first();
+    let order: Vec<usize> = walk
+        .iter()
+        .filter_map(|f| mine.iter().position(|m| std::sync::Arc::ptr_eq(m, f)))
+        .collect();
+    assert_eq!(order, (0..mine.len()).collect::<Vec<_>>());
+    drop(walk);
+    // each closes as its last handle goes, oldest first: the list's slot
+    // and the handle are its only references
+    for h in hs.iter_mut() {
+        if let Some(x) = h.take() {
+            assert_eq!(std::sync::Arc::strong_count(x.file_stream().unwrap()), 2);
+        }
+    }
+}
+
+/// LB-29 as the judge narrowed it: the exit's flush waits for a stream
+/// whose holder is writing or busy otherwise (another thread here: the
+/// drain's out-of-memory exit while `main` is in a `println`, leanrs's
+/// re-review), and skips at once one whose holder is blocked reading.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn exit_lock_waits_for_writers_and_skips_readers() {
+    use crate::io::exit::exit_lock;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::time::{Duration, Instant};
+    let (_r, w) = pipe();
+    let file = CFile::fdopen(w, FsMode::Write);
+    let busy = file.busy_arc().unwrap();
+    let m = Arc::new(Mutex::new(file));
+    let reading = {
+        let b = busy.clone();
+        move || b.load(Ordering::Acquire) == BUSY_INPUT
+    };
+    // the last: the holder takes the lock idle and starts reading 200 ms
+    // later (the race of leanrs's re-check): seen reading, skipped
+    for (what, held_ms, late) in [
+        (BUSY_IDLE, 300u64, false),
+        (BUSY_OUTPUT, 300, false),
+        (BUSY_INPUT, 1500, false),
+        (BUSY_INPUT, 3000, true),
+    ] {
+        let start = Arc::new(Barrier::new(2));
+        let (m2, s2) = (m.clone(), start.clone());
+        let holder = std::thread::spawn(move || {
+            let mut g = m2.lock().unwrap();
+            if what != BUSY_IDLE && !late {
+                g.mark(what);
+            }
+            s2.wait();
+            if late {
+                std::thread::sleep(Duration::from_millis(200));
+                g.mark(what);
+            }
+            std::thread::sleep(Duration::from_millis(held_ms));
+            g.unmark();
+        });
+        start.wait();
+        let t0 = Instant::now();
+        let got = exit_lock(&m, &reading).is_some();
+        let waited = t0.elapsed();
+        if what == BUSY_INPUT {
+            assert!(!got, "a reader's stream is skipped");
+            assert!(waited < Duration::from_millis(1000), "{late}: {waited:?}");
+        } else {
+            assert!(got, "a writer's stream is waited for");
+            assert!(waited >= Duration::from_millis(200), "{waited:?}");
+        }
+        holder.join().unwrap();
+        assert_eq!(busy.load(Ordering::Acquire), BUSY_IDLE);
+    }
+}
+
 /// glibc's `_IO_file_doallocate`: `st_blksize` only when positive and below
 /// `BUFSIZ` (8192). From leanrs's `block.rs` test.
 #[test]

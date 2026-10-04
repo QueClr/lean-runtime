@@ -1,0 +1,15 @@
+id = "startup_fd_exhausted"
+area = "io"
+lean_version = "4.34.0"
+source = "LB-30, LB-31 (docs/lean-bugs.md; lean2rr-side judge, 2026-10-04, from leanrs's finding of 134 and 139 at low descriptor limits)"
+streams = "separate"
+deviations = { lean2rr = "LB-30; LB-31", leanrs = "LB-30; LB-31" }
+native = { stdout = "exit 134\nexit 139\nexit 139\nexit 134\nexit 139\n", stderr = "<killed: Aborted>\n<killed: Segmentation fault>\n<killed: Segmentation fault>\n<killed: Aborted>\n<killed: Segmentation fault>\n", code = "0" }
+# bash reports each death by a signal on its stderr, with its line number, the pid and, where a
+# core is written, `(core dumped)` (the .pipe turns cores off).
+normalize = ['^.*line \d+: +\d+ (Aborted|Segmentation fault)( +\(core dumped\))?.*$ -> <killed: \1>']
+# Host-dependent, as startup_fd_limit: recorded where libuv 1.48 makes its two io_uring rings
+# (Linux 5.13 or later, io_uring allowed); without them the three default runs move two
+# descriptors down (9 and 10 then reach Init's `/dev/urandom` and its uncaught exception). The
+# runner's own descriptors above 2 must be closed (scripts/cases.py's subprocesses close them).
+# The expected files are the correct outcome, written by hand.

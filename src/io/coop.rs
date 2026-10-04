@@ -167,8 +167,13 @@ fn held(g: std::sync::MutexGuard<'_, CFile>, key: usize) -> StreamGuard<'_> {
     }
 }
 
-/// A stream's lock, taken cooperatively (see the module comment).
+/// A stream's lock, taken cooperatively (see the module comment). First,
+/// with no stream lock held yet, the context's handed-off streams end
+/// ([`join_own_writers`]): natively its thread was in their `fclose` until
+/// then, so a write through another descriptor of the same pipe comes
+/// after their bytes (leanrs's FIFO probe, case `process/handoff_then_write`).
 pub(crate) fn lock(m: &Mutex<CFile>) -> StreamGuard<'_> {
+    join_own_writers(JoinAt::End);
     let key = key_of(m);
     loop {
         match m.try_lock() {
@@ -182,6 +187,34 @@ pub(crate) fn lock(m: &Mutex<CFile>) -> StreamGuard<'_> {
             }
         }
     }
+}
+
+/// Who holds stream `m`, as far as this thread knows (the exit's
+/// `exit_lock`): the running context itself (`HELD`), a suspended context
+/// of this thread (`OWNED`), or neither (another thread, or nobody).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Holder {
+    Me,
+    Suspended,
+    Other,
+}
+
+/// See [`Holder`].
+pub(crate) fn holder_of(m: &Mutex<CFile>) -> Holder {
+    let key = key_of(m);
+    if HELD
+        .try_with(|h| h.borrow().contains(&key))
+        .unwrap_or(false)
+    {
+        return Holder::Me;
+    }
+    if OWNED
+        .try_with(|o| o.borrow().iter().any(|e| e.key == key))
+        .unwrap_or(false)
+    {
+        return Holder::Suspended;
+    }
+    Holder::Other
 }
 
 /// A stream's lock if it is free (glibc's `_IO_unbuffer_all` skips a
@@ -409,48 +442,221 @@ pub(crate) fn write_nowait(fd: &Fd, data: &[u8], coop: &mut Coop) -> Option<Resu
     Some(fd.write(&data[..n]))
 }
 
-thread_local! {
-    /// Streams whose drop in a no-suspend scope found their pipe full: their
-    /// flush and close wait for the end of the outermost scope.
-    static DEFERRED: RefCell<Vec<CFile>> = const { RefCell::new(Vec::new()) };
+// ---------------------------------------------------------------------------
+// The hand-off of a dropped stream's last bytes (review RSIO-09; AR-8)
+
+/// A writer thread ([`hand_off`]) that has not ended, and the context that
+/// dropped the stream: natively that context's thread would still be inside
+/// `fclose` until the writes end. The thread removes its own entry when it
+/// has written and closed, so nothing of it stays behind (review RFX1-19).
+struct Writer {
+    id: u64,
+    owner: Owner,
 }
 
-/// How many streams wait in `DEFERRED` (any thread): one relaxed load at
-/// each outermost `leave_no_suspend`.
-static DEFERRED_COUNT: AtomicUsize = AtomicUsize::new(0);
+/// A context of a thread: the thread's tag (`thread_tag`) and its context
+/// (`None` where the scheduler's state cannot be read).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Owner(u64, Option<CtxId>);
 
-/// Set a stream aside, its flush and close to happen when this thread's
-/// outermost no-suspend scope ends (`close_deferred`), or at the exit's
-/// flush (`exit::exit_flush`).
-pub(crate) fn defer_close(f: CFile) {
-    if DEFERRED.try_with(|d| d.borrow_mut().push(f)).is_ok() {
-        DEFERRED_COUNT.fetch_add(1, Ordering::Relaxed);
+/// The writer threads that still run, with their dropping contexts.
+static WRITERS: Mutex<Vec<Writer>> = Mutex::new(Vec::new());
+
+/// Notified when a writer has removed its entry: the plain waits of
+/// [`join_own_writers`] (off the scheduler, or with no other context).
+static WRITER_ENDED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// How many writers `WRITERS` holds, kept under its lock: the one relaxed
+/// load at every writers point ([`join_own_writers`]), so only running
+/// writers cost anything (review RFX1-16).
+static RUNNING_WRITERS: AtomicUsize = AtomicUsize::new(0);
+
+/// The stack of a writer thread: a write loop needs little (the system's
+/// minimum applies when it is larger; review RFX1-11).
+const WRITER_STACK: usize = 64 * 1024;
+
+/// A number naming the calling thread for `Owner` (0 while its locals are
+/// being destroyed).
+fn thread_tag() -> u64 {
+    use std::sync::atomic::AtomicU64;
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    thread_local! {
+        static TAG: u64 = NEXT.fetch_add(1, Ordering::Relaxed);
+    }
+    TAG.try_with(|t| *t).unwrap_or(0)
+}
+
+/// The running context of the calling thread.
+fn me() -> Owner {
+    Owner(thread_tag(), sched::running_context())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test hook: this thread's hand-offs find no thread to start (`EAGAIN`).
+    pub(crate) static FAIL_WRITER_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The blocking writes of `bytes` to `fd`, as glibc's `new_do_write` makes
+/// them in `fclose`'s flush (until every byte is written or a write fails:
+/// `EPIPE` when the reader has gone, since the process ignores `SIGPIPE`),
+/// then the close (the last clone of the descriptor goes). A failure's
+/// `errno` is this thread's own (review RFX1-06).
+fn write_then_close(bytes: &[u8], fd: Fd) {
+    let mut done = 0;
+    while done < bytes.len() {
+        match fd.write(&bytes[done..]) {
+            Ok(n) => done += n,
+            Err(_) => break,
+        }
+    }
+    drop(fd);
+}
+
+/// A dropped stream whose pending bytes its descriptor would not take
+/// without blocking (`CFile::flush_nowait` in a no-suspend scope, review
+/// RSIO-09): the bytes and the descriptor go to a writer thread of their
+/// own, which writes them with blocking writes and closes the descriptor,
+/// as natively the drop's `fclose` does; the drop returns at once, with no
+/// suspension, no lock to wait for and no scheduling point needed (AR-8;
+/// reviews RFX1-01 to RFX1-03). The thread holds plain data only (a
+/// `Vec<u8>` and the descriptor), never a Lean value: an internal helper,
+/// not parallelism a Lean program can see. One thread per hand-off,
+/// with a small stack, so a pipe that never drains blocks no other stream's
+/// close.
+///
+/// The writer belongs to the dropping context, whose thread natively would
+/// still be in `fclose`: that context waits for it at its next point where
+/// it publishes or may suspend, and at its exit ([`join_own_writers`]); the
+/// exit of another context does not (review RFX1-09: natively glibc unlinks
+/// a stream before `fclose` flushes it, so `exit` never waits for another
+/// thread's `fclose` in progress).
+///
+/// Where no thread can start (`EAGAIN`: the thread limit, no memory for a
+/// stack), the dropping thread writes and closes itself, blocking as a
+/// plain `fclose` does: no panic, no byte lost. Its limit: if the pipe's
+/// reader is a task of this program, the blocked thread cannot run it, and
+/// the program waits for good (review RFX1-11).
+pub(crate) fn hand_off(bytes: Vec<u8>, fd: Fd) {
+    use std::sync::atomic::AtomicU64;
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    {
+        // registered before the thread starts, so its removal comes after
+        let mut w = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
+        w.push(Writer { id, owner: me() });
+        RUNNING_WRITERS.store(w.len(), Ordering::Relaxed);
+    }
+    let job = std::sync::Arc::new(Mutex::new(Some((bytes, fd))));
+    let theirs = job.clone();
+    let run = move || {
+        /// The entry goes however the thread ends, a panic included, so its
+        /// owner never waits for good (review RFX1-22).
+        struct Ended(u64);
+        impl Drop for Ended {
+            fn drop(&mut self) {
+                writer_ended(self.0);
+            }
+        }
+        let _ended = Ended(id);
+        let taken = theirs.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some((b, fd)) = taken {
+            write_then_close(&b, fd);
+        }
+    };
+    #[cfg(test)]
+    let refused = FAIL_WRITER_SPAWN.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let refused = false;
+    let spawned = if refused {
+        drop(run);
+        false
+    } else {
+        // detached: the thread removes its own entry (`writer_ended`)
+        std::thread::Builder::new()
+            .name("lean-runtime-close".to_owned())
+            .stack_size(WRITER_STACK)
+            .spawn(run)
+            .is_ok()
+    };
+    if !spawned {
+        writer_ended(id);
+        let taken = job.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some((b, fd)) = taken {
+            write_then_close(&b, fd);
+        }
     }
 }
 
-/// Whether a stream waits to be closed (`defer_close`).
-#[inline]
-pub(crate) fn deferred_pending() -> bool {
-    DEFERRED_COUNT.load(Ordering::Relaxed) > 0
+/// Writer `id` has written and closed (or never started): its entry goes,
+/// and the plain waits look again.
+fn writer_ended(id: u64) {
+    let mut w = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
+    w.retain(|w| w.id != id);
+    RUNNING_WRITERS.store(w.len(), Ordering::Relaxed);
+    drop(w);
+    WRITER_ENDED.notify_all();
 }
 
-/// Close this thread's deferred streams, oldest first: each flush may wait
-/// cooperatively now (`leave_no_suspend` at the outermost scope's end, and
-/// the exit's flush).
-pub(crate) fn close_deferred() {
+/// When the calling context waits for its writers ([`join_own_writers`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JoinAt {
+    /// A point where the context publishes or may suspend (`sched`'s
+    /// `writers_point`: effect points, polls, sleeps, waits, promise
+    /// resolutions, task creations, `Std.Sync` operations, the glue's
+    /// reference writes, the end of a task's job or of `main`; and the entry
+    /// of every stream lock, `flock` and `Child.wait`). Skipped in a
+    /// no-suspend scope, while the context holds a stream lock (the wait
+    /// could need that stream: review RFX1-02's shape) and while a panic
+    /// unwinds; the next such point, or the exit, waits instead. The writer
+    /// is a thread, so the pipe drains without the context, and skipping
+    /// never hangs (RFX1-03's shape).
+    End,
+    /// The exit (`IO.Process.exit`, an internal panic, `forceExit`).
+    Exit,
+}
+
+/// Wait until the writer threads of the calling context ([`hand_off`]) have
+/// written and closed their streams, as natively its thread was inside
+/// `fclose` until then, so that nothing the context does after the drop is
+/// seen first (review RFX1-07; leanrs's re-checks of a771e57 and 78edede,
+/// reviews RFX1-14 and RFX1-18: a promise it resolves, a lock it releases,
+/// a reference it writes, a write through another descriptor of the same
+/// pipe, a child it kills, a directory it creates). While the scheduler runs
+/// other contexts (`sched::io_cooperative`), the context waits in the
+/// scheduler, looking again every 1 to 16 ms (the event loop's timers wake
+/// it), and the other contexts run meanwhile (a task of this program may be
+/// the pipe's reader), as natively the program's other threads ran while
+/// the drop's `fclose` waited. It takes no descriptor (review RFX1-19).
+/// Otherwise (no other context, off the scheduler's thread, an exit in a
+/// no-suspend scope) the thread waits on a condition variable the writers
+/// notify. Other contexts' writers are not waited for. One relaxed load
+/// when no writer runs.
+pub(crate) fn join_own_writers(at: JoinAt) {
+    if RUNNING_WRITERS.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    if at == JoinAt::End
+        && (sched::in_no_suspend()
+            || std::thread::panicking()
+            || HELD.try_with(|h| !h.borrow().is_empty()).unwrap_or(true))
+    {
+        return;
+    }
+    let me = me();
+    let mut nap = FLOCK_FIRST;
     loop {
-        let next = DEFERRED
-            .try_with(|d| {
-                let mut d = d.borrow_mut();
-                (!d.is_empty()).then(|| d.remove(0))
-            })
-            .ok()
-            .flatten();
-        let Some(mut f) = next else { return };
-        DEFERRED_COUNT.fetch_sub(1, Ordering::Relaxed);
-        f.close();
-        drop(f);
-        flock_released();
+        let w = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
+        if !w.iter().any(|w| w.owner == me) {
+            return;
+        }
+        if sched::io_cooperative() {
+            drop(w);
+            sched::block_until(Instant::now() + nap);
+            nap = (nap * 2).min(FLOCK_MAX);
+        } else {
+            drop(WRITER_ENDED.wait(w).unwrap_or_else(PoisonError::into_inner));
+        }
     }
 }
 
@@ -478,6 +684,7 @@ const FLOCK_MAX: Duration = Duration::from_millis(16);
 /// `flock(fd, op)` for a blocking `op`, cooperatively: `None` when the call
 /// is to stay plain (no other context, or a non-blocking `op`).
 pub(crate) fn flock(fd: &Fd, op: FlockOperation) -> Option<Result<(), i32>> {
+    join_own_writers(JoinAt::End);
     let nb = match op {
         FlockOperation::LockShared => FlockOperation::NonBlockingLockShared,
         FlockOperation::LockExclusive => FlockOperation::NonBlockingLockExclusive,
@@ -531,6 +738,7 @@ pub(crate) fn flock_released() {
 /// not a child, as without the wait.
 pub(crate) fn before_waitpid(pid: rustix::process::Pid) {
     use rustix::process::{waitid, WaitId, WaitIdOptions};
+    join_own_writers(JoinAt::End);
     if !sched::io_cooperative() {
         return;
     }
@@ -559,6 +767,60 @@ pub(crate) fn before_waitpid(pid: rustix::process::Pid) {
 mod tests {
     use super::*;
     use crate::io::handle::{lock, STDOUT};
+
+    fn pipe_fd() -> (std::fs::File, Fd) {
+        let (r, w) = std::io::pipe().unwrap();
+        let w: std::os::fd::OwnedFd = w.into();
+        (
+            std::fs::File::from(std::os::fd::OwnedFd::from(r)),
+            Fd::Owned(std::sync::Arc::new(std::fs::File::from(w))),
+        )
+    }
+
+    fn read_all(mut r: std::fs::File) -> Vec<u8> {
+        use std::io::Read;
+        let mut v = Vec::new();
+        r.read_to_end(&mut v).unwrap();
+        v
+    }
+
+    /// AR-8: a hand-off returns at once, even into a full pipe; its writer
+    /// writes every byte and closes the descriptor (the reader then sees end
+    /// of file), and `join_writers` waits for it.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn hand_off_writes_and_closes_without_blocking_the_dropper() {
+        let (r, fd) = pipe_fd();
+        // fill the pipe
+        let b = fd.borrow().unwrap();
+        rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::NONBLOCK).unwrap();
+        let mut filled = 0;
+        while let Ok(n) = rustix::io::write(b, &[b'x'; 4096]) {
+            filled += n;
+        }
+        rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::empty()).unwrap();
+        hand_off(vec![b'y'; 100], fd);
+        // the drop's thread goes on at once; the reader drains, the writer
+        // finishes
+        let got = read_all(r);
+        assert_eq!(got.len(), filled + 100);
+        assert!(got.ends_with(&[b'y'; 100]));
+        join_own_writers(JoinAt::Exit);
+    }
+
+    /// leanrs's condition on AR-8: where no writer thread can start, the
+    /// dropping thread writes and closes itself, with no panic and no byte
+    /// lost (the hook makes the spawn fail).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn hand_off_without_a_thread_writes_in_place() {
+        let (r, fd) = pipe_fd();
+        FAIL_WRITER_SPAWN.with(|f| f.set(true));
+        hand_off(b"in place".to_vec(), fd);
+        FAIL_WRITER_SPAWN.with(|f| f.set(false));
+        // written and closed before `hand_off` returned
+        assert_eq!(read_all(r), b"in place");
+    }
 
     #[test]
     fn stream_locks_are_tracked_once_tasks_may_exist() {

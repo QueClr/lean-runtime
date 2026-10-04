@@ -265,6 +265,64 @@ fn io_process_output() {
     assert_eq!((code, o.len(), e.len()), (4, 300000, 200000));
 }
 
+/// A sink that stops once it would hold more than `cap` bytes, as a glue's
+/// sink whose reservation failed (leanrs's `Bytes`).
+struct Capped {
+    v: Vec<u8>,
+    cap: usize,
+    stopped: bool,
+}
+
+impl ByteSink for Capped {
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        if self.stopped {
+            return;
+        }
+        if self.v.len() + bytes.len() > self.cap {
+            self.stopped = true;
+            self.v = Vec::new();
+            return;
+        }
+        self.v.extend_from_slice(bytes);
+    }
+
+    fn stopped(&self) -> bool {
+        self.stopped
+    }
+}
+
+/// AR-5: once a sink stops, `output` returns at once with `ENOMEM`'s error,
+/// whether the child writes standard output or standard error without end
+/// and keeps the other pipe open (`yes` alone: it never reaches end of file,
+/// and before the fix `output` read and dropped its bytes forever). The
+/// other sink is untouched. The call runs on a thread so that a regression
+/// fails the test instead of hanging it.
+#[test]
+fn output_stops_with_its_sink() {
+    for (script, stdout_stops) in [(&b"exec yes"[..], true), (&b"exec yes >&2"[..], false)] {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mk = || Capped {
+                v: Vec::new(),
+                cap: 1 << 20,
+                stopped: false,
+            };
+            let (mut o, mut e) = (mk(), mk());
+            let r = output(&args(b"sh", &[b"-c", script]), None, &mut o, &mut e);
+            let _ = tx.send((r, o.stopped, e.stopped, o.v.len(), e.v.len()));
+        });
+        let (r, os, es, ol, el) = rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("output returns once its sink has stopped");
+        assert_eq!(
+            r.unwrap_err(),
+            IoError::ResourceExhausted(None, 12, "not enough memory".to_owned())
+        );
+        assert_eq!((os, es), (stdout_stops, !stdout_stops));
+        assert_eq!((ol, el), (0, 0));
+    }
+}
+
 /// A UTF-8 character split across reads is valid; a bad byte or a cut
 /// character at the end is not.
 #[test]

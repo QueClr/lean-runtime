@@ -1,0 +1,7 @@
+id = "output_drain_oom"
+area = "process"
+lean_version = "4.34.0"
+source = "review RFX1-04 of lean-runtime fixes-1 (DrainUnbounded.lean); AR-6"
+streams = "separate"
+# Heavy for a case: a few seconds of CPU (yes and the copies), up to 3 GB of address space
+# (under the runner's 4G memory cap: the reads stop near 1.5 GB).

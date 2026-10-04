@@ -470,6 +470,7 @@ pub fn get_addr_info(
     family: u8,
     done: impl FnOnce(Result<Vec<IpAddr>, IoError>) + 'static,
 ) -> Result<(), IoError> {
+    crate::io::effect_point();
     if !safe_ascii(host.as_bytes()) {
         return Err(IoError::InvalidArgument(
             None,
@@ -514,6 +515,7 @@ pub fn get_name_info(
     addr: SocketAddr,
     done: impl FnOnce(Result<(String, String), IoError>) + 'static,
 ) -> Result<(), IoError> {
+    crate::io::effect_point();
     super::loop_lock();
     let addr = match addr {
         SocketAddr::V6(a) => SocketAddr::V6(std::net::SocketAddrV6::new(*a.ip(), a.port(), 0, 0)),

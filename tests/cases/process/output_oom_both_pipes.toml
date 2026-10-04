@@ -1,0 +1,11 @@
+id = "output_oom_both_pipes"
+area = "process"
+lean_version = "4.34.0"
+source = "LB-29 (docs/lean-bugs.md; lean2rr-side judge, 2026-10-04); AR-5 (leanrs adopt-io-2); lean-runtime fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-29", leanrs = "LB-29" }
+native = { stdout = "before\n", stderr = "INTERNAL PANIC: out of memory\n", code = "timeout" }
+expect = { hang = 15 }
+# Heavy for a case: about 3 s of CPU (yes and the copies), up to 3 GB of address space (under
+# the runner's 4G memory cap: the reads stop near 1.5 GB). The panic comes about 3 s in; the
+# 15-second bound covers it. The expected files are the correct outcome, written by hand.

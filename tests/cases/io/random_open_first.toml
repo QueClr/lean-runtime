@@ -1,0 +1,5 @@
+id = "random_open_first"
+area = "io"
+lean_version = "4.34.0"
+source = "AR-1 (leanrs adopt-io review: a glue that reserves the array before the open ends with out of memory); lean-runtime fixes-1"
+streams = "separate"

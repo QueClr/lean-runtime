@@ -134,7 +134,8 @@ use rustix::process::{Pid, Signal, WaitOptions};
 
 use super::error::{
     set_errno, IoError, E2BIG, EACCES, EAGAIN, ECHILD, EINVAL, EIO, EISDIR, ELOOP, EMFILE,
-    ENAMETOOLONG, ENFILE, ENODEV, ENOENT, ENOEXEC, ENOTDIR, EPERM, ESRCH, ETIMEDOUT, ETXTBSY,
+    ENAMETOOLONG, ENFILE, ENODEV, ENOENT, ENOEXEC, ENOMEM, ENOTDIR, EPERM, ESRCH, ETIMEDOUT,
+    ETXTBSY,
 };
 use super::handle::{FsMode, Handle};
 use super::{environ, ByteSink};
@@ -1135,6 +1136,8 @@ fn modelled_child(
 
 /// `lean_io_process_spawn` up to the parent's ends (see the module comment).
 fn start(cfg: StdioConfig, a: &SpawnArgs) -> Result<Started, IoError> {
+    // a child process is an effect another context can see
+    super::effect_point();
     if cfg.stdin == Stdio::Inherit {
         // `std::cout.flush()`, `fflush(stdout)` under `sync_with_stdio`;
         // its error is not reported
@@ -1235,6 +1238,7 @@ impl ChildProcess {
     /// `Child.kill` (`lean_io_process_child_kill`): `SIGKILL` to the child,
     /// or to its process group (`killpg`) with `setsid`.
     pub fn kill(&self) -> Result<(), IoError> {
+        super::effect_point();
         if let Some(f) = self.modelled() {
             // a zombie until waited; a child that failed at `chdir` never
             // called `setsid()`, so no group has its id
@@ -1346,6 +1350,12 @@ struct Reading<'a, S: ByteSink + ?Sized> {
 }
 
 impl<S: ByteSink + ?Sized> Reading<'_, S> {
+    /// Whether the sink has stopped taking bytes ([`ByteSink::stopped`]).
+    #[inline]
+    fn stopped(&self) -> bool {
+        self.sink.stopped()
+    }
+
     /// One `read` into `buf`'s spare capacity (no zeroing), appended to the
     /// sink; the descriptor is dropped at end of file or on an error.
     fn step(&mut self, buf: &mut Vec<u8>) {
@@ -1366,25 +1376,96 @@ impl<S: ByteSink + ?Sized> Reading<'_, S> {
     }
 }
 
-/// Reads a pipe to its end on a thread of its own and drops what it reads:
-/// `output`'s standard-output task, still running when `output` has failed.
-/// Without a thread, the pipe closes here (a child still writing then gets
-/// `EPIPE`).
+/// The drains `output` left running ([`drain_in_background`]), joined once
+/// `main` has returned ([`join_drains`]).
+static DRAINS: Mutex<Vec<std::thread::JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// Reads a pipe to its end on a thread of its own: `output`'s standard-output
+/// task, a dedicated task in Lean, still running when `output` has failed.
+/// The process waits for it after `main` ([`join_drains`]), as
+/// `lean_finalize_task_manager` waits for the dedicated tasks, so the
+/// child's later writes still find a reader (AR-6). Without a thread, the
+/// pipe closes here (a child still writing then gets `EPIPE`).
+///
+/// It keeps what it reads, as native's task grows the `ByteArray` that
+/// `readToEnd` returns into a result nobody reads: the storage grows by
+/// fallible reservations, and when one fails the thread ends the process
+/// with Lean's `INTERNAL PANIC: out of memory`, as native's task does from
+/// its own thread (review RFX1-04; case `process/output_drain_oom`). So a
+/// child that writes without end ends the program, natively and here, where
+/// a drain that dropped the bytes made the exit's join wait for good.
 fn drain_in_background(fd: Option<OwnedFd>) {
     if let Some(fd) = fd {
-        let _ = std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .name("lean-runtime-output-drain".to_owned())
             .spawn(move || {
+                let mut kept: Vec<u8> = Vec::new();
                 let mut buf = Vec::with_capacity(READ_CHUNK);
                 loop {
+                    buf.clear();
                     match rustix::io::read(&fd, buf.spare_capacity_mut()) {
                         Ok(([], _)) => return,
-                        Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                        Ok((got, _)) => {
+                            if kept.try_reserve(got.len()).is_err() {
+                                drain_out_of_memory();
+                            }
+                            kept.extend_from_slice(got);
+                        }
+                        Err(rustix::io::Errno::INTR) => {}
                         Err(_) => return,
                     }
                 }
             });
+        if let Ok(h) = spawned {
+            let mut drains = DRAINS.lock().unwrap_or_else(PoisonError::into_inner);
+            // a finished drain's handle is let go (its thread has ended)
+            drains.retain(|d| !d.is_finished());
+            drains.push(h);
+        }
     }
+}
+
+/// The drain's storage could not grow: Lean's `lean_internal_panic_out_of_memory`
+/// from that thread, its line on standard error, then `exit(1)` (an abort
+/// under `LEAN_ABORT_ON_PANIC`).
+fn drain_out_of_memory() -> ! {
+    use crate::semantics::panic::{
+        internal_panic_end, InternalPanic, PanicEnd, PanicSettings, PANIC_EXIT_STATUS,
+    };
+    let mut line = String::new();
+    let _ = InternalPanic::OutOfMemory.write_line(&mut line);
+    let _ = Handle::stderr().put_str(line.as_bytes());
+    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
+    let s = PanicSettings::from_env(abort.as_ref().map(|v| v.as_encoded_bytes()), None);
+    match internal_panic_end(s) {
+        PanicEnd::Abort => std::process::abort(),
+        _ => super::exit::exit(PANIC_EXIT_STATUS),
+    }
+}
+
+/// Waits until every drain `output` left running has read its pipe to the
+/// end: the dedicated tasks that `lean_finalize_task_manager` waits for
+/// after `main` returns (`~task_manager`). A child that never closes its
+/// standard output keeps the process alive, as natively. Called by
+/// [`super::exit::after_main`].
+pub(crate) fn join_drains() {
+    loop {
+        let drains = std::mem::take(&mut *DRAINS.lock().unwrap_or_else(PoisonError::into_inner));
+        if drains.is_empty() {
+            return;
+        }
+        for d in drains {
+            let _ = d.join();
+        }
+    }
+}
+
+/// What `output` returns once a sink has stopped ([`ByteSink::stopped`]):
+/// `ENOMEM`'s error (`resource exhausted`, errno untouched). The glue, whose
+/// sink stopped, ends the process with Lean's `INTERNAL PANIC: out of memory`
+/// instead of using it.
+fn sink_stopped() -> IoError {
+    IoError::decode_io_error(ENOMEM, None)
 }
 
 /// Before `output` blocks in `poll` or a read of its pipes: in a program
@@ -1414,9 +1495,30 @@ fn ready(fds: &[&Option<OwnedFd>]) {
 /// neither pipe can block the child). Then, in Lean's order: a read error of
 /// standard error, or standard error that is not UTF-8
 /// (`Tried to read from handle containing non UTF-8 data.`), fails before
-/// the child is waited (its standard output is still read, and dropped, as
-/// Lean's task does); then `wait`; then standard output's read error or
+/// the child is waited (its standard output is still read to its end on a
+/// thread, which keeps the bytes as Lean's task does, until `main` has
+/// returned: [`drain_in_background`]); then `wait`; then standard output's
+/// read error or
 /// UTF-8 error. Returns the exit code; the sinks then hold valid UTF-8.
+///
+/// **A sink that stops** ([`ByteSink::stopped`], its storage could not grow;
+/// AR-5): `output` returns at once, without reading either pipe further and
+/// without waiting for the child, and the glue ends the process with Lean's
+/// `INTERNAL PANIC: out of memory`, exit status 1. Natively the allocation
+/// of the growing `ByteArray` fails in `readToEnd` (the standard-output task
+/// or `main`'s standard-error read) and `lean_internal_panic` calls `exit(1)`
+/// there: the child is neither waited nor killed, and its pipes close with
+/// the process, so its next write gets `EPIPE` (`SIGPIPE` is ignored, as in
+/// the parent). Here both pipes close as `output` returns (the parent's
+/// ends were its only ones), the child is not waited either, and the result
+/// is `ENOMEM`'s error, which the glue, whose sink said it stopped, does not
+/// use. Case `process/output_oom` (both pipes, under `ulimit -v`). Native
+/// hangs instead when the child keeps the other pipe open without writing
+/// to it (`yes` alone): `exit`'s flush of every `FILE` (`_IO_flush_all`)
+/// waits for the lock of the other pipe's stream, which the other thread
+/// holds in its blocked `fread` (LB-29, not reproduced: this crate reads the
+/// pipes without a `FILE`, and its exit waits for no held stream; case
+/// `process/output_oom_both_pipes`).
 pub fn output<O, E>(
     args: &SpawnArgs,
     input: Option<&[u8]>,
@@ -1459,6 +1561,9 @@ where
         if o.fd.is_none() {
             ready(&[&e.fd]);
             e.step(&mut buf);
+            if e.stopped() {
+                return Err(sink_stopped());
+            }
             continue;
         }
         let (ro, re) = {
@@ -1482,6 +1587,9 @@ where
         if re {
             e.step(&mut buf);
         }
+        if o.stopped() || e.stopped() {
+            return Err(sink_stopped());
+        }
     }
     if let Some(x) = e.error {
         drain_in_background(o.fd.take());
@@ -1494,6 +1602,9 @@ where
     while o.fd.is_some() {
         ready(&[&o.fd]);
         o.step(&mut buf);
+        if o.stopped() {
+            return Err(sink_stopped());
+        }
     }
     let code = s.process.wait()?;
     if let Some(x) = o.error {

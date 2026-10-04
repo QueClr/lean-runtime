@@ -39,6 +39,8 @@ use super::sys::{Fd, ReadDest, VecDest};
 use super::ByteSink;
 use rustix::fd::OwnedFd;
 use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 /// `_IO_UNBUFFERED`.
 const UNBUFFERED: u32 = 0x2;
@@ -64,6 +66,23 @@ const SEEK_CUR: i32 = 1;
 const SEEK_END: i32 = 2;
 /// glibc's `BUFSIZ`.
 const BUFSIZ: usize = 8192;
+
+/// What the holder of a stream's lock is doing, readable without the lock
+/// (LB-29: the exit's flush waits for a stream whose holder writes, and
+/// skips one whose holder is blocked reading): nothing that blocks...
+pub(crate) const BUSY_IDLE: u8 = 0;
+/// ... a read of the descriptor (or the cooperative wait before it) ...
+pub(crate) const BUSY_INPUT: u8 = 1;
+/// ... or a write of it.
+pub(crate) const BUSY_OUTPUT: u8 = 2;
+
+/// The state of the three standard streams (their `FILE`s are statics).
+static STD_BUSY: [AtomicU8; 3] = [const { AtomicU8::new(BUSY_IDLE) }; 3];
+
+/// The state cell of standard stream `n` (0 to 2).
+pub(crate) fn std_busy(n: u8) -> &'static AtomicU8 {
+    &STD_BUSY[usize::from(n.min(2))]
+}
 
 /// A stream's buffer size from its descriptor's `st_blksize`, as glibc's
 /// `_IO_file_doallocate` (`libio/filedoalloc.c`) computes it: `BUFSIZ`, or
@@ -106,6 +125,13 @@ pub struct CFile {
     /// What the descriptor is for the cooperative path (sched-io).
     #[cfg(feature = "sched")]
     coop: super::coop::Coop,
+    /// The state of an opened stream's holder (`None` for a standard
+    /// stream, whose cell is `STD_BUSY`): see [`BUSY_IDLE`].
+    busy: Option<Arc<AtomicU8>>,
+    /// The cell is not `BUSY_IDLE` (set and read under the lock), so the
+    /// guard's release resets it only then: no atomic store on the paths
+    /// that never block.
+    marked: bool,
 }
 
 /// The `fdopen` flags of a mode (`lean_io_prim_handle_mk`): `read` is `"r"`,
@@ -139,13 +165,55 @@ impl CFile {
             regular: false,
             #[cfg(feature = "sched")]
             coop: super::coop::Coop::UNKNOWN,
+            busy: None,
+            marked: false,
         }
     }
 
-    /// A stream with no descriptor, as after `fclose`.
-    #[cfg(feature = "sched")]
-    pub(crate) const fn closed() -> CFile {
-        CFile::with(Fd::Closed, 0)
+    /// The cell holding what this stream's holder is doing (LB-29).
+    fn busy_cell(&self) -> Option<&AtomicU8> {
+        match (&self.busy, &self.fd) {
+            (Some(c), _) => Some(c),
+            (None, Fd::Std(n)) => Some(std_busy(*n)),
+            _ => None,
+        }
+    }
+
+    /// A clone of an opened stream's cell, for the open-file list.
+    pub(crate) fn busy_arc(&self) -> Option<Arc<AtomicU8>> {
+        self.busy.clone()
+    }
+
+    /// Record what the holder is about to block in.
+    #[inline]
+    fn mark(&mut self, what: u8) {
+        if let Some(c) = self.busy_cell() {
+            c.store(what, Ordering::Release);
+        }
+        self.marked = true;
+    }
+
+    /// A read of the descriptor has returned: the holder is no longer
+    /// blocked reading (one store per read; review RFX1-15: a hold that read,
+    /// then buffered output and waits, is not taken for a reader).
+    #[inline]
+    fn read_done(&mut self) {
+        if let Some(c) = self.busy_cell() {
+            c.store(BUSY_IDLE, Ordering::Release);
+        }
+        self.marked = false;
+    }
+
+    /// The holder lets go of the stream (`StreamGuard`'s drop): its state is
+    /// idle again.
+    #[inline]
+    pub(crate) fn unmark(&mut self) {
+        if self.marked {
+            if let Some(c) = self.busy_cell() {
+                c.store(BUSY_IDLE, Ordering::Release);
+            }
+            self.marked = false;
+        }
     }
 
     /// glibc's `stdin` (0), `stdout` (1) or `stderr` (2, unbuffered).
@@ -162,10 +230,12 @@ impl CFile {
     /// `"w"`, `"r+"`, `"a"`); the stream holds `fd`, which closes when the
     /// stream is dropped (`fclose`) and no `Handle` keeps a clone of it.
     pub fn fdopen(fd: OwnedFd, mode: FsMode) -> CFile {
-        CFile::with(
+        let mut f = CFile::with(
             Fd::Owned(std::sync::Arc::new(std::fs::File::from(fd))),
             mode_flags(mode),
-        )
+        );
+        f.busy = Some(Arc::new(AtomicU8::new(BUSY_IDLE)));
+        f
     }
 
     /// A write-only stream (mode `write`) over the non-blocking write end of a
@@ -302,6 +372,7 @@ impl CFile {
     /// `io::coop`); the `read(2)` itself is the same.
     #[inline]
     fn before_read(&mut self) {
+        self.mark(BUSY_INPUT);
         #[cfg(feature = "sched")]
         if crate::sched::coop_possible() {
             super::coop::before_read(&self.fd, &mut self.coop);
@@ -312,6 +383,7 @@ impl CFile {
     /// the other contexts (sched-io, `io::coop`).
     #[inline]
     fn write_once(&mut self, data: &[u8]) -> Result<usize, i32> {
+        self.mark(BUSY_OUTPUT);
         #[cfg(feature = "sched")]
         if crate::sched::coop_possible() {
             if let Some(r) = super::coop::write_once(&self.fd, data, &mut self.coop) {
@@ -548,6 +620,7 @@ impl CFile {
         let b = std::mem::take(&mut self.buf);
         let mut b = b;
         let r = self.fd.read(&mut b);
+        self.read_done();
         self.buf = b;
         let count = match r {
             Ok(0) => {
@@ -659,7 +732,9 @@ impl CFile {
                 count -= want % block;
             }
             self.before_read();
-            match out.read(&self.fd, self.regular, got, count) {
+            let r = out.read(&self.fd, self.regular, got, count);
+            self.read_done();
+            match r {
                 Ok(0) => {
                     self.flags |= EOF_SEEN;
                     break;
@@ -781,6 +856,7 @@ impl CFile {
                         Ok(c) => c as i64,
                         Err(_) => EOF as i64,
                     };
+                    self.read_done();
                     self.buf = b;
                     if count < delta {
                         offset = if count == EOF as i64 {
@@ -1017,6 +1093,23 @@ impl CFile {
         self.fd = Fd::Closed;
         self.buf = Vec::new();
         self.has_buf = false;
+    }
+
+    /// The pending output and the descriptor, after a `flush_nowait` that
+    /// returned false (its compaction put the rest at the buffer's start),
+    /// for the writer thread that finishes the close (`io::coop::hand_off`);
+    /// the stream is left closed, with nothing pending.
+    #[cfg(feature = "sched")]
+    pub(crate) fn hand_off(&mut self) -> (Vec<u8>, Fd) {
+        let mut bytes = std::mem::take(&mut self.buf);
+        bytes.truncate(self.wp);
+        bytes.drain(..self.wb);
+        self.has_buf = false;
+        self.setg(0, 0, 0);
+        self.wb = 0;
+        self.wp = 0;
+        self.we = 0;
+        (bytes, std::mem::replace(&mut self.fd, Fd::Closed))
     }
 
     /// In a no-suspend scope (the drop of a handle's last reference): write

@@ -1,0 +1,13 @@
+id = "output_drain_exit_panic"
+area = "process"
+lean_version = "4.34.0"
+source = "AR-6, leanrs's review of lean-runtime fixes-1 (87d4446); LB-29 (docs/lean-bugs.md; lean2rr-side judge, 2026-10-04)"
+streams = "separate"
+deviations = { lean2rr = "LB-29", leanrs = "LB-29" }
+native = { stdout = "output failed: Tried to read from handle containing non UTF-8 data.\nmain ends\nchild: write status 0\n", stderr = "INTERNAL PANIC: out of memory\n", code = "1" }
+# Natively the internal panic's `exit(1)` waits about 1 s, in glibc's `_IO_flush_all`, for the lock of
+# the standard-output pipe's stream, which `output`'s reader task holds in `fread` until the
+# child's end of file; so the child's late write finds a reader (status 0). Correct (LB-29):
+# the process ends at once, its end of the pipe closes, and the write fails with `EPIPE`
+# (status 1), as after `forceExit` (`output_drain_exit_force`, native-followed). The expected
+# files are the correct outcome, written by hand.

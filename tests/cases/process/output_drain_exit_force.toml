@@ -1,0 +1,5 @@
+id = "output_drain_exit_force"
+area = "process"
+lean_version = "4.34.0"
+source = "AR-6, leanrs's review of lean-runtime fixes-1 (87d4446)"
+streams = "separate"

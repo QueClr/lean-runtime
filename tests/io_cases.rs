@@ -159,8 +159,11 @@ fn to_string(e: &IoError) -> String {
     }
 }
 
-/// The end of a native program: `main`'s result, then C's `exit`.
+/// The end of a native program: `lean_finalize_task_manager` (the io
+/// layer's dedicated tasks, `exit::after_main`), `main`'s result, then C's
+/// `exit`.
 fn finish(r: R<()>) -> ! {
+    exit::after_main();
     match r {
         Ok(()) => exit::exit(0),
         Err(e) => {
@@ -183,6 +186,35 @@ fn nat(s: &str) -> usize {
 }
 
 // ---- the twins ----
+
+/// `IO.getRandomBytes` with leanrs's glue: the source first
+/// (`env::open_random`), then the array's fallible reservation (out of
+/// memory if it fails), then the fill (AR-1).
+fn random_bytes(n: usize) -> R<Vec<u8>> {
+    let src = env::open_random(n)?;
+    let mut v: Vec<u8> = Vec::new();
+    if v.try_reserve_exact(n).is_err() {
+        let _ = Handle::stderr().put_str(b"INTERNAL PANIC: out of memory\n");
+        exit::exit(1);
+    }
+    v.resize(n, 0);
+    src.fill(&mut v)?;
+    Ok(v)
+}
+
+/// The case `io/random_open_first` (under `ulimit -n 64`).
+fn random_open_first(args: &[String]) -> R<()> {
+    let (big, small) = (nat(&args[0]), nat(&args[1]));
+    let mut hs = Vec::new();
+    while let Ok(h) = open("/dev/null", FsMode::Read) {
+        hs.push(h);
+    }
+    for n in [big, small, 0] {
+        let r = show_err(random_bytes(n), |b| format!("{} bytes", b.len()));
+        println(&format!("getRandomBytes {n}: {r}"))?;
+    }
+    println(&format!("handles kept open: {}", !hs.is_empty()))
+}
 
 fn exit_flush_order(args: &[String]) -> R<()> {
     let h = open(&args[0], FsMode::Append)?;
@@ -457,6 +489,20 @@ fn startup_fd_limit(args: &[String]) -> R<()> {
         }
     }
     println(&format!("opened {} more, then: {err}", hs.len()))
+}
+
+/// The case `io/startup_fd_exhausted`: never reaches `main` (the startup
+/// constructor ends it: LB-30, LB-31); if it did, the descriptors open.
+fn startup_fd_exhausted(_: &[String]) -> R<()> {
+    let mut fds: Vec<u64> = Vec::new();
+    lfs::read_dir(b"/proc/self/fd", |n| {
+        if let Some(v) = std::str::from_utf8(n).ok().and_then(|t| t.parse().ok()) {
+            fds.push(v)
+        }
+    })?;
+    fds.sort();
+    let list: Vec<String> = fds.iter().map(|n| n.to_string()).collect();
+    println(&format!("main: open #[{}]", list.join(", ")))
 }
 
 fn startup_closed_stdio(args: &[String]) -> R<()> {
@@ -755,6 +801,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("error_without_file_name", error_without_file_name),
     ("startup_fd_limit", startup_fd_limit),
     ("startup_closed_stdio", startup_closed_stdio),
+    ("startup_fd_exhausted", startup_fd_exhausted),
     ("lock_blocked", lock_blocked),
     ("lock_exit", lock_exit),
     ("lock_during_read", lock_during_read),
@@ -763,6 +810,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("initializing", initializing),
     ("allocprof", allocprof),
     ("startup_rings", startup_rings),
+    ("random_open_first", random_open_first),
 ];
 
 /// The twin named by `argv[0]`'s file name, if any.

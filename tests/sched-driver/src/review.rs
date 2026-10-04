@@ -100,9 +100,10 @@ pub fn rsio_watch_spin(_: &[String]) -> u32 {
 /// RSIO-03 and RSIO-09: dropping a handle's last reference flushes it, and
 /// the flush may wait for a full pipe. In a no-suspend scope (the glue's
 /// free and drop paths) no other context runs during the drop: the flush
-/// that would wait is set aside, and done when the scope ends. Without the
-/// scope (argument `plain`), the context suspends in the drop. Either way
-/// the child (`wc -c`) gets every byte.
+/// that would wait is set aside, and done at the context's next scheduling
+/// point (AR-8: its next line, not the scope's end). Without the scope
+/// (argument `plain`), the context suspends in the drop. Either way the
+/// child (`wc -c`) gets every byte.
 pub fn rsio_drop_no_suspend(args: &[String]) -> u32 {
     let child = lio::spawn(
         "sh",
@@ -139,7 +140,8 @@ pub fn rsio_drop_no_suspend(args: &[String]) -> u32 {
         let scope = sched::no_suspend();
         drop(stdin);
         let d = ticks.get() - before;
-        // the set-aside flush and close, waiting cooperatively now
+        // the leave: no flush, no suspension (AR-8); the set-aside flush and
+        // close wait cooperatively at the next line's effect point
         drop(scope);
         d
     };
@@ -370,6 +372,529 @@ pub fn rsio_ns_partial(args: &[String]) -> u32 {
     println(&format!(
         "expected {} bytes; errno before {before} after {after}",
         fill + 500
+    ));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// AR-8 (lean-runtime fixes-1): leaving the scope never suspends
+
+/// AR-8: a translator's drop walk that ends inside a panic's unwinding (a
+/// `Drop` of the unwound frame), with a stream it sets aside (its pipe to
+/// `wc -c` full, 100 bytes still buffered). The leave neither flushes nor
+/// suspends: the ticker task does not run during it, with the panic in
+/// flight. The child still gets every byte: at `main`'s next scheduling
+/// point (its next line), or, with argument `exit`, when `main` has
+/// returned (`sched::finish`, or the exit's flush). The walk's report goes
+/// straight to descriptor 2 (Rust's `stderr`), which is no scheduling point.
+pub fn rsio_ns_unwind(args: &[String]) -> u32 {
+    use std::io::Write;
+    let at_exit = args.first().map(String::as_str) == Some("exit");
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.3; wc -c"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let ticks = Rc::new(Cell::new(0u32));
+    let t2 = ticks.clone();
+    let ticker = as_task(
+        move || {
+            for _ in 0..6 {
+                sleep(40);
+                t2.set(t2.get() + 1);
+            }
+        },
+        PRIO_DEDICATED,
+    );
+    // the ticker starts on a context of its own
+    sleep(1);
+    let stdin = child.stdin.expect("piped");
+    stdin.put_str(&vec![b'x'; 65536 + 100]).unwrap();
+
+    /// The drop walk, run by the unwinding.
+    struct Walk {
+        h: Option<Handle>,
+        ticks: Rc<Cell<u32>>,
+    }
+    impl Drop for Walk {
+        fn drop(&mut self) {
+            let before = self.ticks.get();
+            sched::enter_no_suspend();
+            drop(self.h.take());
+            sched::leave_no_suspend();
+            let _ = writeln!(
+                std::io::stderr(),
+                "drop walk: panicking {}, ticks during the leave {}",
+                std::thread::panicking(),
+                self.ticks.get() - before
+            );
+        }
+    }
+    let quiet = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _walk = Walk {
+            h: Some(stdin),
+            ticks: ticks.clone(),
+        };
+        panic!("unwinding through the drop walk");
+    }));
+    std::panic::set_hook(quiet);
+    assert!(r.is_err());
+    if at_exit {
+        return 0;
+    }
+    // a scheduling point of `main`: the set-aside stream closes here
+    println("main: after the unwind");
+    ticker.get();
+    let _ = child.process.wait();
+    0
+}
+
+/// AR-8, leanrs's review of fixes-1: `IO.Process.forceExit` (`_Exit`) right
+/// after a drop in a no-suspend scope set a stream aside (its pipe to
+/// `wc -c` full, 100 bytes still buffered), with no scheduling point in
+/// between. Natively the drop's `fclose` wrote the bytes before any
+/// `_Exit`: `force_exit` closes the set-aside streams first, so the child
+/// gets every byte (65636), and flushes nothing else (`main`'s buffered
+/// line is lost, as `_Exit` loses it).
+pub fn rsio_ns_force_exit(_: &[String]) -> u32 {
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.3; wc -c"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    // a task, so that the program has tasks (coop_possible)
+    let t = as_task(|| sleep(5), PRIO_DEDICATED);
+    t.get();
+    let stdin = child.stdin.expect("piped");
+    stdin.put_str(&vec![b'x'; 65536 + 100]).unwrap();
+    println("main: buffered, lost at _Exit");
+    {
+        let _scope = sched::no_suspend();
+        drop(stdin);
+    }
+    lean_runtime::io::exit::force_exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// Review fixes-1 probes (RFX1, the reviewer's): AR-8's hand-off must let these end
+
+/// RFX1 probe: a child writes 300000 bytes to stdout, then reads stdin to
+/// its end. Task B reads the child's stdout (a shared handle). Main writes
+/// 65536+100 bytes to the child's stdin and drops the handle in a no-suspend
+/// scope (set aside: the pipe is full, the child does not read it yet), then
+/// reads the child's stdout itself. Natively the drop's `fclose` waits until
+/// the child reads stdin (B drains its stdout meanwhile), and everything ends.
+/// Modes: "" (B reads without pause: main waits for the handle's lock in
+/// `block_sync`), "sleepy" (B pauses 1 ms between reads: main takes the
+/// lock and settles inside `before_read`), "plain" (no scope).
+/// The progress report goes straight to descriptor 2 (no scheduling point).
+pub fn rfx1_shared_read(args: &[String]) -> u32 {
+    use std::io::Write;
+    let mode = args.first().cloned().unwrap_or_default();
+    let sleepy = mode == "sleepy" || mode == "sleepy-plain";
+    let plain = mode == "plain" || mode == "sleepy-plain";
+    let child = lio::spawn(
+        "sh",
+        &["-c", "head -c 300000 /dev/zero; cat >/dev/null"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Piped,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let out = child.stdout.clone().expect("piped");
+    let out2 = out.clone();
+    let reader = as_task(
+        move || {
+            let mut n = 0usize;
+            loop {
+                match lio::read(&out2, 1024) {
+                    Ok(b) if b.is_empty() => break,
+                    Ok(b) => {
+                        n += b.len();
+                        if sleepy {
+                            sleep(1);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            n
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(1);
+    let stdin = child.stdin.expect("piped");
+    stdin.put_str(&vec![b'A'; 65536 + 100]).unwrap();
+    if plain {
+        drop(stdin);
+    } else {
+        let _scope = sched::no_suspend();
+        drop(stdin);
+    }
+    let _ = writeln!(std::io::stderr(), "main: dropped, reading");
+    let got = lio::read(&out, if sleepy { 8192 } else { 1 }).map(|b| b.len() <= 8192);
+    let _ = writeln!(std::io::stderr(), "main: read {got:?}");
+    let n = reader.get();
+    println(&format!("main read {got:?}; reader read some: {}", n > 0));
+    println(&format!("exit {:?}", child.process.wait().ok()));
+    0
+}
+
+/// RFX1 probe: a program with a task; main writes 65536+100 bytes to a
+/// child (`sleep 0.3; wc -c`) and drops the handle in a no-suspend scope (set
+/// aside: the pipe is full), then polls `Child.tryWait` until the child has
+/// exited, with no other call in the loop. Natively the drop's `fclose`
+/// waits until `wc` reads, closes, and the loop ends.
+pub fn rfx1_trywait(_: &[String]) -> u32 {
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.3; wc -c"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let t = as_task(|| sleep(5), PRIO_DEDICATED);
+    t.get();
+    let stdin = child.stdin.expect("piped");
+    stdin.put_str(&vec![b'a'; 65536 + 100]).unwrap();
+    {
+        let _scope = sched::no_suspend();
+        drop(stdin);
+    }
+    let mut spins = 0u64;
+    let code = loop {
+        if let Some(c) = child.process.try_wait().unwrap() {
+            break c;
+        }
+        spins += 1;
+    };
+    println(&format!("child exited {code} (spun: {})", spins > 0));
+    0
+}
+
+/// LB-29's scope, the writers of dropped streams at exit: `rsio_exit_join`
+/// in `tests/cases.rs`. The child writes 300000 bytes to its stdout, which
+/// a task drains, then counts its stdin to stderr. `main` writes 65636
+/// bytes to its stdin, drops the handle in a no-suspend scope (handed to a
+/// writer thread: the pipe is full), then exits (`exit`: `IO.Process.exit
+/// 0`; `force`: `forceExit 0`).
+pub fn rsio_exit_join(args: &[String]) -> u32 {
+    let child = lio::spawn(
+        "sh",
+        &["-c", "head -c 300000 /dev/zero; wc -c >&2"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Piped,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let out = child.stdout.clone().expect("piped");
+    let _reader = as_task(
+        move || lio::read_bin_to_end(&out).map(|b| b.len()),
+        PRIO_DEDICATED,
+    );
+    let stdin = child.stdin.expect("piped");
+    stdin.put_str(&vec![b'A'; 65536 + 100]).unwrap();
+    {
+        let _scope = sched::no_suspend();
+        drop(stdin);
+    }
+    if args.first().map(String::as_str) == Some("force") {
+        lean_runtime::io::exit::force_exit(0)
+    }
+    println("main: exiting");
+    crate::glue::process_exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// Review fixes-1 round 2 probes (RFX1, the reviewer's)
+
+/// Round-2 probe: a child writes 300000 bytes to stdout, sleeps 0.5 s,
+/// writes 300000 more, then reads stdin to its end. Task B reads the
+/// child's stdout to its end. Main writes 65536+100 bytes to the child's
+/// stdin, drops the handle in a no-suspend scope (handed off: the pipe is
+/// full), then ends: "exit" (IO.Process.exit 0), "force" (forceExit 0) or
+/// "return" (main returns). Natively the drop's `fclose` waits until the
+/// child reads stdin (B drains its stdout meanwhile), then the exit.
+pub fn rfx2_exit_handoff(args: &[String]) -> u32 {
+    use std::io::Write;
+    let mode = args.first().cloned().unwrap_or_default();
+    let child = lio::spawn(
+        "sh",
+        &[
+            "-c",
+            "head -c 300000 /dev/zero; sleep 0.5; head -c 300000 /dev/zero; cat >/dev/null",
+        ],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Piped,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let out = child.stdout.clone().expect("piped");
+    let _reader = as_task(
+        move || lio::read_bin_to_end(&out).map(|b| b.len()).unwrap_or(0),
+        PRIO_DEDICATED,
+    );
+    sleep(1);
+    let stdin = child.stdin.expect("piped");
+    stdin.put_str(&vec![b'A'; 65536 + 100]).unwrap();
+    {
+        let _scope = sched::no_suspend();
+        drop(stdin);
+    }
+    let _ = writeln!(std::io::stderr(), "main: dropped, ending ({mode})");
+    match mode.as_str() {
+        "exit" => crate::glue::process_exit(0),
+        "force" => lean_runtime::io::exit::force_exit(0),
+        _ => 0,
+    }
+}
+
+/// Round-2 probe: a task drops the stdin of `sleep 30` (the reviewer's
+/// `sleep 3`, longer here so that waiting for it fails the test), 65536+100 bytes
+/// written (handed off: `sleep` never reads), then main calls
+/// IO.Process.exit 3 after 300 ms. Natively the task's thread is blocked in
+/// `fclose`, which unlinked the stream from glibc's list first, so the exit
+/// does not wait for it: exit 3 at once.
+pub fn rfx2_exit_unrelated_handoff(_: &[String]) -> u32 {
+    use std::io::Write;
+    // `sleep` holds none of the runner's pipes, which would keep its reads
+    // open for 30 s
+    let child = lio::spawn(
+        "sleep",
+        &["30"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Null,
+            stderr: Stdio::Null,
+        },
+    )
+    .unwrap();
+    let stdin = child.stdin.clone().expect("piped");
+    drop(child);
+    let _t = as_task(
+        move || {
+            stdin.put_str(&vec![b'a'; 65536 + 100]).unwrap();
+            {
+                let _scope = sched::no_suspend();
+                drop(stdin);
+            }
+            // not ended when `main` exits: its writer is still running
+            sleep(5000);
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(300);
+    let _ = writeln!(std::io::stderr(), "main: exiting");
+    crate::glue::process_exit(3)
+}
+
+/// Round-2 probe (LB-29's narrowed rule): task B prints a 200000-byte line
+/// to stdout, a pipe whose reader starts after 1 s, so B is suspended in
+/// the write holding stdout; main then calls IO.Process.exit 0. Natively
+/// the exit waits for B's write (the reader drains it), then flushes: the
+/// reader counts 200001 bytes.
+pub fn rfx2_exit_writer_held(_: &[String]) -> u32 {
+    let _b = as_task(
+        || {
+            println(&"y".repeat(200000));
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(50);
+    crate::glue::process_exit(0)
+}
+
+/// RFX1-07, the causal case (`rfx2_causal_handoff` in `tests/cases.rs`).
+pub fn rfx2_causal_handoff(_: &[String]) -> u32 {
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.3; wc -c"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let stdin = child.stdin.clone().expect("piped");
+    drop(child);
+    let t = as_task(
+        move || {
+            stdin.put_str(&vec![b'a'; 65536 + 100]).unwrap();
+            let _scope = sched::no_suspend();
+            drop(stdin);
+        },
+        PRIO_DEDICATED,
+    );
+    // the task starts on a context of its own (not run by `get` on `main`'s)
+    sleep(1);
+    t.get();
+    crate::glue::process_exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// Review fixes-1 round 3 probes (RFX1, the reviewer's)
+
+/// Round-3 probe: as `rfx2_causal_handoff`, but the task tells `main`
+/// through a promise (also `Std.Channel`'s mechanism) instead of its value,
+/// and goes on (sleeps 2 s) before its job ends. Main waits for the promise,
+/// then "exit" (IO.Process.exit 0) or "return". Natively the task's drop
+/// `fclose` ended before it resolved the promise: `wc` counts 65636.
+pub fn rfx3_promise_handoff(args: &[String]) -> u32 {
+    let mode = args.first().cloned().unwrap_or_default();
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.3; wc -c"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let stdin = child.stdin.clone().expect("piped");
+    drop(child);
+    let p: Promise<u32> = Promise::new();
+    let res = p.result_opt();
+    let _t = as_task(
+        move || {
+            stdin.put_str(&vec![b'a'; 65536 + 100]).unwrap();
+            {
+                let _scope = sched::no_suspend();
+                drop(stdin);
+            }
+            p.resolve(1);
+            sleep(2000);
+        },
+        PRIO_DEDICATED,
+    );
+    let _ = res.get();
+    if mode == "exit" {
+        crate::glue::process_exit(0)
+    }
+    0
+}
+
+/// Round-3 probe: `IO.Process.exit` from an event-loop callback (a timer)
+/// while task B is suspended writing a 200000-byte line to stdout, a pipe
+/// whose reader starts after 1 s ("callback"); or two contexts calling
+/// `IO.Process.exit` while B holds stdout ("two": a task exits 4 and main
+/// exits 5). Natively every byte is written (the exit waits for B's lock).
+pub fn rfx3_exit_contexts(args: &[String]) -> u32 {
+    let mode = args.first().cloned().unwrap_or_default();
+    let _b = as_task(
+        || {
+            println(&"y".repeat(200000));
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(20);
+    if mode == "callback" {
+        let _id = sched::timer_start(
+            std::time::Instant::now() + std::time::Duration::from_millis(30),
+            Rc::new(|| crate::glue::process_exit(0)),
+        );
+        sleep(5000);
+        return 9;
+    }
+    let _a = as_task(|| crate::glue::process_exit(4), PRIO_DEDICATED);
+    sleep(10);
+    crate::glue::process_exit(5)
+}
+
+// ---------------------------------------------------------------------------
+// Review fixes-1 round 4 probes (RFX1, the reviewer's)
+
+/// Round-4 probe: as `rfx3_promise_handoff`, but the task tells `main`
+/// through the file system (`IO.FS.createDir "done"`, which takes no stream
+/// lock) and goes on (sleeps 2 s). Main polls `System.FilePath.pathExists`
+/// (with 1 ms sleeps), then IO.Process.exit 0. Natively the task's drop
+/// `fclose` ended before the directory appeared: `wc` counts 65636.
+pub fn rfx4_fs_signal(_: &[String]) -> u32 {
+    use lean_runtime::io::fs as lfs;
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.3; wc -c"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let stdin = child.stdin.clone().expect("piped");
+    drop(child);
+    let _t = as_task(
+        move || {
+            stdin.put_str(&vec![b'a'; 65536 + 100]).unwrap();
+            {
+                let _scope = sched::no_suspend();
+                drop(stdin);
+            }
+            let _ = lfs::create_dir(b"done");
+            sleep(2000);
+        },
+        PRIO_DEDICATED,
+    );
+    while lfs::metadata(b"done").is_err() {
+        sleep(1);
+    }
+    crate::glue::process_exit(0)
+}
+
+/// Round-4 probe: the descriptors open after a hand-off whose writer ends
+/// before the dropping context's next point (the child reads after 50 ms;
+/// main then spins 300 ms with no scheduling point). Natively the drop
+/// closed the pipe: as many descriptors as before the spawn.
+pub fn rfx4_fd_after(_: &[String]) -> u32 {
+    let count = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+    let t = as_task(|| sleep(5), PRIO_DEDICATED);
+    t.get();
+    let before = count();
+    let child = lio::spawn(
+        "sh",
+        &["-c", "sleep 0.05; cat >/dev/null"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    )
+    .unwrap();
+    let stdin = child.stdin.clone().expect("piped");
+    stdin.put_str(&vec![b'a'; 65536 + 100]).unwrap();
+    drop(child);
+    {
+        let _scope = sched::no_suspend();
+        drop(stdin);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let after = count();
+    sleep(10);
+    let later = count();
+    println(&format!(
+        "descriptors: before {before}, after the writer {after}, after a sleep {later}"
     ));
     0
 }

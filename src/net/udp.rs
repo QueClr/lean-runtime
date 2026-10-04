@@ -311,6 +311,7 @@ impl UdpSocket {
     /// `Socket.new` (`lean_uv_udp_new`, `uv_udp_init`): a socket with no
     /// descriptor yet.
     pub fn new() -> Result<UdpSocket, IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         Ok(UdpSocket(Rc::new_cyclic(|me| {
             let mut t = Udp::default();
@@ -453,12 +454,14 @@ impl UdpSocket {
 
     /// `Socket.bind` (`lean_uv_udp_bind`, `uv_udp_bind(..., UV_UDP_REUSEADDR)`).
     pub fn bind(&self, addr: SocketAddr) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         self.0.borrow_mut().bind(&addr, true).map_err(uv_error)
     }
 
     /// `Socket.connect` (`lean_uv_udp_connect`, `uv_udp_connect`).
     pub fn connect(&self, addr: SocketAddr) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         let mut u = self.0.borrow_mut();
         if u.connected {
@@ -487,6 +490,7 @@ impl UdpSocket {
         addr: Option<SocketAddr>,
         done: impl FnOnce(Result<(), IoError>) + 'static,
     ) -> Result<(), IoError> {
+        crate::io::effect_point();
         if data.count() == 0 {
             done(Ok(()));
             return Ok(());
@@ -687,6 +691,7 @@ impl UdpSocket {
         interface: Option<IpAddr>,
         membership: u8,
     ) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         // LEAN-BUG LB-22: native writes each address's text into a 16-byte
         // buffer (`INET_ADDRSTRLEN`, also for IPv6) and aborts

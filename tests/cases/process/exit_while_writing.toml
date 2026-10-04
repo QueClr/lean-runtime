@@ -1,0 +1,7 @@
+id = "exit_while_writing"
+area = "process"
+lean_version = "4.34.0"
+source = "LB-29 scope ruling (lean2rr-side judge, 2026-10-04: judge/io3 LB-29-writers, ExitWhileWriting.lean); lean-runtime fixes-1"
+streams = "separate"
+# Needs python3 on PATH (the slow reader). The size is not a multiple of the buffer, so the exit
+# also flushes a buffered remainder after the writer's write.

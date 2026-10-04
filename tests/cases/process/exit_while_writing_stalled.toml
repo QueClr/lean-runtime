@@ -1,0 +1,8 @@
+id = "exit_while_writing_stalled"
+area = "process"
+lean_version = "4.34.0"
+source = "LB-29 scope ruling (lean2rr-side judge, 2026-10-04: judge/io3 LB-29-writers, ExitWhileWriting.lean); lean-runtime fixes-1"
+streams = "separate"
+expect = { hang = 3 }
+# The child never reads, so the writer never finishes and the exit waits for it for good, as
+# natively (`exit` flushing to a stalled reader): native-followed, code `timeout`.

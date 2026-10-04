@@ -89,6 +89,7 @@ fn gen_name<T>(
 /// `IO.FS.createTempFile`: a new file, opened `fdopen(fd, "r+")`; its path
 /// is appended to `path`.
 pub fn create_temp_file<S: ByteSink + ?Sized>(path: &mut S) -> Result<Handle, IoError> {
+    super::effect_point();
     let (file, p) = gen_name(template()?, |p| {
         OpenOptions::new()
             .read(true)
@@ -103,6 +104,7 @@ pub fn create_temp_file<S: ByteSink + ?Sized>(path: &mut S) -> Result<Handle, Io
 
 /// `IO.FS.createTempDir`: a new directory; its path is appended to `path`.
 pub fn create_temp_dir<S: ByteSink + ?Sized>(path: &mut S) -> Result<(), IoError> {
+    super::effect_point();
     let ((), p) = gen_name(template()?, |p| DirBuilder::new().mode(0o700).create(p))?;
     path.extend_from_slice(&p);
     Ok(())

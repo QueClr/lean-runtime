@@ -690,26 +690,14 @@ pub fn enter_no_suspend() {
     NO_SUSPEND.with(|n| n.set(n.get() + 1));
 }
 
-/// Leave the innermost no-suspend scope ([`enter_no_suspend`]). Leaving
-/// the outermost one closes the streams whose drop in the scope found their
-/// pipe full (`io::coop::defer_close`, review RSIO-09): their flush may wait
-/// cooperatively now, so this call may suspend the context. End the
-/// outermost scope only where the context may suspend (review RSIO-14).
+/// Leave the innermost no-suspend scope ([`enter_no_suspend`]). It never
+/// suspends, never writes and never waits: a decrement of the thread-local
+/// counter, so it is safe in any `Drop`, also during a panic's unwinding.
+/// A stream whose drop in the scope found its pipe full has already been
+/// handed to an internal writer thread (`io::coop::hand_off`, AR-8).
 #[inline]
 pub fn leave_no_suspend() {
-    let left = NO_SUSPEND
-        .try_with(|n| {
-            let d = n.get().saturating_sub(1);
-            n.set(d);
-            d
-        })
-        .unwrap_or(1);
-    #[cfg(feature = "io")]
-    if left == 0 && crate::io::coop::deferred_pending() {
-        crate::io::coop::close_deferred();
-    }
-    #[cfg(not(feature = "io"))]
-    let _ = left;
+    let _ = NO_SUSPEND.try_with(|n| n.set(n.get().saturating_sub(1)));
 }
 
 /// The running context's no-suspend depth, set aside while it is switched

@@ -1,0 +1,1 @@
+$BIN $ARGS; st=$?; until [ -s marker ]; do sleep 0.05; done; echo "status $st, bytes $(wc -c < out), Y at $(grep -bo Y out | cut -d: -f1)"

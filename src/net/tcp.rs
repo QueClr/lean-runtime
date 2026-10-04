@@ -498,6 +498,7 @@ impl TcpSocket {
     /// descriptor yet. The first stream also takes libuv's spare descriptor
     /// (`/dev/null`, kept open), as natively.
     pub fn new() -> Result<TcpSocket, IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         Ok(TcpSocket::make())
     }
@@ -790,6 +791,7 @@ impl TcpSocket {
         addr: SocketAddr,
         done: impl FnOnce(Result<(), IoError>) + 'static,
     ) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.connect.is_some() {
@@ -843,6 +845,7 @@ impl TcpSocket {
         data: D,
         done: impl FnOnce(Result<(), IoError>) + 'static,
     ) -> Result<(), IoError> {
+        crate::io::effect_point();
         if data.count() == 0 {
             done(Ok(()));
             return Ok(());
@@ -965,6 +968,7 @@ impl TcpSocket {
 
     /// `Socket.bind` (`lean_uv_tcp_bind`, `uv_tcp_bind(handle, addr, 0)`).
     pub fn bind(&self, addr: SocketAddr) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         let mut t = self.0.borrow_mut();
         t.maybe_new_socket(family_of(&addr), false, false)
@@ -991,6 +995,7 @@ impl TcpSocket {
     /// backlog is passed on as a C `int`. A socket without a descriptor gets
     /// an IPv4 one (the kernel binds it to a free port).
     pub fn listen(&self, backlog: u32) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.delayed_error != 0 {
@@ -1069,6 +1074,7 @@ impl TcpSocket {
         &self,
         done: impl FnOnce(Result<(), IoError>) + 'static,
     ) -> Result<(), IoError> {
+        crate::io::effect_point();
         super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.shutdown.is_some() {

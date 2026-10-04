@@ -161,6 +161,7 @@ pub fn getenv(name: &[u8]) -> Option<Vec<u8>> {
 /// `setenv(name, value, 1)`, on the C environment and on the copy. `name` is
 /// one `setenv` accepts ([`name_ok`]) and neither holds a NUL byte.
 pub fn set(name: &[u8], value: &[u8]) {
+    super::effect_point();
     debug_assert!(name_ok(name) && !name.contains(&0) && !value.contains(&0));
     change(|env| {
         std::env::set_var(OsStr::from_bytes(name), OsStr::from_bytes(value));
@@ -171,6 +172,7 @@ pub fn set(name: &[u8], value: &[u8]) {
 /// `unsetenv(name)`, on the C environment and on the copy. `name` is one
 /// `unsetenv` accepts ([`name_ok`]) and holds no NUL byte.
 pub fn unset(name: &[u8]) {
+    super::effect_point();
     debug_assert!(name_ok(name) && !name.contains(&0));
     change(|env| {
         std::env::remove_var(OsStr::from_bytes(name));

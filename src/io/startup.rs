@@ -122,16 +122,39 @@ pub fn mark_end_initialization() {
     INITIALIZING.store(false, Ordering::Relaxed)
 }
 
-/// Why native Lean's startup would not reach `main`.
+/// Why the event loop could not be made, so the program does not reach
+/// `main`, with the `errno` of the call that failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartupFailure {
     /// `uv_loop_init` failed (the epoll descriptor, the signal pipe or the
-    /// eventfd could not be made): `uv_default_loop` returns NULL and
-    /// `event_loop_init`'s `uv_async_init` on it crashes (SIGSEGV).
-    LoopInit,
-    /// The signal lock pipe could not be made or written: libuv calls
-    /// `abort()` (`uv__signal_global_reinit`).
-    SignalLock,
+    /// eventfd could not be made). Natively `uv_default_loop` returns NULL
+    /// and `event_loop_init`'s `uv_async_init` on it crashes (SIGSEGV, 139;
+    /// LB-30).
+    LoopInit(i32),
+    /// The signal lock pipe could not be made or written. Natively libuv
+    /// calls `abort()` (`uv__signal_global_reinit`; SIGABRT, 134; LB-31).
+    SignalLock(i32),
+}
+
+impl StartupFailure {
+    /// The `errno` of the call that failed.
+    pub fn errno(self) -> i32 {
+        match self {
+            StartupFailure::LoopInit(e) | StartupFailure::SignalLock(e) => e,
+        }
+    }
+
+    /// The message after `INTERNAL PANIC: `: `Failed to initialize event
+    /// loop: ` and libuv's message for the error (`uv_strerror`), the shape
+    /// of Lean's own `check_uv` messages in `event_loop_init`
+    /// (`Failed to initialize event loop: too many open files` for
+    /// `EMFILE`).
+    pub fn message(self) -> String {
+        format!(
+            "Failed to initialize event loop: {}",
+            super::error::uv_strerror(super::error::crt_to_uv(self.errno()))
+        )
+    }
 }
 
 /// The descriptors, kept open for the life of the process, as libuv keeps
@@ -153,8 +176,9 @@ struct Descriptors {
 static DESCRIPTORS: OnceLock<Result<Descriptors, StartupFailure>> = OnceLock::new();
 
 /// Open native Lean's startup descriptors, once (later calls return the first
-/// outcome). On `Err`, native Lean would not reach `main`: the translator
-/// ends the process as [`fail_as_native`] does.
+/// outcome). On `Err`, the event loop could not be made and the program
+/// does not reach `main`: the translator ends the process with
+/// [`end_startup`].
 pub fn open_native_descriptors() -> Result<(), StartupFailure> {
     match DESCRIPTORS.get_or_init(open_all) {
         Ok(_) => Ok(()),
@@ -207,7 +231,9 @@ pub(crate) fn loop_eventfd() -> Option<BorrowedFd<'static>> {
 
 fn open_all() -> Result<Descriptors, StartupFailure> {
     let cloexec = epoll::CreateFlags::CLOEXEC;
-    let epoll = epoll::create(cloexec).map_err(|_| StartupFailure::LoopInit)?;
+    let loop_init = |e: rustix::io::Errno| StartupFailure::LoopInit(e.raw_os_error());
+    let signal_lock = |e: rustix::io::Errno| StartupFailure::SignalLock(e.raw_os_error());
+    let epoll = epoll::create(cloexec).map_err(loop_init)?;
     let mut rings = Vec::new();
     if use_io_uring() {
         // `uv__iou_init` twice; a ring the kernel does not give is skipped.
@@ -223,13 +249,11 @@ fn open_all() -> Result<Descriptors, StartupFailure> {
             rings.push(ring);
         }
     }
-    let lock_pipe = pipe_with(PipeFlags::CLOEXEC).map_err(|_| StartupFailure::SignalLock)?;
+    let lock_pipe = pipe_with(PipeFlags::CLOEXEC).map_err(signal_lock)?;
     // `uv__signal_unlock`
-    rustix::io::write(&lock_pipe.1, &[42]).map_err(|_| StartupFailure::SignalLock)?;
-    let signal_pipe = pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK)
-        .map_err(|_| StartupFailure::LoopInit)?;
-    let eventfd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)
-        .map_err(|_| StartupFailure::LoopInit)?;
+    rustix::io::write(&lock_pipe.1, &[42]).map_err(signal_lock)?;
+    let signal_pipe = pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK).map_err(loop_init)?;
+    let eventfd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK).map_err(loop_init)?;
     Ok(Descriptors {
         epoll,
         _rings: rings,
@@ -262,19 +286,36 @@ fn ring(entries: u32, polling: bool) -> Option<IoUring> {
         .then_some(ring)
 }
 
-/// End the process as native Lean's startup does on `failure`: `abort()`
-/// (SIGABRT) for the signal lock, a crash by SIGSEGV for a failed loop.
-/// SIGSEGV is raised twice: Rust's std installs a SIGSEGV handler (its stack
-/// overflow report) that, for a fault outside a guard page, restores the
-/// default action and returns, so the second raise kills the process (review
-/// RIO1-08); `abort()` only if a handler returns from both.
-pub fn fail_as_native(failure: StartupFailure) -> ! {
-    if failure == StartupFailure::LoopInit {
-        for _ in 0..2 {
-            let _ = nix::sys::signal::raise(nix::sys::signal::Signal::SIGSEGV);
-        }
+/// End the process when the event loop could not be made, before any module
+/// code: `INTERNAL PANIC: Failed to initialize event loop: <libuv's
+/// message>` on standard error, then exit status 1, or an abort under
+/// `LEAN_ABORT_ON_PANIC`, as Lean's `check_uv` ends a failed step of the
+/// same initialization (`lean_internal_panic`). Nothing is on standard
+/// output yet.
+///
+/// Natively the loop's failure is a crash (LB-30: SIGSEGV, 139, the
+/// unchecked `uv_default_loop()`; LB-31: SIGABRT, 134, libuv's `abort()`
+/// when the signal lock pipe cannot be made), with the outcome depending on
+/// how few descriptors are left; `docs/lean-bugs.md` (case
+/// `io/startup_fd_exhausted`).
+pub fn end_startup(failure: StartupFailure) -> ! {
+    use crate::semantics::panic::{
+        internal_panic_end, PanicEnd, PanicSettings, INTERNAL_PANIC_PREFIX, PANIC_EXIT_STATUS,
+    };
+    let line = format!("{INTERNAL_PANIC_PREFIX}{}\n", failure.message());
+    let _ = super::handle::Handle::stderr().put_str(line.as_bytes());
+    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
+    let s = PanicSettings::from_env(abort.as_ref().map(|v| v.as_encoded_bytes()), None);
+    match internal_panic_end(s) {
+        PanicEnd::Abort => std::process::abort(),
+        _ => std::process::exit(PANIC_EXIT_STATUS),
     }
-    std::process::abort()
+}
+
+/// [`end_startup`], under the name the glue was first written against (it
+/// ended the process as native's crash then).
+pub fn fail_as_native(failure: StartupFailure) -> ! {
+    end_startup(failure)
 }
 
 /// libuv 1.48.0's `uv__use_io_uring`: whether `uv__iou_init` tries to make

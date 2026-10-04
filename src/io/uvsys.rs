@@ -63,6 +63,8 @@ fn std_err(e: &std::io::Error) -> IoError {
 /// `uv__slurp`: one `read` of at most `len - 1` bytes; `None` when the file
 /// cannot be opened or read (the failing call's `errno` set).
 fn slurp(path: &[u8], len: usize) -> Option<Vec<u8>> {
+    // a descriptor is allocated: the context's handed-off streams end first
+    super::effect_point();
     let mut f = File::open(OsStr::from_bytes(path))
         .map_err(|e| failed(&e))
         .ok()?;
@@ -136,6 +138,7 @@ pub fn get_process_title<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoErro
 /// ([`argv_title`], when the crate's constructor kept them), and becomes
 /// the calling thread's name (`prctl(PR_SET_NAME)`, its first 15 bytes).
 pub fn set_process_title(title: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     if title.contains(&0) {
         return Err(IoError::embedded_nul(title));
     }
@@ -239,6 +242,7 @@ pub fn cwd<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoError> {
 /// error; an error names the path. Never during a spawn that has the process
 /// in its `cwd` (`process::with_cwd_change`).
 pub fn chdir(path: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     if path.contains(&0) {
         return Err(IoError::embedded_nul(path));
     }
@@ -321,6 +325,7 @@ pub struct GroupInfo {
 /// `UV_ENOENT` (with the empty name, LB-03). glibc's `getpwuid_r` leaves
 /// `errno` at its result: 0 for an entry or none, else the error.
 fn passwd_entry() -> Result<nix::unistd::User, IoError> {
+    super::effect_point();
     match nix::unistd::User::from_uid(nix::unistd::Uid::effective()) {
         Ok(Some(u)) => {
             set_errno(0);
@@ -384,6 +389,7 @@ pub fn os_get_passwd() -> Result<PasswdInfo, IoError> {
 /// name, id and members; `none` for no such group (`UV_ENOENT`); another
 /// error is decoded with the file name `group`, as `system.cpp` does.
 pub fn os_get_group(gid: u64) -> Result<Option<GroupInfo>, IoError> {
+    super::effect_point();
     let gid = gid as u32;
     // glibc's `getgrgid_r` leaves `errno` at its result
     let found = nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid));
@@ -448,6 +454,7 @@ pub fn os_getenv<S: ByteSink + ?Sized>(name: &[u8], out: &mut S) -> bool {
 /// name, then in the value, is Lean's embedded-NUL error naming that string;
 /// a name `setenv` refuses (empty or holding `=`) is `EINVAL`.
 pub fn os_setenv(name: &[u8], value: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     if name.contains(&0) {
         return Err(IoError::embedded_nul(name));
     }
@@ -464,6 +471,7 @@ pub fn os_setenv(name: &[u8], value: &[u8]) -> Result<(), IoError> {
 /// `osUnsetenv` (`uv_os_unsetenv`, `unsetenv`): a NUL byte in the name is
 /// Lean's embedded-NUL error; a name `unsetenv` refuses is `EINVAL`.
 pub fn os_unsetenv(name: &[u8]) -> Result<(), IoError> {
+    super::effect_point();
     if name.contains(&0) {
         return Err(IoError::embedded_nul(name));
     }
@@ -531,6 +539,7 @@ pub fn os_getpriority(pid: u64) -> Result<i64, IoError> {
 /// outside libuv's `UV_PRIORITY_HIGHEST` (-20) to `UV_PRIORITY_LOW` (19) is
 /// `UV_EINVAL`; then `setpriority(PRIO_PROCESS, (int) pid, priority)`.
 pub fn os_setpriority(pid: u64, priority: i64) -> Result<(), IoError> {
+    super::effect_point();
     let priority = priority as i32;
     if !(-20..=19).contains(&priority) {
         return Err(libuv(EINVAL));
@@ -605,6 +614,7 @@ pub fn random_check(size: u64) -> Result<(), IoError> {
 /// `getrandom`, here the same kernel source read through `/dev/urandom`);
 /// an error is the promise's.
 pub fn random_fill(buf: &mut [u8]) -> Result<(), IoError> {
+    super::effect_point();
     // libuv fills it on its thread pool: the calling thread's `errno` stays
     let os = |e: std::io::Error| libuv(e.raw_os_error().unwrap_or(EINVAL));
     if buf.is_empty() {
@@ -966,6 +976,7 @@ impl Stream<'_> {
 /// libuv aborts (a `/proc/stat` without a line, a frequency file without a
 /// number), the result is `UV_ENOENT`'s error instead.
 pub fn cpu_info() -> Result<Vec<CpuInfo>, IoError> {
+    super::effect_point();
     let stat = std::fs::read("/proc/stat").map_err(|e| std_err(&e))?;
     let info = std::fs::read("/proc/cpuinfo").map_err(|e| failed(&e)).ok();
     parse_cpu_info(&stat, info.as_deref(), MODEL_MARKER, PARTS, |cpu| {

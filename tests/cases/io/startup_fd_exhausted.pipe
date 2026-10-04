@@ -1,0 +1,1 @@
+ulimit -c 0; (ulimit -n 6; $BIN $ARGS; echo "exit $?"); (ulimit -n 9; $BIN $ARGS; echo "exit $?"); (ulimit -n 10; $BIN $ARGS; echo "exit $?"); (ulimit -n 5; UV_USE_IO_URING=0 $BIN $ARGS; echo "exit $?"); (ulimit -n 7; UV_USE_IO_URING=0 $BIN $ARGS; echo "exit $?")

@@ -84,6 +84,54 @@ pub(crate) fn with<R>(f: impl FnOnce(&mut Sched) -> R) -> R {
     SCHED.with(|s| f(&mut s.borrow_mut()))
 }
 
+/// A point where the running context publishes something or may suspend:
+/// first, the writer threads of the streams its drops handed off
+/// (`io::coop::hand_off`) end, letting the other contexts run meanwhile, as
+/// natively its thread was inside those streams' `fclose` until then and
+/// could do nothing else (AR-8; review RFX1-07; leanrs's re-check of
+/// a771e57). Called by the scheduler's own points (effect points, polls,
+/// sleeps, waits, `hang`, promise resolutions, task creations, `Std.Sync`
+/// operations, the end of a task's job and of `main`) and, through the
+/// public [`before_publish`] and [`before_task_value`], by the glue. One
+/// relaxed load when no writer exists; nothing without the feature `io`.
+/// It waits for nothing in a no-suspend scope, while the context holds a
+/// stream lock, or while a panic unwinds (the next point waits instead).
+#[inline]
+pub(crate) fn writers_point() {
+    #[cfg(feature = "io")]
+    crate::io::coop::join_own_writers(crate::io::coop::JoinAt::End);
+}
+
+/// The end of a task's job, right before the glue stores the task's value
+/// (item 3 of "The glue" in `docs/sched.md`): a [`writers_point`], so a
+/// context that waits for the task sees the bytes of the streams the task
+/// handed off delivered, as natively its `fclose` had returned. A glue that
+/// does not call it lets a waiter see the value before `run_task`'s own
+/// wait, with those bytes still on their way.
+#[inline]
+pub fn before_task_value() {
+    writers_point();
+}
+
+/// A write the glue makes that another context can see (an `ST.Ref`'s
+/// `set`, `swap`, `take`, `modify`'s store, in a program with tasks): a
+/// [`writers_point`] (item 7 of "The glue").
+#[inline]
+pub fn before_publish() {
+    writers_point();
+}
+
+/// The running context, where the scheduler's state can be read: `None`
+/// during the destruction of the thread's locals, or inside [`with`] (a
+/// destructor run there).
+#[cfg(feature = "io")]
+pub(crate) fn running_context() -> Option<CtxId> {
+    SCHED
+        .try_with(|s| s.try_borrow().ok().map(|s| s.cx.cur))
+        .ok()
+        .flatten()
+}
+
 /// Whether the scheduler's state is still there: not during the destruction
 /// of the thread's locals at exit, when a translator's global holding a task
 /// or a promise is destructed (natively nothing is destructed at exit).
@@ -193,6 +241,7 @@ pub fn wake(c: CtxId) {
 /// forced from its own computation, tasks waiting for each other (natively
 /// that thread waits forever).
 pub fn hang() -> ! {
+    writers_point();
     if manager_running() {
         loop {
             ctx::block(ctx::Wait::Forever);

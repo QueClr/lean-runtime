@@ -29,7 +29,9 @@ use std::rc::Rc;
 
 use lean_runtime::io::process::{self, Child, SpawnArgs, Stdio, StdioConfig};
 use lean_runtime::io::streams::{self, StdStream};
-use lean_runtime::io::{debug, env as lenv, exit, fs as lfs, temp, uvsys, FsMode, Handle, IoError};
+use lean_runtime::io::{
+    debug, env as lenv, exit, fs as lfs, temp, uvsys, ByteSink, FsMode, Handle, IoError,
+};
 use lean_runtime::semantics::array;
 use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
 
@@ -164,8 +166,11 @@ fn to_string(e: &IoError) -> String {
     }
 }
 
-/// The end of a native program: `main`'s result, then C's `exit`.
+/// The end of a native program: `lean_finalize_task_manager` (the io
+/// layer's dedicated tasks, `exit::after_main`), `main`'s result, then C's
+/// `exit`.
 fn finish(r: R<()>) -> ! {
+    exit::after_main();
     match r {
         Ok(()) => exit::exit(0),
         Err(e) => {
@@ -936,6 +941,135 @@ fn output_big(_: &[String]) -> R<()> {
     ))?;
     let o = cmd("sh").args(&["-c", "printf '\\377' >&2"]).output(None)?;
     println(&format!("code {}", o.exit_code))
+}
+
+/// leanrs's `IO.Process.output` storage: each growth reserved fallibly; a
+/// failed reservation drops the bytes and stops the sink, and the glue ends
+/// with Lean's out of memory once `output` returns (AR-5).
+#[derive(Default)]
+struct Bytes {
+    v: Vec<u8>,
+    out_of_memory: bool,
+}
+
+impl ByteSink for Bytes {
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        if self.out_of_memory {
+            return;
+        }
+        if self.v.try_reserve(bytes.len()).is_err() {
+            self.out_of_memory = true;
+            self.v = Vec::new();
+            return;
+        }
+        self.v.extend_from_slice(bytes);
+    }
+
+    fn stopped(&self) -> bool {
+        self.out_of_memory
+    }
+}
+
+/// The case `process/output_oom` (under `ulimit -v`): a child that writes one
+/// pipe without end and has closed the other.
+fn output_oom(args: &[String]) -> R<()> {
+    let which = args.first().map(String::as_str).unwrap_or("");
+    println(&format!("before {which}"))?;
+    let script = if which == "stdout" {
+        "exec yes 2>&-"
+    } else {
+        "exec yes >&2"
+    };
+    let (mut o, mut e) = (Bytes::default(), Bytes::default());
+    let r = cmd("sh")
+        .args(&["-c", script])
+        .with(|a| process::output(a, None, &mut o, &mut e));
+    if o.out_of_memory || e.out_of_memory {
+        internal_panic(InternalPanic::OutOfMemory);
+    }
+    let code = r?;
+    println(&format!(
+        "after {which}: exit {code}, {} and {} bytes",
+        o.v.len(),
+        e.v.len()
+    ))
+}
+
+/// The case `process/output_drain_exit`: `output` fails on standard error
+/// while the child still writes standard output; the process waits for that
+/// pipe's end after `main` (`finish`).
+fn output_drain_exit(_: &[String]) -> R<()> {
+    drain_then_main_ends()
+}
+
+/// `output_drain_exit`'s `try ... catch` and its last line.
+fn drain_then_main_ends() -> R<()> {
+    let r = cmd("sh")
+        .args(&[
+            "-c",
+            "printf '\\377' >&2; exec 2>&-; sleep 1; echo late; echo \"child: write status $?\" > marker",
+        ])
+        .output(None);
+    match r {
+        Ok(o) => println(&format!("output: exit {}", o.exit_code))?,
+        Err(e) => println(&format!("output failed: {}", to_string(&e)))?,
+    }
+    println("main ends")
+}
+
+/// The case `process/output_drain_oom` (under `ulimit -v`): `output` fails
+/// on standard error while `yes` writes standard output; the drain keeps
+/// the bytes until its storage cannot grow, then ends the process with the
+/// out-of-memory internal panic while `finish` waits for it (RFX1-04).
+fn output_drain_oom(_: &[String]) -> R<()> {
+    let r = cmd("sh")
+        .args(&["-c", "printf '\\377' >&2; exec 2>&-; exec yes"])
+        .output(None);
+    match r {
+        Ok(o) => println(&format!("output: exit {}", o.exit_code))?,
+        Err(e) => println(&format!("output failed: {}", to_string(&e)))?,
+    }
+    println("main ends")
+}
+
+/// The case `process/output_drain_exit_exit`: `IO.Process.exit 0` while the
+/// drain still reads; the exit does not wait for it (LB-29).
+fn output_drain_exit_exit(_: &[String]) -> R<()> {
+    drain_then_main_ends()?;
+    exit::exit(0)
+}
+
+/// The case `process/output_drain_exit_panic`: an internal panic
+/// (`Array.replicate` of the size in argv, 2^64) while the drain still
+/// reads; the panic's exit does not wait for it (LB-29).
+fn output_drain_exit_panic(args: &[String]) -> R<()> {
+    drain_then_main_ends()?;
+    let n: Option<u64> = args[0].parse().ok();
+    let len = array::replicate_len(n).unwrap_or_else(|p| internal_panic(p));
+    println(&len.to_string())
+}
+
+/// The case `process/output_drain_exit_force`: `IO.Process.forceExit 0`
+/// after flushing standard output; nothing waits for the drain, as natively.
+fn output_drain_exit_force(_: &[String]) -> R<()> {
+    drain_then_main_ends()?;
+    stdout().flush()?;
+    exit::force_exit(0)
+}
+
+/// The case `process/output_oom_both_pipes` (under `ulimit -v`): `output` of
+/// `yes`, whose standard error stays open; the panic ends the process at
+/// once (LB-29: natively it hangs).
+fn output_oom_both_pipes(args: &[String]) -> R<()> {
+    println("before")?;
+    let (mut o, mut e) = (Bytes::default(), Bytes::default());
+    let r = cmd(args.first().map(String::as_str).unwrap_or("yes"))
+        .with(|a| process::output(a, None, &mut o, &mut e));
+    if o.out_of_memory || e.out_of_memory {
+        internal_panic(InternalPanic::OutOfMemory);
+    }
+    let code = r?;
+    println(&format!("after {code} {}", o.v.len()))
 }
 
 fn failed_rows(label: &str, a: Spawn) -> R<()> {
@@ -2878,6 +3012,13 @@ const TWINS: &[(&str, Twin)] = &[
     ("rt_process", rt_process),
     ("rt_process_spawn", rt_process_spawn),
     ("output_big", output_big),
+    ("output_oom", output_oom),
+    ("output_drain_exit", output_drain_exit),
+    ("output_drain_exit_exit", output_drain_exit_exit),
+    ("output_drain_exit_panic", output_drain_exit_panic),
+    ("output_drain_exit_force", output_drain_exit_force),
+    ("output_oom_both_pipes", output_oom_both_pipes),
+    ("output_drain_oom", output_drain_oom),
     // `closed_stdout` has no twin: the twin's Rust entry (`lang_start`) opens
     // `/dev/null` on a closed standard descriptor before `main` (leanrs DV19),
     // which a translator's entry does not do

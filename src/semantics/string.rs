@@ -403,6 +403,9 @@ pub struct Utf8Set {
     pub end: usize,
     bytes: [u8; 4],
     len: u8,
+    /// The new character, `None` when the code was not a scalar value
+    /// (never for a Lean `Char`).
+    ch: Option<char>,
 }
 
 impl Utf8Set {
@@ -414,14 +417,19 @@ impl Utf8Set {
         &self.bytes[..usize::from(self.len)]
     }
 
-    /// `new_bytes()` as a `&str`, for a glue whose string type takes text:
-    /// `None` only when the character was not a scalar value, which a Lean
-    /// `Char` always is.
+    /// `new_bytes()` as a `&str` in `buf`, for a glue whose string type
+    /// takes text: the kept character's `encode_utf8`, inline, with no UTF-8
+    /// check (AR-2: `core::str::from_utf8` of `new_bytes()`, out of line, ran
+    /// on every `String.set`). `None` only when the character was not a
+    /// scalar value, which a Lean `Char` always is.
     ///
     /// Source: new.
     #[inline]
-    pub fn new_str(&self) -> Option<&str> {
-        core::str::from_utf8(self.new_bytes()).ok()
+    pub fn new_str<'b>(&self, buf: &'b mut [u8; 4]) -> Option<&'b str> {
+        match self.ch {
+            Some(c) => Some(c.encode_utf8(buf)),
+            None => None,
+        }
     }
 
     /// Writes the new character over the old one in `s`, the bytes of the
@@ -525,6 +533,7 @@ pub fn utf8_set(s: &[u8], pos: u64, c: u32) -> Option<Utf8Set> {
             end: start + 1,
             bytes: [c as u8, 0, 0, 0],
             len: 1,
+            ch: Some(c as u8 as char),
         });
     }
     set_cold(s.len(), start, lead, c)
@@ -549,6 +558,7 @@ fn set_cold(size: usize, start: usize, lead: u8, c: u32) -> Option<Utf8Set> {
         end: (start + old).min(size),
         bytes,
         len,
+        ch: char::from_u32(c),
     })
 }
 
@@ -750,7 +760,14 @@ mod tests {
                         v.extend_from_slice(&s.as_bytes()[p.end..]);
                         assert_eq!(v.len(), p.result_size(s.len()));
                         assert_eq!(p.same_size(), p.old_range().len() == c.len_utf8());
-                        assert_eq!(p.new_str(), Some(c.encode_utf8(&mut [0; 4]) as &str));
+                        assert_eq!(
+                            p.new_str(&mut [0; 4]),
+                            Some(c.encode_utf8(&mut [0; 4]) as &str)
+                        );
+                        assert_eq!(
+                            p.new_str(&mut [0; 4]).map(str::as_bytes),
+                            Some(p.new_bytes())
+                        );
                         if p.same_size() {
                             let mut w = s.as_bytes().to_vec();
                             p.write_in_place(&mut w);
@@ -773,5 +790,10 @@ mod tests {
         v.extend_from_slice(p.new_bytes());
         v.extend_from_slice(&cut[p.end..]);
         assert_eq!(v, b"ax");
+        // A code that is not a scalar value (no Lean `Char` is): C's masked
+        // bytes, and no `&str`.
+        let p = utf8_set(b"a", 0, 0xD800).unwrap();
+        assert_eq!(p.new_bytes(), b"\xed\xa0\x80");
+        assert_eq!(p.new_str(&mut [0; 4]), None);
     }
 }

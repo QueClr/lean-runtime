@@ -51,7 +51,11 @@ pub const PRIO_DEDICATED: u64 = 9;
 fn job_filling<T: 'static>(slot: &Rc<OnceCell<T>>, f: impl FnOnce() -> T + 'static) -> Job {
     let slot = slot.clone();
     Box::new(move || {
-        let _ = slot.set(f());
+        let v = f();
+        // the job's hand-offs end before its value is seen (docs/sched.md,
+        // item 3 of "The glue")
+        sched::before_task_value();
+        let _ = slot.set(v);
         Outcome::Done
     })
 }
@@ -164,6 +168,7 @@ pub fn bind_task<A: Clone + 'static, B: Clone + 'static>(
         let job: Job = Box::new(move || {
             let t2 = f(t.get());
             if t2.0.live() == TaskId::FINISHED || sched::is_finished(t2.0.id) {
+                sched::before_task_value();
                 let _ = slot.set(t2.get());
                 return Outcome::Done;
             }
@@ -171,7 +176,9 @@ pub fn bind_task<A: Clone + 'static, B: Clone + 'static>(
             Outcome::Continue(
                 id2,
                 Box::new(move || {
-                    let _ = slot.set(t2.get());
+                    let v = t2.get();
+                    sched::before_task_value();
+                    let _ = slot.set(v);
                     Outcome::Done
                 }),
             )
@@ -409,17 +416,22 @@ impl<T: Clone> Ref<T> {
     /// while `modify` holds the cell (LB-01). The old value is dropped after
     /// the cell's borrow.
     pub fn set(&self, v: T) {
+        // a write another context can see: the context's handed-off streams
+        // end first (docs/sched.md, item 7 of "The glue")
+        sched::before_publish();
         drop(self.exchange(v));
     }
 
     /// `ST.Ref.swap`: waits while `modify` holds the cell (LB-18).
     pub fn swap(&self, v: T) -> T {
+        sched::before_publish();
         sched::ref_read();
         self.exchange(v)
     }
 
     /// `ST.Ref.modify`: `take`, then `put` (`Ref.modifyUnsafe`).
     pub fn modify(&self, f: impl FnOnce(T) -> T) {
+        sched::before_publish();
         let v = self.take();
         self.put(f(v));
     }
