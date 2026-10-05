@@ -109,6 +109,162 @@ fn no_task_manager_with_zero_workers() {
     assert!(promise_new().is_err());
 }
 
+fn start_lazy_test(workers: u32) {
+    start_lazy(Rc::new(NoSuspend), workers, 1 << 20);
+}
+
+static LAZY_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// A lazy-start test: one at a time, and `ST.Ref` read yields (process-wide),
+/// which the lazy start turns on, off again at its end, so that no other
+/// unit test sees them on (review RSH2-01).
+struct LazyTest(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+impl Drop for LazyTest {
+    fn drop(&mut self) {
+        set_ref_read_yields(false);
+    }
+}
+
+fn lazy_test() -> LazyTest {
+    LazyTest(
+        LAZY_SERIAL
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
+}
+
+/// The lazy start (audit item 4.5): the numbers are taken at once, the
+/// scheduler is built at the first task. Until then `deferring` already
+/// says the task manager runs, while `manager_running` (built with
+/// workers) does not; afterwards both, and the task is deferred as with
+/// `start`.
+#[test]
+fn the_lazy_start_waits_for_the_first_task() {
+    let _t = lazy_test();
+    assert!(!sched_started() && !deferring());
+    ensure_started();
+    assert!(!sched_started(), "nothing to start before start_lazy");
+    start_lazy_test(4);
+    assert!(!sched_started());
+    assert!(deferring());
+    assert!(!manager_running());
+    let l = log();
+    let a = spawn(job(&l, "a"), 0, true);
+    assert!(sched_started() && manager_running() && deferring());
+    // `ST.Ref` reads are polling points from the start on (process-wide;
+    // no unit test turns them off)
+    assert!(REF_YIELDS.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(entries(&l).is_empty(), "deferred, as after start");
+    assert!(!is_finished(a));
+    wait(a);
+    assert_eq!(entries(&l), ["a"]);
+    finish();
+}
+
+/// A promise, a dependent and every `Std.Sync` constructor start it too.
+#[test]
+fn the_lazy_start_comes_with_a_promise() {
+    let _t = lazy_test();
+    start_lazy_test(2);
+    assert!(promise_new().is_ok());
+    assert!(sched_started() && manager_running());
+}
+
+#[test]
+fn the_lazy_start_comes_with_a_dependent() {
+    let _t = lazy_test();
+    start_lazy_test(2);
+    // `Task.pure x |>.map f`: the source is no task, and the dependent is a
+    // task (natively deferred), so it starts the scheduler first
+    assert!(!dependent_runs_now(TaskId::FINISHED, false));
+    assert!(sched_started());
+}
+
+#[test]
+fn the_lazy_start_comes_with_std_sync() {
+    let _t = lazy_test();
+    let made: [fn(); 4] = [
+        || drop(Mutex::new()),
+        || drop(sync::Condvar::new()),
+        || drop(RecursiveMutex::new()),
+        || drop(SharedMutex::new()),
+    ];
+    for (k, make) in made.into_iter().enumerate() {
+        // each on a thread of its own: the state is the thread's
+        std::thread::spawn(move || {
+            start_lazy_test(1);
+            make();
+            assert!(sched_started(), "constructor {k}");
+        })
+        .join()
+        .unwrap();
+    }
+}
+
+/// lean2rr's review RS4-05: a recursive mutex made by an initializer
+/// (before `start_lazy`), locked by `main` before its first task and again
+/// after it, has one owner: its first lock in `main` starts the scheduler,
+/// so both locks are the same thread's and the nested one does not wait.
+#[test]
+fn std_sync_in_main_starts_it_first() {
+    let _t = lazy_test();
+    let m = RecursiveMutex::new();
+    assert!(!sched_started(), "an initializer starts nothing");
+    start_lazy_test(2);
+    m.lock();
+    assert!(sched_started());
+    let l = log();
+    let a = spawn(job(&l, "a"), 0, true);
+    m.lock();
+    m.unlock();
+    m.unlock();
+    wait(a);
+    assert_eq!(entries(&l), ["a"]);
+    finish();
+}
+
+/// With no workers (`LEAN_NUM_THREADS=0`) nothing is deferred: tasks run
+/// at once, after the scheduler is built (its glue for the task's job).
+#[test]
+fn the_lazy_start_with_no_workers() {
+    let _t = lazy_test();
+    start_lazy_test(0);
+    assert!(!deferring());
+    let l = log();
+    assert_eq!(spawn(job(&l, "a"), 0, false), TaskId::FINISHED);
+    assert_eq!(entries(&l), ["a"]);
+    assert!(sched_started() && !manager_running() && !deferring());
+    assert!(promise_new().is_err());
+}
+
+/// `finish` after a lazy start that never came builds nothing, and the
+/// scheduler stays unstarted; `start_with` after `start_lazy` starts at
+/// once and drops what `start_lazy` took; `start_lazy` after the start is
+/// `start_with`.
+#[test]
+fn the_lazy_start_with_finish_and_start() {
+    let _t = lazy_test();
+    std::thread::spawn(|| {
+        start_lazy_test(3);
+        finish();
+        assert!(!sched_started());
+    })
+    .join()
+    .unwrap();
+    std::thread::spawn(|| {
+        start_lazy_test(3);
+        start_test(0);
+        assert!(sched_started() && !deferring());
+        ensure_started();
+        assert!(!manager_running(), "start_with's numbers, not start_lazy's");
+        start_lazy_test(2);
+        assert!(sched_started() && deferring() && manager_running());
+    })
+    .join()
+    .unwrap();
+}
+
 #[test]
 fn tasks_are_deferred_until_needed() {
     start_test(4);

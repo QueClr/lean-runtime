@@ -250,7 +250,17 @@ pub fn crt_to_uv(e: i32) -> i32 {
 /// `Unknown system error <code>` for a code it does not name (`UV_ENOEXEC`
 /// among them: Lean classifies it, but the libuv it links has no message).
 pub fn uv_strerror(code: i32) -> Cow<'static, str> {
-    Cow::Borrowed(match -code {
+    match uv_strerror_named(code) {
+        Some(m) => Cow::Borrowed(m),
+        None => Cow::Owned(format!("Unknown system error {code}")),
+    }
+}
+
+/// [`uv_strerror`] of a code libuv names, `None` for the others: without an
+/// allocation (the startup descriptors' failure in an ELF constructor,
+/// AR-36).
+pub(crate) fn uv_strerror_named(code: i32) -> Option<&'static str> {
+    Some(match -code {
         1 => "operation not permitted",
         2 => "no such file or directory",
         3 => "no such process",
@@ -335,7 +345,7 @@ pub fn uv_strerror(code: i32) -> Cow<'static, str> {
         4080 => "invalid Unicode character",
         4094 => "unknown error",
         4095 => "end of file",
-        _ => return Cow::Owned(format!("Unknown system error {code}")),
+        _ => return None,
     })
 }
 

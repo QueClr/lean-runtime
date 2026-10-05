@@ -185,7 +185,8 @@ pub(crate) fn glue() -> Rc<dyn Glue> {
 
 /// `lean_init_task_manager` (called by Lean's generated `main` after the
 /// module initializers and `lean_io_mark_end_initialization`): from now on
-/// tasks are deferred. `LEAN_NUM_THREADS=0` means no task manager: tasks keep
+/// tasks are deferred ([`start_lazy`] builds the scheduler only when the
+/// program first needs it). `LEAN_NUM_THREADS=0` means no task manager: tasks keep
 /// running at once, and `IO.Promise.new` is Lean's internal panic. Reads
 /// `LEAN_NUM_THREADS` and `LEAN_STACK_SIZE_KB` (`lean_run_main` reads the
 /// latter at this point): `start_with(glue, lean_num_threads(),
@@ -207,6 +208,8 @@ pub fn start(glue: Rc<dyn Glue>) {
 /// dropped, and a context still running on a stack of the old size does not
 /// return it to the pool when it ends.
 pub fn start_with(glue: Rc<dyn Glue>, workers: u32, stack_size: usize) {
+    LAZY.with(|l| l.borrow_mut().take());
+    STATE.with(|st| st.set(STARTED | if workers > 0 { DEFERS } else { 0 }));
     with(|s| {
         s.cx.glue = Some(glue);
         s.cx.pool_limit = workers;
@@ -218,6 +221,124 @@ pub fn start_with(glue: Rc<dyn Glue>, workers: u32, stack_size: usize) {
     // installed it (`install_stack_overflow_handler`).
     #[cfg(feature = "stack-overflow")]
     stack_overflow::on_scheduler_thread();
+}
+
+// ---------------------------------------------------------------------------
+// The lazy start (lean2rr's `task::start` and `ensure_started`; audit item
+// 4.5)
+
+/// [`STATE`]: `start` or `start_with` has run on this thread (directly or
+/// through [`ensure_started`]).
+const STARTED: u8 = 1;
+/// [`STATE`]: [`start_lazy`] has run and the scheduler is not built yet.
+const PENDING: u8 = 2;
+/// [`STATE`]: the task manager runs or will run at the lazy start: new tasks
+/// are deferred ([`deferring`]).
+const DEFERS: u8 = 4;
+
+thread_local! {
+    /// The lazy start's state on this thread ([`STARTED`], [`PENDING`],
+    /// [`DEFERS`]): one byte, so that [`ensure_started`], [`sched_started`]
+    /// and [`deferring`] inline down to its load.
+    static STATE: Cell<u8> = const { Cell::new(0) };
+    /// What [`start_lazy`] was given, until [`ensure_started`] starts the
+    /// scheduler with it.
+    static LAZY: RefCell<Option<LazyStart>> = const { RefCell::new(None) };
+}
+
+/// [`start_lazy`]'s glue, workers and stack size.
+type LazyStart = (Rc<dyn Glue>, u32, usize);
+
+/// `lean_init_task_manager` at `main`'s start, with the scheduler itself
+/// built only when the program first needs it (lean2rr's lazy start): the
+/// number of workers and the contexts' stack size are taken now (Lean reads
+/// `LEAN_NUM_THREADS` and `LEAN_STACK_SIZE_KB` when `main` starts:
+/// [`lean_num_threads`], [`thread_stack_size`]), and [`ensure_started`]
+/// calls `start_with(glue, workers, stack_size)` at the first task, promise,
+/// `Std.Sync` object or operation, timer, signal watcher or socket. The
+/// crate's own entry points for those call it ([`spawn`], [`depend`],
+/// [`dependent_runs_now`], [`promise_new`], every method of [`sync`]'s
+/// objects, `uv::loop_configure`, `uv::loop_alive`, `uv::Timer::new`,
+/// `uv::Signal::new`, and `net`'s `TcpSocket::new`, `UdpSocket::new`,
+/// `dns::get_addr_info` and `dns::get_name_info`); a glue calls it before
+/// anything of its own that needs the scheduler.
+///
+/// So a program that makes none of them builds no scheduler state, context
+/// or event loop, and pages in none of their code. Until the start nothing
+/// could have been deferred or run elsewhere, so the two are the same:
+/// - [`deferring`] is true from now on when `workers > 0` (natively the
+///   task manager runs from `main`'s start), while [`manager_running`]
+///   stays false until the scheduler is built (it means "built with
+///   workers": the crate reads it to know whether contexts exist);
+/// - [`finish`] after `main` waits for the io layer's dedicated tasks and
+///   the streams handed off, as without a scheduler, and builds nothing;
+/// - at the start, `ST.Ref` reads become polling points
+///   ([`set_ref_read_yields`]`(true)`): before it no other context exists,
+///   so no read needs to poll (decisions Q5 refinement B, decided when the
+///   program first needs a scheduler);
+/// - `Std.Sync`'s lock owners tell an initializer's thread from `main`'s by
+///   the scheduler having started, so every operation in `main` starts it
+///   first: an object an initializer made, locked by `main` before its first
+///   task and again after it, has one owner (lean2rr's review RS4-05).
+///
+/// Call it on the thread that runs `main` (inside `io::startup::run_main`'s
+/// body, with `main` and `finish`: the state is this thread's), after the
+/// module initializers (during them nothing is started: Lean has no task
+/// manager then). Once the scheduler has started on this thread, it is
+/// `start_with` (which replaces the glue and both numbers). Single-thread
+/// scheduler only: threads mode (`sched::mt`) has no lazy start, and starts
+/// at once.
+pub fn start_lazy(glue: Rc<dyn Glue>, workers: u32, stack_size: usize) {
+    if sched_started() {
+        start_with(glue, workers, stack_size);
+        return;
+    }
+    LAZY.with(|l| *l.borrow_mut() = Some((glue, workers, stack_size)));
+    STATE.with(|st| st.set(PENDING | if workers > 0 { DEFERS } else { 0 }));
+}
+
+/// Start the scheduler now if [`start_lazy`] is waiting for it on this
+/// thread (then `ST.Ref` reads become polling points); otherwise nothing:
+/// before `start_lazy` (the module initializers), after the start, or for a
+/// glue that calls `start` itself. One thread-local load on the fast path.
+#[inline]
+pub fn ensure_started() {
+    if STATE.with(Cell::get) & PENDING != 0 {
+        start_pending();
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn start_pending() {
+    if let Some((glue, workers, stack_size)) = LAZY.with(|l| l.borrow_mut().take()) {
+        start_with(glue, workers, stack_size);
+        set_ref_read_yields(true);
+    }
+}
+
+/// Whether the scheduler has started on this thread: `start` or
+/// `start_with` ran, directly or through [`ensure_started`] (also with no
+/// workers, where tasks run at once). Before that, [`current_context`] would
+/// build the scheduler's state for nothing: the running context is
+/// [`MAIN`].
+#[inline]
+pub fn sched_started() -> bool {
+    STATE.with(Cell::get) & STARTED != 0
+}
+
+/// Whether new tasks are deferred (`Task.spawn` makes a task instead of
+/// running the function at once): the task manager runs ([`manager_running`])
+/// or will at the lazy start ([`start_lazy`] with workers). lean2rr's
+/// generated code asks it before it registers a task.
+#[inline]
+pub fn deferring() -> bool {
+    STATE.with(Cell::get) & DEFERS != 0
+}
+
+/// [`start_lazy`] ran and the scheduler was never built (for [`finish`]).
+pub(crate) fn start_pending_only() -> bool {
+    STATE.with(Cell::get) & PENDING != 0
 }
 
 static REF_YIELDS: AtomicBool = AtomicBool::new(false);

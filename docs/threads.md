@@ -168,8 +168,9 @@ only plain items moved: `TaskState`, the messages and the priorities to
 `src/sched/common.rs` in T1, and the process-wide part of the signal
 watchers' delivery to `src/sched/uv_signals.rs` in T2, unchanged). `check.sh`
 builds and tests `threads` and every feature that may go with it; with
-`io,threads,proc-title,stack-overflow,unsafe-fast` the io twins run inside
-tasks and the uvloop twins over threads mode's `sched::uv` (0.5).
+`io,threads,proc-title,startup-fds,stack-overflow,unsafe-fast` the io
+twins run inside tasks and the uvloop twins over threads mode's
+`sched::uv` (0.5).
 
 ### 0.3 leanrs's constraints for T1
 
@@ -188,7 +189,10 @@ tasks and the uvloop twins over threads mode's `sched::uv` (0.5).
    the drop walk. Met in T2: `sched::uv` with `LoopPromise` (`is_resolved`,
    `resolve`), `Timer`, `Signal`, `loop_configure` and `loop_alive`, the
    single-thread module's names and shapes, with `LoopPromise: Clone + Send
-   + 'static` (0.5).
+   + 'static` (0.5). The lazy start of shared-2 (`start_lazy`,
+   `ensure_started`, `sched_started`, `deferring`) is the single-thread
+   scheduler's only: threads mode has none of them, and starts eagerly
+   (`start`, `start_with`).
 2. **`Send` in one place.** `sched::Job` is `Box<dyn FnOnce() -> Outcome +
    Send>` in threads mode (`'static` is implied), and has no `Send` in the
    single-thread build.
@@ -552,7 +556,7 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   before its fix and passes after.
 
 **4. The twins inside tasks.** In a threads build (`check.sh`'s
-`io,threads,proc-title,stack-overflow,unsafe-fast`):
+`io,threads,proc-title,startup-fds,stack-overflow,unsafe-fast`):
 - every twin of `tests/io_cases.rs` and `tests/io2_cases.rs` runs inside a
   task, on a worker, which `main` waits for (`tests/in_task/mod.rs`): the
   program `IO.asTask (twin args)` then `IO.wait`. The same expected

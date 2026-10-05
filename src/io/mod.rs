@@ -1,8 +1,9 @@
 //! OS-level IO mirroring Lean 4.34.0's C runtime (`src/runtime/io.cpp`,
 //! `process.cpp`), in safe Rust over std, rustix, nix and io-uring, except
-//! `argv_title` (feature `proc-title`): the one native quirk no safe API can
-//! reproduce, in a file of its own (`UNSAFE.md`). Without that feature the
-//! module has no `unsafe` code.
+//! two native quirks no safe API can reproduce, each in a file of its own
+//! behind a feature of its own (`UNSAFE.md`): `argv_title` (feature
+//! `proc-title`) and `startup_fds` (feature `startup-fds`). Without those
+//! features the module has no `unsafe` code.
 //!
 //! # Layout
 //!
@@ -16,7 +17,8 @@
 //! | [`fs`] | the file system: directories, metadata, `realPath`, removal, renaming, links, permissions, the working directory |
 //! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, `IO.getTID`, random bytes, the monotonic clock, `IO.sleep` |
 //! | [`debug`] | the IO parts of `dbgTrace`, `dbgTraceIfShared`, `dbgSleep` and `allocprof`, the runtime's own standard-error lines, and a test harness's hook for them |
-//! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors; its signal pipe for the one loop that watches signals (`sched::uv`'s, or a translator's own) |
+//! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), opened by the crate's ELF constructor (feature `startup-fds`) or a translator's own; its signal pipe for the one loop that watches signals (`sched::uv`'s, or a translator's own); `IO.initializing`; `main` on a thread of its own with Lean's stack (`run_main`, `lean_run_main`) |
+//! | `startup_fds` | feature `startup-fds` only: the crate's ELF constructor that opens the startup descriptors before Rust's runtime starts, and `ensure_native_descriptors`: an `unsafe` file for a native quirk (`UNSAFE.md`) |
 //! | [`environ`] | the process environment as C's `environ` holds it (every entry in order, changed as glibc's `setenv` and `unsetenv` change it): a child's `envp`, `osEnviron` |
 //! | [`process`] | child processes: `IO.Process.spawn` over `posix_spawn`, the `Child` operations (also on a child known by its pid), `IO.Process.output` |
 //! | [`uvsys`] | `Std.Internal.UV.System`'s queries (libuv 1.48 over std, nix, rustix, `/proc` and `/sys`) |
@@ -121,6 +123,9 @@ pub mod argv_title;
 pub mod cfile;
 #[cfg(feature = "sched")]
 pub(crate) mod coop;
+/// `/proc/self/stat` with no allocation, for the crate's ELF constructors.
+#[cfg(any(feature = "proc-title", feature = "startup-fds"))]
+mod proc_stat;
 /// Test hook of the crate's drivers: how the last cooperative `flock` of
 /// the thread ended its wait (review NEW-1 of wait-1).
 #[cfg(feature = "sched")]
@@ -135,6 +140,8 @@ pub mod fs;
 pub mod handle;
 pub mod process;
 pub mod startup;
+#[cfg(feature = "startup-fds")]
+mod startup_fds;
 pub mod streams;
 mod sys;
 pub mod temp;

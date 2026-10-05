@@ -11,15 +11,28 @@ such item follows the pattern agreed with leanrs:
   root denies `unsafe_code`. A `deny` can be overridden by a file's
   `allow`, so `scripts/check.sh` fails on any file that names `unsafe_code`
   without an entry in `UNSAFE.md`; a build with none of `proc-title`,
-  `stack-overflow` and `unsafe-fast` has no such file, and there the root
-  forbids `unsafe` outright;
+  `startup-fds`, `stack-overflow` and `unsafe-fast` has no such file, and
+  there the root forbids `unsafe` outright;
 - every `unsafe` block has a `// SAFETY:` comment naming the invariant it
   relies on;
 - `UNSAFE.md` has its entry, and this file its invariants and proof;
 - leanrs reviews it before merge.
 
-So far there are two items: the process title (feature `proc-title`) and
-Lean's stack-overflow report (feature `stack-overflow`).
+So far there are three items: the process title (feature `proc-title`),
+the startup descriptors in a constructor (feature `startup-fds`) and Lean's
+stack-overflow report (feature `stack-overflow`).
+
+**No global allocator in a constructor** (AR-36). The crate's ELF
+constructors (`proc-title`'s and `startup-fds`'s) run before the program's
+own code, so before a translator configures its allocator (mimalloc's
+options). An allocation there sets the allocator up early: lean2rr found
+`main`'s first mimalloc arena made without huge pages because the title's
+constructor allocated (263,000 page faults instead of 2,800 in one
+benchmark). So neither constructor allocates: they read `/proc` into stack
+buffers, the title's constructor maps the block for its copies itself
+(`mmap`), the environment is read in place (`getenv`), and a failure's line
+is built on the stack. `tests/ctor_alloc.rs` checks it with a counting
+global allocator.
 
 ## The process title in the arguments' memory (`src/io/argv_title.rs`)
 
@@ -87,9 +100,10 @@ With the feature `proc-title`:
   so no translator's glue takes part and none writes `unsafe`.
 - **Its place among the constructors** (AR-20, lean2rr's review RST3-01).
   Natively the generated `main` calls `lean_setup_args` before libuv opens
-  its startup descriptors. Here the translators open them from constructors
-  of their own, in plain `.init_array`. The priority 100 puts the crate's
-  constructor before those, and after the toolchain's own (G4). So under
+  its startup descriptors. Here the descriptors open in the crate's own
+  constructor with `startup-fds` (priority 101), or in a translator's own,
+  in plain `.init_array`. The priority 100 puts the title's constructor
+  before those, and after the toolchain's own (G4). So under
   `ulimit -n 12`, where libuv's eight descriptors leave one free, the checks
   below still find the two descriptors they need, and the title is written,
   as natively (case `uvsys/title_fd_limit`). In plain `.init_array` it ran
@@ -117,10 +131,15 @@ With the feature `proc-title`:
   the program's `PT_INTERP`), but not worth the complexity for this rare
   launch mode. Case `uvsys/title_via_loader`
   (native's outcome, and ours as `alt1`).
-- **The checks.** In the program's executable, `setup_args` keeps nothing,
-  and the title is modelled from `std::env::args_os` without writing (the
-  title, its cut and the thread's name are native's; `/proc/self/cmdline`
-  keeps the arguments), when:
+- **The checks.** They read `/proc/self/stat` once, into a stack buffer of
+  one page (a line is at most about 1,100 bytes; a read that fills the
+  buffer counts as unreadable; `src/io/proc_stat.rs`, safe code shared
+  with the startup constructor), list `/proc/self/task` with rustix's
+  `RawDir` into a stack buffer, and read each task's `stat` into another,
+  so they allocate nothing (AR-36). In the program's executable,
+  `setup_args` keeps nothing, and the title is modelled from
+  `std::env::args_os` without writing (the title, its cut and the thread's
+  name are native's; `/proc/self/cmdline` keeps the arguments), when:
   - it cannot tell whether it is in the executable (no `/proc`, the code in
     an anonymous mapping);
   - another thread of the process runs code: `/proc/self/task` holds a
@@ -144,14 +163,21 @@ With the feature `proc-title`:
   With `argc <= 0` it keeps "no arguments", and the title functions fail
   with `ENOBUFS`, as natively.
 - **The region.** `Region::from_argv` computes `cap` as libuv does, makes
-  the span check, and copies `argv[0]` as the first title. `setup_args`
-  keeps the start, `cap` and that copy in the `static REGION`, a
+  the span check, and returns the bounds (the start, `cap`, the length of
+  `argv[0]`); it only reads. `setup_args` keeps the start, `cap` and the
+  first title (below) in the `static REGION`, a
   `Mutex<Option<Option<Region>>>`: `None` when it kept nothing it could
   check, `Some(None)` for no arguments, else the region.
-- **libuv's copy.** `copy_and_repoint` copies every argument into one block,
-  never freed (libuv's `args_mem`), and points each entry of the table at
-  its copy. So `main`'s `argv`, glibc's `__libc_argv` and `std::env::args`
-  give the original arguments for good, as Lean's `args` are natively: a
+- **libuv's copy.** `copy_and_repoint` copies every argument with its NUL
+  into one block, never unmapped (libuv's `args_mem`), and points each
+  entry of the table at its copy. After the copies it copies `argv[0]`
+  once more, without its NUL, where the table does not point: the region's
+  first title, a `&'static [u8]` nothing else can reach. The block is a
+  private anonymous mapping of its own (`mmap`, rustix's `mm` feature), not
+  an allocation (AR-36); if it cannot be mapped, nothing is kept and the
+  table is unchanged (the title is then modelled, as for a failed check).
+  So `main`'s `argv`, glibc's `__libc_argv` and `std::env::args` give the
+  original arguments for good, as Lean's `args` are natively: a
   translator that builds `args` after the initializers, or calls
   `std::env::args` late, gets them (case `uvsys/title_in_initializer`). No
   safe code reaches the arguments' memory any more.
@@ -203,16 +229,24 @@ All are in `src/io/argv_title.rs`:
   `Region::from_argv`, every entry in `copy_and_repoint`.
 - **U2.** Reads of the strings (`CStr::from_ptr`): `argv[0]` and
   `argv[argc - 1]` in `Region::from_argv`, every argument in
-  `copy_and_repoint`.
+  `copy_and_repoint` (three times: its length, its copy, its copy's
+  place).
 - **U3.** `Region::write` copies the new contents over the arguments:
   `copy_nonoverlapping(image.as_ptr(), start, cap)`.
 - **U4.** `copy_and_repoint` writes each entry of the table:
-  `argv[i] = copy`.
+  `argv[i] = copy`, a pointer made from the block's base (`base.add(at)`,
+  inside the block).
+- **U5.** `copy_and_repoint` maps the block: `mmap_anonymous` with a null
+  hint, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE` (AR-36).
+- **U6.** `copy_and_repoint` makes a `&'static mut [u8]` over the whole
+  block (`slice::from_raw_parts_mut`), splits it into the copies and the
+  first title, and writes both with safe slice copies.
 - The constructor itself: a `#[used] #[link_section = ".init_array.00100"]`
   static, and its call of `setup_args`.
 
 The unit tests in the same file make `Region`s over blocks of their own,
-and repoint a table of their own, under the same contracts.
+and repoint a table of their own, under the same contracts; one unmaps
+the block `copy_and_repoint` mapped (`munmap`), after its last use.
 
 ### What the constructor relies on
 
@@ -276,9 +310,8 @@ and repoint a table of their own, under the same contracts.
   see (the crate then keeps nothing); the proof does not depend on the
   order. A process that starts with fewer than two free descriptors keeps
   nothing either, where native writes the title. The constructor allocates
-  (the copies, the `/proc` reads), so the program's global allocator must
-  work before the program's other constructors run, as glibc's `malloc` and
-  mimalloc do.
+  nothing (AR-36: the copies go to a block it maps, `/proc` is read into
+  stack buffers), so no allocator is set up in it.
 
 The checks make the rest hold: the program's executable before `main`,
 one thread while the table is read and written, and a write that stays
@@ -304,9 +337,9 @@ it.
   memory and the table holds `REGION`'s lock: `setup_args` holds it while
   `from_argv` and `copy_and_repoint` read (U1, U2) and repoint (U4);
   `write` takes it, and `Region::write` gets its `&mut Region` from the
-  guard (U3). The file keeps no reference into the memory: it copies
-  `argv[0]` into `first` and every argument into the block at once, and
-  the `&CStr`s of U2 end inside their functions.
+  guard (U3). The file keeps no reference into the memory: it copies every
+  argument into the block, and `argv[0]` once more into the block's tail
+  (`first`), at once, and the `&CStr`s of U2 end inside their functions.
 - **I4. One thread at setup.** `setup_args` reads and writes the table only
   after `in_main_executable` found the constructor inside the program's
   code, `start_code` to `end_code` (so it runs before `main`, G1, G2) and `no_other_thread` saw no
@@ -324,9 +357,18 @@ it.
   (below, "outside the proof").
 - **I6. Lengths.** `Region::write` keeps `len = min(title.len(), cap - 1)`
   bytes, and its `image` has exactly `cap` bytes.
-- **I7. No overlap.** `image` is a fresh allocation, and so is the block of
-  copies. The arguments' memory is live memory neither owns: the kernel's
-  stack, or a test's own buffer. So they do not overlap.
+- **I7. No overlap.** `image` is a fresh allocation, and the block of
+  copies a fresh mapping. The arguments' memory is live memory neither
+  owns: the kernel's stack, or a test's own buffer. So they do not
+  overlap.
+- **I8. The block.** `copy_and_repoint` maps `len` bytes, the sum of the
+  strings' lengths with their NULs plus `strlen(argv[0])` (checked
+  arithmetic; `None` on overflow, with nothing changed), and nothing else
+  knows the mapping until it returns. Only the tail `first` is kept as a
+  reference (`&'static [u8]`); the table's entries are raw pointers made
+  from the base after the last write through the slice, and point into the
+  copies, before the tail. The mapping is never unmapped outside the unit
+  tests.
 
 ### Proof
 
@@ -346,14 +388,25 @@ it.
   - `u8` needs no alignment.
 - **U4** writes entries below `argc` of glibc's table, on the writable
   stack (G1), with one thread (I4); no reference into the table is live
-  (the crate holds none; G3).
+  (the crate holds none; G3). Each pointer is `base + at` for the start of
+  that string's copy, inside the block (I8).
+- **U5** makes a new mapping: with a null hint and no `MAP_FIXED` the
+  kernel picks free addresses, so no memory of the process is replaced; a
+  failure returns `None` before anything is written.
+- **U6**: the slice covers exactly the `len` bytes the kernel mapped,
+  readable, writable and zero-filled, at a page-aligned address (any
+  alignment suits `u8`); no other pointer to them is used while the slice
+  is written (I8), and the mapping lives for the rest of the process, so
+  `'static` holds (the unit tests unmap only after their last use of the
+  table and of `first`). The copies are the strings' bytes read by U2,
+  whose lengths cannot change between the passes (one thread, I4; G3), so
+  each fits where the first pass counted it.
 - **The constructor.** glibc calls it with the process's `argc` and
   `argv` (G1); `setup_args` reads and writes only when the constructor is
   in the program's executable, where glibc calls it before `main`. Nothing
-  in `setup_args` unwinds but a failed
-  allocation, which aborts; an unwind could not leave an `extern "C"`
-  function anyway (Rust aborts there). `REGION`'s lock is a `std` mutex,
-  usable before `main`.
+  in `setup_args` allocates or unwinds; an unwind could not leave an
+  `extern "C"` function anyway (Rust aborts there). `REGION`'s lock is a
+  `std` mutex (a futex, no allocation), usable before `main`.
 
 `Region` holds its start in an `AtomicPtr<u8>`, read through `get_mut`
 under the lock. That makes `Region` `Send`, and `REGION` a valid `static`,
@@ -381,8 +434,9 @@ memory belongs to the process, not to a thread.
   (LQ1-01) and `uvsys/process_title`
   run through their twins in `tests/io2_cases.rs`, which links the crate's
   constructor as any binary does and has no constructor of its own, in
-  `scripts/check.sh`'s configurations with `proc-title` (`io,proc-title`
-  and `io,sched,proc-title,unsafe-fast`).
+  `scripts/check.sh`'s configurations with `proc-title` (`io,proc-title`,
+  the two with every feature, and lean2rr's set
+  `io,sched,net,proc-title,startup-fds,stack-overflow`).
 - The constructor is linked, and works, in a downstream binary built each
   way the translators build (2026-10-04): cargo, debug and release; plain
   `rustc` rlibs linked by `rustc` (lean2rr's leanrt is a plain-rustc rlib
@@ -404,18 +458,28 @@ memory belongs to the process, not to a thread.
 - The case `uvsys/title_fd_limit` (AR-20: `ulimit -n 12`, native writes the
   title) through its twin in `tests/io_cases.rs`, whose startup
   constructor opens native's startup descriptors in plain `.init_array`, as
-  a translator's does; checked with `proc-title` only. With the crate's
-  constructor in plain `.init_array` (before AR-20), the twin fails:
-  `/proc/self/cmdline` keeps the arguments.
+  a translator's does (configuration `io,proc-title`), or with the crate's
+  startup constructor (priority 101, feature `startup-fds`, in the
+  configurations with every feature); checked with `proc-title` only. With
+  the title's constructor in plain `.init_array` (before AR-20), the twin
+  fails: `/proc/self/cmdline` keeps the arguments.
+- AR-36: `tests/ctor_alloc.rs`, a binary with a counting global allocator
+  and a constructor of its own in plain `.init_array`, which records the
+  count after the crate's constructors: it is 0, and the title is written
+  and the arguments kept. With the earlier constructor (a `Vec` of copies,
+  `std::fs::read` of `/proc`) the test fails.
 - The unit tests in `argv_title.rs`: `cap`, the copy, the NUL fill and the
   cut on a block laid out as the kernel lays out the arguments; a table
   that skips a string (libuv's rule; such a table comes from a launch
   through the dynamic loader, which keeps nothing here); the layouts that keep
   nothing, including memory outside the kernel's span; the repointed
-  table; the parsing of `/proc/self/stat`. Miri runs them
+  table, in a mapped block with the first title after the copies; a table
+  of null entries, which maps nothing; the parsing of `/proc/self/stat`
+  and the `<tid>/stat` paths. Miri runs them
   (`LEAN_RUNTIME_MIRI=1 LEAN_RUNTIME_MIRI_FILTER=argv_title
   scripts/check.sh`; also passed with Tree Borrows and strict provenance,
-  2026-10-04), except the one that reads this process's `/proc`. Miri
+  2026-10-04, and both again 2026-10-05 after AR-36, with the mapped
+  block), except the one that reads this process's `/proc`. Miri
   cannot run the constructor: it has no process arguments' memory.
 - Adversarial review: ours, then leanrs's before merge.
 - Kani does not apply: the proof is about ownership and ordering of memory
@@ -444,6 +508,284 @@ memory belongs to the process, not to a thread.
   The crate's own constructor needs neither, and the reference keeps it
   linked.
 - **Keeping the deviation** (io-2's LIO2-06): the owner decided against it.
+
+## The startup descriptors in a constructor (`src/io/startup_fds.rs`)
+
+This section is self-contained: with it and the source of
+`src/io/startup_fds.rs`, `src/io/startup.rs` (which opens the
+descriptors) and `src/io/proc_stat.rs` (the executable check, safe code),
+a reader can check the item. It moves lean2rr's startup
+constructor (its `rt.rs`, audit item 4.3) into the crate, so that no
+translator writes one.
+
+The item is compiled only with the feature `startup-fds` (which turns on
+`io`). lean2rr enables it; leanrs leaves it off (DV19: it opens the
+descriptors after Rust's start, or not at all), and may enable it later.
+
+### What native does
+
+Lean 4.34.0's runtime starts libuv's loop during initialization, before
+any module code (`lean_initialize_runtime_module`), and libuv 1.48 opens,
+close-on-exec, at the lowest free numbers: an epoll descriptor, two
+io_uring rings (when the kernel gives them), the signal lock pipe, the
+loop's signal pipe and an eventfd (`io::startup` has the details). So a
+program started with fds 0 to 2 open has 3 to 10 taken, and a program
+started with a standard descriptor closed has it taken by the first of
+them: reading a closed stdin then fails with `EINVAL`, not end of file
+(case `io/startup_closed_stdio`); the point where `open` fails with
+`EMFILE` follows (case `io/startup_fd_limit`). When the descriptors cannot
+be made (a tiny `ulimit -n`), native crashes (LB-30, LB-31); the crate ends
+with `INTERNAL PANIC: Failed to initialize event loop: ...` and status 1
+(case `io/startup_fd_exhausted`).
+
+### Why a constructor
+
+Rust's runtime, in `lang_start` before a Rust `main`, opens `/dev/null`
+read-write in the place of each closed standard descriptor
+(`sanitize_standard_fds`). After that, the startup descriptors can only take
+the standard numbers back by closing such a `/dev/null`, which cannot be
+told from one the program was given (`<>/dev/null`, Python's
+`subprocess.DEVNULL`). An ELF constructor runs before `lang_start`, so the
+descriptors take the closed numbers as natively, and nothing is closed. A
+constructor needs `#[link_section]`, which the crate root's
+`deny(unsafe_code)` refuses (the lint counts it as `unsafe`), hence a file
+of its own.
+
+### What the crate does
+
+With the feature `startup-fds`:
+- **The constructor.** On glibc, `startup_fds.rs` has an ELF constructor
+  (`#[link_section = ".init_array.00101"]`, cfg `target_os = "linux"`,
+  `target_env = "gnu"`, not Miri). It first checks that it is in the
+  program's own executable, with the check of the process title's
+  constructor: its address inside the kernel's record of the program's
+  code, `start_code` to `end_code` (`/proc/self/stat`, read into a stack
+  buffer by `io::proc_stat`, a safe file both constructors share). In a
+  shared library, or when that cannot be told (no `/proc`, no free
+  descriptor for the read), it does nothing (G1; review RSH2-02). Then it
+  reads `UV_USE_IO_URING` in place with
+  glibc's `getenv` (U1) and calls `io::startup::open_native_descriptors_with`
+  with it, which opens the descriptors once (a `OnceLock`) and keeps them in
+  a `static` for the rest of the process. On failure it reads
+  `LEAN_ABORT_ON_PANIC` the same way and calls `end_startup_with`, which
+  writes the line from a stack buffer to descriptor 2 and exits (status 1,
+  or `abort()` under `LEAN_ABORT_ON_PANIC`).
+- **No allocation** (AR-36). Opening the descriptors allocates nothing: the
+  rings are kept in an array, `/proc/version_signature` is read into a stack
+  buffer (one `read` of at most 255 bytes, as libuv's `uv__slurp`), the
+  io-uring crate's `build` maps the rings without the heap, and the failure's
+  line is built on the stack (`uv_strerror`'s unknown code too).
+  `std::env::var_os` would copy a set variable into a new `OsString`, so the
+  constructor uses `getenv`.
+- **Nothing else.** It installs no signal handler (Lean's stack-overflow
+  report is installed after Rust's runtime start, from `main`: review SO-2
+  of AR-11), starts no thread of the process (the kernel starts the polling
+  ring's thread, `iou-sqp-<pid>`, which runs no code of the process, as
+  natively), and assumes nothing of any translator's glue.
+- **`ensure_native_descriptors`.** The glue calls
+  `io::startup::ensure_native_descriptors()` at the start of `main`. It
+  refers to the constructor (below, "Linking") and returns at once when the
+  descriptors are open (the constructor acted). Otherwise (the crate in a
+  shared library, a launch through the dynamic loader, no `/proc`) it opens
+  them where they land, and ends the process as above on failure. It closes
+  nothing: a standard descriptor closed at startup stays the `/dev/null`
+  Rust's runtime put there, and the numbers are not native's. lean2rr's
+  recovery, which closed those `/dev/null`s first, is not kept (reviews
+  RSH2-04, LS2-01; "Alternatives ruled out").
+- **Linking.** A `#[used]` static alone does not keep its object file when
+  the linker takes the crate from an archive (an rlib). `keep_constructor`
+  refers to it (`std::hint::black_box`), from `ensure_native_descriptors`,
+  `open_native_descriptors` and `mark_end_initialization`, which every glue
+  calls. A binary that calls none of them may lose the constructor (seen
+  with `tests/ctor_alloc.rs` before its `main` called them).
+
+### Without the feature
+
+`startup_fds.rs` is not compiled, and the crate has no such constructor. A
+translator that wants native's descriptors writes the constructor in its
+own glue: in plain `.init_array` (or a priority above 101), calling
+`io::startup::open_native_descriptors` and, on `Err`, `end_startup`
+(`tests/io_cases.rs` has one, used without the feature). A translator that
+writes none opens them after Rust's start or not at all, and its programs
+see `/dev/null` on closed standard descriptors (leanrs's DV19).
+
+### The `unsafe` operations
+
+All are in `src/io/startup_fds.rs`:
+- **U1.** `getenv(name)` (nix's re-exported libc) and `CStr::from_ptr` of
+  its result, in `with_env`, which hands the bytes to a closure and keeps
+  no reference after it. Only the constructor calls it: for
+  `UV_USE_IO_URING`, then on failure for `LEAN_ABORT_ON_PANIC` (and, in the
+  lib's unit tests only, for the variable that makes the constructor of a
+  test's child process open nothing).
+- The constructor itself: a `#[used] #[link_section = ".init_array.00101"]`
+  static, and its call of `open_at_startup`.
+
+### What it relies on
+
+- **G1. glibc's convention, and the program's own executable.** glibc calls
+  each `.init_array` function of the program before `main` (`call_init` in
+  `csu/libc-start.c`), of a shared library when it loads it (`_dl_init`;
+  also later, by `dlopen`). The constructor acts only when its address lies
+  in the kernel's record of the program's code (`start_code` to `end_code`,
+  `/proc/self/stat`; the kernel's `load_elf_binary` records the
+  executable's code segments), so only in the program's own executable,
+  before `main`. In a shared library, at startup or by `dlopen`, it does
+  nothing: a library never opens descriptors in its host, nor ends it when
+  they cannot be made (review RSH2-02; before, a library loaded into a
+  Python host short of descriptors ended the host with status 1).
+
+  Two documented deviations follow (review RSH2-11, accepted): in each the
+  constructor does nothing, and the descriptors open in `main`
+  (`ensure_native_descriptors`), where they land, so a standard descriptor
+  closed at startup stays Rust's `/dev/null` and the numbers are not
+  native's:
+  - **a launch through the dynamic loader** (`ld.so ./prog`): the kernel's
+    record of the code is then the loader's, so the program's code reads
+    as a library's (as for LQ1-01);
+  - **a process without `/proc`** (or with no descriptor free for the read
+    of `/proc/self/stat`; a dynamically linked program that starts at all
+    has one, since the dynamic loader needs one first): the check cannot
+    tell, and the constructor does nothing.
+
+  An fd-free check exists and is the fix to adopt if those launches ever
+  matter: `dl_iterate_phdr`'s first entry (the main program) and its
+  `PT_LOAD` spans at its load bias ("Alternatives ruled out"). It costs a
+  new `unsafe` callback, needed only for fidelity in these rare launch
+  modes, so the safe `/proc` check stays (safety first).
+- **G2. The order** (AR-20). The linkers put the sections `.init_array.N`
+  first, by increasing N, then the plain ones in link order (GNU ld's
+  `SORT_BY_INIT_PRIORITY`, gold, lld alike), and glibc calls them in that
+  order. So the constructor runs after the toolchain's (90, 99) and
+  `proc-title`'s (100; natively `lean_setup_args` runs before libuv's loop
+  opens, and the title's checks need two free descriptors), and before the
+  program's own (above 101, or plain). Shared libraries' constructors and
+  `.preinit_array` run before it. A constructor of the program that keeps a
+  descriptor open gets a number after the startup descriptors, where
+  natively (all constructors before `main`'s loop) it gets a lower one; no
+  translated program has one.
+- **G3. No change to the environment while the constructor runs.** The
+  program's own code has not started. Code that ran earlier (a preloaded
+  library's constructor) may have changed the environment, which `getenv`
+  then sees, as libuv's would; it must not change it from another thread
+  while the crate's constructors run (glibc's `getenv` takes no lock; std's
+  `var_os` takes std's own lock, which C code and the dynamic loader do not
+  take either). Natively libuv's `getenv` has the same exposure.
+
+(G4, the first version's contract that no code owns a standard descriptor
+before `main`, went with lean2rr's recovery: nothing closes a descriptor
+now.)
+
+### The invariants the crate maintains
+
+- **I1. Once.** The descriptors are opened by one `OnceLock`
+  initialization (`DESCRIPTORS` in `startup.rs`): the constructor, a glue's
+  own constructor and `ensure_native_descriptors` share it, and later calls
+  return the first outcome.
+- **I2. Never closed.** The descriptors live in that `static` for the rest of
+  the process (their `OwnedFd`s and rings are never dropped), and the
+  crate's users get them only borrowed (`claim_signal_pipe`, the epoll
+  descriptor for one scheduler).
+- **I3. Nothing is closed.** Neither the constructor nor
+  `ensure_native_descriptors` closes a descriptor it did not open: they
+  only open, through I1 (an io_uring ring the kernel gives without libuv's
+  features is unmapped and closed by its own `IoUring`, which owns it).
+- **I4. Nothing else.** The constructor allocates nothing, installs no
+  signal handler, starts no thread of the process, and does not unwind.
+
+### Proof
+
+- **U1.** `name` is a C string literal. `getenv` returns null or a pointer to
+  the NUL-terminated rest of an entry of `environ`. No write to the
+  environment can race with the read or with the closure's use of the bytes
+  (G3), and the bytes do not outlive `with_env` (the closure's argument has
+  no `'static` lifetime: the borrow checker keeps them inside).
+- **The constructor.** glibc calls it before `main` (G1), and it acts only
+  in the program's executable; it calls safe code but U1 (the executable
+  check reads `/proc/self/stat` with rustix's safe calls into a stack
+  buffer), opens descriptors through rustix's and io-uring's safe API,
+  and nothing in it unwinds (an unwind could not leave an `extern "C"`
+  function anyway: Rust aborts there). It holds no lock but the
+  `OnceLock`'s (a futex), usable before `main`.
+
+### What is outside the proof, as natively
+
+- A shared library that starts a thread changing the environment while the
+  crate's constructors run (G3).
+
+### How it is checked
+
+- The native cases `io/startup_fd_limit`, `io/startup_closed_stdio` (each
+  standard descriptor closed in turn: the epoll descriptor takes it),
+  `io/startup_fd_exhausted`, `io/startup_rings` and `uvsys/title_fd_limit`
+  through their twins in `tests/io_cases.rs`, which has no constructor of
+  its own with `startup-fds`, in `scripts/check.sh`'s configurations with
+  every feature (`io,sched,proc-title,startup-fds,stack-overflow,unsafe-fast`
+  and `io,threads,proc-title,startup-fds,stack-overflow,unsafe-fast`) and
+  lean2rr's set (`io,sched,net,proc-title,startup-fds,stack-overflow`); the
+  other io twins (`tests/io2_cases.rs`) there too.
+- `tests/ctor_alloc.rs` (AR-36): no allocation before the program's own
+  constructor, the epoll descriptor at 3 when that constructor runs, six
+  descriptors with `UV_USE_IO_URING=0` (set: read with `getenv`), and under
+  `ulimit -n 4` the internal panic's line and status 1, or an abort with
+  `LEAN_ABORT_ON_PANIC` set, with no allocation first. A constructor that
+  allocates (mutation: `std::fs::read` in `kernel_version`) fails it.
+- The unit tests of `startup_fds.rs`: the constructor ran in the test
+  binary; and the fallback, in a child process whose constructor opens
+  nothing, started with stdin closed: descriptor 0 stays Rust's
+  `/dev/null` and the epoll descriptor lands at 3. The unit tests of
+  `proc_stat.rs` (the executable check on this test binary, the parsing)
+  and of `startup.rs` (the failure's line without allocation, `uv__slurp`'s
+  read).
+- A `cdylib` with the feature, loaded by a Python host (`ctypes.CDLL`),
+  also with only three free descriptors: the host opens no descriptor and
+  stays alive (review RSH2-02's repro; before the executable check, it got
+  eight descriptors, or ended with status 1).
+- Miri does not apply: the constructor and `getenv` are foreign calls on
+  the process's real state.
+- Adversarial review: ours, then leanrs's before merge.
+
+### Alternatives ruled out
+
+- **The constructor in each glue** (lean2rr's until now, and the crate's
+  test glue): each glue writes `unsafe` for the same code (`#[link_section]`,
+  and lean2rr's `fcntl`, `close` and `File::from_raw_fd`).
+- **Opening after Rust's start** (leanrs's DV19): a closed standard
+  descriptor then reads as `/dev/null`, not as native's `EINVAL`, and the
+  descriptor numbers differ.
+- **`std::env::var_os` in the constructor**: it copies a set variable into
+  an `OsString`, an allocation (AR-36).
+- **Reading `/proc/self/environ`** (safe, into a stack buffer): it shows the
+  initial environment, not `environ` after earlier code's changes, and is
+  missing without `/proc`, where libuv's `getenv` still works.
+- **`dl_iterate_phdr` for the executable check** (review RSH2-11): the first
+  entry glibc's `dl_iterate_phdr` reports is the main program, also in a
+  static-pie binary and under `ld.so ./prog`; the constructor's address
+  lies in one of its `PT_LOAD` segments (`dlpi_addr + p_vaddr`, `p_memsz`
+  bytes) exactly when the crate is in the program's executable. It opens no
+  descriptor and allocates nothing. The reviewer's probe answered
+  correctly in seven launch modes (a dynamic executable, `ld.so ./prog`,
+  static-pie, static-pie under `ulimit -n 3`, `dlopen`, `LD_PRELOAD` and a
+  `DT_NEEDED` library), and under gdb it called neither `malloc` nor
+  `open`. It would remove both deviations of G1, but it needs a new
+  `unsafe` item (the `extern "C"` callback reads `dl_phdr_info` and the
+  program headers through raw pointers), for fidelity in rare launch modes
+  only: kept out under the safety-first rule. It is the fix to adopt if
+  those launches ever matter (the auxiliary vector's `AT_PHDR`, also in the
+  probe, needs a `PT_PHDR` entry and `unsafe` reads as well).
+- **lean2rr's recovery** (this item's first version: when the constructor
+  had not run, `ensure_native_descriptors` closed each standard descriptor
+  that was a read-write `/dev/null`, then opened the descriptors, which took
+  those numbers): a safe public function that closes descriptors it does
+  not own rests on a caller contract (call it first, before any other
+  thread or a second call), and a late or racing call could close a
+  descriptor that `DESCRIPTORS` or std's standard streams use (reviews
+  RSH2-04, LS2-01; leanrs's choice). The branch was dead in every real
+  build, so the fallback now opens the descriptors where they land.
+- **`dup2` over the standard descriptors** (rustix's safe `dup2_stdin` and
+  the others) for that recovery: the descriptors would then exist twice
+  (the original and the copy), or the rings' own descriptors, held by the
+  io-uring crate, would have to be closed under them.
 
 ## Lean's stack-overflow report (`src/sched/stack_overflow.rs`)
 

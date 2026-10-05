@@ -504,6 +504,7 @@ impl TcpSocket {
     /// descriptor yet. The first stream also takes libuv's spare descriptor
     /// (`/dev/null`, kept open), as natively.
     pub fn new() -> Result<TcpSocket, IoError> {
+        crate::sched::ensure_started();
         crate::io::effect_point();
         super::loop_lock();
         Ok(TcpSocket::make())

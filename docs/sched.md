@@ -31,7 +31,7 @@ This file covers:
 
 | File | What |
 |---|---|
-| `src/sched/mod.rs` | The public API, `start`, `ref_read`, the low-level waits |
+| `src/sched/mod.rs` | The public API, `start`, the lazy start (`start_lazy`, `ensure_started`), `ref_read`, the low-level waits |
 | `src/sched/task.rs` | Tasks: queues, dependents, walks, queries, cancellation, promises, the final run, the yield points |
 | `src/sched/ctx.rs` | Contexts: corosensei coroutines, the hub, the `Glue` trait, the running stack's bounds |
 | `src/sched/stack_overflow.rs` | Lean's stack-overflow report: the opt-in SIGSEGV handler that knows the contexts' guard pages (a native quirk with `unsafe`, AR-11; `docs/native-quirks.md`) |
@@ -1068,8 +1068,43 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      down to 4 KiB plus 128 KiB). A translator with rules of its own calls
      `start_with(glue, workers, stack_size)` instead (leanrs: its
      `LEANRS_STACK_SIZE_KB`, or 4 GiB).
-   - `set_ref_read_yields(true)` if the program creates tasks.
-   - Run `main`.
+   - Or the lazy start (lean2rr; audit item 4.5):
+     `sched::start_lazy(glue, workers, stack_size)` takes the numbers at
+     `main`'s start (`lean_num_threads()`, `thread_stack_size()`), and
+     `ensure_started()` builds the scheduler at the program's first task,
+     promise, `Std.Sync` object or operation, timer, signal watcher or
+     socket. The crate's own entry points for those call it (`spawn`,
+     `depend`, `dependent_runs_now`, `promise_new`, every method of
+     `sync`'s objects, `uv::loop_configure`, `uv::loop_alive`,
+     `uv::Timer::new`, `uv::Signal::new`, `net`'s socket constructors and
+     DNS lookups); the glue calls it before anything of its own that needs
+     the scheduler. A
+     program that makes none of them builds no scheduler state, context or
+     event loop. Until then `deferring()` already says whether new tasks
+     are deferred (the task manager runs natively from `main`'s start),
+     `manager_running()` stays false (it means "built with workers"),
+     `sched_started()` is false (so `current_context()` is not needed: it
+     is `MAIN`), and `finish()` builds nothing. At the start, `ST.Ref`
+     reads become polling points (`set_ref_read_yields(true)`). Every
+     `Std.Sync` operation in `main` starts it first, so a lock's owner is
+     the same thread before and after `main`'s first task (lean2rr's
+     review RS4-05). Single-thread scheduler only (threads mode starts
+     eagerly). `tests/sched-driver`'s `lazy_start_cases` runs cases
+     through it, one per kind of entry point.
+   - `set_ref_read_yields(true)` if the program creates tasks (the lazy
+     start does it itself).
+   - Run `main`, with a scheduler as Lean's `lean_run_main` does if the
+     glue wants native's thread: `io::startup::run_main(stack_size, body)`
+     runs `body` on a new thread with that stack (Lean's size is
+     `thread_stack_size()`), or on the calling thread with
+     `LEAN_MAIN_USE_THREAD=0`, and aborts with libc++'s report when the
+     thread cannot be made (audit item 4.2). `body` installs Lean's
+     stack-overflow report first (item 8). The scheduler's state is the
+     thread's own (thread-locals), so with `run_main` the whole of this
+     list from `sched::start` (or `start_with`, `start_lazy`) to
+     `sched::finish` runs inside `body`, on `main`'s thread: a `start`
+     before `run_main` starts a scheduler on the initializers' thread,
+     which `main` never sees (review RSH2-03).
    - `sched::finish()`. With `io`, it also waits for the io layer's
      dedicated tasks (`io::exit::after_main`: the standard-output readers
      `IO.Process.output` leaves running when it fails; AR-6). A glue without

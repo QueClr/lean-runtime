@@ -18,8 +18,12 @@
 //!
 //! The objects are plain values; the glue keeps each in its own handle (an
 //! `Rc`, or the translator's external object) and calls these methods with
-//! it. A separate module, so that a translator can admit `Std.Sync` on its
-//! own (decisions Q8).
+//! it. Each method starts the scheduler first if [`super::start_lazy`] is
+//! waiting for it (`ensure_started`): a lock's owner records whether the
+//! scheduler has started, which tells an initializer's thread from `main`'s,
+//! so every operation in `main` must see it started (lean2rr's review
+//! RS4-05). A separate module, so that a translator can admit `Std.Sync` on
+//! its own (decisions Q8).
 
 use super::{block_sync, current_context, wake, with, CtxId};
 use std::cell::RefCell;
@@ -62,6 +66,7 @@ pub struct Mutex {
 impl Mutex {
     /// `lean_io_basemutex_new`.
     pub fn new() -> Mutex {
+        super::ensure_started();
         Mutex::default()
     }
 
@@ -81,12 +86,14 @@ impl Mutex {
 
     /// `lean_io_basemutex_lock`.
     pub fn lock(&self) {
+        super::ensure_started();
         super::writers_point();
         self.lock_as(me());
     }
 
     /// `lean_io_basemutex_try_lock`.
     pub fn try_lock(&self) -> bool {
+        super::ensure_started();
         let who = me();
         let mut m = self.st.borrow_mut();
         if m.owner.is_none() {
@@ -100,6 +107,7 @@ impl Mutex {
     /// `lean_io_basemutex_unlock`. It switches only to let the context's
     /// handed-off streams end first (`writers_point`), before releasing.
     pub fn unlock(&self) {
+        super::ensure_started();
         super::writers_point();
         self.unlock_inner();
     }
@@ -137,12 +145,14 @@ pub struct Condvar {
 impl Condvar {
     /// `lean_io_condvar_new`.
     pub fn new() -> Condvar {
+        super::ensure_started();
         Condvar::default()
     }
 
     /// `lean_io_condvar_wait`: release `m`, wait to be notified, then take
     /// `m` again (natively `condition_variable::wait` on the adopted lock).
     pub fn wait(&self, m: &Mutex) {
+        super::ensure_started();
         super::writers_point();
         let who = me();
         m.unlock_inner();
@@ -154,6 +164,7 @@ impl Condvar {
     /// `lean_io_condvar_notify_one`. It switches only to let the context's
     /// handed-off streams end first (`writers_point`).
     pub fn notify_one(&self) {
+        super::ensure_started();
         super::writers_point();
         let w = self.waiters.borrow_mut().pop_front();
         if let Some(c) = w {
@@ -164,6 +175,7 @@ impl Condvar {
     /// `lean_io_condvar_notify_all`. It switches only to let the context's
     /// handed-off streams end first (`writers_point`).
     pub fn notify_all(&self) {
+        super::ensure_started();
         super::writers_point();
         let ws = std::mem::take(&mut *self.waiters.borrow_mut());
         for c in ws {
@@ -191,11 +203,13 @@ pub struct RecursiveMutex {
 impl RecursiveMutex {
     /// `lean_io_baserecmutex_new`.
     pub fn new() -> RecursiveMutex {
+        super::ensure_started();
         RecursiveMutex::default()
     }
 
     /// `lean_io_baserecmutex_lock`.
     pub fn lock(&self) {
+        super::ensure_started();
         super::writers_point();
         let who = me();
         {
@@ -218,6 +232,7 @@ impl RecursiveMutex {
 
     /// `lean_io_baserecmutex_try_lock`.
     pub fn try_lock(&self) -> bool {
+        super::ensure_started();
         let who = me();
         let mut m = self.st.borrow_mut();
         match m.owner {
@@ -237,6 +252,7 @@ impl RecursiveMutex {
     /// `lean_io_baserecmutex_unlock`. It switches only to let the context's
     /// handed-off streams end first (`writers_point`).
     pub fn unlock(&self) {
+        super::ensure_started();
         super::writers_point();
         let next = {
             let mut m = self.st.borrow_mut();
@@ -288,11 +304,13 @@ pub struct SharedMutex {
 impl SharedMutex {
     /// `lean_io_basesharedmutex_new`.
     pub fn new() -> SharedMutex {
+        super::ensure_started();
         SharedMutex::default()
     }
 
     /// `lean_io_basesharedmutex_write`.
     pub fn write(&self) {
+        super::ensure_started();
         super::writers_point();
         loop {
             {
@@ -319,6 +337,7 @@ impl SharedMutex {
 
     /// `lean_io_basesharedmutex_try_write`.
     pub fn try_write(&self) -> bool {
+        super::ensure_started();
         let mut m = self.st.borrow_mut();
         if !m.write_entered && m.readers == 0 {
             m.write_entered = true;
@@ -331,6 +350,7 @@ impl SharedMutex {
     /// `lean_io_basesharedmutex_unlock_write`. It switches only to let the
     /// context's handed-off streams end first (`writers_point`).
     pub fn unlock_write(&self) {
+        super::ensure_started();
         super::writers_point();
         let ws = {
             let mut m = self.st.borrow_mut();
@@ -345,6 +365,7 @@ impl SharedMutex {
 
     /// `lean_io_basesharedmutex_read`.
     pub fn read(&self) {
+        super::ensure_started();
         super::writers_point();
         loop {
             {
@@ -361,6 +382,7 @@ impl SharedMutex {
 
     /// `lean_io_basesharedmutex_try_read`.
     pub fn try_read(&self) -> bool {
+        super::ensure_started();
         let mut m = self.st.borrow_mut();
         if !m.write_entered && m.readers != u32::MAX {
             m.readers += 1;
@@ -373,6 +395,7 @@ impl SharedMutex {
     /// `lean_io_basesharedmutex_unlock_read`. It switches only to let the
     /// context's handed-off streams end first (`writers_point`).
     pub fn unlock_read(&self) {
+        super::ensure_started();
         super::writers_point();
         let w = {
             let mut m = self.st.borrow_mut();

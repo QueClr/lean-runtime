@@ -322,6 +322,7 @@ impl UdpSocket {
     /// `Socket.new` (`lean_uv_udp_new`, `uv_udp_init`): a socket with no
     /// descriptor yet.
     pub fn new() -> Result<UdpSocket, IoError> {
+        crate::sched::ensure_started();
         crate::io::effect_point();
         super::loop_lock();
         Ok(UdpSocket(Rc::new(Handle::new(|id| {

@@ -1,6 +1,6 @@
 <h1>The io module</h1>
 <p class="lead"><code>io</code> (feature <code>io</code>) does what Lean 4.34.0's <code>io.cpp</code> and <code>process.cpp</code> do.
-It is safe Rust over std, rustix, nix and io-uring, except one <a href="glossary.html#g-quirk">native quirk</a> (<a href="#title">the process title</a>).
+It is safe Rust over std, rustix, nix and io-uring, except two <a href="glossary.html#g-quirk">native quirks</a> (<a href="#title">the process title</a> and <a href="#startup">the startup constructor</a>).
 It copies the behaviour of glibc where a Lean program can see it.</p>
 
 <div class="toc"><ul>
@@ -26,7 +26,8 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>error</code></td><td><code>IO.Error</code> as plain data, its decoding from <code>errno</code>, the model of C's <code>errno</code>.</td><td>main</td></tr>
 <tr><td><code>fs</code></td><td>Directories, metadata, <code>realPath</code>, removal, renaming, links, permissions, the working directory.</td><td>main</td></tr>
 <tr><td><code>env</code>, <code>debug</code></td><td><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, random bytes, the monotonic clock, <code>IO.sleep</code>; <code>dbgTrace</code>, <code>dbgSleep</code>.</td><td>main</td></tr>
-<tr><td><code>startup</code></td><td>The descriptors native Lean has open before <code>main</code>.</td><td>main</td></tr>
+<tr><td><code>startup</code></td><td>The descriptors native Lean has open before <code>main</code>, and <code>main</code> on a thread of its own (<code>run_main</code>).
+Its ELF constructor needs the feature <code>startup-fds</code>.</td><td>main</td></tr>
 <tr><td><code>exit</code></td><td>What the exit does with the streams; <code>IO.Process.exit</code>, <code>forceExit</code>, the uncaught-error message.</td><td>main</td></tr>
 <tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
 <tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
@@ -199,9 +200,19 @@ The two io_uring rings are real rings, made as libuv makes them.</p>
     The epoll descriptor watches the polling ring, as natively.</li>
   <li>One thing still differs.
     Native's loop thread starts the loop: its first round adds the signal pipe and the eventfd to epoll, through the control ring.</li>
-  <li><strong>Glue duty.</strong> The descriptors must open before Rust's runtime starts, because Rust puts <code>/dev/null</code> on closed standard descriptors.
-    So each translator's glue calls <code>open_native_descriptors</code> from an ELF constructor.
-    That needs <code>#[link_section]</code>, which <code>deny(unsafe_code)</code> refuses in the crate.</li>
+  <li><strong>The constructor.</strong> The descriptors must open before Rust's runtime starts, because Rust puts <code>/dev/null</code> on closed standard descriptors.
+    So an ELF constructor opens them.
+    With the feature <code>startup-fds</code>, the crate has that constructor (a <a href="glossary.html#g-quirk">native quirk</a>, <a href="repo:src/io/startup_fds.rs">startup_fds.rs</a>).
+    It acts only in the program's own executable, so a shared library never opens descriptors in its host.
+    The glue then calls <code>startup::ensure_native_descriptors</code> at the start of <code>main</code>, which also keeps the constructor linked.
+    If the constructor did not act, that call opens the descriptors where they land.
+    Without the feature, the glue calls <code>open_native_descriptors</code> from an ELF constructor of its own.
+    The crate's constructors run in a fixed order: the title's first (priority 100), then the descriptors' (101), as natively (AR-20).
+    Neither uses the global allocator (AR-36).</li>
+  <li><strong>Glue duty.</strong> The glue runs <code>main</code> as <code>lean_run_main</code> does.
+    <code>startup::run_main</code> runs it on a thread of its own, with Lean's stack size.
+    With <code>LEAN_MAIN_USE_THREAD=0</code> it runs on the calling thread.
+    When the thread cannot be made, the process aborts with libc++'s message, as natively.</li>
   <li><strong>Glue duty.</strong> After the module initializers, the glue calls <code>startup::mark_end_initialization</code>, as the generated <code>main</code> does.
     Until then <code>IO.initializing</code> is true; in <code>main</code> it is false.</li>
   <li>The scheduler's signal watchers use the loop's signal pipe from startup, so a watcher opens no descriptor.
@@ -242,7 +253,7 @@ Without it, the crate has no <code>unsafe</code> code, and the title functions d
   <li>The file has its own ELF constructor, so no glue takes part.
     glibc calls it with <code>main</code>'s <code>argc</code> and <code>argv</code>, before <code>main</code> (glibc only: musl passes no arguments).</li>
   <li>The constructor has the priority 100 (<code>.init_array.00100</code>).
-    So it runs before the translators' startup constructors, which open libuv's descriptors (AR-20).
+    So it runs before the startup constructors, which open libuv's descriptors (AR-20): the crate's (feature <code>startup-fds</code>) or a translator's own.
     Natively, <code>lean_setup_args</code> also runs before libuv opens them.</li>
   <li>The constructor checks what it would write.
     In a shared library it writes nothing, and the title functions fail with <code>ENOBUFS</code>, as natively.

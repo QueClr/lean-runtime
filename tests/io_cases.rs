@@ -35,6 +35,14 @@
 //! the title when the startup descriptors leave one descriptor free. Without
 //! the feature, `setProcessTitle` fails with `ENOBUFS`, so that twin
 //! ([`NEED_PROC_TITLE`]) is not checked.
+//!
+//! With the feature `startup-fds`, this binary has no constructor of its
+//! own: the crate's (`io::startup_fds`, priority 101) opens the startup
+//! descriptors, in every run of the binary, and the twins of
+//! `io/startup_fd_limit`, `io/startup_closed_stdio`, `io/startup_fd_exhausted`,
+//! `io/startup_rings` and `uvsys/title_fd_limit` check its descriptors
+//! against native's; the twin calls `io::startup::ensure_native_descriptors`
+//! at `main`'s start, as a glue does.
 
 use lean_runtime::io::{debug, env, exit, fs as lfs, startup, uvsys, FsMode, Handle, IoError};
 
@@ -871,8 +879,9 @@ fn twin_name(argv0: &[u8]) -> Option<&'static str> {
 /// opened before Rust's runtime replaces closed standard descriptors with
 /// `/dev/null`, when this binary runs as a twin (`argv[0]` from
 /// `/proc/self/cmdline`: std's own arguments may not be set up yet). Not
-/// under Miri, which runs no file system calls in isolation.
-#[cfg(not(miri))]
+/// under Miri, which runs no file system calls in isolation, nor with
+/// `startup-fds`, where the crate's constructor opens them.
+#[cfg(not(any(miri, feature = "startup-fds")))]
 extern "C" fn startup() {
     let Ok(cmdline) = std::fs::read("/proc/self/cmdline") else {
         return;
@@ -885,7 +894,7 @@ extern "C" fn startup() {
     }
 }
 
-#[cfg(not(miri))]
+#[cfg(not(any(miri, feature = "startup-fds")))]
 #[used]
 #[link_section = ".init_array"]
 static STARTUP: extern "C" fn() = startup;
@@ -894,6 +903,10 @@ fn main() {
     use std::os::unix::ffi::OsStrExt;
     let argv0 = std::env::args_os().next().unwrap_or_default();
     if let Some(id) = twin_name(argv0.as_bytes()) {
+        // a glue's call at `main`'s start: nothing more, the crate's
+        // constructor opened the descriptors
+        #[cfg(feature = "startup-fds")]
+        startup::ensure_native_descriptors();
         let args: Vec<String> = std::env::args().skip(1).collect();
         // Init's module initializer that reaches the runtime before `main`,
         // which a translator runs as every program's: `IO.stdGenRef`

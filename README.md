@@ -19,8 +19,8 @@ values.
 | In this crate | In each translator's own glue |
 |---|---|
 | `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
-| `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error`; with the feature `proc-title` (it turns on `io`), `setProcessTitle`'s write into the arguments' memory, a native quirk written with `unsafe` (without it, `setProcessTitle` fails with `ENOBUFS`) | The memory protocol: reference counting, ownership, freeing |
-| `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour; or, with the feature `threads` instead (threads mode, `docs/threads.md`), Lean's task manager on real threads, with the same functions and `Send` bounds; with the feature `stack-overflow` (with `sched` or `threads`), Lean's stack-overflow report for the scheduler's stacks, a native quirk written with `unsafe` (without it, a task's stack overflow is a plain SIGSEGV, status 139) | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
+| `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error`, `main` on a thread with Lean's stack (`io::startup::run_main`, with a scheduler); with the feature `proc-title` (it turns on `io`), `setProcessTitle`'s write into the arguments' memory, a native quirk written with `unsafe` (without it, `setProcessTitle` fails with `ENOBUFS`); with the feature `startup-fds` (it turns on `io`), an ELF constructor that opens native Lean's startup descriptors before Rust's runtime starts, a native quirk written with `unsafe` (without it, a glue writes that constructor itself) | The memory protocol: reference counting, ownership, freeing |
+| `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour, and a lazy start (`sched::start_lazy`: the scheduler built at the first task; single-thread only, threads mode starts eagerly); or, with the feature `threads` instead (threads mode, `docs/threads.md`), Lean's task manager on real threads, with the same functions and `Send` bounds; with the feature `stack-overflow` (with `sched` or `threads`), Lean's stack-overflow report for the scheduler's stacks, a native quirk written with `unsafe` (without it, a task's stack overflow is a plain SIGSEGV, status 139) | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
 | `net` (feature `net`, with `io` and `sched`): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
 
 Functions take views (`&[u8]`, `&str`) and plain data (`u64`, `f64`), and
@@ -165,6 +165,24 @@ and as keyed functions for a translator whose values have no room for it
 A wait inside a no-suspend scope (a free) is a Rust panic with the reason;
 no Lean program reaches it.
 
+Batch `shared-2` moves three pieces of startup logic that only lean2rr
+kept into the crate (audit items 4.2, 4.3, 4.5):
+- `io::startup::run_main`: `main` on a thread of its own with Lean's stack
+  size, or on the calling thread with `LEAN_MAIN_USE_THREAD=0`, and
+  libc++'s abort text when the thread cannot be made (`lean_run_main`);
+- the feature `startup-fds`: the crate's own ELF constructor opens the
+  startup descriptors (a native quirk, `src/io/startup_fds.rs`), and
+  `io::startup::ensure_native_descriptors` at `main`'s start;
+- `sched::start_lazy`, `ensure_started`, `sched_started` and `deferring`:
+  the scheduler is built at the program's first task, promise, `Std.Sync`
+  object, timer, signal watcher, socket or DNS lookup, so a program without
+  them builds none (the single-thread scheduler only: threads mode has no
+  lazy start, and starts eagerly).
+
+It also makes the crate's ELF constructors use no global allocator
+(AR-36): the title's constructor copies the arguments into a block it
+maps, and both read `/proc` into stack buffers (`tests/ctor_alloc.rs`).
+
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
 that order. See `docs/development.md`, the rules for implementors.
@@ -173,16 +191,18 @@ that order. See `docs/development.md`, the rules for implementors.
 
 - The crate root denies `unsafe` code (`#![deny(unsafe_code)]`). A file may
   allow it for itself only with an entry in `UNSAFE.md`, behind a feature:
-  a native quirk that no safe API can reproduce (two so far:
+  a native quirk that no safe API can reproduce (three so far:
   `io::argv_title`, feature `proc-title`, where `setProcessTitle` writes the
-  title into the arguments' memory, as libuv does; and
-  `sched::stack_overflow`, feature `stack-overflow`, Lean's stack-overflow
-  report for the scheduler's context stacks; their proofs are in
+  title into the arguments' memory, as libuv does; `io::startup_fds`,
+  feature `startup-fds`, the ELF constructor that opens the startup
+  descriptors before Rust's runtime starts; and `sched::stack_overflow`,
+  feature `stack-overflow`, Lean's stack-overflow report for the
+  scheduler's context stacks; their proofs are in
   `docs/native-quirks.md`), or a faster implementation behind the opt-in
   feature `unsafe-fast`, with the same behaviour as its safe twin. Without
-  `proc-title`, `stack-overflow` and `unsafe-fast` (the default build, `io`,
-  `sched`, `threads`, `net`), the crate's own code contains no `unsafe`, and
-  the root forbids it.
+  `proc-title`, `startup-fds`, `stack-overflow` and `unsafe-fast` (the
+  default build, `io`, `sched`, `threads`, `net`), the crate's own code
+  contains no `unsafe`, and the root forbids it.
 - Every expected value in the tests comes from a native build with Lean
   4.34.0, on aarch64 Linux with glibc 2.39 (the host both translators run
   on). The ports of glibc's `cbrt` and `cbrtf` give glibc 2.39's aarch64

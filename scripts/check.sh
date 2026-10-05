@@ -17,15 +17,24 @@
 # compile no `unsafe` code of the crate (the root forbids it); `threads`
 # (threads mode, docs/threads.md, which excludes `sched` and `net`), also
 # with every feature that may go with it
-# (`io,threads,proc-title,stack-overflow,unsafe-fast`: there the io twins,
-# tests/io_cases.rs and tests/io2_cases.rs, run inside tasks, and the
-# uvloop twins, tests/uvloop_mt.rs, over threads mode's `sched::uv`); `io,proc-title`,
-# with the native quirk of the process title (src/io/argv_title.rs: its unit
-# tests and the twins of the cases that set a title), and `io` without
-# `sched`; `sched,stack-overflow`, with the native quirk of Lean's
-# stack-overflow report (src/sched/stack_overflow.rs: its unit tests), and
-# `sched` without `io`; `unsafe-fast`; and every feature but `net`
-# (`io,sched,proc-title,stack-overflow,unsafe-fast`). Miri runs its own
+# (`io,threads,proc-title,startup-fds,stack-overflow,unsafe-fast`: there the
+# io twins, tests/io_cases.rs and tests/io2_cases.rs, run inside tasks, and
+# the uvloop twins, tests/uvloop_mt.rs, over threads mode's `sched::uv`);
+# `io,proc-title`, with the native quirk of the process title
+# (src/io/argv_title.rs: its unit tests and the twins of the cases that set
+# a title), with the test glue's own startup constructor
+# (tests/io_cases.rs), and `io` without `sched`; `sched,stack-overflow`,
+# with the native quirk of Lean's stack-overflow report
+# (src/sched/stack_overflow.rs: its unit tests), and `sched` without `io`;
+# `unsafe-fast`; every feature but `net`
+# (`io,sched,proc-title,startup-fds,stack-overflow,unsafe-fast`); and
+# lean2rr's production set (`io,sched,net,proc-title,startup-fds,
+# stack-overflow`, review RSH2-09). The three configurations with
+# `startup-fds` have the native quirk of the startup constructor
+# (src/io/startup_fds.rs: its unit tests, and the io twins with the crate's
+# constructor in place of the test glue's). tests/ctor_alloc.rs
+# (AR-36: no global allocator in the crate's constructors) runs wherever
+# `io` is on. Miri runs its own
 # configurations (below), which leave `stack-overflow` out: Miri cannot
 # model signal delivery. tests/sched-driver builds the crate with
 # `stack-overflow` (the twin of `tasks/stack_overflow_in_task`, the `so_*`
@@ -45,8 +54,9 @@ if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
 fi
 TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
 FEATURE_SETS=("" "io,sched" "net" "io,proc-title" "sched,stack-overflow" "unsafe-fast"
-  "io,sched,proc-title,stack-overflow,unsafe-fast" "threads"
-  "io,threads,proc-title,stack-overflow,unsafe-fast")
+  "io,sched,proc-title,startup-fds,stack-overflow,unsafe-fast" "threads"
+  "io,threads,proc-title,startup-fds,stack-overflow,unsafe-fast"
+  "io,sched,net,proc-title,startup-fds,stack-overflow")
 
 # Every test run has a deadline (LEAN_RUNTIME_TEST_TIMEOUT seconds, default
 # 3600), so a test that blocks fails the check instead of hanging it. It is

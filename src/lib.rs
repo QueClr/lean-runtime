@@ -15,24 +15,27 @@
 //! say so themselves (`#![allow(unsafe_code)]`), each with an entry in
 //! `UNSAFE.md`:
 //! - a native quirk that no safe API can reproduce, behind a feature of its
-//!   own; so far two: `io::argv_title` (feature `proc-title`, which turns on
-//!   `io`): `setProcessTitle` writes the title into the arguments' memory,
-//!   as libuv does; and `sched::stack_overflow` (feature `stack-overflow`,
-//!   with `sched` or `threads`): Lean's stack-overflow report, a SIGSEGV
-//!   handler that knows the scheduler's context stacks;
+//!   own; so far three: `io::argv_title` (feature `proc-title`, which turns
+//!   on `io`): `setProcessTitle` writes the title into the arguments'
+//!   memory, as libuv does; `io::startup_fds` (feature `startup-fds`, which
+//!   turns on `io`): an ELF constructor opens libuv's startup descriptors
+//!   before Rust's runtime starts; and `sched::stack_overflow` (feature
+//!   `stack-overflow`, with `sched` or `threads`): Lean's stack-overflow
+//!   report, a SIGSEGV handler that knows the scheduler's context stacks;
 //! - with the opt-in feature `unsafe-fast`, a faster implementation of a
 //!   specific function, with the same observable behaviour as its safe twin.
 //!
-//! A build with none of `proc-title`, `stack-overflow` and `unsafe-fast`
-//! (the default build, `io`, `sched`, `threads`, `net`) compiles no
-//! `unsafe` code of the crate: there the root forbids it outright. With any of them, `deny`
-//! lets a file allow it for itself, so `scripts/check.sh` checks that every
-//! such file has its entry.
+//! A build with none of `proc-title`, `startup-fds`, `stack-overflow` and
+//! `unsafe-fast` (the default build, `io`, `sched`, `threads`, `net`)
+//! compiles no `unsafe` code of the crate: there the root forbids it
+//! outright. With any of them, `deny` lets a file allow it for itself, so
+//! `scripts/check.sh` checks that every such file has its entry.
 
 #![deny(unsafe_code)]
 #![cfg_attr(
     not(any(
         feature = "proc-title",
+        feature = "startup-fds",
         feature = "stack-overflow",
         feature = "unsafe-fast"
     )),

@@ -27,7 +27,7 @@
 <h1>Status</h1>
 <p class="lead">State of 2026-10-04.
 The table of merged batches is at main 88ef877, with <code>threads-3</code>, <code>shared-1</code> and <code>wait-1</code>; the adoption and coverage sections are at main 0882b54.
-main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, <a href="threads.html">threads mode</a>, and two native quirks, each behind a feature of its own.
+main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, <a href="threads.html">threads mode</a>, and three native quirks, each behind a feature of its own.
 Every Lean symbol that needs shared code has a crate item on main.</p>
 
 <h2 id="merged">Merged on main</h2>
@@ -102,6 +102,11 @@ A context waits for a thunk or a constant that another context computes.
 The single-thread <code>ST.Ref</code> follows Lean 4.35's rule.
 Promises dropped in a free are resolved after it.
 A free inside a resolution resolves its own promises first, as natively.</td></tr>
+<tr><td><code>shared-2</code></td><td>Startup logic that only lean2rr kept moves into the crate.
+<code>main</code> runs on a thread of its own with Lean's stack (<code>run_main</code>).
+The feature <code>startup-fds</code> opens the startup descriptors in the crate's own constructor: the third native quirk.
+The scheduler can start lazily, at the first task (<code>start_lazy</code>).
+The crate's constructors use no global allocator (AR-36).</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>
@@ -128,8 +133,9 @@ It moves its pin only after its own suite passes.</p>
 Step 2: the <code>Nat</code>, <code>Int</code> and array rules, the panics and the number text of <code>semantics-2</code>.
 Its pin is 1c36a58.</td><td>Step 3: <code>io</code>.</td><td><code>sched</code>.</td></tr>
 </tbody></table></div>
-<p>lean2rr turns on both native quirks: <code>proc-title</code> and <code>stack-overflow</code>.
-Both features are off by default.</p>
+<p>lean2rr turns on the native quirks <code>proc-title</code> and <code>stack-overflow</code>.
+It takes <code>startup-fds</code> when it adopts <code>shared-2</code>.
+The three features are off by default.</p>
 
 <h2 id="coverage">Coverage</h2>
 <p>The coverage count takes the 717 C symbols of the <code>@[extern]</code> declarations in Lean 4.34.0's <code>Init</code> and <code>Std</code>.

@@ -90,8 +90,9 @@ There, a task that was queued 5 ms ago or more runs first.</dd>
 
 <dt id="g-elf-constructor">ELF constructor</dt>
 <dd>A function that the program loader runs before <code>main</code> and before Rust's runtime starts.
-The glue registers one to open the <a href="#g-startup">startup descriptors</a> early enough.
-glibc calls it with <code>main</code>'s arguments, so lean-runtime has one of its own for the process title (feature <a href="#g-proc-title"><code>proc-title</code></a>).</dd>
+One opens the <a href="#g-startup">startup descriptors</a> early enough: the crate's (feature <a href="#g-startup-fds"><code>startup-fds</code></a>), or one in the glue.
+glibc calls it with <code>main</code>'s arguments, so lean-runtime has one of its own for the process title (feature <a href="#g-proc-title"><code>proc-title</code></a>).
+The crate's constructors use no global allocator (AR-36).</dd>
 
 <dt id="g-errno">errno model</dt>
 <dd>lean-runtime's own copy of C's <code>errno</code>, one per thread.
@@ -193,8 +194,10 @@ A native build with Lean 4.34.0 gives every expected value.</dd>
 <dd>A behaviour of native Lean that no safe API can reproduce.
 lean-runtime writes such an item with <code>unsafe</code> code, in a small file of its own (decision of 2026-10-04).
 Each has an entry in <a href="repo:UNSAFE.md">UNSAFE.md</a> and a written proof.
-The two so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>), and Lean's stack-overflow report knows the guard pages of the contexts (<a href="sched.html#overflow">sched</a>).
-Each is built only with a feature of its own: <a href="#g-proc-title"><code>proc-title</code></a> and <a href="#g-stack-overflow"><code>stack-overflow</code></a>.</dd>
+The three so far: <code>setProcessTitle</code> writes the title into the arguments' memory (<a href="io.html#title">io</a>).
+An ELF constructor opens the startup descriptors (<a href="io.html#startup">io</a>).
+Lean's stack-overflow report knows the guard pages of the contexts (<a href="sched.html#overflow">sched</a>).
+Each is built only with a feature of its own: <a href="#g-proc-title"><code>proc-title</code></a>, <a href="#g-startup-fds"><code>startup-fds</code></a> and <a href="#g-stack-overflow"><code>stack-overflow</code></a>.</dd>
 
 <dt id="g-o12">O12 (speed floor)</dt>
 <dd>The decision of 2026-10-03: the default, safe build of every shared function must be at least as fast as Lean 4.34.0's native runtime.
@@ -235,7 +238,7 @@ See <a href="testing.html#rows">Testing</a>.</dd>
 <dt id="g-rustix">rustix, nix, io-uring</dt>
 <dd>Vetted Rust crates for system calls.
 They hold the <code>unsafe</code> code, so <code>io</code> stays free of it.
-The <a href="#g-quirk">native quirks</a> are behind <a href="#g-proc-title"><code>proc-title</code></a> and <a href="#g-stack-overflow"><code>stack-overflow</code></a>.
+The <a href="#g-quirk">native quirks</a> are behind <a href="#g-proc-title"><code>proc-title</code></a>, <a href="#g-startup-fds"><code>startup-fds</code></a> and <a href="#g-stack-overflow"><code>stack-overflow</code></a>.
 io-uring makes the io_uring rings that libuv opens at startup.</dd>
 
 <dt id="g-sched-io">sched-io</dt>
@@ -259,6 +262,11 @@ See <a href="sched.html#pure">the pure-task rule</a>.</dd>
 
 <dt id="g-startup">Startup descriptors</dt>
 <dd>The descriptors that libuv opens before <code>main</code> in native Lean: epoll, two io_uring rings (when libuv uses io_uring), two pipes and an eventfd.</dd>
+
+<dt id="g-startup-fds">startup-fds</dt>
+<dd>The Cargo feature of the startup constructor, a <a href="#g-quirk">native quirk</a>: an ELF constructor of the crate opens the <a href="#g-startup">startup descriptors</a> before Rust's runtime starts.
+It turns on <code>io</code>, and lean2rr turns it on.
+Without it, a translator's glue writes that constructor itself.</dd>
 
 <dt id="g-std-sync">Std.Sync</dt>
 <dd>Lean's synchronization library: mutexes, condition variables, channels, barriers, semaphores.

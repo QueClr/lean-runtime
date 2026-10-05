@@ -1,5 +1,6 @@
-//! The descriptors native Lean has open before `main` (A821), and
-//! `IO.initializing`'s flag ([`initializing`]).
+//! The descriptors native Lean has open before `main` (A821),
+//! `IO.initializing`'s flag ([`initializing`]), and `main` on a thread of
+//! its own with Lean's stack ([`run_main`], `lean_run_main`).
 //!
 //! Lean's runtime starts libuv's default loop during initialization
 //! (`initialize_libuv`, then `event_loop_init` in `src/runtime/uv/event_loop.cpp`),
@@ -27,30 +28,65 @@
 //! - ignore `SIGPIPE` before Lean code runs: Rust's `lang_start` does it for a
 //!   Rust `main`; an entry that is not `lang_start` (lean2rr's) must do it
 //!   itself;
-//! - run an ELF constructor (`#[link_section = ".init_array"]`) that calls
-//!   [`open_native_descriptors`], and on `Err` [`fail_as_native`]; in plain
-//!   `.init_array` or with a priority above 100, so that with the feature
-//!   `proc-title` the crate's own constructor (`.init_array.00100`) runs
-//!   first, as `lean_setup_args` runs before libuv's descriptors open (AR-20;
-//!   with a priority of 100 or less it may not, and under `ulimit -n 12` the
-//!   title's checks then find too few free descriptors);
+//! - get native's startup descriptors opened before Rust's runtime starts:
+//!   - **with the feature `startup-fds`** (lean2rr), the crate's own ELF
+//!     constructor opens them (`.init_array.00101`, a native quirk written
+//!     with `unsafe`: `UNSAFE.md`, `docs/native-quirks.md`, "The startup
+//!     descriptors in a constructor"). The glue writes no constructor and
+//!     no `unsafe`; it calls `ensure_native_descriptors` at the start of
+//!     `main`, which does nothing more when the constructor opened them
+//!     (and else opens them where they land, without native's numbers:
+//!     the constructor acts only in the program's own executable); that
+//!     call (or `mark_end_initialization`'s) also keeps the constructor
+//!     linked, which a `#[used]` static alone does not;
+//!   - **without it**, a glue that wants native's descriptors writes its
+//!     own ELF constructor (`#[link_section = ".init_array"]`, as
+//!     `tests/io_cases.rs` does), which calls [`open_native_descriptors`],
+//!     and on `Err` [`end_startup`]; in plain `.init_array` or with a
+//!     priority above 101, so that with the feature `proc-title` the crate's
+//!     own constructor (`.init_array.00100`) runs first, as `lean_setup_args`
+//!     runs before libuv's descriptors open (AR-20; with a priority of 100 or
+//!     less it may not, and under `ulimit -n 12` the title's checks then find
+//!     too few free descriptors). A glue must not do both: with the feature,
+//!     its own constructor's call only returns the first outcome. A glue
+//!     that writes no constructor (leanrs, its DV19) opens them after Rust's
+//!     start or not at all, and a standard descriptor closed at startup then
+//!     reads as Rust's `/dev/null`;
 //! - call [`mark_end_initialization`] once the module initializers have run,
 //!   before `main`, as the generated `main` calls
-//!   `lean_io_mark_end_initialization` (also when an initializer failed).
+//!   `lean_io_mark_end_initialization` (also when an initializer failed);
+//! - run `main` as `lean_run_main` does, on a thread of its own with Lean's
+//!   stack size ([`run_main`], with a scheduler), and install Lean's
+//!   stack-overflow report on each thread that runs Lean code, after Rust's
+//!   runtime has started, never from an ELF constructor
+//!   (`sched::install_stack_overflow_handler`, feature `stack-overflow`).
 //!
-//! The crate does none of them itself: its ELF constructors live only in
-//! the native quirks' files (the process's arguments, [`super::argv_title`],
-//! need no glue), `SIGPIPE`'s disposition belongs to the entry, and only the
-//! glue knows when the initializers end.
+//! **The constructors' order** (AR-20). The linkers put the `.init_array.N`
+//! sections first, by increasing priority N, then the plain `.init_array`
+//! ones in link order, and glibc calls the executable's entries in that
+//! order: the toolchain's (priorities 90 and 99), `proc-title`'s (100),
+//! `startup-fds`'s (101), then the program's own (a priority above 101, or
+//! none: a glue's constructor of its own). So the arguments' memory is kept
+//! before libuv's descriptors open, as natively, and both run before Rust's
+//! runtime replaces closed standard descriptors (in `main`'s `lang_start`).
+//! Neither crate constructor uses the global allocator (AR-36): an allocator
+//! made in a constructor (mimalloc's first arena) would be set up before the
+//! program configures it.
+//!
+//! The crate does the rest of the list only where it can: `SIGPIPE`'s
+//! disposition belongs to the entry, only the glue knows when the
+//! initializers end, and the stack-overflow report must be installed after
+//! Rust's runtime start.
 //!
 //! So on a host with io_uring, descriptors 3 to 10 are taken, and a standard
 //! descriptor closed at startup is taken by the first of them: reading a
 //! closed stdin or writing a closed stdout then fails with `EINVAL`, and the
-//! point where opening a file fails with `EMFILE` is native's. A translator
-//! calls [`open_native_descriptors`] from an ELF constructor, before Rust's
-//! runtime puts `/dev/null` in the place of closed standard descriptors (the
-//! constructor needs `#[link_section]`, which `deny(unsafe_code)` refuses,
-//! so it lives in each translator's glue).
+//! point where opening a file fails with `EMFILE` is native's. The
+//! descriptors open in an ELF constructor, before Rust's runtime puts
+//! `/dev/null` in the place of closed standard descriptors: afterwards such a
+//! `/dev/null` cannot be told from one the program was given (a constructor
+//! needs `#[link_section]`, which `deny(unsafe_code)` refuses: hence the
+//! feature, or the glue's own).
 //!
 //! The rings are real io_uring rings, made as libuv 1.48.0's `uv__iou_init`
 //! makes them, through the io-uring crate (tokio-rs; accepted by leanrs's
@@ -98,11 +134,18 @@
 //! thread, made at the first use of the loop, waits with `poll(2)` on the
 //! eventfd and the signal pipe instead.
 //!
+//! Opening them allocates nothing ([`open_native_descriptors`] runs in an
+//! ELF constructor with `startup-fds`; AR-36): the rings are kept in an
+//! array, `/proc/version_signature` is read into a stack buffer, and a
+//! failure's line is written from one.
+//!
 //! Source: lean2rr's `runtime/leanrt/src/rt.rs` (`reserve_libuv_descriptors`,
 //! `kernel_version`), rewritten over rustix's safe API and the io-uring
 //! crate's. lean2rr's version
 //! makes the control ring even when `uv__use_io_uring` says no, which libuv
 //! 1.48.0 does not (`UV_USE_IO_URING=0` gives 6 descriptors natively).
+//! [`run_main`] is lean2rr's `rt::run_main`'s thread (audit item 4.2), and
+//! the feature `startup-fds` its startup constructor (item 4.3).
 
 use io_uring::IoUring;
 use rustix::event::{epoll, eventfd, EventfdFlags};
@@ -124,8 +167,11 @@ pub fn initializing() -> bool {
 
 /// `lean_io_mark_end_initialization`: the generated `main` calls it right
 /// after the module initializers (whether they succeeded or not), before
-/// `main` runs; so does each translator's glue.
+/// `main` runs; so does each translator's glue. (With `startup-fds` it also
+/// keeps the crate's startup constructor linked: every glue calls it.)
 pub fn mark_end_initialization() {
+    #[cfg(feature = "startup-fds")]
+    super::startup_fds::keep_constructor();
     INITIALIZING.store(false, Ordering::Relaxed)
 }
 
@@ -157,10 +203,36 @@ impl StartupFailure {
     /// (`Failed to initialize event loop: too many open files` for
     /// `EMFILE`).
     pub fn message(self) -> String {
-        format!(
-            "Failed to initialize event loop: {}",
-            super::error::uv_strerror(super::error::crt_to_uv(self.errno()))
-        )
+        let mut s = String::new();
+        let _ = self.write_message(&mut s);
+        s
+    }
+
+    /// [`StartupFailure::message`] into `w`, with no allocation of its own.
+    fn write_message(self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
+        let code = super::error::crt_to_uv(self.errno());
+        w.write_str("Failed to initialize event loop: ")?;
+        match super::error::uv_strerror_named(code) {
+            Some(m) => w.write_str(m),
+            None => write!(w, "Unknown system error {code}"),
+        }
+    }
+}
+
+/// A line built on the stack ([`end_startup`] in an ELF constructor, which
+/// must not allocate: AR-36). A longer line is cut, which no message reaches
+/// (the longest is under 120 bytes).
+struct StackLine {
+    buf: [u8; 256],
+    len: usize,
+}
+
+impl std::fmt::Write for StackLine {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let n = s.len().min(self.buf.len() - self.len);
+        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+        self.len += n;
+        Ok(())
     }
 }
 
@@ -169,7 +241,9 @@ impl StartupFailure {
 struct Descriptors {
     #[cfg_attr(not(feature = "sched"), allow(dead_code))]
     epoll: OwnedFd,
-    _rings: Vec<IoUring>,
+    /// The polling ring and the control ring, each if the kernel gave it (an
+    /// array, not a `Vec`: no allocation, AR-36).
+    _rings: [Option<IoUring>; 2],
     _lock_pipe: (OwnedFd, OwnedFd),
     /// Kept open for the life of the process, never closed, `dup2`'d over or
     /// reused: signal handlers write to its write end by number (signal-hook's
@@ -186,12 +260,51 @@ static DESCRIPTORS: OnceLock<Result<Descriptors, StartupFailure>> = OnceLock::ne
 /// outcome). On `Err`, the event loop could not be made and the program
 /// does not reach `main`: the translator ends the process with
 /// [`end_startup`].
+///
+/// A glue's own ELF constructor calls it (without the feature
+/// `startup-fds`). With `startup-fds` the crate's constructor has called it
+/// already, and a glue calls [`ensure_native_descriptors`] instead.
+/// It allocates nothing, unless `UV_USE_IO_URING` is set (read with
+/// `std::env::var_os`; the crate's constructor reads it with `getenv`).
 pub fn open_native_descriptors() -> Result<(), StartupFailure> {
-    match DESCRIPTORS.get_or_init(open_all) {
+    #[cfg(feature = "startup-fds")]
+    super::startup_fds::keep_constructor();
+    let env = std::env::var_os("UV_USE_IO_URING");
+    open_native_descriptors_with(env.as_ref().map(|v| v.as_encoded_bytes()))
+}
+
+/// [`open_native_descriptors`] with `UV_USE_IO_URING`'s value given (`None`
+/// when unset): the crate's constructor reads it without allocating.
+pub(crate) fn open_native_descriptors_with(
+    uv_use_io_uring: Option<&[u8]>,
+) -> Result<(), StartupFailure> {
+    match DESCRIPTORS.get_or_init(|| open_all(uv_use_io_uring)) {
         Ok(_) => Ok(()),
         Err(f) => Err(*f),
     }
 }
+
+/// Whether [`open_native_descriptors`] has run (whatever its outcome).
+#[cfg(feature = "startup-fds")]
+pub(crate) fn descriptors_opened() -> bool {
+    DESCRIPTORS.get().is_some()
+}
+
+/// Native Lean's startup descriptors at the start of `main`, with the
+/// feature `startup-fds`: the crate's ELF constructor opened them before
+/// Rust's runtime started, and then this does nothing more. If it did not
+/// (the crate in a shared library, a launch through the dynamic loader, no
+/// `/proc`), this opens them now, where they land: it closes nothing, so a
+/// standard descriptor closed at startup stays Rust's `/dev/null` and the
+/// numbers are not native's (reviews RSH2-04, LS2-01); a failure ends the
+/// process ([`end_startup`]). Call it at the start of `main`, before the
+/// program opens a file, so that the numbers are as close as they can be.
+/// It also keeps the constructor linked (a `#[used]` static alone does not
+/// keep its object file in an rlib). (The constructor is a native quirk
+/// written with `unsafe`: `UNSAFE.md`, `docs/native-quirks.md`, "The
+/// startup descriptors in a constructor".)
+#[cfg(feature = "startup-fds")]
+pub use super::startup_fds::ensure_native_descriptors;
 
 /// libuv's loop descriptor (an epoll instance), for the scheduler's event
 /// loop (`sched`'s reactor), once [`open_native_descriptors`] has opened
@@ -211,7 +324,11 @@ pub(crate) fn claim_loop_epoll() -> Option<BorrowedFd<'static>> {
 /// `uv__process_init` makes at startup), once [`open_native_descriptors`]
 /// has opened them, for the one event loop that delivers
 /// `Std.Internal.UV.Signal`'s signals, so that its watchers open no
-/// descriptor of their own, as natively (review RSIOB-05).
+/// descriptor of their own, as natively (review RSIOB-05). With the feature
+/// `startup-fds` the crate's ELF constructor opened them before `main`: a
+/// glue that wants the pipe enables the feature rather than write a
+/// constructor of its own (the module comment, "The translator's glue
+/// duties").
 ///
 /// **Who may claim it.** `sched::uv`'s signal watchers (feature `sched`)
 /// claim it at the first watcher. A translator that keeps its own scheduler
@@ -255,25 +372,25 @@ pub(crate) fn loop_eventfd() -> Option<BorrowedFd<'static>> {
     }
 }
 
-fn open_all() -> Result<Descriptors, StartupFailure> {
+/// libuv's `uv_loop_init`, with `UV_USE_IO_URING`'s value given. Allocates
+/// nothing (AR-36).
+fn open_all(uv_use_io_uring: Option<&[u8]>) -> Result<Descriptors, StartupFailure> {
     let cloexec = epoll::CreateFlags::CLOEXEC;
     let loop_init = |e: rustix::io::Errno| StartupFailure::LoopInit(e.raw_os_error());
     let signal_lock = |e: rustix::io::Errno| StartupFailure::SignalLock(e.raw_os_error());
     let epoll = epoll::create(cloexec).map_err(loop_init)?;
-    let mut rings = Vec::new();
-    if use_io_uring() {
+    let mut rings = [None, None];
+    if use_io_uring_with(uv_use_io_uring) {
         // `uv__iou_init` twice; a ring the kernel does not give is skipped.
         // The polling ring is watched for completions (`POLLIN`, data its
         // number); if that fails, libuv closes it.
         if let Some(ring) = ring(POLLING_ENTRIES, true) {
             let data = epoll::EventData::new_u64(ring.as_raw_fd() as u64);
             if epoll::add(&epoll, &ring, data, epoll::EventFlags::IN).is_ok() {
-                rings.push(ring);
+                rings[0] = Some(ring);
             }
         }
-        if let Some(ring) = ring(CONTROL_ENTRIES, false) {
-            rings.push(ring);
-        }
+        rings[1] = ring(CONTROL_ENTRIES, false);
     }
     let lock_pipe = pipe_with(PipeFlags::CLOEXEC).map_err(signal_lock)?;
     // `uv__signal_unlock`
@@ -324,14 +441,40 @@ fn ring(entries: u32, polling: bool) -> Option<IoUring> {
 /// when the signal lock pipe cannot be made), with the outcome depending on
 /// how few descriptors are left; `docs/lean-bugs.md` (case
 /// `io/startup_fd_exhausted`).
+///
+/// The line is built on the stack and written to descriptor 2 at once (the
+/// unbuffered standard error, which no stream has used yet), so the call
+/// allocates nothing unless `LEAN_ABORT_ON_PANIC` is set (read with
+/// `std::env::var_os`; the crate's constructor reads it with `getenv`).
 pub fn end_startup(failure: StartupFailure) -> ! {
+    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
+    end_startup_with(failure, abort.as_ref().map(|v| v.as_encoded_bytes()))
+}
+
+/// [`end_startup`] with `LEAN_ABORT_ON_PANIC`'s value given (`None` when
+/// unset). Allocates nothing (AR-36).
+pub(crate) fn end_startup_with(failure: StartupFailure, abort_on_panic: Option<&[u8]>) -> ! {
     use crate::semantics::panic::{
         internal_panic_end, PanicEnd, PanicSettings, INTERNAL_PANIC_PREFIX, PANIC_EXIT_STATUS,
     };
-    let line = format!("{INTERNAL_PANIC_PREFIX}{}\n", failure.message());
-    let _ = super::handle::Handle::stderr().put_str(line.as_bytes());
-    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
-    let s = PanicSettings::from_env(abort.as_ref().map(|v| v.as_encoded_bytes()), None);
+    use std::fmt::Write;
+    let mut line = StackLine {
+        buf: [0; 256],
+        len: 0,
+    };
+    let _ = line.write_str(INTERNAL_PANIC_PREFIX);
+    let _ = failure.write_message(&mut line);
+    let _ = line.write_str("\n");
+    let mut rest = &line.buf[..line.len];
+    while !rest.is_empty() {
+        match rustix::io::write(rustix::stdio::stderr(), rest) {
+            Ok(0) => break,
+            Ok(n) => rest = &rest[n..],
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => break,
+        }
+    }
+    let s = PanicSettings::from_env(abort_on_panic, None);
     match internal_panic_end(s) {
         PanicEnd::Abort => std::process::abort(),
         _ => std::process::exit(PANIC_EXIT_STATUS),
@@ -353,11 +496,17 @@ pub fn fail_as_native(failure: StartupFailure) -> ! {
 /// `io` builds only for Linux on x86-64 and aarch64, both little-endian, so
 /// the epoll watch's data is also libuv's `data.fd` (review RQ2-06).
 pub fn use_io_uring() -> bool {
-    let mut use_io_uring = kernel_version() >= 0x05_0A_BA;
-    if let Some(v) = std::env::var_os("UV_USE_IO_URING") {
-        use_io_uring = atoi(std::os::unix::ffi::OsStrExt::as_bytes(v.as_os_str())) != 0;
+    let env = std::env::var_os("UV_USE_IO_URING");
+    use_io_uring_with(env.as_ref().map(|v| v.as_encoded_bytes()))
+}
+
+/// [`use_io_uring`] with `UV_USE_IO_URING`'s value given (`None` when
+/// unset).
+fn use_io_uring_with(uv_use_io_uring: Option<&[u8]>) -> bool {
+    match uv_use_io_uring {
+        Some(v) => atoi(v) != 0,
+        None => kernel_version() >= 0x05_0A_BA,
     }
-    use_io_uring
 }
 
 /// glibc's `atoi`, `(int) strtol(s, NULL, 10)`: leading white space, a
@@ -420,15 +569,15 @@ fn three_numbers(s: &[u8]) -> Option<(u32, u32, u32)> {
 /// `/proc/version_signature` (`Ubuntu <kernel> <a.b.c>`), else the one in a
 /// Debian `uname` version (`... Debian a.b.c ...`), else `uname`'s release,
 /// with the `UNAME26` personality's 2.6.x mapped back; as `a * 65536 + b * 256
-/// + c`, 0 when unknown.
+/// + c`, 0 when unknown. Allocates nothing (AR-36).
 pub fn kernel_version() -> u32 {
     let mk = |(a, b, c): (u32, u32, u32)| {
         a.wrapping_mul(65536)
             .wrapping_add(b.wrapping_mul(256))
             .wrapping_add(c)
     };
-    if let Ok(sig) = std::fs::read("/proc/version_signature") {
-        let sig = &sig[..sig.len().min(255)];
+    let mut buf = [0u8; 256];
+    if let Some(sig) = slurp(c"/proc/version_signature", &mut buf) {
         let mut words = sig
             .split(|b| b.is_ascii_whitespace())
             .filter(|w| !w.is_empty());
@@ -456,6 +605,106 @@ pub fn kernel_version() -> u32 {
         }
     }
     mk((a, b, c))
+}
+
+/// libuv 1.48.0's `uv__slurp(path, buf, len)`: one `read` of at most
+/// `len - 1` bytes (retried on `EINTR`) from the file opened close-on-exec;
+/// the bytes read, `None` when it cannot be opened or read.
+fn slurp<'a>(path: &std::ffi::CStr, buf: &'a mut [u8]) -> Option<&'a [u8]> {
+    use rustix::fs::{open, Mode, OFlags};
+    let fd = open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty()).ok()?;
+    let max = buf.len().saturating_sub(1);
+    loop {
+        match rustix::io::read(&fd, &mut buf[..max]) {
+            Ok(n) => return Some(&buf[..n]),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => return None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `main` on a thread of its own
+
+/// Whether `main` runs on a thread of its own ([`run_main`]), set before its
+/// body starts.
+#[cfg(any(feature = "sched", feature = "threads"))]
+static MAIN_ON_THREAD: AtomicBool = AtomicBool::new(false);
+
+/// Whether [`run_main`] runs `main` on a thread of its own: false with
+/// `LEAN_MAIN_USE_THREAD=0`, where it runs on the calling thread (the
+/// initializers'), so that a glue that gives `main` fresh per-thread state
+/// (lean2rr's standard-stream context) does so only on its own thread, as
+/// natively a new thread starts with none. Read inside `main`'s body.
+#[cfg(any(feature = "sched", feature = "threads"))]
+pub fn main_on_thread() -> bool {
+    MAIN_ON_THREAD.load(Ordering::Relaxed)
+}
+
+/// `lean_run_main`'s choice (`run_with_thread_stack`): the calling thread
+/// when `LEAN_MAIN_USE_THREAD` is exactly `0` (`strcmp(v, "0") == 0`), else
+/// a thread of its own.
+#[cfg(any(feature = "sched", feature = "threads"))]
+fn main_uses_thread(lean_main_use_thread: Option<&[u8]>) -> bool {
+    lean_main_use_thread != Some(b"0")
+}
+
+/// Run the program's `main` as Lean's `lean_run_main` does
+/// (`src/runtime/thread.cpp`): on a new thread with a stack of `stack_size`
+/// bytes, which it waits for; or on the calling thread when
+/// `LEAN_MAIN_USE_THREAD` is `0`. The caller passes Lean's size, read when
+/// `main` starts (after the module initializers, as `lean_run_main` reads
+/// `LEAN_STACK_SIZE_KB`): [`crate::sched::thread_stack_size`] (1 GiB on
+/// 64-bit targets, or `LEAN_STACK_SIZE_KB` rounded down to 4 KiB plus
+/// 128 KiB), or a size of its own.
+///
+/// - The thread has no name of its own, as native's (`lthread` names none),
+///   so it keeps the process's (`/proc/thread-self/comm`).
+/// - When it cannot be made, the process aborts with libc++'s report of
+///   Lean's uncaught `failed to create thread: <strerror>`
+///   ([`crate::sched::thread_create_failed`]; status 134).
+/// - `body`'s value is returned; `Err` holds the payload of a Rust panic
+///   that ended `body` (a runtime bug: Lean code does not panic in Rust),
+///   on its thread or on the calling one, after the panic hook printed it.
+///   The glue decides how to end then (lean2rr: exit status 101, its streams
+///   written, as a Rust program).
+/// - [`main_on_thread`] says which thread `body` runs on.
+///
+/// The caller's duties:
+/// - `body` installs Lean's stack-overflow report first
+///   (`sched::install_stack_overflow_handler()` with the feature
+///   `stack-overflow`: natively each Lean thread installs it at its start),
+///   as the crate installs nothing here;
+/// - `body` holds the whole of `main`'s life with tasks: `sched::start` (or
+///   `start_with`, `start_lazy`), the program's `main`, then
+///   `sched::finish`, all inside `body`, on its thread. The single-thread
+///   scheduler's state is that thread's own (thread-locals): a `start`
+///   before `run_main` would start a scheduler on the calling thread, which
+///   `main` never sees (review RSH2-03);
+/// - the module initializers ran before, on the calling thread, with its
+///   own stack, so that a deep initializer overflows as natively.
+#[cfg(any(feature = "sched", feature = "threads"))]
+pub fn run_main<T, F>(stack_size: usize, body: F) -> std::thread::Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let env = std::env::var_os("LEAN_MAIN_USE_THREAD");
+    if !main_uses_thread(env.as_ref().map(|v| v.as_encoded_bytes())) {
+        MAIN_ON_THREAD.store(false, Ordering::Relaxed);
+        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    }
+    MAIN_ON_THREAD.store(true, Ordering::Relaxed);
+    match std::thread::Builder::new()
+        .stack_size(stack_size)
+        .spawn(body)
+    {
+        Ok(t) => t.join(),
+        // natively `lthread` throws `lean::exception("failed to create
+        // thread: " << strerror(err))`, which nothing catches: libc++
+        // reports it and aborts
+        Err(e) => crate::sched::thread_create_failed(&e),
+    }
 }
 
 #[cfg(test)]
@@ -548,7 +797,8 @@ mod tests {
     /// after it the first claim gets the two ends of one pipe, read and
     /// write, both non-blocking and close-on-exec, and every later claim
     /// gets `None`. In a child process of its own, so that the descriptors
-    /// open nowhere else and no other test claims first.
+    /// open nowhere else and no other test claims first. (With
+    /// `startup-fds` the crate's constructor opened them before `main`.)
     #[test]
     #[cfg_attr(miri, ignore)] // Miri runs no process or file system call
     fn signal_pipe_claimed_once() {
@@ -573,7 +823,9 @@ mod tests {
             );
             return;
         }
-        assert!(claim_signal_pipe().is_none());
+        if !cfg!(feature = "startup-fds") {
+            assert!(claim_signal_pipe().is_none());
+        }
         open_native_descriptors().unwrap();
         let (r, w) = claim_signal_pipe().unwrap();
         assert!(claim_signal_pipe().is_none());
@@ -599,6 +851,91 @@ mod tests {
         assert_eq!(rustix::io::read(r, &mut b), Err(rustix::io::Errno::AGAIN));
     }
 
+    /// `lean_run_main`'s choice: only exactly `0` keeps the calling thread.
+    #[test]
+    #[cfg(any(feature = "sched", feature = "threads"))]
+    fn main_uses_a_thread_unless_zero() {
+        assert!(main_uses_thread(None));
+        assert!(!main_uses_thread(Some(b"0")));
+        for v in [&b""[..], b"1", b"00", b" 0", b"0 ", b"false"] {
+            assert!(main_uses_thread(Some(v)), "{v:?}");
+        }
+    }
+
+    /// `run_main` runs the body on a new thread with the stack asked for,
+    /// which keeps the process's name (no name of its own, as `lthread`),
+    /// and returns its value; a panic of the body comes back as `Err`.
+    #[test]
+    #[cfg(any(feature = "sched", feature = "threads"))]
+    #[cfg_attr(miri, ignore)] // reads `/proc`
+    fn run_main_runs_on_a_thread_of_its_own() {
+        if std::env::var_os("LEAN_MAIN_USE_THREAD").is_some_and(|v| v == "0") {
+            eprintln!("LEAN_MAIN_USE_THREAD=0 in the environment: nothing checked");
+            return;
+        }
+        let comm = || std::fs::read_to_string("/proc/thread-self/comm").unwrap();
+        // libtest names its test threads; a new thread inherits the name of
+        // the thread that makes it, as natively `main`'s inherits the
+        // process's
+        let outer = (std::thread::current().id(), comm());
+        let size = 3 << 20;
+        let (id, name, on_thread, local) = run_main(size, move || {
+            let local = 0u8;
+            (
+                std::thread::current().id(),
+                comm(),
+                main_on_thread(),
+                std::ptr::addr_of!(local).addr(),
+            )
+        })
+        .unwrap();
+        assert_ne!(id, outer.0);
+        assert_eq!(name, outer.1);
+        assert!(on_thread);
+        // the body ran on a stack of its own: not on this thread's
+        let here = 0u8;
+        let distance = std::ptr::addr_of!(here).addr().abs_diff(local);
+        assert!(distance > 64 << 10, "{distance}");
+        let r = run_main(size, || -> u8 { panic!("a runtime bug") });
+        assert!(r.is_err());
+    }
+
+    /// A thread `run_main` cannot make (a stack larger than the address
+    /// space) ends the process with libc++'s report of Lean's uncaught
+    /// exception and an abort, as native's `lthread`. In a child process.
+    #[test]
+    #[cfg(any(feature = "sched", feature = "threads"))]
+    #[cfg_attr(miri, ignore)] // Miri runs no process
+    fn run_main_without_a_thread_aborts_as_native() {
+        const CHILD: &str = "LEAN_RUNTIME_TEST_RUN_MAIN_FAILS";
+        if std::env::var_os(CHILD).is_none() {
+            use std::os::unix::process::ExitStatusExt;
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "io::startup::tests::run_main_without_a_thread_aborts_as_native",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .env_remove("LEAN_MAIN_USE_THREAD")
+                .output()
+                .unwrap();
+            assert_eq!(out.status.signal(), Some(6), "{out:?}");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                err.contains(
+                    "libc++abi: terminating due to uncaught exception of type lean::exception: \
+                     failed to create thread: Resource temporarily unavailable\n"
+                ),
+                "{err}"
+            );
+            return;
+        }
+        let _ = run_main(1 << 62, || ());
+        unreachable!("the thread was made");
+    }
+
     #[test]
     fn atoi_is_c_atoi() {
         assert_eq!(atoi(b"1"), 1);
@@ -616,6 +953,55 @@ mod tests {
         assert_eq!(atoi(b"-9223372036854775808"), 0);
         assert_eq!(atoi(b"-9223372036854775809"), 0);
         assert_eq!(atoi(b"-4294967297"), -1);
+    }
+
+    /// The failure's line, built without an allocation, is the message
+    /// `StartupFailure::message` gives, with Lean's prefix; a code libuv
+    /// does not name gets its `Unknown system error` text.
+    #[test]
+    fn failure_lines() {
+        use std::fmt::Write;
+        for (f, text) in [
+            (
+                StartupFailure::SignalLock(24),
+                "Failed to initialize event loop: too many open files",
+            ),
+            (
+                StartupFailure::LoopInit(12),
+                "Failed to initialize event loop: not enough memory",
+            ),
+            (
+                StartupFailure::LoopInit(4000),
+                "Failed to initialize event loop: Unknown system error -4000",
+            ),
+        ] {
+            assert_eq!(f.message(), text);
+            let mut line = StackLine {
+                buf: [0; 256],
+                len: 0,
+            };
+            f.write_message(&mut line).unwrap();
+            assert_eq!(&line.buf[..line.len], text.as_bytes());
+        }
+        // a longer line is cut at the buffer's end
+        let mut line = StackLine {
+            buf: [0; 256],
+            len: 250,
+        };
+        line.write_str("0123456789").unwrap();
+        assert_eq!((line.len, &line.buf[250..]), (256, &b"012345"[..]));
+    }
+
+    /// libuv's `uv__slurp`: at most `len - 1` bytes, the file's start.
+    #[test]
+    #[cfg_attr(miri, ignore)] // reads `/proc`
+    fn slurp_reads_one_buffer_less_one() {
+        let mut buf = [0u8; 8];
+        let got = slurp(c"/proc/self/stat", &mut buf).unwrap();
+        assert_eq!(got.len(), 7);
+        let whole = std::fs::read("/proc/self/stat").unwrap();
+        assert_eq!(got, &whole[..7]);
+        assert_eq!(slurp(c"/nonexistent/file", &mut buf), None);
     }
 
     #[test]

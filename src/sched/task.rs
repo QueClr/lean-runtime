@@ -2571,6 +2571,7 @@ fn walk_above(floor: usize) {
 /// task is finished; at priority `LEAN_SYNC_PRIO` it runs at once as a task
 /// on the current thread; otherwise it is deferred.
 pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
+    super::ensure_started();
     super::writers_point();
     if !with(|s| s.tk.started) {
         let _ = job();
@@ -2592,6 +2593,7 @@ pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
 /// `lean_task_bind_core`). The translator then does that itself instead of
 /// calling `depend`.
 pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
+    super::ensure_started();
     with(|s| !s.tk.started || (sync && s.find(src).is_none()))
 }
 
@@ -2601,6 +2603,7 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
 /// dependent runs there and then on the finishing thread, the others are
 /// queued. Requires `!dependent_runs_now(src, sync)`.
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId {
+    super::ensure_started();
     super::writers_point();
     let (i, now, id) = with(|s| {
         let (i, _) = s.register(job, prio, keep_alive, true);
@@ -2865,6 +2868,7 @@ pub fn tid_offset() -> u64 {
 /// resolution (docs/sched.md, "The glue", item 4; case
 /// `tasks/promise_result_opt`).
 pub fn promise_new() -> Result<TaskId, &'static str> {
+    super::ensure_started();
     with(|s| {
         if !s.tk.started {
             return Err(PROMISE_BEFORE_MANAGER);
@@ -2980,7 +2984,8 @@ pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str))
 /// their streams, before it waits for the dedicated threads (reviews AR-33,
 /// AR-34). Then, with `io`, it waits for the io layer's dedicated tasks
 /// (`io::exit::after_main`: `IO.Process.output`'s standard-output readers),
-/// also in a program that started no task.
+/// also in a program that started no task, and after a [`super::start_lazy`]
+/// whose scheduler was never built (then nothing is built here either).
 pub fn finish() {
     // `main`'s own deferred resolutions, if a drain's end was not reported
     // (R6 when a context ends: debug builds report them)
@@ -3003,9 +3008,10 @@ fn end_workers() {
     }
 }
 
-/// [`finish`]'s run of the remaining tasks.
+/// [`finish`]'s run of the remaining tasks: none when the lazy start never
+/// came ([`super::start_lazy`]: nothing is built then either).
 fn finish_tasks() {
-    if !with(|s| s.tk.started) {
+    if super::start_pending_only() || !with(|s| s.tk.started) {
         return;
     }
     with(|s| s.shutdown());
@@ -3048,6 +3054,12 @@ pub fn poll() {
 /// `panic = "abort"` anyway; docs/sched.md, "Costs to measure").
 #[inline(never)]
 extern "C" fn poll_check() {
+    // before the task manager runs there is nothing to run, and no scheduler
+    // state is built (fixes-6's rule; review RSH2-01): `tk.started` and
+    // `MANAGER` are set together, in `start_with` only
+    if !manager_running() {
+        return;
+    }
     let go = with(|s| {
         if !s.tk.started
             || (s.cx.sleepers.is_empty()

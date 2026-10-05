@@ -64,7 +64,7 @@ It is built to be shared by two Lean <a href="glossary.html#g-translator">transl
     <h3>Safe Rust</h3>
     <p>The crate root denies <code>unsafe</code> code: <code>#![deny(unsafe_code)]</code>.
     System calls go through vetted crates.
-    A file may allow <code>unsafe</code> only with an entry in <a href="../UNSAFE.md">UNSAFE.md</a>: so far two <a href="glossary.html#g-quirk">native quirks</a>, behind the features <a href="glossary.html#g-proc-title"><code>proc-title</code></a> and <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a>.
+    A file may allow <code>unsafe</code> only with an entry in <a href="../UNSAFE.md">UNSAFE.md</a>: so far three <a href="glossary.html#g-quirk">native quirks</a>, behind the features <a href="glossary.html#g-proc-title"><code>proc-title</code></a>, <a href="glossary.html#g-startup-fds"><code>startup-fds</code></a> and <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a>.
     Without them, the crate's own code has no <code>unsafe</code>, since <code>unsafe-fast</code> has no entries yet.</p>
   </div>
   <div class="card">

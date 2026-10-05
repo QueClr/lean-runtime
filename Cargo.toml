@@ -13,8 +13,9 @@ path = "src/lib.rs"
 # system calls and stack switches through vetted crates, so that the crate
 # itself stays free of `unsafe` (except the native quirks of UNSAFE.md, each
 # behind a feature of its own: so far `proc-title`, the write of the process
-# title into the arguments' memory, and `stack-overflow`, Lean's
-# stack-overflow report for the scheduler's contexts):
+# title into the arguments' memory, `startup-fds`, the constructor that opens
+# libuv's startup descriptors, and `stack-overflow`, Lean's stack-overflow
+# report for the scheduler's contexts):
 # - `io`: rustix (the FILE model's descriptor calls, the clock, waitpid, kill,
 #   the scheduling priority), nix (process-level libc calls: posix_spawn,
 #   unshare, poll, the password and group databases, getrusage,
@@ -26,6 +27,9 @@ path = "src/lib.rs"
 #   rustix (the event loop's epoll and poll; sched-io), and signal-hook (the
 #   `Std.Internal.UV.Signal` watchers: its safe flag, self-pipe and
 #   conditional default actions; accepted by the owner, 2026-10-04);
+# - `proc-title`: rustix's `mm` (the `mmap` of the constructor's block,
+#   AR-36); `startup-fds`: nix's re-exported libc (`getenv` in the
+#   constructor, which reads the environment without allocating);
 # - `stack-overflow`: nix (its `sigaction` and re-exported libc, for the
 #   native quirk of Lean's stack-overflow report, `sched::stack_overflow`;
 #   AR-11).
@@ -81,8 +85,22 @@ net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
 # crate's ELF constructor keeps the arguments' memory, and `setProcessTitle`
 # writes the title there, as libuv does. lean2rr enables it. Without it,
 # `setProcessTitle` fails with ENOBUFS, as libuv does when it holds no
-# arguments' memory, and `getProcessTitle` gives `argv[0]`.
-proc-title = ["io"]
+# arguments' memory, and `getProcessTitle` gives `argv[0]`. The constructor
+# uses no global allocator (AR-36): it copies the arguments into a block of
+# its own that it maps with rustix's `mmap` (its `mm` feature: no new crate).
+proc-title = ["io", "rustix/mm"]
+# The descriptors native Lean opens before `main` (libuv's loop: epoll, the
+# io_uring rings, the signal lock pipe, the signal pipe, the eventfd), opened
+# by an ELF constructor of the crate (`io::startup`'s native quirk, written
+# with `unsafe`: UNSAFE.md, docs/native-quirks.md; audit item 4.3), before
+# Rust's runtime puts `/dev/null` in the place of a closed standard
+# descriptor, so a closed standard descriptor is taken by the first of them,
+# as natively. Its section `.init_array.00101` makes it run right after
+# `proc-title`'s (AR-20). It acts only in the program's own executable,
+# never in a shared library (RSH2-02), and uses no global allocator (AR-36).
+# lean2rr enables it. Without it, a translator that wants native's descriptors writes
+# the constructor in its own glue (`io::startup::open_native_descriptors`).
+startup-fds = ["io"]
 # Lean's stack-overflow report for the scheduler's contexts and the threads
 # that run them (`sched::stack_overflow`, a native quirk written with
 # `unsafe`: UNSAFE.md, docs/native-quirks.md, AR-11):
@@ -99,9 +117,9 @@ stack-overflow = ["dep:nix"]
 # docs/development.md).
 unsafe-fast = []
 # The crate's own code contains no `unsafe` unless `proc-title`,
-# `stack-overflow` or `unsafe-fast` is enabled: without them the crate root
-# forbids it. The
-# `unsafe` of the dependencies is audited in UNSAFE.md.
+# `startup-fds`, `stack-overflow` or `unsafe-fast` is enabled: without them
+# the crate root forbids it. The `unsafe` of the dependencies is audited in
+# UNSAFE.md.
 
 # The io program cases on the model (tests/io_cases.rs): the binary is also
 # each case's twin, so it runs without libtest.
@@ -116,6 +134,14 @@ required-features = ["io"]
 # title run only with `proc-title`.
 [[test]]
 name = "io2_cases"
+harness = false
+required-features = ["io"]
+
+# AR-36: the crate's ELF constructors (`proc-title`'s and `startup-fds`'s)
+# use no global allocator (tests/ctor_alloc.rs, a binary of its own with a
+# counting allocator; without libtest, which allocates before `main`).
+[[test]]
+name = "ctor_alloc"
 harness = false
 required-features = ["io"]
 

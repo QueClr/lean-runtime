@@ -90,6 +90,11 @@ pub(crate) fn meta(id: &str) -> (Option<u64>, bool) {
 }
 
 pub(crate) fn run(id: &str) -> Outcome {
+    run_env(id, &[])
+}
+
+/// [`run`] with `extra` added to the case's environment.
+pub(crate) fn run_env(id: &str, extra: &[(String, String)]) -> Outcome {
     let dir = case_dir(id);
     for f in [".stdin", ".files"] {
         assert!(
@@ -117,6 +122,7 @@ pub(crate) fn run(id: &str) -> Outcome {
                 .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
         })
         .collect();
+    let env: Vec<(String, String)> = env.into_iter().chain(extra.iter().cloned()).collect();
     let (hang, merged) = meta(id);
     run_with(id, &args, &env, hang, merged)
 }

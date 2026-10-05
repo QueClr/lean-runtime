@@ -3069,6 +3069,11 @@ fn main() {
         .find(|(n, _)| *n == name)
         .or_else(|| TWINS.iter().find(|(n, _)| *n == argv0_name))
     {
+        // with `startup-fds`, a glue's call at `main`'s start (the crate's
+        // constructor opened native's startup descriptors; this keeps it
+        // linked)
+        #[cfg(feature = "startup-fds")]
+        lean_runtime::io::startup::ensure_native_descriptors();
         let args: Vec<String> = std::env::args().skip(1).collect();
         // a threads build runs the twin inside a task (`in_task`)
         #[cfg(feature = "threads")]

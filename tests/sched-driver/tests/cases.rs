@@ -33,9 +33,13 @@ const WITH_TASKS: &[(&str, &str)] = &[
 ];
 
 fn check(id: &str) {
+    check_env(id, &[]);
+}
+
+fn check_env(id: &str, extra: &[(String, String)]) {
     let exp = expected(id);
     assert!(!exp.is_empty(), "{id}: no recorded outcome");
-    let got = run(id);
+    let got = run_env(id, extra);
     let ok = exp
         .iter()
         .any(|e| e.out == got.out && e.err == got.err && e.code == got.code);
@@ -49,6 +53,36 @@ fn check(id: &str) {
         String::from_utf8_lossy(&exp[0].out),
         String::from_utf8_lossy(&exp[0].err),
     );
+}
+
+/// The glue's lazy start (`sched::start_lazy`, lean2rr's; review RSH2-09):
+/// cases whose first scheduler use is each kind of entry point (a task, a
+/// promise, `Std.Sync` objects, a timer, a signal watcher, the loop's
+/// configuration, `ST.Ref` reads polled by `main`, a TCP and a UDP socket,
+/// a DNS lookup) give their recorded outcomes with the scheduler built
+/// there, not at `main`'s start. The glue asserts that nothing is built at
+/// `start_lazy` and that the scheduler was built by the end of `main`, so
+/// the test fails if the lazy path is not taken (review RSH2-12: checked
+/// with `start_lazy` mutated into `start_with`).
+#[test]
+fn lazy_start_cases() {
+    let lazy = [("SCHED_DRIVER_LAZY".to_string(), "1".to_string())];
+    for id in [
+        "promise_across_tasks",
+        "dropped_pure_task",
+        "mutex_handoff",
+        "recursive_mutex",
+        "condvar_turns",
+        "timer_oneshot",
+        "signal_usr1",
+        "loop_configure",
+        "lost_update",
+        "tcp_echo",
+        "udp_basic",
+        "dns_localhost",
+    ] {
+        check_env(id, &lazy);
+    }
 }
 
 /// Every case of the areas has a port (no case is left out silently).

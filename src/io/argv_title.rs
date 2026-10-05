@@ -37,9 +37,12 @@
 //! `main`'s `argc` and `argv` before `main` (glibc calls each `.init_array`
 //! function with `argc`, `argv` and `envp`), so no translator's glue takes
 //! part. It does what `uv_setup_args` does: it computes `cap` as libuv does,
-//! keeps the memory's start and `cap`, copies `argv[0]` as the first title,
-//! copies every argument into a block of its own (leaked, as libuv's
-//! `args_mem`) and points the table at the copies. So `main`'s `argv`, glibc's
+//! keeps the memory's start and `cap`, copies every argument into a block of
+//! its own (never unmapped, as libuv's `args_mem` is never freed), with a
+//! further copy of `argv[0]` after them as the first title, and points the
+//! table at the copies. It allocates nothing (AR-36): it maps the block
+//! itself and reads `/proc` into stack buffers, so no global allocator is
+//! set up before the program configures it. So `main`'s `argv`, glibc's
 //! `__libc_argv` and `std::env::args` give the original arguments for good,
 //! as Lean's `args` are natively, and no safe code reaches the arguments'
 //! memory. Each `setProcessTitle` then writes that memory exactly as libuv's
@@ -54,8 +57,9 @@
 //! (priority 90: the detection of the aarch64 CPU's features, by compiler-rt
 //! or libgcc, and libstdc++'s streams; 99: std's record of `argc` and
 //! `argv`), and before the executable's other constructors, with a priority
-//! above 100 or none. Among those are the translators' startup
-//! constructors, which open libuv's eight startup descriptors: under
+//! above 100 or none. Among those are the startup constructors (the crate's,
+//! feature `startup-fds`, priority 101, or a translator's own), which open
+//! libuv's eight startup descriptors: under
 //! `ulimit -n 12` one descriptor is left after them, and the checks below
 //! need two (`/proc/self/task` and a task's `stat` are open together).
 //! Shared libraries' constructors and `.preinit_array` still run before it
@@ -84,7 +88,9 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 
+use super::proc_stat::{in_main_executable, read_proc, stat_field, STAT_BUF};
 use std::ffi::{c_char, c_int, CStr};
+use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicPtr;
 use std::sync::{Mutex, PoisonError};
 
@@ -93,9 +99,9 @@ use std::sync::{Mutex, PoisonError};
 ///
 /// Invariant (R): `start` is valid for writes of `cap` bytes for the rest of
 /// the process, `cap >= 1`, and nothing outside this file accesses those
-/// bytes while this file writes them. Only [`Region::from_argv`], an `unsafe
-/// fn` whose contract gives R, makes a `Region` (`docs/native-quirks.md`,
-/// I1 to I7).
+/// bytes while this file writes them. A `Region` is made only from the
+/// [`Bounds`] that [`Region::from_argv`] returns, an `unsafe fn` whose
+/// contract gives R (`docs/native-quirks.md`, I1 to I7).
 struct Region {
     /// `argv[0]`: the first byte. An `AtomicPtr` only so that `Region` is
     /// `Send` (and [`REGION`] a valid `static`) without an `unsafe impl`; it
@@ -103,9 +109,19 @@ struct Region {
     start: AtomicPtr<u8>,
     /// libuv's `pt.cap`.
     cap: usize,
-    /// `argv[0]`'s bytes, copied in [`setup_args`]: the title before any
-    /// `setProcessTitle`.
-    first: Vec<u8>,
+    /// `argv[0]`'s bytes, copied in [`setup_args`] into the block of copies,
+    /// after the arguments' copies, where the table does not point: the title
+    /// before any `setProcessTitle`. Not a `Vec`: the constructor allocates
+    /// nothing (AR-36).
+    first: &'static [u8],
+}
+
+/// What [`Region::from_argv`] checked: the memory's first byte, libuv's
+/// `cap`, and `strlen(argv[0])` (`cap > first_len`).
+struct Bounds {
+    start: *mut u8,
+    cap: usize,
+    first_len: usize,
 }
 
 /// What [`setup_args`] kept: `None` before it ran, or when it could not check
@@ -119,7 +135,7 @@ impl Region {
     /// to the NUL ending `argv[argc - 1]`. `None` with `argc <= 0`, as
     /// libuv keeps nothing then, and when the memory is not inside `span`
     /// (`arg_start`, `arg_end`: the kernel's span of the arguments), or does
-    /// not start with `argv[0]` and its NUL.
+    /// not start with `argv[0]` and its NUL. Reads only; allocates nothing.
     ///
     /// # Safety
     ///
@@ -127,15 +143,15 @@ impl Region {
     ///   `argc` pointers.
     /// - **C2.** `argv[0]` and `argv[argc - 1]`, when not null, point to
     ///   NUL-terminated strings, and the bytes of `span` are valid for reads
-    ///   and writes for as long as the `Region` is used.
-    /// - **C3.** While the `Region` is used, no code outside this file
+    ///   and writes for as long as a `Region` made from the bounds is used.
+    /// - **C3.** While that `Region` is used, no code outside this file
     ///   accesses the bytes of `span` at the same time as this file, and no
     ///   reference into them is live across [`Region::write`].
     unsafe fn from_argv(
         argc: c_int,
         argv: *const *mut c_char,
         span: (usize, usize),
-    ) -> Option<Region> {
+    ) -> Option<Bounds> {
         if argc <= 0 || argv.is_null() {
             return None;
         }
@@ -150,7 +166,7 @@ impl Region {
         // SAFETY: (U2) C2: `argv[0]` points to a NUL-terminated string,
         // readable, which nothing writes during this call (C3, and this
         // file holds `REGION`'s lock, which every write of its own holds).
-        let first_bytes = unsafe { CStr::from_ptr(first) }.to_bytes().to_vec();
+        let first_len = unsafe { CStr::from_ptr(first) }.to_bytes().len();
         // SAFETY: (U2) as above, for `argv[argc - 1]`.
         let last_len = unsafe { CStr::from_ptr(last) }.to_bytes().len();
         // libuv: `pt.cap = argv[argc - 1] + strlen(argv[argc - 1]) + 1 - argv[0]`
@@ -158,18 +174,29 @@ impl Region {
         let cap = end.checked_sub(first.addr())?;
         // the memory starts with `argv[0]` and its NUL, and lies inside the
         // kernel's span (on a normal `execve`, it is exactly the span)
-        if cap <= first_bytes.len() || first.addr() < span.0 || end > span.1 {
+        if cap <= first_len || first.addr() < span.0 || end > span.1 {
             return None;
         }
-        Some(Region {
-            start: AtomicPtr::new(first.cast::<u8>()),
+        Some(Bounds {
+            start: first.cast::<u8>(),
             cap,
-            first: first_bytes,
+            first_len,
         })
     }
 
+    /// The region of `bounds`, which [`Region::from_argv`] returned, with
+    /// `first` as its first title.
+    fn new(bounds: Bounds, first: &'static [u8]) -> Region {
+        Region {
+            start: AtomicPtr::new(bounds.start),
+            cap: bounds.cap,
+            first,
+        }
+    }
+
     /// `uv_set_process_title`'s write: `title` cut to `cap - 1` bytes, then
-    /// NUL bytes to the end of the memory. Returns the length kept.
+    /// NUL bytes to the end of the memory. Returns the length kept. (Called
+    /// by `setProcessTitle`, not by the constructor: it may allocate.)
     fn write(&mut self, title: &[u8]) -> usize {
         // libuv: `if (len >= pt->cap) len = pt->cap - 1` (`cap >= 1` by R)
         let len = title.len().min(self.cap - 1);
@@ -188,66 +215,117 @@ impl Region {
     }
 }
 
-/// libuv's `args_mem`: copies every argument into one block, which it never
-/// frees, and points `argv`'s entries at the copies (null entries stay
-/// null). Returns the block, for a test to free.
+/// The block [`copy_and_repoint`] mapped: its first byte and its length (0
+/// for no block). Never unmapped, as libuv's `args_mem` is never freed;
+/// only the unit tests unmap theirs (and read these fields).
+#[cfg_attr(not(test), allow(dead_code))]
+struct Block {
+    base: *mut u8,
+    len: usize,
+}
+
+/// libuv's `args_mem`: copies every argument (with its NUL) into one block,
+/// which it maps for them (`mmap`, private and anonymous: no allocator, so
+/// none is set up in the constructor, AR-36) and never unmaps, and points
+/// `argv`'s entries at the copies (null entries stay null). After them it
+/// copies `argv[0]` once more, without its NUL, where the table does not
+/// point: the region's first title. `None`, with nothing changed, when the
+/// block cannot be mapped.
 ///
 /// # Safety
 ///
 /// - **C4.** `argv` is valid and aligned for reading and writing `argc`
 ///   pointers, each null or pointing to a NUL-terminated string, and no other
 ///   thread runs.
-unsafe fn copy_and_repoint(argc: usize, argv: *mut *mut c_char) -> *mut [u8] {
-    let mut block = Vec::new();
-    let mut offsets = Vec::with_capacity(argc);
+unsafe fn copy_and_repoint(argc: usize, argv: *mut *mut c_char) -> Option<(Block, &'static [u8])> {
+    use rustix::mm::{mmap_anonymous, MapFlags, ProtFlags};
+    // the lengths: every string with its NUL, then `argv[0]` without it
+    let mut total = 0usize;
+    let mut first_len = 0;
     for i in 0..argc {
         // SAFETY: (U1) C4: `i < argc`.
         let p = unsafe { *argv.add(i) };
         if p.is_null() {
-            offsets.push(None);
             continue;
         }
-        offsets.push(Some(block.len()));
         // SAFETY: (U2) C4: a NUL-terminated string, and no thread writes it.
-        block.extend_from_slice(unsafe { CStr::from_ptr(p) }.to_bytes_with_nul());
-    }
-    let block: *mut [u8] = Box::into_raw(block.into_boxed_slice());
-    let base = block.cast::<u8>();
-    for (i, offset) in offsets.into_iter().enumerate() {
-        if let Some(o) = offset {
-            // SAFETY: `o` is the start of a copy inside the block, which lives
-            // until a test frees it (never, outside the tests).
-            let copy = unsafe { base.add(o) }.cast::<c_char>();
-            // SAFETY: (U4) C4: `i < argc`, the table is valid for writes, and
-            // no other thread reads it.
-            unsafe { *argv.add(i) = copy };
+        let n = unsafe { CStr::from_ptr(p) }.to_bytes().len();
+        if i == 0 {
+            first_len = n;
         }
+        total = total.checked_add(n)?.checked_add(1)?;
     }
-    block
+    let len = total.checked_add(first_len)?;
+    if len == 0 {
+        let none = Block {
+            base: std::ptr::null_mut(),
+            len: 0,
+        };
+        return Some((none, &[]));
+    }
+    // SAFETY: (U5) a new private anonymous mapping at an address the kernel
+    // chooses (a null hint without `MAP_FIXED`), so it replaces no memory.
+    let base = unsafe {
+        mmap_anonymous(
+            std::ptr::null_mut(),
+            len,
+            ProtFlags::READ | ProtFlags::WRITE,
+            MapFlags::PRIVATE,
+        )
+    }
+    .ok()?
+    .cast::<u8>();
+    // SAFETY: (U6) the mapping is `len` bytes, readable, writable and
+    // zero-filled, at `base`, which `mmap` aligned to a page; it is
+    // never unmapped (outside the unit tests, which unmap only after their
+    // last use), so it lives for the rest of the process; nothing else knows
+    // it yet, and the table's entries are made from `base`, not from this
+    // slice, after its last write.
+    let all: &'static mut [u8] = unsafe { std::slice::from_raw_parts_mut(base, len) };
+    let (copies, first) = all.split_at_mut(total);
+    let mut at = 0;
+    for i in 0..argc {
+        // SAFETY: (U1) C4: `i < argc`.
+        let p = unsafe { *argv.add(i) };
+        if p.is_null() {
+            continue;
+        }
+        // SAFETY: (U2) C4: a NUL-terminated string, and no thread writes it,
+        // so it has the length counted above.
+        let s = unsafe { CStr::from_ptr(p) }.to_bytes_with_nul();
+        copies[at..at + s.len()].copy_from_slice(s);
+        if i == 0 {
+            first.copy_from_slice(&s[..first_len]);
+        }
+        at += s.len();
+    }
+    let first: &'static [u8] = first;
+    let mut at = 0;
+    for i in 0..argc {
+        // SAFETY: (U1) C4: `i < argc`.
+        let p = unsafe { *argv.add(i) };
+        if p.is_null() {
+            continue;
+        }
+        // SAFETY: (U2) as above: the original string, unchanged.
+        let n = unsafe { CStr::from_ptr(p) }.to_bytes_with_nul().len();
+        // SAFETY: `at` is the start of this string's copy, inside the block
+        // (`at + n <= total <= len`).
+        let copy = unsafe { base.add(at) }.cast::<c_char>();
+        // SAFETY: (U4) C4: `i < argc`, the table is valid for writes, and
+        // no other thread reads it.
+        unsafe { *argv.add(i) = copy };
+        at += n;
+    }
+    Some((Block { base, len }, first))
 }
 
 /// `arg_start` and `arg_end` of `/proc/self/stat` (fields 48 and 49): where
 /// the kernel put the arguments' strings. Read with safe code.
+#[cfg(test)]
 fn kernel_arg_span() -> Option<(usize, usize)> {
-    arg_span_of(&std::fs::read("/proc/self/stat").ok()?)
-}
-
-/// The fields after `comm` of a `/proc/<pid>/stat` line, from field 3 on
-/// (`comm` may hold spaces and `)`: it ends at the last `)`).
-fn stat_fields(stat: &[u8]) -> Vec<&[u8]> {
-    let rest = match stat.iter().rposition(|&b| b == b')') {
-        Some(at) => &stat[at + 1..],
-        None => &[][..],
-    };
-    rest.split(|b| b.is_ascii_whitespace())
-        .filter(|f| !f.is_empty())
-        .collect()
-}
-
-/// Field `n` (from 1) of a `/proc/<pid>/stat` line, as a number.
-fn stat_field(stat: &[u8], n: usize) -> Option<usize> {
-    let f = *stat_fields(stat).get(n.checked_sub(3)?)?;
-    std::str::from_utf8(f).ok()?.parse().ok()
+    let mut buf = [0u8; STAT_BUF];
+    arg_span_of(read_proc(None, c"/proc/self/stat", &mut buf)?)
 }
 
 fn arg_span_of(stat: &[u8]) -> Option<(usize, usize)> {
@@ -277,23 +355,51 @@ fn major_minor_of(release: &[u8]) -> Option<(u32, u32)> {
     Some((number()?, number()?))
 }
 
+/// `<name>/stat` as a C string in `buf` (a task's directory under
+/// `/proc/self/task`), `None` if it does not fit.
+fn task_stat_path<'a>(name: &[u8], buf: &'a mut [u8; 32]) -> Option<&'a CStr> {
+    let tail = b"/stat\0";
+    let n = name.len().checked_add(tail.len())?;
+    if n > buf.len() {
+        return None;
+    }
+    buf[..name.len()].copy_from_slice(name);
+    buf[name.len()..n].copy_from_slice(tail);
+    CStr::from_bytes_with_nul(&buf[..n]).ok()
+}
+
 /// Whether no other thread of the process runs code of the process: every
 /// task in `/proc/self/task` but this one is an io_uring kernel thread (such
 /// as the polling ring's, when the startup descriptors are already open).
 /// io_uring kernel threads are told apart only on Linux 5.12 or later
-/// (review of quirks-1); on an older kernel any other task counts.
+/// (review of quirks-1); on an older kernel any other task counts. The
+/// directory is listed into a stack buffer (rustix's `RawDir`) and each
+/// task's `stat` read into another: no allocation (AR-36).
 fn no_other_thread() -> bool {
+    use rustix::fs::{openat, Mode, OFlags, RawDir, CWD};
     let io_workers_known = kernel_major_minor().is_some_and(|v| v >= (5, 12));
-    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+    let Ok(dir) = openat(CWD, c"/proc/self/task", flags, Mode::empty()) else {
         return false;
     };
+    let mut entries = [MaybeUninit::<u8>::uninit(); 2048];
+    let mut tasks = RawDir::new(&dir, &mut entries);
     let mut others = 0;
-    for t in tasks {
+    while let Some(t) = tasks.next() {
         let Ok(t) = t else { return false };
-        let Ok(stat) = std::fs::read(t.path().join("stat")) else {
+        let name = t.file_name().to_bytes();
+        if name == b"." || name == b".." {
+            continue;
+        }
+        let mut path = [0u8; 32];
+        let Some(path) = task_stat_path(name, &mut path) else {
             return false;
         };
-        match stat_field(&stat, 9) {
+        let mut buf = [0u8; STAT_BUF];
+        let Some(stat) = read_proc(Some(rustix::fd::AsFd::as_fd(&dir)), path, &mut buf) else {
+            return false;
+        };
+        match stat_field(stat, 9) {
             Some(flags) if io_workers_known && flags & PF_IO_WORKER != 0 => {}
             Some(_) => others += 1,
             None => return false,
@@ -302,34 +408,11 @@ fn no_other_thread() -> bool {
     others == 1
 }
 
-/// Whether `code`, an address in this crate's code, lies in the program's
-/// own executable rather than in a shared library: inside the kernel's
-/// record of the program's code, `start_code` to `end_code`
-/// (`/proc/self/stat`, fields 26 and 27; leanrs's review of quirks-1:
-/// comparing the device and inode of `/proc/self/maps` and
-/// `/proc/self/exe` fails on btrfs and older overlayfs). `None` when that
-/// cannot be told (no `/proc`, the fields hidden).
-///
-/// A program started through the dynamic loader (`ld.so ./prog`) reads as
-/// not in the executable: the kernel's record is then the loader's code. That
-/// launch keeps "no arguments" (`ENOBUFS`), where native writes the title: a
-/// judged deviation (LQ1-01, `docs/native-quirks.md`).
-fn in_main_executable(code: usize) -> Option<bool> {
-    code_span_of(&std::fs::read("/proc/self/stat").ok()?)
-        .map(|(start, end)| (start..end).contains(&code))
-}
-
-/// `start_code` and `end_code` of a `/proc/<pid>/stat` line (fields 26 and
-/// 27); `None` when they are missing, or hidden from a reader without
-/// permission (the kernel then shows both as 1: an empty span).
-fn code_span_of(stat: &[u8]) -> Option<(usize, usize)> {
-    let (start, end) = (stat_field(stat, 26)?, stat_field(stat, 27)?);
-    (start < end).then_some((start, end))
-}
-
 /// libuv's `uv_setup_args`, called once by the constructor below: checks what
 /// it would write, then keeps the region and repoints the table (see the
-/// module comment). `code` is the constructor's address.
+/// module comment). `code` is the constructor's address. It allocates
+/// nothing (AR-36): `/proc` is read into stack buffers, the copies go to a
+/// block it maps, and `REGION`'s lock is a `std` mutex (a futex).
 ///
 /// # Safety
 ///
@@ -348,7 +431,13 @@ unsafe fn setup_args(argc: c_int, argv: *mut *mut c_char, code: usize) {
         *g = Some(None);
         return;
     }
-    match in_main_executable(code) {
+    // `/proc/self/stat`, read once: the program's code (`start_code`,
+    // `end_code`) and the arguments' span (`arg_start`, `arg_end`)
+    let mut stat = [0u8; STAT_BUF];
+    let Some(stat) = read_proc(None, c"/proc/self/stat", &mut stat) else {
+        return;
+    };
+    match in_main_executable(stat, code) {
         // the crate is in the program's executable: its constructor runs
         // before `main`
         Some(true) => {}
@@ -363,7 +452,7 @@ unsafe fn setup_args(argc: c_int, argv: *mut *mut c_char, code: usize) {
     if !no_other_thread() {
         return;
     }
-    let Some(span) = kernel_arg_span() else {
+    let Some(span) = arg_span_of(stat) else {
         return;
     };
     // SAFETY: by C5 (the program's own constructor, before `main`) and
@@ -373,13 +462,16 @@ unsafe fn setup_args(argc: c_int, argv: *mut *mut c_char, code: usize) {
     // process, which stays mapped; C3, as no other thread runs now, the
     // table is repointed below, and `REGION` keeps the region for the rest
     // of the process.
-    let Some(region) = (unsafe { Region::from_argv(argc, argv, span) }) else {
+    let Some(bounds) = (unsafe { Region::from_argv(argc, argv, span) }) else {
         return;
     };
     // SAFETY: C4: glibc's table holds `argc` pointers to the arguments, on the
     // writable stack, and no other thread runs (checked above).
-    let _ = unsafe { copy_and_repoint(argc as usize, argv) };
-    *g = Some(Some(region));
+    let Some((_, first)) = (unsafe { copy_and_repoint(argc as usize, argv) }) else {
+        return;
+    };
+    debug_assert_eq!(first.len(), bounds.first_len);
+    *g = Some(Some(Region::new(bounds, first)));
 }
 
 /// The ELF constructor: glibc calls each `.init_array` function with `main`'s
@@ -389,9 +481,9 @@ unsafe fn setup_args(argc: c_int, argv: *mut *mut c_char, code: usize) {
 ///
 /// Its section `.init_array.00100` makes it the executable's first
 /// constructor after the toolchain's own (priorities 90 and 99), before
-/// every constructor with a higher priority or none, such as the
-/// translators' startup descriptors (AR-20; the module comment, "When it
-/// runs").
+/// every constructor with a higher priority or none, such as the startup
+/// descriptors' (`startup-fds`, 101, or a translator's own; AR-20; the
+/// module comment, "When it runs").
 #[cfg(all(target_os = "linux", target_env = "gnu", not(miri)))]
 mod constructor {
     use std::ffi::{c_char, c_int};
@@ -401,9 +493,9 @@ mod constructor {
         // process's `argc` and `argv` (`main`'s), and `hand_in_arguments` is
         // the function it called; `setup_args` reads nothing unless this
         // function is in the program's own executable, whose constructors
-        // run before `main`. Nothing in `setup_args` unwinds but a failed
-        // allocation, which aborts; an unwind could not leave this
-        // `extern "C"` function anyway (Rust aborts).
+        // run before `main`. Nothing in `setup_args` unwinds (it allocates
+        // nothing); an unwind could not leave this `extern "C"` function
+        // anyway (Rust aborts).
         unsafe { super::setup_args(argc, argv, (hand_in_arguments as *const ()).addr()) }
     }
 
@@ -443,7 +535,7 @@ pub(crate) fn initial() -> Setup {
     match &*g {
         None => Setup::NotCalled,
         Some(None) => Setup::NoArguments,
-        Some(Some(r)) => Setup::Arguments(r.first.clone(), r.cap),
+        Some(Some(r)) => Setup::Arguments(r.first.to_vec(), r.cap),
     }
 }
 
@@ -467,10 +559,13 @@ mod tests {
         offsets: Vec<usize>,
         /// The arguments' bytes (the kernel's `arg_end - arg_start`).
         len: usize,
+        /// `argv[0]`, for the region's first title (`setup_args` copies it
+        /// into its block).
+        first: &'static [u8],
     }
 
     impl Args {
-        fn new(args: &[&str], env: &str) -> Args {
+        fn new(args: &[&'static str], env: &str) -> Args {
             let mut block = Vec::new();
             let mut offsets = Vec::new();
             for a in args {
@@ -485,12 +580,14 @@ mod tests {
                 block,
                 offsets,
                 len,
+                first: args[0].as_bytes(),
             }
         }
 
         /// A region over the block, with the arguments' bytes as the
         /// kernel's span, used and dropped by `f` before the block is read
-        /// again.
+        /// again. Its first title is `argv[0]`'s bytes, as `setup_args`
+        /// copies them.
         fn with_region<R>(&mut self, f: impl FnOnce(Option<&mut Region>) -> R) -> R {
             let base = self.block.as_mut_ptr();
             let table: Vec<*mut c_char> = self
@@ -505,7 +602,11 @@ mod tests {
             // laid out one after another in `block`, which holds `span`,
             // outlives the region, and which nothing else touches until `f`
             // returns.
-            let mut r = unsafe { Region::from_argv(argc, table.as_ptr(), span) };
+            let b = unsafe { Region::from_argv(argc, table.as_ptr(), span) };
+            let mut r = b.map(|b| {
+                assert_eq!(b.first_len, self.first.len());
+                Region::new(b, self.first)
+            });
             f(r.as_mut())
         }
     }
@@ -567,10 +668,9 @@ mod tests {
         assert!(unsafe { Region::from_argv(2, table.as_ptr(), span) }.is_none());
         // the same table inside a span that holds it is kept
         let wide = (base.addr(), base.addr() + block.len());
-        // SAFETY: as above; the region is dropped at once.
-        let r = unsafe { Region::from_argv(2, table.as_ptr(), wide) }.unwrap();
-        assert_eq!(r.cap, 18);
-        drop(r);
+        // SAFETY: as above; the bounds are not used further.
+        let b = unsafe { Region::from_argv(2, table.as_ptr(), wide) }.unwrap();
+        assert_eq!((b.cap, b.first_len), (18, 4));
         // a span that starts after `argv[0]` keeps nothing either
         let late = (base.addr() + 1, base.addr() + block.len());
         // SAFETY: as above.
@@ -594,10 +694,11 @@ mod tests {
         // the 9 bytes from the first to the end of the second are in
         // `block`, which outlives the region and which nothing else touches
         // until it is dropped.
-        let mut r = unsafe { Region::from_argv(2, table.as_ptr(), span) }.unwrap();
-        assert_eq!((r.first.as_slice(), r.cap), (&b"a"[..], 9));
+        let b = unsafe { Region::from_argv(2, table.as_ptr(), span) }.unwrap();
+        assert_eq!((b.first_len, b.cap), (1, 9));
+        let mut r = Region::new(b, b"a");
         assert_eq!(r.write(b"0123456789"), 8);
-        drop(r);
+        // the region is not used after this read of the block
         assert_eq!(&block, b"01234567\0E=1\0");
     }
 
@@ -627,8 +728,10 @@ mod tests {
         assert_eq!(c.block, b"\0\0\0\0\0");
     }
 
-    /// libuv's `args_mem`: the table points at copies afterwards, so a title
-    /// written over the original memory leaves the arguments as they were.
+    /// libuv's `args_mem`: the table points at copies afterwards, in one
+    /// mapped block, so a title written over the original memory leaves the
+    /// arguments as they were; the first title is a further copy of
+    /// `argv[0]`, after the arguments' copies.
     #[test]
     fn the_table_points_at_copies() {
         let mut a = Args::new(&["./prog", "ab", "c"], "HOME=/x");
@@ -644,12 +747,16 @@ mod tests {
         // SAFETY: `table` holds three pointers to NUL-terminated strings in
         // `block` (and a null one), which outlives the region; nothing else
         // touches the block until the region is dropped.
-        let mut r = unsafe { Region::from_argv(3, table.as_ptr(), span) }.unwrap();
+        let b = unsafe { Region::from_argv(3, table.as_ptr(), span) }.unwrap();
         // SAFETY: `table` is valid for reads and writes of 4 pointers, each
         // null or a NUL-terminated string; one thread.
-        let copies = unsafe { copy_and_repoint(4, table.as_mut_ptr()) };
+        let (copies, first) = unsafe { copy_and_repoint(4, table.as_mut_ptr()) }.unwrap();
+        // the copies with their NULs, then `argv[0]` again
+        assert_eq!(copies.len, 7 + 3 + 2 + 6);
+        assert_eq!(first, b"./prog");
+        let mut r = Region::new(b, first);
         r.write(b"title-over-everything");
-        drop(r);
+        // the region is not used after this
         let args: Vec<&[u8]> = table[..3]
             .iter()
             // SAFETY: each entry points into `copies`, which is still live.
@@ -658,9 +765,35 @@ mod tests {
         assert_eq!(args, [&b"./prog"[..], b"ab", b"c"]);
         assert!(table[3].is_null());
         assert_eq!(&a.block[..12], b"title-over-\0");
-        // SAFETY: `copies` came from `Box::into_raw` in `copy_and_repoint`,
-        // and no pointer into it is used after this.
-        drop(unsafe { Box::from_raw(copies) });
+        assert_eq!(first, b"./prog");
+        // SAFETY: `copies` is the mapping `copy_and_repoint` made, unmapped
+        // once; no pointer into it (the table's entries, `first`) is used
+        // after this.
+        unsafe { rustix::mm::munmap(copies.base.cast(), copies.len) }.unwrap();
+    }
+
+    /// No string, no block: a table of null entries (no process has one;
+    /// `setup_args` never gets there with a null `argv[0]`).
+    #[test]
+    fn null_entries_map_no_block() {
+        let mut table: [*mut c_char; 2] = [std::ptr::null_mut(); 2];
+        // SAFETY: `table` is valid for reads and writes of 2 pointers, both
+        // null; one thread.
+        let (b, first) = unsafe { copy_and_repoint(2, table.as_mut_ptr()) }.unwrap();
+        assert!(b.base.is_null() && b.len == 0 && first.is_empty());
+        assert!(table.iter().all(|p| p.is_null()));
+    }
+
+    /// `<tid>/stat` for a task's `stat` relative to `/proc/self/task`.
+    #[test]
+    fn task_stat_paths() {
+        let mut buf = [0u8; 32];
+        assert_eq!(
+            task_stat_path(b"12345", &mut buf).map(CStr::to_bytes),
+            Some(&b"12345/stat"[..])
+        );
+        assert_eq!(task_stat_path(&[b'1'; 27], &mut buf), None);
+        assert!(task_stat_path(&[b'1'; 26], &mut buf).is_some());
     }
 
     #[test]
@@ -670,12 +803,9 @@ mod tests {
         for n in 4..=52 {
             line.extend_from_slice(format!(" {}", n * 10).as_bytes());
         }
-        assert_eq!(stat_field(&line, 4), Some(40));
         assert_eq!(arg_span_of(&line), Some((480, 490)));
         assert_eq!(stat_field(&line, 9), Some(90));
         assert_eq!(arg_span_of(b"1 (x) S 1 2"), None);
-        assert_eq!(code_span_of(&line), Some((260, 270)));
-        assert_eq!(stat_field(b"no comm here", 3), None);
     }
 
     /// On this process: the kernel's span of the arguments is not empty;
@@ -689,14 +819,19 @@ mod tests {
     fn this_process() {
         let (start, end) = kernel_arg_span().unwrap();
         assert!(start < end);
+        let mut buf = [0u8; STAT_BUF];
+        let stat = read_proc(None, c"/proc/self/stat", &mut buf).unwrap();
         let code = (this_process as *const ()).addr();
-        assert_eq!(in_main_executable(code), Some(true));
+        assert_eq!(in_main_executable(stat, code), Some(true));
         // the stack is not the program's code
         let local = 0u8;
         assert_eq!(
-            in_main_executable(std::ptr::addr_of!(local).addr()),
+            in_main_executable(stat, std::ptr::addr_of!(local).addr()),
             Some(false)
         );
+        // a buffer it fills is no answer
+        let mut small = [0u8; 8];
+        assert_eq!(read_proc(None, c"/proc/self/stat", &mut small), None);
         let first_task_is_this = no_other_thread();
         let threads = std::fs::read_dir("/proc/self/task").unwrap().count();
         assert_eq!(first_task_is_this, threads == 1);

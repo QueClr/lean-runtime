@@ -69,6 +69,7 @@ enum State {
 /// `SIGPROF` must stay deliverable, so neither changes anything (case
 /// `uvloop/loop_configure`). Never fails (a libuv error code otherwise).
 pub fn loop_configure(accumulate_idle_time: bool, block_sigprof: bool) -> Result<(), i32> {
+    super::ensure_started();
     catch_up();
     let _ = (accumulate_idle_time, block_sigprof);
     Ok(())
@@ -78,6 +79,7 @@ pub fn loop_configure(accumulate_idle_time: bool, block_sigprof: bool) -> Result
 /// `uv_loop_alive`): true. Native Lean's loop always has its async handle
 /// (`event_loop_init`), so it is always alive.
 pub fn loop_alive() -> bool {
+    super::ensure_started();
     catch_up();
     true
 }
@@ -112,6 +114,7 @@ impl<P: LoopPromise> Clone for Timer<P> {
 impl<P: LoopPromise> Timer<P> {
     /// `Timer.mk timeout repeating` (`lean_uv_timer_mk`): an initial timer.
     pub fn new(timeout: u64, repeating: bool) -> Timer<P> {
+        super::ensure_started();
         catch_up();
         Timer::initial(timeout, repeating)
     }
@@ -390,6 +393,7 @@ impl<P: LoopPromise> Signal<P> {
     /// watcher of `signum` (Lean's number), or of no signal if Lean's table
     /// does not have it.
     pub fn new(signum: i32, repeating: bool) -> Signal<P> {
+        super::ensure_started();
         catch_up();
         Signal::initial(native_signum(signum), repeating, signals::next_seq())
     }

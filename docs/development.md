@@ -30,7 +30,8 @@ once.
   (one dereference of a coroutine's yielder; `docs/sched.md`), or is a
   native quirk of the crate (below). The crate root denies
   `unsafe_code` (`#![deny(unsafe_code)]`), and forbids it in a build with
-  none of `proc-title`, `stack-overflow` and `unsafe-fast`: the default
+  none of `proc-title`, `startup-fds`, `stack-overflow` and
+  `unsafe-fast`: the default
   build, `io`, `sched`, `threads` and `net` compile no `unsafe` code of the
   crate.
 - **Native quirks.** A native behaviour that no safe API can reproduce, and
@@ -54,7 +55,12 @@ once.
   `threads`; AR-11): Lean's stack-overflow report for the scheduler's
   contexts, and in threads mode for the task manager's threads. lean2rr
   enables it; without it, a task that overflows its context's stack ends
-  with a plain SIGSEGV (status 139).
+  with a plain SIGSEGV (status 139). And `src/io/startup_fds.rs`, feature
+  `startup-fds` (which turns on `io`): the ELF constructor that opens
+  native Lean's startup descriptors before Rust's runtime starts. lean2rr
+  enables it; without it, a glue that wants native's descriptors writes
+  that constructor itself. No ELF constructor of the crate uses the global
+  allocator (AR-36, `tests/ctor_alloc.rs`).
 - **`unsafe-fast`.** Every `unsafe` item has its own
   `#[allow(unsafe_code)]` (the crate root denies it). An implementation
   behind this feature must:

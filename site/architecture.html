@@ -116,8 +116,8 @@ Each translator's glue connects its own values to the crate.</p>
 </svg>
 <figcaption>Figure 1. The default build has no dependencies.
 Each feature adds one module and the crates it needs.
-<code>proc-title</code> adds one file to <code>io</code>, and <code>stack-overflow</code> one file to <code>sched</code>.
-Without <code>proc-title</code>, <code>stack-overflow</code> and <code>unsafe-fast</code>, the crate has no <code>unsafe</code> code of its own.
+<code>proc-title</code> and <code>startup-fds</code> each add one file to <code>io</code>, and <code>stack-overflow</code> one file to <code>sched</code>.
+Without <code>proc-title</code>, <code>startup-fds</code>, <code>stack-overflow</code> and <code>unsafe-fast</code>, the crate has no <code>unsafe</code> code of its own.
 The owner approved nix, rustix, corosensei, signal-hook (its safe API only) and dns-lookup (for <code>net</code> only).
 leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegation of dependency decisions (2026-10-04).</figcaption>
 </figure>
@@ -143,6 +143,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
     <code>io::argv_title</code> writes the process title into the arguments' memory (<a href="io.html#title">io</a>).
     lean2rr turns it on.
     Without it, <code>setProcessTitle</code> fails with <code>ENOBUFS</code>.</li>
+  <li><strong><code>startup-fds</code>.</strong> Turns on <code>io</code>, and adds a native quirk in a file of its own.
+    <code>io::startup_fds</code> is an ELF constructor that opens the startup descriptors before Rust's runtime starts (<a href="io.html#startup">io</a>).
+    lean2rr turns it on.
+    Without it, a translator's glue writes that constructor itself.</li>
   <li><strong><code>stack-overflow</code>.</strong> Needs <code>sched</code> or <code>threads</code>, and adds a native quirk in a file of its own, with nix's <code>sigaction</code>.
     <code>sched::stack_overflow</code> is Lean's stack-overflow report for the stacks of the contexts (<a href="sched.html#overflow">sched</a>).
     lean2rr turns it on.
