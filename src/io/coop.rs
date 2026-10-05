@@ -599,7 +599,9 @@ fn writer_ended(id: u64) {
 }
 
 /// When the calling context waits for its writers ([`join_own_writers`]).
+/// A byte, as the argument of an `extern "C"` function.
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum JoinAt {
     /// A point where the context publishes or may suspend (`sched`'s
     /// `writers_point`: effect points, polls, sleeps, waits, promise
@@ -641,10 +643,17 @@ pub(crate) fn join_own_writers(at: JoinAt) {
     }
 }
 
-/// [`join_own_writers`] once a writer runs.
+/// [`join_own_writers`] once a writer runs. `extern "C"`, so it cannot
+/// unwind (review AR-28): a caller that holds values with destructors
+/// across the inlined fast path then needs no cleanup path for this call,
+/// which would make it too costly for LLVM to inline into the translator's
+/// code. A Rust panic in it, or one that a context's panic resumes here
+/// while it waits, aborts the process, as at an FFI boundary (both
+/// translators call it from FFI code or with `panic = "abort"` anyway;
+/// docs/sched.md, "Costs to measure").
 #[cold]
 #[inline(never)]
-fn join_own_writers_slow(at: JoinAt) {
+extern "C" fn join_own_writers_slow(at: JoinAt) {
     if at == JoinAt::End
         && (sched::in_no_suspend()
             || std::thread::panicking()

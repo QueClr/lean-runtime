@@ -306,6 +306,32 @@ fn a_rust_panic_in_a_context_goes_on_in_main() {
     assert!(!err.contains("not reached"));
 }
 
+/// Review LF3-01, the effect points' half: a started pure task that runs
+/// for a waiter and reaches effect points lets the next started task run,
+/// whose worker takes the awaited task (two workers); the runaway then
+/// keeps the exit waiting.
+#[test]
+fn effect_points_in_a_started_task_let_the_next_run() {
+    let env = [("LEAN_NUM_THREADS".to_string(), "2".to_string())];
+    let got = run_with("effect_points_in_a_started_task", &[], &env, Some(3), false);
+    let err = String::from_utf8_lossy(&got.err);
+    assert_eq!(got.code, "timeout", "stderr {err:?}");
+    assert_eq!(err, "t = 1001\np finished: false, q finished: true\n");
+}
+
+/// The same panic, resumed while `main` is in an effect point: the hooks'
+/// cold paths cannot unwind (review AR-28; docs/sched.md, "Rust panics"),
+/// so the process aborts there, as at an FFI boundary: status 134.
+#[test]
+fn a_rust_panic_resumed_in_a_hooks_cold_path_aborts() {
+    let got = run_with("rust_panic_through_effect", &[], &[], None, false);
+    let err = String::from_utf8_lossy(&got.err);
+    assert_eq!(got.code, "134", "stderr {err:?}");
+    assert!(err.contains("a Rust panic in a task"), "stderr {err:?}");
+    assert!(err.contains("cannot unwind"), "stderr {err:?}");
+    assert!(!err.contains("not reached"));
+}
+
 // leanrs's adversarial checks of docs/sched.md's "Why Glue::suspend is
 // sound" (their proof check of sched-1 at 15b62ed, 2026-10-03), ported as
 // regression tests. The programs are in `src/cases.rs`.
@@ -995,6 +1021,23 @@ cases!(
     sync_self_wait_keeps_worker,
     sync_wait_in_inline_walk,
     sync_dep_waits_queued_task,
+    // fixes-3 (AR-25)
+    wait_pure_queue_order,
+    drop_queued_behind_pure,
+    runaway_pure_before_awaited,
+    // the review of fixes-3 (RF3)
+    picked_task_own_worker_streams,
+    picked_task_sleeping_worker,
+    picked_task_ticking_worker,
+    picked_task_reaches_yield_points,
+    runaway_pure_passed_over,
+    // review AR-33
+    worker_streams_closed_at_exit,
+    worker_streams_at_process_exit,
+    // reviews RF3-05, LF3-04, LF3-05
+    picked_task_short_sleeper_long,
+    picked_task_watchdog,
+    picked_task_sleep_zero,
     late_task_after_main,
     late_dependent_of_dedicated,
     late_wait_dedicated,

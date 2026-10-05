@@ -139,33 +139,47 @@ const FINISHED: u32 = 1 << 15;
 /// natively a deleted task's finish skips `resolve_core` (review RS2-08 of
 /// sched-2). A deleted pure task (`DELETED`) is unreferenced too.
 const UNREFERENCED: u32 = 1 << 16;
+/// A started pure task at a pool priority (`PICKED`), until it begins: its
+/// `link` holds the emulated worker id reserved for it at the pick, the id
+/// of the worker that started it (review RF3-01; `pick`, `take_reserved`).
+const RESERVED: u32 = 1 << 17;
 
-struct Entry {
+/// The bits of `Entry::flags` above the flags: the task's priority (its
+/// queue, `common::priority`; `DEDICATED` for a dedicated task).
+const PRIO_SHIFT: u32 = 24;
+/// The flag bits of `Entry::flags`.
+const STATE: u32 = (1 << PRIO_SHIFT) - 1;
+
+/// A task's bookkeeping: 56 bytes (review AR-27; the unit test
+/// `the_slab_entry_is_56_bytes`).
+pub(crate) struct Entry {
     /// 0 for a free slot.
     gen: u32,
+    /// The flags (`STATE`), and the priority above them (`prio`).
     flags: u32,
-    prio: u8,
     job: Option<Job>,
     /// Its dependents, newest first; its siblings in its source's list.
     head_dep: u32,
     next_dep: u32,
     prev_dep: u32,
     /// `QUEUED`: the sequence number of its queue item (stale items are
-    /// skipped); `WAITING`: the task it waits for (its source).
+    /// skipped); `WAITING`: the task it waits for (its source); `RESERVED`
+    /// (a started pure task, which is neither): its emulated worker id.
     link: u32,
     /// Pending: `IO.getTaskState` reported it waiting (`query`): the sleep
     /// count + 1 at the first such answer (0: never), and the number of
-    /// answers. Running: `aux[1]` is the sleep count when the run started.
+    /// answers. Running (or about to run `INLINE`): `aux[0]` is the low half
+    /// of its thread number (`thread_number`), whose high half is its
+    /// context's (`Ctx::thread_base`: the tasks of a context run on its
+    /// stack), and `aux[1]` the sleep count when the run started.
     aux: [u32; 2],
-    /// Running (or about to run `INLINE`): its thread number
-    /// (`thread_number`).
-    thread: u64,
     /// Its *IO need*: the number of its dependents that are IO tasks, or
     /// pure tasks with IO need themselves (`need_up`). A pure task with IO
     /// need is started as an IO task is (`eligible`).
     io_need: u32,
-    /// When it was last queued.
-    queued_at: Option<Instant>,
+    /// `QUEUED`: when it was queued, in microseconds since `Tasks::tick0`
+    /// (`Sched::tick`).
+    queued_at: u32,
 }
 
 impl Entry {
@@ -173,17 +187,80 @@ impl Entry {
         Entry {
             gen: 0,
             flags: 0,
-            prio: 0,
             job: None,
             head_dep: NONE,
             next_dep: NONE,
             prev_dep: NONE,
             link: NONE,
             aux: [0, 0],
-            thread: 0,
             io_need: 0,
-            queued_at: None,
+            queued_at: 0,
         }
+    }
+
+    /// Its priority: its queue (`common::priority`), `DEDICATED` for a
+    /// dedicated task.
+    fn prio(&self) -> usize {
+        (self.flags >> PRIO_SHIFT) as usize
+    }
+}
+
+/// The size of a task's bookkeeping (review AR-27).
+#[cfg(test)]
+pub(crate) const ENTRY_SIZE: usize = std::mem::size_of::<Entry>();
+
+/// The number of entries in a chunk of the slab (`Slab`).
+const CHUNK_BITS: u32 = 10;
+const CHUNK: usize = 1 << CHUNK_BITS;
+
+/// The task entries, by index, in chunks of `CHUNK` that never move or grow
+/// (review AR-27): a new chunk when the last is full, so no growth by
+/// doubling, with its unused half and its copy of every entry.
+struct Slab {
+    chunks: Vec<Vec<Entry>>,
+    len: usize,
+}
+
+impl Slab {
+    fn new() -> Slab {
+        Slab {
+            chunks: Vec::new(),
+            len: 0,
+        }
+    }
+    fn len(&self) -> usize {
+        self.len
+    }
+    fn get(&self, i: usize) -> Option<&Entry> {
+        (i < self.len).then(|| &self[i])
+    }
+    fn push(&mut self, e: Entry) {
+        if self.len.is_multiple_of(CHUNK) {
+            self.chunks.push(Vec::with_capacity(CHUNK));
+        }
+        let last = self.chunks.len() - 1;
+        self.chunks[last].push(e);
+        self.len += 1;
+    }
+    #[cfg(test)]
+    fn iter(&self) -> impl Iterator<Item = &Entry> {
+        self.chunks.iter().flatten()
+    }
+    fn iter_mut(&mut self) -> impl Iterator<Item = &mut Entry> {
+        self.chunks.iter_mut().flatten()
+    }
+}
+
+impl std::ops::Index<usize> for Slab {
+    type Output = Entry;
+    fn index(&self, i: usize) -> &Entry {
+        &self.chunks[i >> CHUNK_BITS][i % CHUNK]
+    }
+}
+
+impl std::ops::IndexMut<usize> for Slab {
+    fn index_mut(&mut self, i: usize) -> &mut Entry {
+        &mut self.chunks[i >> CHUNK_BITS][i % CHUNK]
     }
 }
 
@@ -219,6 +296,11 @@ struct Walk {
     /// `None` for a task that ran on the thread below it, and a promise
     /// resolved there (review AR-16).
     own: Option<bool>,
+    /// The emulated worker id and hold token of the pool task whose walk
+    /// it is (`Some(true)` above): free again when the walk is over, as
+    /// natively the worker takes its next task after `handle_finished`
+    /// (review RF3-01).
+    held: Option<(u32, u32)>,
 }
 
 /// What belongs to a context, as natively to a thread: the tasks running on
@@ -239,8 +321,10 @@ pub(crate) struct Tasks {
     /// Sleeps so far (`IO.sleep`, `dbgSleep`): time passing, for the
     /// heuristics below.
     pub(crate) epoch: u32,
-    slab: Vec<Entry>,
+    slab: Slab,
     free: Vec<u32>,
+    /// The origin of the queue times (`Entry::queued_at`, `Sched::tick`).
+    tick0: Instant,
     /// Pending tasks that do not wait for another task, one queue per
     /// priority as in Lean's task manager (the highest non-empty one is
     /// taken first), in the order they were enqueued: (entry, sequence
@@ -265,10 +349,33 @@ pub(crate) struct Tasks {
     /// (entry, generation); items whose entry no longer has `PICKED` are
     /// stale.
     picked: VecDeque<(u32, u32)>,
+    /// The number of those that are not stale (`pick`, `hand`): `picked`
+    /// is compacted when its stale items outnumber them.
+    picked_live: u32,
+    /// The number of those at a pool priority (not dedicated): each keeps the
+    /// worker that started it busy until it has run (review AR-25), so a
+    /// worker picks a pure task only while `pool_in_use() + picked_pool` is
+    /// below the number of workers.
+    picked_pool: u32,
+    /// For each priority, the number of its queued tasks that are not pure
+    /// tasks without IO need (`eligible` before the shutdown): an IO task
+    /// passes over the pure tasks that wait for a worker (AR-25, LSCHED-01),
+    /// and the queues without such a task are not scanned for one.
+    elig: [u32; PRIOS],
     /// Started pure tasks an IO task has come to wait for since, directly or
     /// through pure tasks (`need_up`): started on a context as soon as one
     /// can be (`startable`).
     picked_io: Vec<(u32, u32)>,
+    /// The emulated pool workers (review AR-24, AR-32), by id: 0 while free,
+    /// else the token of the hold: a task of it runs (a task waiting in
+    /// `Task.get` included), or a started pure task waits to run on it
+    /// (RF3-01). A pool task that begins takes the lowest free id
+    /// (`enter_worker`); it is free again once the task's walk of dependents
+    /// is over, as natively the worker then takes its next task (RF3-01).
+    worker_ids: Vec<u32>,
+    /// The last token handed out for a hold of a worker id (never 0): a
+    /// hold ends only if the id still has its token (`release_worker`).
+    worker_seq: u32,
     /// The walks of dependents in progress, on every context: (owner,
     /// generation). Their owners have their values, and their waiters wake at
     /// the next `notify_all` (review RS2-10 of sched-2: no scan of the
@@ -301,8 +408,9 @@ impl Tasks {
             started: false,
             shutting_down: false,
             epoch: 0,
-            slab: Vec::new(),
+            slab: Slab::new(),
             free: Vec::new(),
+            tick0: Instant::now(),
             queues: Default::default(),
             queued: [0; PRIOS],
             next_q: 0,
@@ -311,7 +419,12 @@ impl Tasks {
             worker_exists: false,
             serial: 0,
             picked: VecDeque::new(),
+            picked_live: 0,
+            picked_pool: 0,
+            elig: [0; PRIOS],
             picked_io: Vec::new(),
+            worker_ids: Vec::new(),
+            worker_seq: 0,
             open_walks: Vec::new(),
             notify_seq: 0,
         }
@@ -323,7 +436,7 @@ impl Drop for Tasks {
         // At thread exit, pending jobs are not dropped: they hold Lean values
         // whose destructors would call back into the scheduler during its
         // destruction (see `Contexts`'s `Drop`).
-        for e in &mut self.slab {
+        for e in self.slab.iter_mut() {
             if let Some(job) = e.job.take() {
                 std::mem::forget(job);
             }
@@ -341,6 +454,17 @@ pub(crate) enum Gate {
     /// Queued after this queue position (`effect`: released by what ran at
     /// an effect point).
     After(u32),
+}
+
+/// A position in the queues, in the order a free worker takes their tasks
+/// (`next_queued`): the queue, counted from the highest priority, and the
+/// index in it. With `elig_only`, a queue without a task that is not a pure
+/// task without IO need is passed over (`Tasks::elig`).
+#[derive(Clone, Copy, Default)]
+struct Scan {
+    q: usize,
+    k: usize,
+    elig_only: bool,
 }
 
 /// What `wait` does next.
@@ -399,7 +523,7 @@ impl Sched {
         }
     }
 
-    fn alloc(&mut self, job: Option<Job>, flags: u32, prio: u8) -> u32 {
+    fn alloc(&mut self, job: Option<Job>, flags: u32, prio: usize) -> u32 {
         // From the first task or promise on, blocking calls may have to let
         // other contexts run (sched-io).
         super::reactor::coop_on();
@@ -408,10 +532,10 @@ impl Sched {
         if t.serial == 0 {
             t.serial = 1;
         }
+        debug_assert!(flags & !STATE == 0 && prio < PRIOS);
         let e = Entry {
             gen: t.serial,
-            flags,
-            prio,
+            flags: flags | (prio as u32) << PRIO_SHIFT,
             job,
             ..Entry::free()
         };
@@ -432,16 +556,69 @@ impl Sched {
     fn free_entry(&mut self, i: u32) {
         let e = self.ent_mut(i);
         debug_assert!(e.job.is_none() && e.head_dep == NONE);
+        // a worker id reserved for a run that never came (none of today's
+        // paths frees a started task before it runs; RF3-01)
+        let reserved = (e.flags & RESERVED != 0).then_some(e.link);
         *e = Entry::free();
         self.tk.free.push(i);
+        if let Some(w) = reserved {
+            self.tk.worker_ids[w as usize] = 0;
+        }
     }
 
     /// The thread of the innermost running task (0: `main`).
     pub(crate) fn cur_thread(&self) -> u64 {
+        let base = self.cx.ctxs[self.cx.cur].thread_base;
         match self.st_ref().running.last() {
-            Some(&r) => self.ent(r).thread,
-            None => self.cx.ctxs[self.cx.cur].thread_base,
+            Some(&r) => base | u64::from(self.ent(r).aux[0]),
+            None => base,
         }
+    }
+
+    /// Store thread number `th`, of a thread of the running context, in
+    /// entry `i`, which runs (or is about to run) on it (`Entry::aux`).
+    fn set_thread(&mut self, i: u32, th: u64) {
+        debug_assert_eq!(th >> 32, self.cx.ctxs[self.cx.cur].thread_base >> 32);
+        self.ent_mut(i).aux[0] = th as u32;
+    }
+
+    /// Microseconds from `Tasks::tick0` to `at`, a queue time
+    /// (`Entry::queued_at`). Past 2^31 µs (36 minutes), the origin moves on
+    /// to 2^30 µs before `at`, and the queue times of the queued tasks with
+    /// it, those before the new origin becoming 0 (once in a half hour, a
+    /// pass over the entries). `Gate::Before` asks only whether a task was
+    /// queued 5 ms (`STALE`) or 90 µs (`WORKER_LATENCY`) ago or more, which
+    /// these times still answer exactly.
+    fn tick(&mut self, at: Instant) -> u32 {
+        let t = &mut self.tk;
+        let us = at.saturating_duration_since(t.tick0).as_micros();
+        if us < 1 << 31 {
+            return us as u32;
+        }
+        let shift = us - (1 << 30);
+        t.tick0 += Duration::from_micros(shift as u64);
+        for e in t.slab.iter_mut() {
+            if e.gen != 0 && e.flags & QUEUED != 0 {
+                e.queued_at = u128::from(e.queued_at).saturating_sub(shift) as u32;
+            }
+        }
+        1 << 30
+    }
+
+    /// Whether entry `i` (queued) was queued at `t` or before.
+    fn queued_by(&self, i: u32, t: Instant) -> bool {
+        t.checked_duration_since(self.tk.tick0)
+            .is_some_and(|d| u128::from(self.ent(i).queued_at) <= d.as_micros())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn queued_at_of(&self, id: TaskId) -> Option<u32> {
+        self.find(id).map(|i| self.ent(i).queued_at)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn age_ticks_for_test(&mut self, d: Duration) {
+        self.tk.tick0 = self.tk.tick0.checked_sub(d).expect("a clock that old");
     }
 
     /// Whether running task `i` could still be running before Lean's
@@ -473,7 +650,7 @@ impl Sched {
                 flags |= EARLY;
             }
         }
-        let i = self.alloc(Some(job), flags, p);
+        let i = self.alloc(Some(job), flags, p as usize);
         if dep {
             return (i, false);
         }
@@ -488,24 +665,26 @@ impl Sched {
     /// Task `i` is to run on the current thread when it begins.
     fn run_here(&mut self, i: u32) {
         let th = self.cur_thread();
-        let e = self.ent_mut(i);
-        e.flags |= INLINE;
-        e.thread = th;
+        self.ent_mut(i).flags |= INLINE;
+        self.set_thread(i, th);
     }
 
     /// Put pending task `i` at the end of its priority's queue.
     fn enqueue(&mut self, i: u32) {
         let now = Instant::now();
+        let tick = self.tick(now);
         let t = &mut self.tk;
         t.next_q = t.next_q.wrapping_add(1);
         let q = t.next_q;
         let e = &mut t.slab[i as usize];
         e.flags |= QUEUED;
         e.link = q;
-        e.queued_at = Some(now);
-        let p = e.prio as usize;
+        e.queued_at = tick;
+        let p = e.prio();
+        let elig = e.flags & PURE == 0 || e.io_need > 0;
         t.queues[p].push_back((i, q));
         t.queued[p] += 1;
+        t.elig[p] += u32::from(elig);
         // An enqueue by `main` wakes the idle worker (if one is free: tasks
         // the scheduler started on contexts of their own hold workers).
         if t.started
@@ -535,8 +714,9 @@ impl Sched {
             return;
         }
         e.flags &= !QUEUED;
-        let (p, l) = (e.prio as usize, e.link);
+        let (p, l) = (e.prio(), e.link);
         t.queued[p] -= 1;
+        t.elig[p] -= u32::from(e.flags & PURE == 0 || e.io_need > 0);
         let q = &mut t.queues[p];
         if q.back() == Some(&(i, l)) {
             q.pop_back();
@@ -593,7 +773,11 @@ impl Sched {
             if se.io_need != 1 {
                 return;
             }
-            let (flags, g) = (se.flags, se.gen);
+            let (flags, g, p) = (se.flags, se.gen, se.prio());
+            if flags & (PURE | QUEUED) == PURE | QUEUED {
+                // a queued pure task an IO task now waits for
+                self.tk.elig[p] += 1;
+            }
             if flags & PICKED != 0 {
                 self.tk.picked_io.push((s, g));
             }
@@ -629,6 +813,7 @@ impl Sched {
             }
             false
         }
+        let (mut elig, mut picked) = ([0u32; PRIOS], 0u32);
         for (i, e) in self.tk.slab.iter().enumerate() {
             if e.gen == 0 {
                 continue;
@@ -645,6 +830,21 @@ impl Sched {
                 d = de.next_dep;
             }
             assert_eq!(e.io_need, n, "io_need of entry {i} (flags {:#x})", e.flags);
+            if e.flags & QUEUED != 0 && (e.flags & PURE == 0 || e.io_need > 0) {
+                elig[e.prio()] += 1;
+            }
+            if e.flags & PICKED != 0 && e.prio() < DEDICATED {
+                picked += 1;
+                // RF3-01: its worker's id, held for it
+                assert!(
+                    e.flags & RESERVED != 0,
+                    "started task {i} without its worker id"
+                );
+                assert!(
+                    self.tk.worker_ids[e.link as usize] != 0,
+                    "worker id of {i} not held"
+                );
+            }
             if e.flags & PURE != 0 && e.flags & FINISHED == 0 {
                 assert_eq!(
                     e.io_need > 0,
@@ -653,6 +853,15 @@ impl Sched {
                 );
             }
         }
+        // AR-25's counts
+        assert_eq!(
+            elig, self.tk.elig,
+            "queued tasks other than pure ones without need"
+        );
+        assert_eq!(
+            picked, self.tk.picked_pool,
+            "started pure tasks at pool priorities"
+        );
     }
 
     /// The reverse of `need_up`: dependent `d` (still linked) no longer
@@ -667,8 +876,13 @@ impl Sched {
             }
             let s = e.link;
             let se = self.ent_mut(s);
-            se.io_need = se.io_need.saturating_sub(1);
-            if se.io_need != 0 || se.flags & PURE == 0 {
+            let was = se.io_need;
+            se.io_need = was.saturating_sub(1);
+            let (flags, p) = (se.flags, se.prio());
+            if was == 1 && flags & (PURE | QUEUED) == PURE | QUEUED {
+                self.tk.elig[p] -= 1;
+            }
+            if was > 1 || flags & PURE == 0 {
                 return;
             }
             d = s;
@@ -727,7 +941,21 @@ impl Sched {
     fn hand(&mut self, i: u32) {
         self.unqueue(i);
         self.unlink(i);
-        self.ent_mut(i).flags &= !PICKED;
+        let e = self.ent_mut(i);
+        if e.flags & PICKED != 0 {
+            e.flags &= !PICKED;
+            let (p, g) = (e.prio(), e.gen);
+            let t = &mut self.tk;
+            t.picked_live -= 1;
+            // its worker runs it now, as the task of the context that runs it
+            if p < DEDICATED {
+                t.picked_pool -= 1;
+            }
+            // started pure tasks mostly run in the order they were started
+            if t.picked.front() == Some(&(i, g)) {
+                t.picked.pop_front();
+            }
+        }
     }
 
     /// Task `i`'s job panicked (`Unwound`): it stays unfinished, and the
@@ -753,6 +981,9 @@ impl Sched {
         while self.st_ref().walks.len() > keep {
             let w = self.st().walks.pop().unwrap();
             self.refresh_holds(self.cx.cur);
+            if let Some((id, token)) = w.held {
+                self.release_worker(id, token);
+            }
             loop {
                 let d = self.ent(w.owner).head_dep;
                 if d == NONE {
@@ -844,16 +1075,20 @@ impl Sched {
     fn begin(&mut self, i: u32) -> (Job, bool, bool) {
         let th = self.cur_thread();
         let epoch = self.tk.epoch;
-        let e = self.ent_mut(i);
-        let own = e.flags & INLINE == 0;
+        let own = self.ent(i).flags & INLINE == 0;
         if own {
-            e.thread = th + 1;
+            self.set_thread(i, th + 1);
         }
+        let e = self.ent_mut(i);
+        debug_assert!(
+            e.flags & PICKED == 0,
+            "a started pure task begins once handed"
+        );
         let on = if own { 0 } else { ON_THREAD };
         e.flags =
             (e.flags & !(INLINE | CHECKED | ON_THREAD | PICKED | QUEUED | WAITING)) | RUNNING | on;
         e.aux[1] = epoch;
-        let dedicated = e.prio as usize >= DEDICATED;
+        let dedicated = e.prio() >= DEDICATED;
         let job = e.job.take().expect("lean-runtime: a task ran twice");
         self.st().running.push(i);
         self.refresh_holds(self.cx.cur);
@@ -872,9 +1107,10 @@ impl Sched {
         let early = self.early_now(i);
         let gen = self.ent(i).gen;
         let flags = self.ent(i).flags;
-        let thread = self.ent(i).thread;
+        let thread = self.cx.ctxs[self.cx.cur].thread_base | u64::from(self.ent(i).aux[0]);
+        let prio = self.ent(i).prio();
         let e = self.ent_mut(i);
-        e.flags = FINISHED;
+        e.flags = FINISHED | (flags & !STATE);
         let base = flags & FROM_WALK == 0;
         // The worker that ran it picks the next task once the walk is over.
         let t = &self.tk;
@@ -888,7 +1124,6 @@ impl Sched {
             self.tk.worker = NONE;
             self.tk.wake = None;
         }
-        let prio = self.ent(i).prio as usize;
         let w = Walk {
             owner: i,
             gen,
@@ -900,6 +1135,13 @@ impl Sched {
             base,
             depth: self.st_ref().running.len(),
             own: (flags & ON_THREAD == 0).then_some(prio < DEDICATED),
+            held: if flags & ON_THREAD == 0 && prio < DEDICATED {
+                self.cx.ctxs[self.cx.cur]
+                    .worker
+                    .map(|w| (w, self.tk.worker_ids[w as usize]))
+            } else {
+                None
+            },
         };
         self.open_walk(w);
         base
@@ -947,7 +1189,8 @@ impl Sched {
         };
         let gen = self.ent(i).gen;
         let canceled = self.ent(i).flags & CANCELED != 0;
-        self.ent_mut(i).flags = FINISHED;
+        let e = self.ent_mut(i);
+        e.flags = FINISHED | (e.flags & !STATE);
         let thread = self.cur_thread();
         let depth = self.st_ref().running.len();
         self.open_walk(Walk {
@@ -961,6 +1204,7 @@ impl Sched {
             base: true,
             depth,
             own: None,
+            held: None,
         });
     }
 
@@ -985,8 +1229,12 @@ impl Sched {
             let d = self.ent(owner).head_dep;
             if d == NONE {
                 let w = self.st().walks.pop().unwrap();
-                // the finishing worker is free once its walk is over
+                // the finishing worker is free once its walk is over: its
+                // id too, for the task it picks next (RF3-01)
                 self.refresh_holds(self.cx.cur);
+                if let Some((id, token)) = w.held {
+                    self.release_worker(id, token);
+                }
                 self.free_entry(owner);
                 self.close_walk((owner, w.gen));
                 if w.notify {
@@ -1014,7 +1262,7 @@ impl Sched {
             }
             if e.flags & SYNC != 0 {
                 e.flags |= INLINE | FROM_WALK;
-                e.thread = thread;
+                self.set_thread(d, thread);
                 return Some(d);
             }
             self.enqueue(d);
@@ -1032,15 +1280,42 @@ impl Sched {
 
     /// A worker starts pure task `i` (natively): it can no longer be
     /// deleted, `IO.getTaskState` reports it running, and it runs when it is
-    /// needed, polled, at exit, or when nothing else can go on. It does not
-    /// keep a worker: here it takes no time. A context that waits for it
+    /// needed, polled, at exit, or when nothing else can go on. Until then it
+    /// keeps the worker that started it, as natively that worker runs it to
+    /// its end before it takes another task (the worker loop, object.cpp
+    /// 863-865; review AR-25): `picked_pool` counts it, and no pure task
+    /// starts on that worker meanwhile (`pure_room`). It also takes that
+    /// worker's emulated id now (`RESERVED`; review RF3-01): it runs with
+    /// that worker's standard streams and `errno` (`slots`) and
+    /// `running_worker`, which no other task uses meanwhile. A context that
+    /// waits for it
     /// (`wait`, blocked until it is the head, or `wait_any`) looks again: it
     /// is needed, so it runs now (AR-10).
     fn pick(&mut self, i: u32) {
         self.unqueue(i);
-        let g = self.ent(i).gen;
-        self.ent_mut(i).flags |= PICKED;
-        self.tk.picked.push_back((i, g));
+        let p = self.ent(i).prio();
+        let reserved = (p < DEDICATED).then(|| self.reserve_worker());
+        let e = self.ent_mut(i);
+        e.flags |= PICKED;
+        if let Some(w) = reserved {
+            e.flags |= RESERVED;
+            e.link = w;
+        }
+        let g = e.gen;
+        let t = &mut self.tk;
+        t.picked_live += 1;
+        if p < DEDICATED {
+            t.picked_pool += 1;
+        }
+        if t.picked.len() > 2 * t.picked_live as usize + 64 {
+            // stale items (started tasks that have run since) pile up
+            let slab = &t.slab;
+            t.picked.retain(|&(j, h)| {
+                let f = &slab[j as usize];
+                f.gen == h && f.flags & PICKED != 0
+            });
+        }
+        t.picked.push_back((i, g));
         if self.cx.blocked > 0 {
             self.wake_cell((i, g));
             self.wake_progress();
@@ -1050,20 +1325,114 @@ impl Sched {
     /// The first valid item of the highest non-empty queue (stale items in
     /// front are discarded).
     fn first_queued(&mut self) -> Option<u32> {
+        self.next_queued(&mut Scan::default())
+    }
+
+    /// The next valid queued item from `at` on, in the order a free worker
+    /// takes them (the highest non-empty queue first, first come, first
+    /// served within it), and `at` moved past it. Stale items at the front
+    /// of a queue are discarded. With `at.elig_only`, a queue without a task
+    /// that is not a pure task without IO need is passed over (`elig`).
+    fn next_queued(&mut self, at: &mut Scan) -> Option<u32> {
         let t = &mut self.tk;
-        for p in (0..PRIOS).rev() {
-            if t.queued[p] == 0 {
-                continue;
-            }
-            while let Some(&(i, q)) = t.queues[p].front() {
-                let e = &t.slab[i as usize];
-                if e.gen != 0 && e.flags & QUEUED != 0 && e.link == q {
-                    return Some(i);
+        while at.q < PRIOS {
+            let p = PRIOS - 1 - at.q;
+            if t.queued[p] != 0 && (!at.elig_only || t.elig[p] != 0) {
+                let q = &mut t.queues[p];
+                while let Some(&(i, l)) = q.get(at.k) {
+                    let e = &t.slab[i as usize];
+                    if e.gen != 0 && e.flags & QUEUED != 0 && e.link == l {
+                        at.k += 1;
+                        return Some(i);
+                    }
+                    if at.k == 0 {
+                        q.pop_front();
+                    } else {
+                        at.k += 1;
+                    }
                 }
-                t.queues[p].pop_front();
+            }
+            at.q += 1;
+            at.k = 0;
+        }
+        None
+    }
+
+    /// The next candidate of a free worker: the lone worker's task first, if
+    /// it is still queued and `lone` (then cleared), else the next queued
+    /// item from `at` on (`next_queued`).
+    fn next_cand(&mut self, lone: &mut bool, at: &mut Scan) -> Option<u32> {
+        let w = self.tk.worker;
+        if std::mem::take(lone) && w != NONE && self.ent(w).flags & QUEUED != 0 {
+            return Some(w);
+        }
+        self.next_queued(at)
+    }
+
+    /// Whether a worker is free for a pure task (review AR-25): `in_use`
+    /// workers are held by contexts, and each started pure task not run yet
+    /// keeps the worker that started it (`picked_pool`). A dedicated task has
+    /// a thread of its own.
+    fn pure_room(&self, i: u32, in_use: u32) -> bool {
+        self.ent(i).prio() == DEDICATED || in_use + self.tk.picked_pool < self.cx.pool_limit
+    }
+
+    /// A worker the started pure task `i` (`PICKED`) keeps busy: natively it
+    /// runs `i` meanwhile, and takes another task when `i` ends.
+    fn picked_has_worker(&self, i: u32) -> bool {
+        self.ent(i).prio() < DEDICATED
+    }
+
+    /// Whether every worker that no context holds is busy with a started pure
+    /// task (review AR-25): a queued pure task can then start only once one
+    /// of them has run.
+    fn picked_hold_pool(&self) -> bool {
+        let in_use = self.pool_in_use();
+        let limit = self.cx.pool_limit;
+        self.tk.picked_pool > 0 && in_use < limit && in_use + self.tk.picked_pool >= limit
+    }
+
+    /// The oldest started pure task at a pool priority that no context is
+    /// about to begin (`preselect`).
+    fn oldest_picked(&mut self) -> Option<(u32, u32)> {
+        while let Some(&(i, g)) = self.tk.picked.front() {
+            let e = self.ent(i);
+            if e.gen == g && e.flags & PICKED != 0 {
+                break;
+            }
+            self.tk.picked.pop_front();
+        }
+        for k in 0..self.tk.picked.len() {
+            let (i, g) = self.tk.picked[k];
+            let e = self.ent(i);
+            if e.gen == g
+                && e.flags & PICKED != 0
+                && self.picked_has_worker(i)
+                && !self.preselected(i)
+            {
+                return Some((i, g));
             }
         }
         None
+    }
+
+    /// Review AR-25: a started pure task to run now, on a context of its
+    /// own, because a context waits (`wait`) for a queued pure task that only
+    /// the started pure tasks keep from starting (`picked_hold_pool`).
+    /// Natively their workers finish them meanwhile and then take the
+    /// queue's next tasks. The oldest first: it has run the longest.
+    pub(crate) fn needed_picked(&mut self) -> Option<(u32, u32)> {
+        if !self.tk.started || !self.picked_hold_pool() {
+            return None;
+        }
+        let waits = self.some_cell_waiter(|i, g| {
+            let e = self.ent(i);
+            e.gen == g && e.flags & QUEUED != 0 && !self.eligible(i)
+        });
+        if !waits {
+            return None;
+        }
+        self.oldest_picked()
     }
 
     pub(crate) fn has_queued(&mut self) -> bool {
@@ -1083,7 +1452,11 @@ impl Sched {
     /// worker waiting for a task (`IO.wait`, `Task.get`) frees its place
     /// meanwhile (`wait_for`), one in `IO.waitAny` does not; a dedicated
     /// task has a thread of its own.
-    /// Pure tasks no IO task waits for are picked on the way (`pick`); a
+    /// Pure tasks no IO task waits for are picked on the way (`pick`) while a
+    /// worker is free for them (`pure_room`); once none is, they wait in
+    /// their queue (review AR-25), and the first task further back that is
+    /// not such a pure task is the candidate: an IO task does not wait for
+    /// started pure tasks, which count as finished for it (LSCHED-01). A
     /// picked one that an IO task has come to wait for comes first.
     pub(crate) fn startable(&mut self, gate: Gate) -> Option<(u32, u32)> {
         if !self.tk.started {
@@ -1099,29 +1472,33 @@ impl Sched {
             }
             self.tk.picked_io.pop();
         }
+        let (mut lone, mut at) = (true, Scan::default());
         loop {
             let w = self.tk.worker;
-            let cand = if w != NONE && self.ent(w).flags & QUEUED != 0 {
-                w
-            } else {
-                self.first_queued()?
-            };
+            let cand = self.next_cand(&mut lone, &mut at)?;
             let e = self.ent(cand);
             let ok = match gate {
                 Gate::Any => true,
-                Gate::Before(t) => e.queued_at.is_some_and(|q| q <= t),
+                Gate::Before(t) => self.queued_by(cand, t),
                 Gate::After(mark) => (e.link.wrapping_sub(mark) as i32) > 0,
             };
             if !ok {
                 return None;
             }
-            if e.prio as usize != DEDICATED && self.pool_in_use() >= self.cx.pool_limit {
+            let in_use = self.pool_in_use();
+            if self.ent(cand).prio() != DEDICATED && in_use >= self.cx.pool_limit {
                 return None;
             }
             if !self.eligible(cand) {
-                self.pick(cand);
-                if cand == w {
-                    self.tk.worker = NONE;
+                if self.pure_room(cand, in_use) {
+                    self.pick(cand);
+                    if cand == w {
+                        self.tk.worker = NONE;
+                    }
+                    (lone, at) = (true, Scan::default());
+                } else {
+                    // AR-25: it waits for a worker; the scan passes over it
+                    at.elig_only = true;
                 }
                 continue;
             }
@@ -1191,7 +1568,7 @@ impl Sched {
                 if e.flags & ON_THREAD == 0 {
                     let waits =
                         innermost && matches!(w, Wait::Cell(..) | Wait::Progress | Wait::OnItself);
-                    return (e.prio as usize) < DEDICATED && !waits;
+                    return e.prio() < DEDICATED && !waits;
                 }
                 ri -= 1;
             } else if wi > 0 {
@@ -1219,7 +1596,7 @@ impl Sched {
             return false;
         }
         let e = self.ent(i);
-        e.flags & ON_THREAD == 0 && (e.prio as usize) < DEDICATED
+        e.flags & ON_THREAD == 0 && e.prio() < DEDICATED
     }
 
     /// The number of the task manager's workers in use: a counter kept by
@@ -1254,7 +1631,9 @@ impl Sched {
     }
 
     /// What the idle worker picks: the first task of the highest non-empty
-    /// queue; pure tasks no IO task waits for are picked on the way.
+    /// queue; pure tasks no IO task waits for are picked on the way, as long
+    /// as a worker is free for them: once the worker is busy with a started
+    /// pure task, it takes nothing more (review AR-25).
     fn pick_worker(&mut self) -> u32 {
         loop {
             let Some(i) = self.first_queued() else {
@@ -1262,6 +1641,9 @@ impl Sched {
             };
             if self.eligible(i) {
                 return i;
+            }
+            if !self.pure_room(i, self.pool_in_use()) {
+                return NONE;
             }
             self.pick(i);
         }
@@ -1314,6 +1696,11 @@ impl Sched {
     /// - otherwise, if a worker is free, the lone worker's task, else the
     ///   first task of the highest non-empty queue (pure tasks no IO task
     ///   waits for are started on the way, `pick`, as `startable` does).
+    ///   A started pure task keeps its worker until it has run (review
+    ///   AR-25): an awaited pure task needs a worker free of them too, and
+    ///   waits behind the pure tasks in front of it (their workers finish
+    ///   them first: `needed_picked`); an awaited IO task passes over pure
+    ///   tasks that wait for a worker, as `startable` does (LSCHED-01).
     ///
     /// `spare`: the waiter's own worker counts as free, as native `wait_for`
     /// in a pool task raises the worker limit by one (`Task.get`, `IO.wait`;
@@ -1333,7 +1720,7 @@ impl Sched {
             // as before, it runs (docs/sched.md, review AR-15).
             return true;
         }
-        if self.ent(i).prio as usize == DEDICATED {
+        if self.ent(i).prio() == DEDICATED {
             return true;
         }
         self.settle_worker();
@@ -1342,25 +1729,29 @@ impl Sched {
         if in_use >= self.cx.pool_limit {
             return false;
         }
+        let elig = self.eligible(i);
+        let (mut lone, mut at) = (true, Scan::default());
         loop {
             let w = self.tk.worker;
-            let cand = if w != NONE && self.ent(w).flags & QUEUED != 0 {
-                w
-            } else {
-                match self.first_queued() {
-                    Some(c) => c,
-                    None => return false,
-                }
+            let Some(cand) = self.next_cand(&mut lone, &mut at) else {
+                return false;
             };
             if cand == i {
-                return true;
+                return elig || self.pure_room(i, in_use);
             }
             if self.eligible(cand) {
                 return false;
             }
-            self.pick(cand);
-            if cand == w {
-                self.tk.worker = NONE;
+            if self.pure_room(cand, in_use) {
+                self.pick(cand);
+                if cand == w {
+                    self.tk.worker = NONE;
+                }
+                (lone, at) = (true, Scan::default());
+            } else if elig {
+                at.elig_only = true;
+            } else {
+                return false;
             }
         }
     }
@@ -1401,7 +1792,10 @@ impl Sched {
     ///   pool waiter, it would take one worker where natively it takes two,
     ///   its own and the runner's;
     /// - a pure task a worker has started (`PICKED`) at the root of a listed
-    ///   task's chain starts on a context of its own: it is needed;
+    ///   task's chain starts on a context of its own: it is needed; so does
+    ///   the oldest started pure task when such a root is a queued pure task
+    ///   that waits for the workers the started pure tasks keep (review
+    ///   AR-25, `picked_hold_pool`);
     /// - otherwise the waiter blocks (`Wait::Any`), and the hub starts the
     ///   heads on contexts of their own.
     fn wait_any_step(&mut self, ids: &[TaskId]) -> Option<u32> {
@@ -1431,9 +1825,15 @@ impl Sched {
         for &u in &open {
             if let Some(r) = self.chain_root(u) {
                 let e = self.ent(r);
-                if e.flags & PICKED != 0 && !self.preselected(r) {
-                    let g = e.gen;
-                    self.start_worker(r, g);
+                if e.flags & PICKED != 0 {
+                    if !self.preselected(r) {
+                        let g = e.gen;
+                        self.start_worker(r, g);
+                    }
+                } else if e.flags & QUEUED != 0 && !self.eligible(r) && self.picked_hold_pool() {
+                    if let Some((p, g)) = self.oldest_picked() {
+                        self.start_worker(p, g);
+                    }
                 }
             }
         }
@@ -1454,9 +1854,11 @@ impl Sched {
     /// worker starts what it would start, on a context of its own, never on
     /// the poller's stack (the task may block on something only the poller
     /// provides): the pure task a worker has started at the root of the
-    /// polled task's chain (it is needed), else the queue's head
-    /// (`startable`). The polled task itself starts once it is the head, as
-    /// natively the queue is first come, first served.
+    /// polled task's chain (it is needed); the oldest started pure task if
+    /// that root is a queued pure task waiting for the workers the started
+    /// pure tasks keep (review AR-25, `picked_hold_pool`); else the queue's
+    /// head (`startable`). The polled task itself starts once it is the
+    /// head, as natively the queue is first come, first served.
     fn start_polled(&mut self, id: TaskId) {
         if let Some(r) = self.find(id).and_then(|i| self.chain_root(i)) {
             let e = self.ent(r);
@@ -1464,6 +1866,12 @@ impl Sched {
                 if !self.preselected(r) {
                     let g = e.gen;
                     self.start_worker(r, g);
+                }
+                return;
+            }
+            if e.flags & QUEUED != 0 && !self.eligible(r) && self.picked_hold_pool() {
+                if let Some((p, g)) = self.oldest_picked() {
+                    self.start_worker(p, g);
                 }
                 return;
             }
@@ -1786,14 +2194,19 @@ impl Sched {
 /// and the walk of its dependents (or, for a bind task, its wait for the task
 /// it continues as).
 pub(crate) fn run_task(i: u32) {
-    let (job, own, dedicated) = with(|s| s.begin(i));
+    let (job, own, worker) = with(|s| {
+        let reserved = s.take_reserved(i);
+        let (job, own, dedicated) = s.begin(i);
+        (job, own, s.enter_worker(own, dedicated, reserved))
+    });
+    // the emulated worker it occupies (`running_worker`, review AR-32),
+    // until the end of the run, `task_end` included (dropped last)
+    let _worker = worker;
     // its emulated thread's standard streams and `errno` (`slots`, review
     // AR-24), until the end of the run: after the glue's `task_end`, also
     // when a panic unwinds it (dropped after `Unwound`)
     #[cfg(feature = "io")]
-    let _slots = super::slots::TaskSlots::begin(own, dedicated);
-    #[cfg(not(feature = "io"))]
-    let _ = dedicated;
+    let _slots = super::slots::TaskSlots::begin(own, _worker.held.map(|(w, _)| w));
     let g = glue_opt();
     if let Some(g) = &g {
         g.task_begin(own);
@@ -1830,6 +2243,99 @@ pub(crate) fn run_task(i: u32) {
         g.task_end(own);
     }
     drop(leftover);
+}
+
+/// The emulated pool worker a running task occupies (`Sched::enter_worker`),
+/// from its begin to the end of its run: its drop gives the context its
+/// former innermost worker back and frees the id.
+struct WorkerGuard {
+    /// The id a pool task occupies (for `slots` and `running_worker`) and
+    /// its hold token.
+    held: Option<(u32, u32)>,
+    prev: Option<u32>,
+}
+
+impl Drop for WorkerGuard {
+    fn drop(&mut self) {
+        if super::alive() {
+            with(|s| {
+                s.cx.cur_ctx().worker = self.prev;
+                if let Some((w, token)) = self.held {
+                    s.release_worker(w, token);
+                }
+            });
+        }
+    }
+}
+
+impl Sched {
+    /// The lowest emulated worker id that no task holds, now held (with a
+    /// new token).
+    fn reserve_worker(&mut self) -> u32 {
+        let t = &mut self.tk;
+        t.worker_seq = t.worker_seq.wrapping_add(1).max(1);
+        let ids = &mut t.worker_ids;
+        let w = match ids.iter().position(|&h| h == 0) {
+            Some(w) => w,
+            None => {
+                ids.push(0);
+                ids.len() - 1
+            }
+        };
+        ids[w] = t.worker_seq;
+        w as u32
+    }
+
+    /// The hold `token` of worker id `w` ends, if it is still the id's
+    /// (the walk's end may have ended it already, and a pick taken it).
+    fn release_worker(&mut self, w: u32, token: u32) {
+        if let Some(h) = self.tk.worker_ids.get_mut(w as usize) {
+            if *h == token {
+                *h = 0;
+            }
+        }
+    }
+
+    /// The worker id reserved at its pick for task `i`, which is about to
+    /// begin (`RESERVED`, review RF3-01).
+    fn take_reserved(&mut self, i: u32) -> Option<u32> {
+        let e = self.ent_mut(i);
+        if e.flags & RESERVED == 0 {
+            return None;
+        }
+        e.flags &= !RESERVED;
+        Some(e.link)
+    }
+
+    /// A task begins on the running context (review AR-32): a pool task
+    /// (`own`, as on a thread of its own, and not `dedicated`) takes the id
+    /// reserved at its pick (`reserved`: a started pure task, review
+    /// RF3-01), else the lowest free emulated worker id, which becomes the
+    /// context's innermost worker; a dedicated task makes it `None`; a
+    /// `sync` task (not `own`) runs on the thread below it and keeps its
+    /// worker (review RF3-03, as threads mode answers).
+    fn enter_worker(&mut self, own: bool, dedicated: bool, reserved: Option<u32>) -> WorkerGuard {
+        let pool = own && !dedicated;
+        if !pool {
+            if let Some(w) = reserved {
+                // a started pure task is a pool task: not reached
+                self.tk.worker_ids[w as usize] = 0;
+            }
+        }
+        let worker = match (pool, reserved) {
+            (true, Some(w)) => Some(w),
+            (true, None) => Some(self.reserve_worker()),
+            (false, _) if own => None,
+            (false, _) => self.cx.cur_ctx().worker,
+        };
+        let held = if pool {
+            worker.map(|w| (w, self.tk.worker_ids[w as usize]))
+        } else {
+            None
+        };
+        let prev = std::mem::replace(&mut self.cx.cur_ctx().worker, worker);
+        WorkerGuard { held, prev }
+    }
 }
 
 /// A Rust panic unwinds `run_task` (review RS1S-12 of sched-1). Out of the
@@ -2136,18 +2642,41 @@ pub fn check_canceled() -> bool {
 #[inline]
 pub fn release(id: TaskId) {
     if id != TaskId::FINISHED {
-        release_live(id);
+        release_live(id.to_bits());
     }
 }
 
-/// [`release`] of a task that may still have an entry.
+/// [`release`] of a task that may still have an entry (its id's bits).
+/// `extern "C"`, so it cannot unwind (review AR-28), as [`poll_check`]: a
+/// panic in a destructor of the dropped job aborts.
 #[inline(never)]
-fn release_live(id: TaskId) {
+extern "C" fn release_live(bits: u64) {
+    let id = TaskId::from_bits(bits);
     if !super::alive() {
         return;
     }
     let job = with(|s| s.deactivate(id));
     drop(job);
+}
+
+/// The emulated pool worker of the innermost task the scheduler runs on the
+/// running context (review AR-32, lean2rr's AR-S3): from the glue's
+/// `task_begin` through the job to its `task_end`, the id `slots` gives that
+/// task's standard streams and `errno` (review AR-24). A pool task takes the
+/// lowest id that no task holds (a task waiting in `Task.get` still holds
+/// its own; a started pure task holds its worker's from the pick, review
+/// RF3-01), and keeps it to the end of its run. A `sync` task shares the
+/// thread below it, so its answer is that thread's (review RF3-03, as in
+/// threads mode). `None` for a dedicated task, `main` and the
+/// initializers. A glue that keeps per-thread state of its own
+/// (lean2rr's stream cells) keeps one set per id: swapped in at a pool
+/// task's `task_begin`, kept at its `task_end`. Threads mode has the same
+/// name: there it is the pool worker thread's index.
+pub fn running_worker() -> Option<u32> {
+    if !super::alive() {
+        return None;
+    }
+    with(|s| s.cx.ctxs[s.cx.cur].worker)
 }
 
 /// Whether the innermost task running on this thread is a `sync` one: a
@@ -2299,14 +2828,22 @@ pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str))
 /// (decisions Q5 refinement A): a runaway task keeps the process alive, and
 /// its buffered output is never flushed, as natively.
 ///
-/// With the feature `io`, it then waits for the io layer's dedicated tasks
-/// (`io::exit::after_main`: `IO.Process.output`'s standard-output readers),
-/// as `~task_manager` waits for the dedicated workers, also in a program
-/// that started no task.
+/// With the feature `io`, the emulated pool workers then end: their current
+/// standard streams are dropped (a handle a task left set as its stdout is
+/// closed and flushed), as natively each worker's thread finalizers drop
+/// its streams when `~task_manager` joins it (review AR-33). Then it waits
+/// for the io layer's dedicated tasks (`io::exit::after_main`:
+/// `IO.Process.output`'s standard-output readers), as `~task_manager` waits
+/// for the dedicated workers, also in a program that started no task.
 pub fn finish() {
     // `main`'s own hand-offs: natively its `fclose`s ended before it returned
     super::writers_point();
     finish_tasks();
+    // the standard workers end, and their thread finalizers drop their
+    // current streams, before the dedicated ones are waited for and before
+    // `main`'s flush (`~task_manager`, object.cpp 972-988; review AR-33)
+    #[cfg(feature = "io")]
+    super::slots::end_workers();
     #[cfg(feature = "io")]
     crate::io::exit::after_main();
 }
@@ -2346,8 +2883,15 @@ pub fn poll() {
 }
 
 /// [`poll`] once a task, a promise, a timer or a watch exists.
+/// `extern "C"`, so it cannot unwind (review AR-28): a caller that holds
+/// values with destructors across the inlined [`poll`] then needs no cleanup
+/// path for this call, which would make it too costly for LLVM to inline
+/// into the translator's code. A Rust panic in it, or one that a context's
+/// panic resumes here (on `main`, in the hub), aborts the process, as at an
+/// FFI boundary (both translators call the hooks from FFI code or with
+/// `panic = "abort"` anyway; docs/sched.md, "Costs to measure").
 #[inline(never)]
-fn poll_check() {
+extern "C" fn poll_check() {
     let go = with(|s| {
         if !s.tk.started
             || (s.cx.sleepers.is_empty()
@@ -2363,6 +2907,12 @@ fn poll_check() {
         s.ev_start_loop();
         if s.cx.runnable.is_empty() {
             if let Some((e, g)) = s.startable(Gate::Any) {
+                s.start_worker(e, g);
+            } else if let Some((e, g)) = s.needed_picked() {
+                // a waiter needs a worker that started pure tasks keep: the
+                // running context (a started task itself, say) reaches a
+                // polling point, so the oldest of them runs now, as the hub
+                // would run it (review LF3-01)
                 s.start_worker(e, g);
             }
         }
@@ -2391,8 +2941,9 @@ pub fn effect() {
 }
 
 /// [`effect`] once a task, a promise, a timer or a watch exists.
+/// `extern "C"`, so it cannot unwind (review AR-28), as [`poll_check`].
 #[inline(never)]
-fn effect_check() {
+extern "C" fn effect_check() {
     let slow = with(|s| {
         s.tk.started
             && (!s.cx.sleepers.is_empty()
@@ -2440,6 +2991,12 @@ fn effect_slow() {
                 if let Some((e, g)) = w {
                     s.start_worker(e, g);
                     go = true;
+                } else if s.cx.runnable.is_empty() {
+                    // as at a polling point (review LF3-01)
+                    if let Some((e, g)) = s.needed_picked() {
+                        s.start_worker(e, g);
+                        go = true;
+                    }
                 }
             }
             if !go || s.cx.runnable.is_empty() {
@@ -2507,6 +3064,11 @@ fn zero_sleep() {
                 .and_then(|t| s.startable(Gate::Before(t)))
             {
                 s.start_worker(e, g);
+            } else if s.cx.runnable.is_empty() {
+                // as at a polling point (review LF3-04)
+                if let Some((e, g)) = s.needed_picked() {
+                    s.start_worker(e, g);
+                }
             }
         }
         !s.cx.runnable.is_empty()
@@ -2522,9 +3084,20 @@ pub fn current_context() -> CtxId {
     with(|s| s.cx.cur)
 }
 
-/// Whether the task manager runs (`g_task_manager`).
+thread_local! {
+    /// A copy of `Tasks::started` (`start_with` sets both), so that
+    /// [`manager_running`] reads a flag instead of borrowing the scheduler's
+    /// state (review AR-29).
+    pub(crate) static MANAGER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the task manager runs (`g_task_manager`): on this thread,
+/// `start` (or `start_with`) has been called with at least one worker.
+/// Inlined down to a thread-local flag's load (review AR-29: a translator
+/// asks it at every task creation).
+#[inline]
 pub fn manager_running() -> bool {
-    with(|s| s.tk.started)
+    MANAGER.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]

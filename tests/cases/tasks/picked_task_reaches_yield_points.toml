@@ -1,0 +1,6 @@
+id = "picked_task_reaches_yield_points"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's fixes-3 (LF3-01: a started pure task that reaches polling points), batch fixes-3"
+streams = "separate"
+expect = { hang = 3 }

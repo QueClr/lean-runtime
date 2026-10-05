@@ -145,6 +145,9 @@ pub(crate) struct State {
     live: u32,
     /// `m_idle_std_workers`: live workers between tasks.
     idle: u32,
+    /// Standard workers made so far: the next one's index (its position in
+    /// native's `m_std_workers`; `running_worker`, review AR-32).
+    made: u32,
     /// `m_num_dedicated_workers`: dedicated threads made and not ended.
     dedicated: u32,
     /// One FIFO queue per pool priority (`m_queues`); the ids of tasks
@@ -215,6 +218,7 @@ impl Shared {
                 raised: 0,
                 live: 0,
                 idle: 0,
+                made: 0,
                 dedicated: 0,
                 queues: Default::default(),
                 queued: 0,
@@ -278,6 +282,15 @@ thread_local! {
     static CURRENT: RefCell<Vec<Frame>> = const { RefCell::new(Vec::new()) };
     /// This thread's number (`thread_number`).
     static NUMBER: Cell<Option<u64>> = const { Cell::new(None) };
+    /// A standard worker's index (`running_worker`); `None` on every other
+    /// thread.
+    static WORKER: Cell<Option<u32>> = const { Cell::new(None) };
+}
+
+/// The index of the standard worker this thread is (review AR-32): `None`
+/// on a dedicated task's thread, `main`'s, the loop thread and any other.
+pub(crate) fn running_worker() -> Option<u32> {
+    WORKER.try_with(Cell::get).ok().flatten()
 }
 
 /// `f` on the calling thread's task manager, `None` if there is none (no
@@ -457,8 +470,10 @@ fn spawn_worker(sh: &Arc<Shared>, g: &mut State) {
     // then, and no task then is a pool task.
     debug_assert!(g.started, "lean-runtime: a worker made after finish");
     g.live += 1;
+    let index = g.made;
+    g.made += 1;
     let sh2 = sh.clone();
-    let h = spawn_thread(g.stack_size, move || worker_main(sh2));
+    let h = spawn_thread(g.stack_size, move || worker_main(sh2, index));
     g.worker_handles.push(h);
 }
 
@@ -466,7 +481,8 @@ fn spawn_worker(sh: &Arc<Shared>, g: &mut State) {
 /// of the highest non-empty queue and run it, unless the busy workers
 /// already reach the limit (outside the shutdown); wait while the queue is
 /// empty; end once it is empty and the shutdown has begun.
-fn worker_main(sh: Arc<Shared>) {
+fn worker_main(sh: Arc<Shared>, index: u32) {
+    let _ = WORKER.try_with(|w| w.set(Some(index)));
     thread_entry(&sh);
     let mut g = sh.lock();
     g.idle += 1;

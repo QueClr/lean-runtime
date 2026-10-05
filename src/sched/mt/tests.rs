@@ -1722,3 +1722,43 @@ fn rt1_02b_a_wait_in_a_dependent_run_after_finish_makes_no_thread() {
         after - before
     );
 }
+
+/// Review AR-32: `running_worker` is the standard worker's index on its
+/// thread; `None` on a dedicated task's thread and on `main`'s (a `sync`
+/// dependent run there by `resolve` included).
+#[test]
+fn running_worker_names_the_pool_worker_thread() {
+    let _s = serial();
+    start_test(1);
+    assert_eq!(running_worker(), None, "main");
+    type Seen = Arc<StdMutex<Vec<(&'static str, Option<u32>)>>>;
+    let seen: Seen = Arc::default();
+    let rec = |tag: &'static str| -> Job {
+        let s = seen.clone();
+        Box::new(move || {
+            s.lock().unwrap().push((tag, running_worker()));
+            Outcome::Done
+        })
+    };
+    let a = spawn(rec("a"), 0, true);
+    wait(a);
+    let b = spawn(rec("b"), 0, false);
+    wait(b);
+    let d = spawn(rec("dedicated"), 9, true);
+    wait(d);
+    let p = promise_new().unwrap();
+    let dep = depend(p, rec("sync on main"), 0, true, true);
+    assert!(resolve(p, || {}));
+    assert!(is_finished(dep));
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            ("a", Some(0)),
+            ("b", Some(0)),
+            ("dedicated", None),
+            ("sync on main", None)
+        ]
+    );
+    assert_eq!(running_worker(), None, "main again");
+    finish();
+}

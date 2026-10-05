@@ -277,6 +277,10 @@ pub(crate) struct Ctx {
     /// It holds one of the task manager's workers, as last counted in
     /// `Contexts::in_use` (`Sched::refresh_holds`).
     pub(crate) holds: bool,
+    /// The emulated pool worker of the innermost task running on it
+    /// (`running_worker`, review AR-32): `None` for a dedicated or a `sync`
+    /// task, and outside tasks.
+    pub(crate) worker: Option<u32>,
 }
 
 impl Ctx {
@@ -294,6 +298,7 @@ impl Ctx {
             ready: Instant::now(),
             at_effect: false,
             holds: false,
+            worker: None,
         }
     }
 }
@@ -433,6 +438,18 @@ impl Sched {
     /// Whether some context waits for a particular task (`Wait::Cell`).
     pub(crate) fn has_cell_waiters(&self) -> bool {
         !self.cx.cell_waiters.is_empty()
+    }
+
+    /// Whether a context blocked in `wait` waits for a task or promise
+    /// (entry, generation) for which `f` holds.
+    pub(crate) fn some_cell_waiter(&self, f: impl Fn(u32, u32) -> bool) -> bool {
+        self.cx.cell_waiters.iter().any(|(&(i, g), ws)| {
+            f(i, g)
+                && ws.iter().any(|&c| {
+                    let x = &self.cx.ctxs[c];
+                    x.status == Status::Blocked && x.wait == Wait::Cell(i, g)
+                })
+        })
     }
 
     /// Something changed that `Wait::Progress`, `Wait::Any` and
@@ -594,6 +611,13 @@ impl Sched {
             // `startable` marked started a pure task that a context waits
             // for, which woke it (`pick`): it runs before the hub waits.
             if !self.cx.runnable.is_empty() {
+                continue;
+            }
+            // A context waits for a queued pure task that only the started
+            // pure tasks keep from starting: the oldest runs, as natively
+            // its worker finishes it (review AR-25).
+            if let Some((e, g)) = self.needed_picked() {
+                self.start_worker(e, g);
                 continue;
             }
             let next_deadline = match (next_deadline, self.ev.next_timer()) {

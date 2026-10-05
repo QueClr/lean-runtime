@@ -1,0 +1,12 @@
+id = "runaway_pure_passed_over"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's fixes-3 (LF3-03: since AR-25 an IO task passes over a pure task that waits for a worker), recorded as LSCHED-01, batch fixes-3"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { lean_runtime = "LSCHED-01", leanrs = "DV26 (b)" }
+# `expected` is native's: the only worker runs p0, then the runaway p1, so the IO task never runs
+# and main waits for it forever. lean-runtime's IO task passes over p1, which waits for the worker
+# p0 keeps, and p1 is deleted while still queued: runaway_pure_passed_over.alt1.*, written by hand,
+# which `check` accepts (docs/sched.md, "Known differences from native", LSCHED-01).
+# leanrs DV26 (b): leanrs's record of LSCHED-01.

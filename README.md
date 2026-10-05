@@ -94,7 +94,9 @@ frees its worker, as native's `wait_for` does (AR-15), and a pool task's
 worker stays busy for its walk of `sync` dependents, whose waits never
 free it (AR-16); and it records lean-runtime's first known difference of
 the deferred model, LSCHED-01 (`docs/sched.md`, "Known differences from
-native").
+native"). In fixes-3, a pure task a worker has started keeps that worker
+until it runs, as natively (AR-25), with two more known differences,
+LSCHED-02 and LSCHED-03.
 
 Threads mode (feature `threads`, which excludes `sched` and `net`) has its
 first batch, T1: `sched::mt`, Lean 4.34.0's task manager on real threads

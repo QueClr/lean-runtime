@@ -9,7 +9,9 @@
 //!   `tests/in_task/mod.rs`, so every extern comes from a worker), those of
 //!   LB-33 and LB-34 included;
 //! - `tasks/worker_keeps_streams` and `worker_keeps_errno` (review AR-24),
-//!   on `main`, as their programs run.
+//!   and `worker_streams_closed_at_exit` and `worker_streams_at_process_exit`
+//!   (review AR-33: a worker's streams dropped when `finish` joins it, by
+//!   its thread-locals' destructors), on `main`, as their programs run.
 //!
 //! The expected outcomes are the cases' own: native Lean 4.34.0's, or the
 //! correct one where native is wrong (LB-19, LB-20, LB-33, LB-34), or the
@@ -1405,6 +1407,52 @@ fn worker_keeps_streams(_: &[String]) -> u32 {
     0
 }
 
+// tests/cases/tasks/worker_streams_{closed_at_exit,at_process_exit}.lean
+// (review AR-33): a worker's stdout, a handle a task left set, is dropped
+// when `finish` joins the worker (its thread-locals' destructors), before
+// `main`'s flush; `IO.Process.exit` drops nothing, and the exit's flush
+// writes `stdout` first.
+
+/// A stdout set to a handle (`IO.FS.Stream.ofHandle h`), or `None` for the
+/// process's.
+type HandleOut = Option<Handle>;
+
+/// `IO.print s` on the current stdout.
+fn print_current(s: &str) {
+    use lean_runtime::io::streams::{current, StdStream};
+    match current(StdStream::Stdout, || None as HandleOut) {
+        Some(h) => {
+            let _ = h.put_str(s.as_bytes());
+        }
+        None => {
+            let _ = Handle::stdout().put_str(s.as_bytes());
+        }
+    }
+}
+
+fn worker_streams_closed_at_exit(args: &[String]) -> u32 {
+    let n = args.len();
+    let t = as_task(
+        move || {
+            let h = ok(Handle::open(
+                b"/dev/stdout",
+                lean_runtime::io::FsMode::Write,
+            ));
+            let _ = lean_runtime::io::streams::set_stdout(Some(h) as HandleOut, || None);
+            print_current(&format!("A{n}"));
+        },
+        PRIO_DEFAULT,
+    );
+    t.get();
+    print_current("B");
+    0
+}
+
+fn worker_streams_at_process_exit(args: &[String]) -> u32 {
+    worker_streams_closed_at_exit(args);
+    exit::exit(0)
+}
+
 /// `Handle.getLine`.
 fn get_line(h: &Handle) -> R<String> {
     let mut v = Vec::new();
@@ -1520,11 +1568,24 @@ const TWINS: &[(&str, Twin)] = &[
     ("signal_stop_drops_promise", signal_stop_drops_promise),
     ("worker_keeps_streams", worker_keeps_streams),
     ("worker_keeps_errno", worker_keeps_errno),
+    (
+        "worker_streams_closed_at_exit",
+        worker_streams_closed_at_exit,
+    ),
+    (
+        "worker_streams_at_process_exit",
+        worker_streams_at_process_exit,
+    ),
 ];
 
 /// The twins that run on `main`, as their programs do, not inside a task:
 /// the task cases, whose outcome is about the threads their tasks run on.
-const ON_MAIN: &[&str] = &["worker_keeps_streams", "worker_keeps_errno"];
+const ON_MAIN: &[&str] = &[
+    "worker_keeps_streams",
+    "worker_keeps_errno",
+    "worker_streams_closed_at_exit",
+    "worker_streams_at_process_exit",
+];
 
 /// The glue: nothing to do in threads mode.
 struct MainGlue;

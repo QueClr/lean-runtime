@@ -1,0 +1,5 @@
+id = "drop_queued_behind_pure"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean2rr's switch to lean-runtime's scheduler, step 4 (F1, PickDropped), review AR-25, batch fixes-3"
+streams = "separate"

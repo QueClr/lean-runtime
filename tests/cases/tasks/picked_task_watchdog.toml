@@ -1,0 +1,5 @@
+id = "picked_task_watchdog"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's fixes-3 (LF3-05: a waiter must not idle for an unrelated sleeper), batch fixes-3"
+streams = "separate"

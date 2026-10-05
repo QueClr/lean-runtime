@@ -1,0 +1,5 @@
+id = "worker_streams_closed_at_exit"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's AR-24 (AR-33: the workers' streams at the task manager's finalization), batch fixes-3"
+streams = "separate"

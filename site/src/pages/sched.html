@@ -103,9 +103,25 @@ So it may run later, as on a slow worker.</p>
   <li><strong>Evidence.</strong> Three program cases with pure tasks each gave the recorded outcome in 20 of 20 native runs.
     lean2rr's own runtime fails one of them (<code>runaway_pure_task_started</code>); this rule passes it.</li>
   <li><strong>IO need.</strong> A pure task that an IO task waits for, directly or through other pure tasks, starts as an IO task does.</li>
+  <li><strong>A started pure task keeps its worker</strong> until it runs (AR-25).
+    Natively a worker runs its task to the end before it takes the next one.
+    So a pure task behind it waits in the queue, and the program can still delete it.
+    When a waiter needs that worker, the oldest started pure task runs on a context of its own.
+    An IO task does not wait for started pure tasks.</li>
   <li><strong>A known difference (LSCHED-01).</strong> Natively, runaway pure tasks queued first can take every worker, for example the only one, and keep a later IO task from running.
     Here the IO task runs, because the pure task waits until the exit.
     The case <code>runaway_pure_task_before_io</code> accepts both outcomes.</li>
+  <li><strong>A known difference (LSCHED-02).</strong> With two or more workers, a waiter can need a worker that a runaway started pure task keeps.
+    Natively another worker takes the awaited task, and the waiter goes on.
+    Here the runaway task runs first and never ends.
+    The program hangs in both cases, because the exit waits for a started task.
+    The case <code>runaway_pure_before_awaited</code> accepts both outcomes.</li>
+  <li><strong>A known difference (LSCHED-03).</strong> A waiter can need a worker that a started pure task keeps while another worker only sleeps.
+    Natively the sleeping worker can wake, finish its task and take the awaited task first.
+    Here the started task runs at once, so the awaited task comes after the started task's run.
+    If the started task reaches yield points, the sleeper goes on there, as natively.
+    A wait for the sleeper instead could stop the program for as long as the sleeper sleeps, so that a watchdog fires.
+    The case <code>picked_task_sleeping_worker</code> accepts both outcomes.</li>
 </ul>
 
 <h2 id="yield">Yield points</h2>

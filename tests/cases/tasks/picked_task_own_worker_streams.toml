@@ -1,0 +1,5 @@
+id = "picked_task_own_worker_streams"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime's review of fixes-3 (RF3-01: a started pure task and AR-24's worker streams), batch fixes-3"
+streams = "separate"

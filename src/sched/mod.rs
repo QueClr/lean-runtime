@@ -65,8 +65,8 @@ pub(crate) fn reactor_coop_on_for_tests() {
 pub use task::{
     cancel, check_canceled, current_context, depend, dependent_runs_now, effect, end_running_task,
     finish, in_sync_task, is_finished, manager_running, option_get_or_block, poll, promise_new,
-    release, resolve, sleep_ms, spawn, state, thread_number, wait, wait_any, Job, Outcome, TaskId,
-    TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED,
+    release, resolve, running_worker, sleep_ms, spawn, state, thread_number, wait, wait_any, Job,
+    Outcome, TaskId, TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED,
 };
 
 use std::cell::{Cell, RefCell};
@@ -188,6 +188,7 @@ pub fn start_with(glue: Rc<dyn Glue>, workers: u32, stack_size: usize) {
         s.cx.set_stack_size(stack_size);
         s.tk.started = workers > 0;
     });
+    task::MANAGER.with(|m| m.set(workers > 0));
     // Lean's stack-overflow report covers this thread too, if the glue
     // installed it (`install_stack_overflow_handler`).
     #[cfg(feature = "stack-overflow")]
@@ -240,10 +241,11 @@ pub fn ref_read() {
 
 /// Every `REF_READS_PER_POLL`-th read of [`ref_read`]: out of line, so the
 /// reads in between inline down to the flag's load and the countdown
-/// (review AR-23).
+/// (review AR-23). `extern "C"`, so it cannot unwind (review AR-28), as
+/// `task::poll_check`.
 #[cold]
 #[inline(never)]
-fn ref_read_poll() {
+extern "C" fn ref_read_poll() {
     poll();
 }
 

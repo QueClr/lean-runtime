@@ -95,9 +95,12 @@ context that blocks suspends back to the hub. The hub picks, in this order:
    loop's due timers and ready descriptors are looked at first, and wake
    theirs);
 2. a queued task, on a new context, if a worker is free;
-3. a pure task a worker has started (below), when nothing else will ever
-   happen (no sleeper, timer or registered descriptor);
-4. otherwise it waits in the event loop: in `epoll_wait` until a registered
+3. the oldest pure task a worker has started (below), when a context waits
+   for a queued pure task that only such started tasks keep from starting
+   (review AR-25, "The pure-task rule");
+4. a pure task a worker has started, when nothing else will ever happen (no
+   sleeper, timer or registered descriptor);
+5. otherwise it waits in the event loop: in `epoll_wait` until a registered
    descriptor is ready or the earliest sleeper or timer is due, or forever
    (a deadlocked native program waits forever too).
 
@@ -258,7 +261,10 @@ AR-10, corrected; `src/sched/task.rs`):
   it, so the mark wakes the waiters of that task, and `wait` then runs it on
   its stack (it is started, so it may); `IO.waitAny` and the polling
   threshold start such a task, when a task they wait for needs it, on a
-  context of its own (as the last resort does).
+  context of its own (as the last resort does). A started pure task keeps
+  its worker until it has run (review AR-25): an awaited pure task needs a
+  worker free of started tasks too, and a waiter that waits behind them
+  makes the oldest run on a context of its own ("The pure-task rule").
 
 Example (`tasks/wait_queue_order`, one worker): `x` holds the worker for
 100 ms; `b` and `c` are queued, then `a` at `Task.Priority.max`, which
@@ -318,6 +324,26 @@ standard streams and exits. It waits until:
 It does not wait for a task whose dependency never finishes (an unresolved
 promise, a cycle), as natively.
 
+Then, with `io`, the emulated pool workers end (review AR-33): their
+current standard streams and `errno` (`slots`) are dropped, so a handle a
+task left set as its stdout is closed and flushed, before the glue flushes
+`main`'s streams. Natively `lean_finalize_task_manager` joins the standard
+workers (`~task_manager`, `object.cpp` 972-988), and each worker's thread
+finalizers (`lean_finalize_thread`, `thread.cpp` 58-61) drop the current
+streams of `MK_THREAD_LOCAL_GET` (`io.cpp` 115-117). Dedicated tasks drop
+theirs at their end, as their threads end then. What is never dropped, as
+natively: `main`'s streams (its thread is not finalized), the event loop
+context's (native's loop thread never ends), and every set at
+`IO.Process.exit`, which runs no thread finalizers natively either; glibc's
+exit then flushes `stdout` first and the other open streams after it, as
+`io::exit::exit_flush` does. Cases (recorded natively, `| cat`, also the
+same with 2 and 4 workers natively): `tasks/worker_streams_closed_at_exit`
+(a task makes a handle on `/dev/stdout` its stdout and prints `A0`; `main`
+prints `B`: `A0B`; before the fix `BA0`) and
+`tasks/worker_streams_at_process_exit` (the same, then `IO.Process.exit 0`:
+`BA0`), with twins in the driver and in threads mode, where the workers'
+thread-locals' destructors run when `finish` joins them.
+
 Native Lean differs in one point, a Lean bug (LB-13 in
 `docs/lean-bugs.md`): once no standard worker is left after `main`, a pool
 task enqueued then never runs, so its effects are lost and a wait on it
@@ -362,8 +388,105 @@ other pure tasks, the task is only marked *started* (`pick`,
   - an IO task comes to wait for it, directly or through other pure tasks
     (`need_up` walks the chain of waiting tasks up and gives each its *IO
     need*; `startable` starts a started pure task that gains it);
+  - a waiter needs its worker (`needed_picked`, below);
   - nothing else can go on, and no sleeper will wake (`last_resort`);
   - `main` returns (`finish`, before the queued tasks).
+
+**A started pure task keeps its worker** (review AR-25, from lean2rr's
+switch to the crate). Natively a worker runs the task it dequeues to its
+end before it dequeues another (the worker loop, `object.cpp` 863-865:
+`dequeue`, then `run_task`). So W workers have at most W tasks started at
+a time, and a task queued behind them is not started yet: the program can
+still delete it (`deactivate_task`, 1060-1072). Here a started pure task
+counts as its worker's task until it runs (`picked_pool`):
+- a worker starts a pure task only while a worker is free of the contexts'
+  tasks and of started pure tasks (`pure_room`). Otherwise the pure task
+  stays in its queue, and `release` still deletes it;
+- an awaited pure task (`wait`) needs such a free worker too, so it waits
+  behind the pure tasks queued in front of it;
+- a waiter (`wait`, `IO.waitAny`, the polling threshold) that waits for a
+  queued pure task, while every worker that no context holds is busy with
+  a started pure task, makes the oldest of them run on a context of its
+  own (`needed_picked`, `picked_hold_pool`), as natively its worker
+  finishes it and takes the next task. It runs at once, also while a
+  context that holds a worker only sleeps: natively that sleeper's wake
+  could free its worker first (LSCHED-03, below). Waiting for the sleeper
+  instead (reviews RF3-02, LF3-02, reverted after LF3-05) idled the only
+  thread for as long as the sleeper slept, so a watchdog task fired where
+  native ends (case `tasks/picked_task_watchdog`). The oldest started
+  task also runs when the running context reaches a polling point, an
+  effect point or a zero sleep (`IO.sleep 0`, `dbgSleep 0`) and nothing
+  else can go on (reviews LF3-01, LF3-04): a started task run for a
+  waiter that reads references (every 1000th read polls), prints or
+  sleeps 0 ms lets the next one run, whose worker then takes the awaited
+  task, and lets a due sleeper go on (cases
+  `tasks/picked_task_reaches_yield_points`, `picked_task_sleep_zero`;
+  driver test `effect_points_in_a_started_task_let_the_next_run`; each
+  fails without it);
+- an IO task, and a pure task with IO need, do not wait for started pure
+  tasks: for them a started pure task takes no time, as before (LSCHED-01).
+  Such a task starts once a worker is free of the contexts' tasks, and
+  passes over the pure tasks queued in front of it that wait for a worker
+  (`Tasks::elig` counts the queued tasks that are not pure tasks without IO
+  need, so a queue without one is not scanned).
+
+The exception for IO tasks is needed. If an IO task waited for the started
+pure tasks, it would start only when one of them is needed. Example: one
+worker; a pure task is started, an IO task that sets a flag is queued
+behind it, and `main` polls the flag with sleeps. Nothing needs the pure
+task, so the IO task would never start, and the program would hang where
+native ends. It would also run the runaway task of
+`tasks/runaway_pure_task_before_io` to free its worker, so `main` would
+print nothing (neither native's outcome nor `alt1`).
+
+The cases, recorded natively (5 runs each), with twins in the driver;
+"before" is the outcome before AR-25:
+
+| Case | What the program does | Native | Before |
+|---|---|---|---|
+| `tasks/wait_pure_queue_order` | one worker; four pure tasks that print their number (`dbgTrace`); `main` waits for the last one first | `task 0` to `task 3` in order | `task 3` first, then 2, 1, 0 (`wait` started the three in front at once and ran the awaited one first) |
+| `tasks/drop_queued_behind_pure` | one worker, busy 50 ms with an IO task; `t0` (pure, about 100 ms) and `t1` (pure, never ends) queued behind it; `main` drops `t1` once the worker is free, then waits for `t0` | `t0 752938 false`, status 0 | hangs (the free worker started `t0` and `t1` at once, so `t1` could not be deleted) |
+| `tasks/runaway_pure_before_awaited` | LSCHED-02 below (two workers) | `t`'s line, then a hang | `t`'s line with `q` reported unfinished, then a hang (not native either) |
+| `tasks/picked_task_sleeping_worker` | LSCHED-03 below: two workers; IO task `a` sleeps 200 ms; `p` (pure, about 1 s, no yield point) started; `main` waits for pure `t` | `t` while `p` still runs (`p finished then: false`) | the same as now: `t` after `p` (`alt1`) |
+| `tasks/picked_task_reaches_yield_points` | two workers; `p` (pure, never ends) loops over an `ST.Ref`; `q` (pure, quick), then `t`; `main` waits for `t` (LF3-01) | `t = 1001`, `p` unfinished, `q` finished, then a hang | nothing, then a hang: `p` ran for the waiter, and its reference reads never let `q` run |
+| `tasks/picked_task_ticking_worker` | a control: two workers; an IO task sleeps 100 ms at a time until the exit; `p` (pure, about 100 ms) started; `main` waits for pure `t` (LF3-02) | `t = 2`, status 0 | passes; a waiter that waits for the ticker's wakes hangs |
+| `tasks/picked_task_short_sleeper_long` | a control: two workers; an IO task sleeps 1 s once; `p` (pure, a few ms) started; `main` waits for pure `t` (RF3-05) | `t` before 500 ms, then `tick` | passes; a waiter that waits for the sleeper's wake gets `t` after 1 s |
+| `tasks/picked_task_watchdog` | two workers; a watchdog IO task sleeps 3 s, then exits with status 1 unless shutting down; `p` (pure, about 100 ms) started; `main` waits for pure `t` (LF3-05) | `t = 2`, status 0 | passes; with RF3-02's wait (reverted), `timeout`, status 1 |
+| `tasks/picked_task_sleep_zero` | two workers; `p` (pure, never ends) calls `dbgSleep 0` at every step; `q` (pure, quick), then `t`; `main` waits for `t` (LF3-04) | `t = 1001`, `p` unfinished, `q` finished, then a hang | nothing, then a hang: `p`'s zero sleeps never let `q` run |
+
+Unit tests (`src/sched/tests.rs`): `an_awaited_pure_task_waits_for_the_pure_tasks_in_front`,
+`a_pure_task_behind_a_started_one_can_still_be_deleted`,
+`an_io_task_does_not_wait_for_started_pure_tasks`, and, with a pending
+timer that keeps the hub from its last resort,
+`a_waiter_runs_the_started_pure_tasks_it_waits_behind`,
+`wait_any_runs_the_started_pure_tasks_its_list_waits_behind`,
+`polling_runs_the_started_pure_tasks_the_polled_task_waits_behind`.
+Mutation checks (2026-10-04): the first two unit tests and the first two
+cases fail on the code before AR-25; without the hub's `needed_picked`,
+`IO.waitAny`'s or the polling threshold's start of the oldest started task,
+the matching timer test fails (a 20-second wait, or a poll that never
+ends); without the pass-over of pure tasks that wait for a worker,
+`an_io_task_does_not_wait_for_started_pure_tasks` fails (the IO task does
+not run while `main` sleeps).
+
+**Its worker's id** (review RF3-01). With `io`, a pool task runs with its
+emulated worker's standard streams and `errno` (`slots`, review AR-24),
+and `running_worker` names that worker. A started pure task takes the id
+of the worker that started it at the pick (the lowest free id then), and
+keeps it until it runs, so no other task uses that worker's set meanwhile:
+it runs with what its worker's previous task left, as natively. A pool
+task's id is free again when its walk of dependents is over, as natively
+the worker then takes its next task, so the lone worker's next pick gets
+the same id. One corner, with LSCHED-01: an IO task that starts while
+started pure tasks hold every worker takes an id beyond the number of
+workers, with a fresh set (natively it would wait for one of those
+workers, and get its leftovers). Case `tasks/picked_task_own_worker_streams`
+(two workers: `p` is started, then IO task `x` on the other worker sets
+its stderr to a buffer; native: `p`'s trace on the process's stderr, the
+buffer `"x\n"`; before the fix `p` ran with `x`'s streams, and its trace
+went into the buffer), with its twin, and the unit test
+`a_started_pure_task_runs_with_its_workers_streams`; both fail before the
+fix.
 
 An IO task starts as before (lean2rr's rules), and so does a pure task with
 IO need: in `t := Task.spawn f; u := t.map g; IO.mapTask h u`, `t` and `u`
@@ -412,9 +535,13 @@ while !(← IO.hasFinished t) do IO.sleep 5
 `polling_with_sleeps_runs_a_pure_task_after_two` (`src/sched/tests.rs`)
 records the three answers. No recorded case polls a pure task this way.
 
-**A known difference: LSCHED-01.** Deferring a started pure task gives a
-schedule native's pool does not produce when runaway pure tasks, queued
-first, would take every worker ("Known differences from native" below).
+**Known differences: LSCHED-01, LSCHED-02 and LSCHED-03.** Deferring a
+started pure task gives a schedule native's pool does not produce when
+runaway pure tasks, queued first, would take every worker (LSCHED-01).
+Running the oldest started pure task for a waiter gives one when that task
+never ends (LSCHED-02), and delays the awaited task by its run time where
+natively a sleeping worker's wake could take it first (LSCHED-03; "Known
+differences from native" below).
 
 ## Blocking IO and the event loop (sched-io)
 
@@ -857,6 +984,32 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    its thread-locals from one task to the next; cases
    `tasks/worker_keeps_streams` and `worker_keeps_errno`), a dedicated task
    with a fresh one. A glue must not swap `io::streams` in its hooks too.
+
+   A glue that keeps per-thread state of its own (lean2rr's stream cells,
+   which only its generated code can build and drop) follows the same
+   emulated workers with `sched::running_worker()` (review AR-32,
+   lean2rr's AR-S3). From `task_begin` through the job to `task_end`, it is
+   the id of the emulated worker the innermost running task occupies, the
+   one whose `io::streams` set `slots` swapped in: a pool task takes the
+   lowest id no task holds (a task waiting in `Task.get` still holds its
+   own; a pure task a worker has started holds the id of that worker from
+   the start, review RF3-01), and keeps it to the end of its run (the id
+   is free for the next pick once its walk is over). A `sync` task runs
+   on the thread below it and shares its answer (review RF3-03, as in
+   threads mode): inside a pool task's walk, that task's id; on `main`'s
+   thread, `None`. It is `None` for a dedicated task, `main` and the
+   initializers. So the glue keeps one set per id: swapped in at a pool
+   task's `task_begin`, kept at its `task_end`, and fresh for a dedicated
+   task (a `sync` task's `task_begin` comes with `own_thread` false: it
+   keeps the set of the thread below it). Unit tests
+   `running_worker_names_a_pool_tasks_emulated_worker` (two pool tasks at
+   one worker: one id, and the `sync` dependent in their walk the same; a
+   dedicated task and `main`: `None`; the hooks see the same),
+   `a_sync_dependent_shares_its_threads_worker` (on `main`'s thread:
+   `None`) and
+   `a_pool_task_run_by_a_pool_waiter_takes_the_next_id`. In threads mode
+   the same function gives the standard worker thread's index
+   (`docs/threads.md`).
 
    `switched` runs on `main`'s stack, inside the hub: it must not block or
    yield, and the scheduler panics if it tries. When nothing can run, the
@@ -1503,6 +1656,8 @@ Each invariant names the code that establishes it.
   then sets `cur` back to `MAIN` and marks `n` dead; `main`, which was
   blocked or letting others go first in the hub, runs again and waits for
   nothing (review RS1S-04; test `a_caught_context_panic_leaves_main_usable`).
+  If `main` was in a hook's cold path, which cannot unwind (review AR-28;
+  "Rust panics" below), the process aborts there instead.
   A dead context is never resumed (`Sched::wake` and `hub_step` select only
   blocked or able contexts), and its slot is never freed or reused, so its
   stale pointer is never read.
@@ -1689,7 +1844,9 @@ accepts both (`tests/cases/README.md`).
 
 | Id | What | Native | Here | Why | Case |
 |---|---|---|---|---|---|
-| LSCHED-01 | Runaway pure tasks (`Task.spawn` of a computation that never ends), queued before an IO task, when they would take every worker (for example one, at `LEAN_NUM_THREADS=1`; leanrs's DV26 (b), reviews AR-15, RS4-02) | The workers take the pure tasks first (first come, first served) and never finish them: the IO task never runs, and the exit waits forever | The worker only marks the pure task started ("The pure-task rule"): the IO task runs during `main`'s next wait, and the pure task at the exit, which then waits forever | The pure-task rule: a pure task no IO task waits for is deferred, so that a runaway one cannot take the only thread from `main`, which natively goes on in parallel (`tasks/runaway_pure_task_started`); a pure task has no effects, so the deferral shows only in what other tasks a stalled worker would have kept from running | `tasks/runaway_pure_task_before_io` (native: `main done false false`, then a hang; here: `io task ran` first, `alt1`) |
+| LSCHED-01 | Runaway pure tasks (`Task.spawn` of a computation that never ends), queued before an IO task, when they would take every worker (for example one, at `LEAN_NUM_THREADS=1`; leanrs's DV26 (b), reviews AR-15, RS4-02, LF3-03) | The workers take the pure tasks first (first come, first served) and never finish them: the IO task never runs, and the exit waits forever (or `main` does, if it waits for the IO task) | An IO task does not wait for pure tasks no IO task waits for: a worker only marks such a task started ("The pure-task rule"), and since AR-25 an IO task also passes over the pure tasks that wait in the queue for a worker that started pure tasks keep. So the IO task runs during `main`'s next wait. A started runaway task runs at the exit, which then waits forever; a passed-over one is still queued, so if the program drops it, it is deleted and never runs, and the program can end where native hangs | The pure-task rule: a pure task no IO task waits for is deferred, so that a runaway one cannot take the only thread from `main`, which natively goes on in parallel (`tasks/runaway_pure_task_started`); a pure task has no effects, so the deferral shows only in what other tasks a stalled worker would have kept from running | `tasks/runaway_pure_task_before_io` (native: `main done false false`, then a hang; here: `io task ran` first, then the hang, `alt1`); `tasks/runaway_pure_passed_over` (one worker; `p0` finite, then runaway `p1`, kept, then an IO task; `main` drops `p1` after 300 ms and waits for the IO task; native: nothing, then a hang; here: `io`, `done`, status 0, `alt1`) |
+| LSCHED-02 | A waiter needs a worker that started pure tasks keep, and the oldest of them never ends and reaches no polling point, effect point or zero sleep (two workers or more; reviews AR-25, LF3-01, LF3-04) | Another worker finishes its task and takes the awaited one: the waiter goes on, and the exit waits forever for the runaway task | The oldest started pure task runs on the one thread to free its worker (`needed_picked`) and never ends: nothing after the wait happens | One thread runs one task at a time and cannot tell which started task would end first; the oldest has run the longest. The program hangs either way (a started task runs to completion before the exit); only what it does before the hang differs | `tasks/runaway_pure_before_awaited` (native: `t = 1001`, `p finished: false, q finished: true`, then a hang; here: nothing, then a hang, `alt1`) |
+| LSCHED-03 | A waiter needs a worker that started pure tasks keep, while a context that holds a worker sleeps, and the oldest started task reaches no yield point (two workers or more; reviews RF3-02, LF3-05) | A race: the sleeper's worker takes the awaited task when the sleeper wakes and ends, a started task's worker when that task ends; whichever comes first | The oldest started task runs at once for the waiter (AR-25), so the awaited task comes after that task's run, whatever the sleeper does. With yield points in the started task (reference reads, clock reads, outputs, zero sleeps) the hub resumes the due sleeper there, and its worker takes the awaited task, as natively (LF3-01, LF3-04) | One thread cannot know how long a started pure task takes, and cannot preempt it. Waiting for the sleeper's wake instead (RF3-02's fix) idled the only thread for as long as an unrelated sleeper slept, so a watchdog fired where native ends (LF3-05, `tasks/picked_task_watchdog`), and it was reverted: a delay by the started task's own run time is the admitted cost | `tasks/picked_task_sleeping_worker` (native: `t` while `p` still runs, `p finished then: false`; here: `t` after `p`'s run, `true`, `alt1`) |
 
 The other places where the crate's schedule is one of native's but may
 differ from the most frequent one are "Schedules that depend on the
@@ -1730,7 +1887,17 @@ machine's speed" (above) and "The limits of one thread" (below).
   then whatever the glue does with a panic in `main` (status 101 in the
   driver). The driver test `a_rust_panic_in_a_context_goes_on_in_main`
   checks it. A glue that catches it goes on without the tasks and walks the
-  panic unwound (S6). A panic in `switched` or `idle` aborts. With
+  panic unwound (S6). A panic in `switched` or `idle` aborts. So does a
+  panic in the cold path of an inlined hook (review AR-28): those cannot
+  unwind (`extern "C"`: `effect_check`, `poll_check`, `ref_read_poll`,
+  `release_live`, and io's `join_own_writers_slow`). A panic raised in
+  one, or a context's panic resumed in `main` while `main` waits in one
+  (the yield of an effect or polling point, a release whose dropped job
+  blocks, the wait for a writer), aborts there with Rust's "panic in a
+  function that cannot unwind", status 134 (driver test
+  `a_rust_panic_resumed_in_a_hooks_cold_path_aborts`). Both translators
+  call the hooks from FFI code (lean2rr's textures) or build with
+  `panic = "abort"` (leanrs), where such a panic aborts anyway. With
   `panic = "abort"` (leanrs's builds), a panic anywhere, a context
   included, prints Rust's message and aborts at the panic site: status 134,
   nothing unwound, no buffered stdout written. Suspended contexts are never
@@ -1852,9 +2019,19 @@ None of these has been timed.
   writers); `poll` and `effect` are that load and `coop_possible()`'s until
   the program has a task, a promise, a timer or a watch; `ref_read` is the
   flag's load, then the countdown; `release` of a finished task's id is a
-  comparison; the no-suspend scope is a thread-local counter. What follows
+  comparison; the no-suspend scope is a thread-local counter;
+  `manager_running`, which a translator asks at every task creation, is a
+  thread-local flag's load (review AR-29). What follows
   is out of line (`#[inline(never)]`, and `#[cold]` for the writers' wait
-  and every 1000th read).
+  and every 1000th read), and cannot unwind (`extern "C"`, review AR-28):
+  a caller that holds values with destructors across a hook then needs no
+  cleanup path for the call. With one, LLVM priced lean2rr's
+  `l2r_lcell_set` at 285 against its threshold of 225 and stopped inlining
+  it into the generated task code. A Rust panic in a cold path aborts, as
+  at an FFI boundary ("Rust panics" above). Checked on a probe crate's
+  LLVM IR (each hook called with a `Box` held across it): every call of a
+  cold path is a `call`, where before it was an `invoke` with a cleanup
+  landing pad.
 - **Polling points.** `ref_read` is an atomic load when off, and a
   thread-local countdown when on; every 1000th read, and every `poll`, costs
   a thread-local `RefCell` borrow and checks on the sleepers, runnable
@@ -1869,9 +2046,36 @@ None of these has been timed.
   - The hub's `RefCell` borrows, and a thread-local flag per switch (S4).
   - A new context maps a stack (`mmap` and `mprotect`) unless one of the 8
     pooled stacks is free.
-- **Per-task cost.** One boxed `Job` per task, a slab entry, and the
-  translator's slot. The lone-worker model reads the clock once per spawn
-  while a worker is waking.
+- **Per-task cost** (review AR-27). Per live task:
+  - its slab entry, 56 bytes (80 before AR-27: the queue time is a 32-bit
+    count of microseconds instead of an `Option<Instant>`, the thread
+    number keeps only its low half, which shares a word with the polling
+    counts, and the priority is the top byte of the flags; the unit test
+    `the_slab_entry_is_56_bytes`). The entries are in chunks of 1024 that
+    never move, so the slab never doubles: no unused half, and no copy of
+    every entry when it grows, which mimalloc's `realloc` makes with both
+    blocks resident;
+  - its boxed `Job`: the closure's size, rounded up by the allocator (no
+    allocation for a closure that captures nothing);
+  - while queued, an 8-byte item in its priority's queue (a `VecDeque`,
+    which grows by doubling); while started and not run, an 8-byte item in
+    the started list, compacted when its stale items outnumber the others;
+  - the translator's slot.
+
+  A thin job (a function pointer and a word, without a `Box`) was
+  considered and left out: as a second form of `Job`, it makes the
+  optional job 24 bytes (two 16-byte forms leave no spare bits for the
+  tag), and keeping it at 16 needs `unsafe`. It would save one 16-byte
+  allocation per task for a translator whose job captures one pointer.
+
+  Probe (2026-10-04, a scratch program, not committed): TaskHeavy's first
+  two phases (100 000 live pure tasks, awaited in order, then a
+  100 000-long chain of `Task.map`) through the crate with 20 workers.
+  Peak RSS, 3 runs each, equal within 0.1 MB: with mimalloc 40.9 MB at
+  31c7bfa, 43.0 MB with AR-25 alone (its tasks stay queued, so the queue
+  grows, and the started list kept its stale items), 28.6 MB with AR-27;
+  with glibc's `malloc`, 20.3 MB, 21.0 MB and 17.9 MB. The lone-worker
+  model reads the clock once per spawn while a worker is waking.
 - **Memory.** A pooled stack keeps every page it touched (no `madvise`
   without `unsafe`); up to 8 are kept. A deep recursion in a task leaves
   that much RSS behind, as a native worker thread's stack would.

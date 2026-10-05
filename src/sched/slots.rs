@@ -47,11 +47,19 @@ struct Store {
     contexts: Vec<Option<ThreadSlots>>,
     /// The event loop context's set between two loop contexts.
     event_loop: Option<ThreadSlots>,
-    /// The emulated pool workers' sets, by worker id: `None` while a task
-    /// of that worker runs.
+    /// The emulated pool workers' sets, by worker id (the scheduler's,
+    /// `running_worker`): `None` while a task of that worker runs, or before
+    /// its first task.
     workers: Vec<Option<ThreadSlots>>,
 }
 
+/// What it still forgets at thread exit (review AR-33): the sets of
+/// contexts suspended then (an `IO.Process.exit` from a task, a context that
+/// waits forever), the event loop's (native's loop thread never ends, so its
+/// thread finalizers never run), and the workers' sets when `finish` did
+/// not run (`IO.Process.exit`: natively `exit` runs no thread finalizers
+/// either, and glibc's exit flushes the streams still open, as
+/// `io::exit::exit_flush` does).
 impl Drop for Store {
     fn drop(&mut self) {
         for s in self.contexts.drain(..).chain(self.workers.drain(..)) {
@@ -63,6 +71,23 @@ impl Drop for Store {
 
 thread_local! {
     static STORE: RefCell<Store> = RefCell::new(Store::default());
+}
+
+/// The task manager's finalization (`sched::finish`, review AR-33): the
+/// emulated pool workers end, and with them their sets, as natively
+/// `lean_finalize_task_manager` joins the standard workers, whose thread
+/// finalizers (`lean_finalize_thread`, `thread.cpp` 58-61) drop each
+/// worker's current streams (`MK_THREAD_LOCAL_GET`), closing a handle a
+/// task left set there, before `main`'s streams are flushed at the exit.
+/// In id order (natively the workers end in any order); outside the
+/// store's borrow, since a stream's drop is translator code.
+pub(crate) fn end_workers() {
+    let sets = STORE
+        .try_with(|s| std::mem::take(&mut s.borrow_mut().workers))
+        .unwrap_or_default();
+    for set in sets {
+        drop(set);
+    }
 }
 
 /// The hub's swap for context `n` (its index), from just before it resumes
@@ -148,32 +173,33 @@ pub(crate) struct TaskSlots {
 
 impl TaskSlots {
     /// Task begins: with `own` (natively on a thread of its own) its
-    /// emulated thread's set is swapped in, a pool task's from the lowest
-    /// free worker id (`dedicated` false), a dedicated task's fresh; a `sync`
-    /// task (`own` false) keeps the current set.
-    pub(crate) fn begin(own: bool, dedicated: bool) -> TaskSlots {
+    /// emulated thread's set is swapped in: a pool task's, that of the
+    /// emulated worker the scheduler gave it (`worker`: the lowest free id,
+    /// `running_worker`, review AR-32), a dedicated task's (`worker` `None`)
+    /// fresh; a `sync` task (`own` false) keeps the current set.
+    pub(crate) fn begin(own: bool, worker: Option<u32>) -> TaskSlots {
         if !own {
             return TaskSlots {
                 worker: None,
                 held: None,
             };
         }
-        let (worker, mut held) = if dedicated {
-            (None, ThreadSlots::default())
-        } else {
-            let taken = STORE.try_with(|s| {
-                let mut s = s.borrow_mut();
-                match s.workers.iter().position(Option::is_some) {
-                    Some(w) => (w, s.workers[w].take().unwrap_or_default()),
-                    None => {
-                        s.workers.push(None);
-                        (s.workers.len() - 1, ThreadSlots::default())
+        let (worker, mut held) = match worker {
+            None => (None, ThreadSlots::default()),
+            Some(w) => {
+                let w = w as usize;
+                // a free worker's set, or a fresh one for a new worker
+                let taken = STORE.try_with(|s| {
+                    let mut s = s.borrow_mut();
+                    if s.workers.len() <= w {
+                        s.workers.resize_with(w + 1, || None);
                     }
+                    s.workers[w].take().unwrap_or_default()
+                });
+                match taken {
+                    Ok(x) => (Some(w), x),
+                    Err(_) => (None, ThreadSlots::default()),
                 }
-            });
-            match taken {
-                Ok((w, x)) => (Some(w), x),
-                Err(_) => (None, ThreadSlots::default()),
             }
         };
         held.swap();

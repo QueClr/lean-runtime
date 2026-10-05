@@ -1,0 +1,6 @@
+id = "picked_task_sleep_zero"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's fixes-3 (LF3-04: a started pure task's zero sleeps), batch fixes-3"
+streams = "separate"
+expect = { hang = 3 }

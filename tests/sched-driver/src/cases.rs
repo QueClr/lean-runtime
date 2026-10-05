@@ -76,6 +76,19 @@ pub fn lookup(id: &str) -> Option<Case> {
         "sync_self_wait_keeps_worker" => (no_init, sync_self_wait_keeps_worker),
         "sync_wait_in_inline_walk" => (no_init, sync_wait_in_inline_walk),
         "sync_dep_waits_queued_task" => (no_init, sync_dep_waits_queued_task),
+        "wait_pure_queue_order" => (no_init, wait_pure_queue_order),
+        "drop_queued_behind_pure" => (no_init, drop_queued_behind_pure),
+        "runaway_pure_before_awaited" => (no_init, runaway_pure_before_awaited),
+        "picked_task_own_worker_streams" => (no_init, picked_task_own_worker_streams),
+        "picked_task_sleeping_worker" => (no_init, picked_task_sleeping_worker),
+        "picked_task_ticking_worker" => (no_init, picked_task_ticking_worker),
+        "picked_task_reaches_yield_points" => (no_init, picked_task_reaches_yield_points),
+        "runaway_pure_passed_over" => (no_init, runaway_pure_passed_over),
+        "worker_streams_closed_at_exit" => (no_init, worker_streams_closed_at_exit),
+        "worker_streams_at_process_exit" => (no_init, worker_streams_at_process_exit),
+        "picked_task_short_sleeper_long" => (no_init, picked_task_short_sleeper_long),
+        "picked_task_watchdog" => (no_init, picked_task_watchdog),
+        "picked_task_sleep_zero" => (no_init, picked_task_sleep_zero),
         "late_task_after_main" => (no_init, late_task_after_main),
         "late_dependent_of_dedicated" => (no_init, late_dependent_of_dedicated),
         "late_wait_dedicated" => (no_init, late_wait_dedicated),
@@ -194,6 +207,8 @@ pub fn lookup(id: &str) -> Option<Case> {
         // Not a Lean program: a Rust panic (a translator's or the runtime's
         // bug) in a task on a context of its own.
         "rust_panic_in_task" => (no_init, rust_panic_in_task),
+        "rust_panic_through_effect" => (no_init, rust_panic_through_effect),
+        "effect_points_in_a_started_task" => (no_init, effect_points_in_a_started_task),
         // Not Lean programs either: leanrs's adversarial checks of
         // docs/sched.md's "Why Glue::suspend is sound" (S5, S6).
         "adv_block_in_drop_during_unwind" => (no_init, adv_block_in_drop_during_unwind),
@@ -500,6 +515,19 @@ fn rust_panic_in_task(_: &[String]) -> u32 {
     println("main starts");
     let _ = as_task(|| -> () { panic!("a Rust panic in a task") }, PRIO_DEFAULT);
     sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+/// As `rust_panic_in_task`, but `main` is in an effect point when the task
+/// panics: the panic resumes in the effect point's cold path, which cannot
+/// unwind (review AR-28), so the process aborts there.
+fn rust_panic_through_effect(_: &[String]) -> u32 {
+    println("main starts");
+    let _ = as_task(|| -> () { panic!("a Rust panic in a task") }, PRIO_DEFAULT);
+    // no yield point: at the output, the task has been queued for 10 ms
+    // (`STALE` is 5), so the effect point lets it go first
+    std::thread::sleep(std::time::Duration::from_millis(10));
     eprintln("not reached");
     0
 }
@@ -4954,5 +4982,500 @@ fn worker_keeps_errno(_: &[String]) -> u32 {
         Ok(l) => println(&format!("main's getLine: ok {}", quote(&l))),
         Err(e) => println(&format!("main's getLine: {}", lio::error_text(&e))),
     }
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-3: a started pure task keeps its worker until it has run (review
+// AR-25). Each case runs with `LEAN_NUM_THREADS=1`.
+
+/// `dbgTrace msg`: Lean's `io_eprintln` on the current standard error, an
+/// output, so an effect point first, as the glue's other outputs.
+fn dbg_trace(msg: &str) {
+    lean_runtime::sched::effect();
+    lean_runtime::io::debug::dbg_trace(msg.as_bytes());
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   IO.eprintln "start"
+//   let ts := (List.range n).map fun i => Task.spawn fun _ => dbgTrace s!"task {i}" fun _ => i
+//   IO.eprintln s!"values {ts.reverse.map Task.get}"
+fn wait_pure_queue_order(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    eprintln("start");
+    let ts: Vec<Task<u64>> = (0..n)
+        .map(|i| {
+            Task::spawn(
+                move || {
+                    dbg_trace(&format!("task {i}"));
+                    i
+                },
+                PRIO_DEFAULT,
+            )
+        })
+        .collect();
+    let vs: Vec<String> = ts.iter().rev().map(|t| t.get().to_string()).collect();
+    eprintln(&format!("values [{}]", vs.join(", ")));
+    0
+}
+
+// def slow (n : Nat) : Nat := Id.run do
+//   let mut s := 0
+//   for i in [0:n] do s := (s + i * i) % 1000003
+//   return s
+fn slow(n: u64) -> u64 {
+    let mut s = 0u64;
+    for i in 0..n {
+        s = (s + i * i) % 1000003;
+    }
+    s
+}
+
+// partial def spinForever (n : Nat) : Nat := if n == 0 then 1 else spinForever (n + 1)
+fn spin_forever(mut n: u64) -> u64 {
+    // `Nat`: no overflow; the loop never ends for n > 0
+    while n != 0 {
+        n = n.wrapping_add(1).max(1);
+        std::hint::black_box(n);
+    }
+    1
+}
+
+// @[noinline] def mkT1 (k : Nat) : Task Nat := Task.spawn fun _ => spinForever (k + 1)
+//
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let busy ← IO.asTask (do IO.sleep 50; return 1)
+//   let t0 := Task.spawn fun _ => slow k
+//   let f0 ← IO.hasFinished t0
+//   let keep ← IO.mkRef (some (mkT1 k))
+//   let _ ← IO.wait busy
+//   keep.set none
+//   IO.println s!"t0 {t0.get} {f0}"
+fn drop_queued_behind_pure(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    let busy = as_task(
+        || {
+            sleep(50);
+            1u64
+        },
+        PRIO_DEFAULT,
+    );
+    let t0 = Task::spawn(move || slow(k), PRIO_DEFAULT);
+    let f0 = has_finished(&t0);
+    let keep = Ref::new(Some(Task::spawn(move || spin_forever(k + 1), PRIO_DEFAULT)));
+    busy.get();
+    drop(busy);
+    keep.set(None);
+    println(&format!("t0 {} {f0}", t0.get()));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let s := args.head!.toNat!.toUInt64 ||| 1
+//   let n := args[1]!.toNat!
+//   let p := Task.spawn fun _ => spin s 0
+//   let _ ← IO.hasFinished p
+//   let q := Task.spawn fun _ => (List.range n).foldl (· + ·) 0
+//   let _ ← IO.hasFinished q
+//   let t := Task.spawn fun _ => n + 1
+//   IO.eprintln s!"t = {t.get}"
+//   IO.eprintln s!"p finished: {← IO.hasFinished p}, q finished: {← IO.hasFinished q}"
+fn runaway_pure_before_awaited(args: &[String]) -> u32 {
+    let s = seed(args);
+    let n = to_nat(&args[1]);
+    let p = Task::spawn(move || spin(s, 0), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    let q = Task::spawn(move || (0..n).sum::<u64>(), PRIO_DEFAULT);
+    let _ = has_finished(&q);
+    let t = Task::spawn(move || n + 1, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    drop(t);
+    let (fp, fq) = (has_finished(&p), has_finished(&q));
+    eprintln(&format!("p finished: {fp}, q finished: {fq}"));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// The review of fixes-3 (RF3): a started pure task and the workers.
+
+/// `IO.eprintln s` through the current stderr (`IO.getStderr`): the buffer
+/// `IO.setStderr` set (`set_stderr_stream`), else the process's stderr.
+fn eprintln_current(s: &str) {
+    use lean_runtime::io::streams::{current, StdStream};
+    match current(StdStream::Stderr, || None as ErrStream) {
+        Some(b) => {
+            lean_runtime::sched::effect();
+            b.borrow_mut()
+                .extend_from_slice(format!("{s}\n").as_bytes());
+        }
+        None => eprintln(s),
+    }
+}
+
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let buf ← IO.mkRef ({} : IO.FS.Stream.Buffer)
+//   let p := Task.spawn fun _ => dbgTrace "p's trace" fun _ => slow k
+//   let _ ← IO.hasFinished p
+//   IO.sleep 20
+//   let x ← IO.asTask (do
+//     let _ ← IO.setStderr (IO.FS.Stream.ofBuffer buf)
+//     IO.eprintln "x")
+//   let _ ← IO.wait x
+//   IO.println s!"p = {p.get}"
+//   IO.println s!"x's buffer: {repr (String.fromUTF8! (← buf.get).data)}"
+fn picked_task_own_worker_streams(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    let buf: Rc<RefCell<Vec<u8>>> = Rc::default();
+    let p = Task::spawn(
+        move || {
+            dbg_trace("p's trace");
+            slow(k)
+        },
+        PRIO_DEFAULT,
+    );
+    let _ = has_finished(&p);
+    sleep(20);
+    let b2 = buf.clone();
+    let x = as_task(
+        move || {
+            let _ = set_stderr_stream(Some(b2));
+            eprintln_current("x");
+        },
+        PRIO_DEFAULT,
+    );
+    x.get();
+    drop(x);
+    println(&format!("p = {}", p.get()));
+    let text = String::from_utf8(buf.borrow().clone()).expect("UTF-8");
+    println(&format!("x's buffer: {}", quote(&text)));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let a ← IO.asTask (do IO.sleep 200; return 1)
+//   IO.sleep 20
+//   let p := Task.spawn fun _ => slow k
+//   let _ ← IO.hasFinished p
+//   IO.sleep 20
+//   let t := Task.spawn fun _ => k + 1
+//   let v := t.get
+//   IO.eprintln s!"t = {v}, p finished then: {← IO.hasFinished p}"
+//   let _ ← IO.wait a
+//   IO.eprintln s!"p = {p.get}"
+fn picked_task_sleeping_worker(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    let a = as_task(
+        || {
+            sleep(200);
+            1u64
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(20);
+    let p = Task::spawn(move || slow(k), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    sleep(20);
+    let t = Task::spawn(move || k + 1, PRIO_DEFAULT);
+    let v = t.get();
+    drop(t);
+    let fp = has_finished(&p);
+    eprintln(&format!("t = {v}, p finished then: {fp}"));
+    a.get();
+    eprintln(&format!("p = {}", p.get()));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let _ticker ← IO.asTask (do while !(← IO.checkCanceled) do IO.sleep 100)
+//   IO.sleep 50
+//   let p := Task.spawn fun _ => slow k
+//   let _ ← IO.hasFinished p
+//   let t := Task.spawn fun _ => k % 7
+//   IO.eprintln s!"t = {t.get}"
+fn picked_task_ticking_worker(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    // `_ticker` is unused: compiled Lean drops it at once (an IO task still
+    // runs)
+    drop(as_task(
+        || {
+            while !check_canceled() {
+                sleep(100);
+            }
+        },
+        PRIO_DEFAULT,
+    ));
+    sleep(50);
+    let p = Task::spawn(move || slow(k), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    let t = Task::spawn(move || k % 7, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    0
+}
+
+// partial def loopST {σ : Type} (r : ST.Ref σ UInt64) (acc : UInt64) : ST σ UInt64 := do
+//   let x ← r.get
+//   if x == 0 then return acc
+//   r.set (x * 6364136223846793005 + 1442695040888963407)
+//   loopST r (acc + 1)
+//
+// def spinST (s : UInt64) : UInt64 := runST fun _ => do
+//   let r ← ST.mkRef s
+//   loopST r 0
+fn spin_st(s: u64) -> u64 {
+    let r = Ref::new(s);
+    let mut acc = 0u64;
+    loop {
+        let x = r.get();
+        if x == 0 {
+            return acc;
+        }
+        r.set(
+            x.wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407),
+        );
+        acc = acc.wrapping_add(1);
+    }
+}
+
+// def main (args : List String) : IO Unit := do
+//   let s := args.head!.toNat!.toUInt64 ||| 1
+//   let n := args[1]!.toNat!
+//   let p := Task.spawn fun _ => spinST s
+//   let _ ← IO.hasFinished p
+//   let q := Task.spawn fun _ => (List.range n).foldl (· + ·) 0
+//   let _ ← IO.hasFinished q
+//   let t := Task.spawn fun _ => n + 1
+//   IO.eprintln s!"t = {t.get}"
+//   IO.eprintln s!"p finished: {← IO.hasFinished p}, q finished: {← IO.hasFinished q}"
+fn picked_task_reaches_yield_points(args: &[String]) -> u32 {
+    let s = seed(args);
+    let n = to_nat(&args[1]);
+    let p = Task::spawn(move || spin_st(s), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    let q = Task::spawn(move || (0..n).sum::<u64>(), PRIO_DEFAULT);
+    let _ = has_finished(&q);
+    let t = Task::spawn(move || n + 1, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    drop(t);
+    let (fp, fq) = (has_finished(&p), has_finished(&q));
+    eprintln(&format!("p finished: {fp}, q finished: {fq}"));
+    0
+}
+
+/// Not a Lean program: as `picked_task_reaches_yield_points`, but `p`
+/// reaches effect points (`sched::effect`, as an output would) instead of
+/// reference reads (review LF3-01, the effect points' half). Two workers.
+fn effect_points_in_a_started_task(_: &[String]) -> u32 {
+    let p = Task::spawn(
+        || loop {
+            lean_runtime::sched::effect();
+            std::hint::spin_loop();
+        },
+        PRIO_DEFAULT,
+    );
+    let _: bool = has_finished(&p);
+    let q = Task::spawn(|| (0..1000u64).sum::<u64>(), PRIO_DEFAULT);
+    let _ = has_finished(&q);
+    let t = Task::spawn(|| 1001u64, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    drop(t);
+    let (fp, fq) = (has_finished(&p), has_finished(&q));
+    eprintln(&format!("p finished: {fp}, q finished: {fq}"));
+    0
+}
+
+// @[noinline] def mkP1 (k : Nat) : Task Nat := Task.spawn fun _ => spinForever (k + 1)
+//
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let p0 := Task.spawn fun _ => slow k
+//   let _ ← IO.hasFinished p0
+//   let keep ← IO.mkRef (some (mkP1 k))
+//   let io ← IO.asTask (IO.eprintln "io")
+//   IO.sleep 300
+//   keep.set none
+//   let _ ← IO.wait io
+//   IO.eprintln s!"done {p0.get}"
+fn runaway_pure_passed_over(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    let p0 = Task::spawn(move || slow(k), PRIO_DEFAULT);
+    let _ = has_finished(&p0);
+    let keep = Ref::new(Some(Task::spawn(move || spin_forever(k + 1), PRIO_DEFAULT)));
+    let io = as_task(|| eprintln("io"), PRIO_DEFAULT);
+    sleep(300);
+    keep.set(None);
+    io.get();
+    drop(io);
+    eprintln(&format!("done {}", p0.get()));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// Review AR-33 (fixes-3): the workers' streams at the exit.
+
+/// A stdout the twins set to a handle (`IO.FS.Stream.ofHandle h`), or
+/// `None` for the process's.
+type HandleOut = Option<lean_runtime::io::Handle>;
+
+/// `IO.print s`: an effect point, then `putStr` on the current stdout.
+fn print_current(s: &str) {
+    use lean_runtime::io::streams::{current, StdStream};
+    lean_runtime::sched::effect();
+    match current(StdStream::Stdout, || None as HandleOut) {
+        Some(h) => {
+            let _ = h.put_str(s.as_bytes());
+        }
+        None => {
+            let _ = lean_runtime::io::Handle::stdout().put_str(s.as_bytes());
+        }
+    }
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.length
+//   let t ← IO.asTask (do
+//     let h ← IO.FS.Handle.mk "/dev/stdout" .write
+//     discard <| IO.setStdout (IO.FS.Stream.ofHandle h)
+//     IO.print s!"A{n}")
+//   let _ ← IO.wait t
+//   IO.print "B"
+fn worker_streams_closed_at_exit(args: &[String]) -> u32 {
+    let n = args.len();
+    let t = as_task(
+        move || {
+            let h = lean_runtime::io::Handle::open(b"/dev/stdout", lean_runtime::io::FsMode::Write)
+                .expect("/dev/stdout");
+            let _ = lean_runtime::io::streams::set_stdout(Some(h) as HandleOut, || None);
+            print_current(&format!("A{n}"));
+        },
+        PRIO_DEFAULT,
+    );
+    t.get();
+    drop(t);
+    print_current("B");
+    0
+}
+
+// ... the same, then
+//   IO.Process.exit 0
+fn worker_streams_at_process_exit(args: &[String]) -> u32 {
+    worker_streams_closed_at_exit(args);
+    crate::glue::process_exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// Started pure tasks and sleeping workers (reviews RF3-05, LF3-04, LF3-05).
+
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let t0 ← IO.monoMsNow
+//   let ticker ← IO.asTask (do IO.sleep 1000; IO.eprintln "tick"; return 1)
+//   IO.sleep 50
+//   let p := Task.spawn fun _ => slow k
+//   let _ ← IO.hasFinished p
+//   let t := Task.spawn fun _ => k % 7
+//   let v := t.get
+//   IO.eprintln s!"t = {v}, before 500 ms: {decide ((← IO.monoMsNow) - t0 < 500)}"
+//   let _ ← IO.wait ticker
+//   IO.eprintln s!"p = {p.get}"
+fn picked_task_short_sleeper_long(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    let t0 = mono_ms_now();
+    let ticker = as_task(
+        || {
+            sleep(1000);
+            eprintln("tick");
+            1u64
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(50);
+    let p = Task::spawn(move || slow(k), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    let t = Task::spawn(move || k % 7, PRIO_DEFAULT);
+    let v = t.get();
+    drop(t);
+    let before = mono_ms_now() - t0 < 500;
+    eprintln(&format!("t = {v}, before 500 ms: {before}"));
+    ticker.get();
+    eprintln(&format!("p = {}", p.get()));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let k := args.head!.toNat!
+//   let _wd ← IO.asTask (do
+//     IO.sleep 3000
+//     if !(← IO.checkCanceled) then
+//       IO.eprintln "timeout"
+//       IO.Process.exit 1)
+//   IO.sleep 50
+//   let p := Task.spawn fun _ => slow k
+//   let _ ← IO.hasFinished p
+//   let t := Task.spawn fun _ => k % 7
+//   IO.eprintln s!"t = {t.get}"
+fn picked_task_watchdog(args: &[String]) -> u32 {
+    let k = to_nat(&args[0]);
+    // `_wd` is unused: compiled Lean drops it at once (an IO task still runs)
+    drop(as_task(
+        || {
+            sleep(3000);
+            if !check_canceled() {
+                eprintln("timeout");
+                crate::glue::process_exit(1);
+            }
+        },
+        PRIO_DEFAULT,
+    ));
+    sleep(50);
+    let p = Task::spawn(move || slow(k), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    let t = Task::spawn(move || k % 7, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    0
+}
+
+// partial def spinSleep (x acc : UInt64) : UInt64 :=
+//   if x == 0 then acc else
+//     let x' := dbgSleep 0 fun _ => x * 6364136223846793005 + 1442695040888963407
+//     spinSleep x' (acc + 1)
+fn spin_sleep(mut x: u64, mut acc: u64) -> u64 {
+    while x != 0 {
+        sleep(0);
+        x = x
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        acc = acc.wrapping_add(1);
+    }
+    acc
+}
+
+// def main (args : List String) : IO Unit := do
+//   let s := args.head!.toNat!.toUInt64 ||| 1
+//   let n := args[1]!.toNat!
+//   let p := Task.spawn fun _ => spinSleep s 0
+//   let _ ← IO.hasFinished p
+//   let q := Task.spawn fun _ => (List.range n).foldl (· + ·) 0
+//   let _ ← IO.hasFinished q
+//   let t := Task.spawn fun _ => n + 1
+//   IO.eprintln s!"t = {t.get}"
+//   IO.eprintln s!"p finished: {← IO.hasFinished p}, q finished: {← IO.hasFinished q}"
+fn picked_task_sleep_zero(args: &[String]) -> u32 {
+    let s = seed(args);
+    let n = to_nat(&args[1]);
+    let p = Task::spawn(move || spin_sleep(s, 0), PRIO_DEFAULT);
+    let _ = has_finished(&p);
+    let q = Task::spawn(move || (0..n).sum::<u64>(), PRIO_DEFAULT);
+    let _ = has_finished(&q);
+    let t = Task::spawn(move || n + 1, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    drop(t);
+    let (fp, fq) = (has_finished(&p), has_finished(&q));
+    eprintln(&format!("p finished: {fp}, q finished: {fq}"));
     0
 }

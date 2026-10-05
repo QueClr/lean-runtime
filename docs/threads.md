@@ -91,7 +91,11 @@ LSCHED-01), net-1, net-2, fixes-1 and the io batches (AR-1 to AR-20).
 - sched-4's `holds_worker` bookkeeping, and LSCHED-01 with the pure-task
   rule: a runaway pure task takes its worker, as natively, so
   `tasks/runaway_pure_task_before_io` should give native's outcome, not its
-  `alt1` (T3's driver runs it).
+  `alt1` (T3's driver runs it). The same holds for fixes-3's started pure
+  tasks that keep their workers (AR-25), LSCHED-02
+  (`tasks/runaway_pure_before_awaited`) and LSCHED-03
+  (`tasks/picked_task_sleeping_worker`, where real workers race as
+  natively).
 - The yield points (`effect`, `poll`, `ref_read`, `set_ref_read_yields`),
   `STALE`, `LATENCY_*`, `POLL_QUERIES` and `EARLY`: no-ops, or nothing.
 - The no-suspend scope stays callable (leanrs's point 1): a depth per
@@ -346,7 +350,11 @@ modes, and the glue does nothing for it:
 - **threads mode**: the real threads give it. The io layer's slots
   (`io::streams`) and its modelled `errno` (`io::error`) are thread-locals,
   so a worker keeps them; `Glue::task_begin` and `task_end` have nothing to
-  do for them (T2's `io::streams::task_begin` and `task_end` are gone);
+  do for them (T2's `io::streams::task_begin` and `task_end` are gone).
+  A worker's thread-locals' destructors drop them when `finish` joins the
+  worker, before `main`'s flush, as native's thread finalizers do (review
+  AR-33; `tests/threads_twins.rs` runs `tasks/worker_streams_closed_at_exit`
+  and `worker_streams_at_process_exit`);
 - **the single-thread scheduler** (with `io`): `src/sched/slots.rs` keeps a
   `ThreadSlots` (the slots and the modelled `errno`) per context, swapped
   by the hub around each resume, and per emulated thread, swapped by
@@ -355,8 +363,21 @@ modes, and the glue does nothing for it:
   keeps what the task leaves; a dedicated task with a fresh set; the event
   loop's context keeps one set across loop contexts (native's one loop
   thread). The glue's `switched` must not swap `io::streams` too now.
+  `finish` drops the emulated workers' sets, as native's task-manager
+  finalization ends the workers (review AR-33).
   Which idle worker natively takes a task is the schedule's choice; the
   lowest free id is one of its outcomes, and the one the cases record.
+
+`sched::running_worker() -> Option<u32>` (review AR-32, lean2rr's AR-S3),
+in both modes, names the worker for a glue's own per-thread state: in
+threads mode the standard worker's index (the order the task manager made
+it in), on that thread whatever runs there (a `sync` dependent included),
+and `None` on a dedicated task's thread, `main`'s and the loop thread; in
+the single-thread scheduler the emulated worker id of the innermost
+running pool task (a `sync` task shares the thread below it, and that
+thread's answer, in both modes; review RF3-03; `docs/sched.md`, item 1 of
+"The glue"). Unit test in threads mode:
+`running_worker_names_the_pool_worker_thread`.
 
 **A glue with per-task state of its own** (review AR-26, lean2rr's
 AR-S1; lean2rr's case `RtTaskSyncStream`: a task sets stdout to a buffer,
@@ -943,6 +964,7 @@ pub fn release(id: TaskId);                 // from any thread
 pub fn end_running_task(id: TaskId);        // AR-26: a job ends its own task early
 pub fn in_sync_task() -> bool;
 pub fn thread_number() -> u64;
+pub fn running_worker() -> Option<u32>;     // AR-32: the standard worker's index
 pub fn manager_running() -> bool;
 pub fn promise_new() -> Result<TaskId, &'static str>;
 pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool;  // store runs here

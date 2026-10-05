@@ -1368,3 +1368,415 @@ fn rt2_15_end_running_task_in_a_walked_sync_dependent() {
         "C ran after B's job closed its context"
     );
 }
+
+// --- Review AR-25 (fixes-3): a started pure task keeps the worker that
+// started it until it has run.
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn an_awaited_pure_task_waits_for_the_pure_tasks_in_front() {
+    // tasks/wait_pure_queue_order: one worker, four pure tasks, the last
+    // awaited first. The worker runs them in queue order, each to its end.
+    start_test(1);
+    let l = log();
+    let ids: Vec<TaskId> = (0..4)
+        .map(|k| spawn(job(&l, &k.to_string()), 0, false))
+        .collect();
+    wait(ids[3]);
+    need_ok();
+    assert_eq!(entries(&l), ["0", "1", "2", "3"]);
+    finish();
+    need_ok();
+    assert_eq!(entries(&l), ["0", "1", "2", "3"]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_pure_task_behind_a_started_one_can_still_be_deleted() {
+    // tasks/drop_queued_behind_pure: the worker starts p0 during the sleep;
+    // p1 stays queued behind it, so dropping p1 deletes it.
+    start_test(1);
+    let l = log();
+    let p0 = spawn(job(&l, "p0"), 0, false);
+    let flag = Rc::new(Cell::new(false));
+    let d = DropFlag(flag.clone());
+    let l2 = l.clone();
+    let p1 = spawn(
+        Box::new(move || {
+            let _ = &d;
+            l2.borrow_mut().push("p1".into());
+            Outcome::Done
+        }),
+        0,
+        false,
+    );
+    sleep_ms(1);
+    assert_eq!(state(p0), TaskState::Running, "p0 started");
+    need_ok();
+    release(p1);
+    assert!(flag.get(), "p1 was still queued: deleted");
+    assert!(is_finished(p1));
+    finish();
+    need_ok();
+    assert_eq!(entries(&l), ["p0"]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn an_io_task_does_not_wait_for_started_pure_tasks() {
+    // The exception LSCHED-01 keeps: the worker starts p0, p1 waits for it,
+    // and the IO task queued behind both starts while `main` sleeps (a
+    // runtime where it waited for p0 would hang a program that polls a
+    // flag the IO task sets, as p0 is never needed).
+    start_test(1);
+    let l = log();
+    let p0 = spawn(job(&l, "p0"), 0, false);
+    let p1 = spawn(job(&l, "p1"), 0, false);
+    let io = spawn(job(&l, "io"), 0, true);
+    let late = sleep_or_stall(50);
+    need_ok();
+    if !late {
+        assert_eq!(entries(&l), ["io"]);
+        assert!(is_finished(io));
+    }
+    assert_eq!(state(p0), TaskState::Running, "started");
+    assert_eq!(state(p1), TaskState::Waiting, "queued behind p0");
+    finish();
+    need_ok();
+    let mut e = entries(&l);
+    e.sort();
+    assert_eq!(e, ["io", "p0", "p1"]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_waiter_runs_the_started_pure_tasks_it_waits_behind() {
+    // A pending timer keeps the hub from its last resort; the waiter's need
+    // runs the started pure task in front of the awaited one at once
+    // (`needed_picked`), as natively its worker finishes it meanwhile.
+    start_test(1);
+    let l = log();
+    let p0 = spawn(job(&l, "p0"), 0, false);
+    sleep_ms(1);
+    assert_eq!(state(p0), TaskState::Running, "p0 started");
+    let p1 = spawn(job(&l, "p1"), 0, false);
+    let t0 = std::time::Instant::now();
+    let timer = timer_start(t0 + std::time::Duration::from_secs(20), Rc::new(|| {}));
+    wait(p1);
+    need_ok();
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(10),
+        "the waiter did not wait for the timer"
+    );
+    assert_eq!(entries(&l), ["p0", "p1"]);
+    assert!(timer_stop(timer));
+    finish();
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn wait_any_runs_the_started_pure_tasks_its_list_waits_behind() {
+    // As above, for `IO.waitAny` (`wait_any_step`).
+    start_test(1);
+    let l = log();
+    let p0 = spawn(job(&l, "p0"), 0, false);
+    sleep_ms(1);
+    assert_eq!(state(p0), TaskState::Running, "p0 started");
+    let p1 = spawn(job(&l, "p1"), 0, false);
+    let p2 = spawn(job(&l, "p2"), 0, false);
+    let t0 = std::time::Instant::now();
+    let timer = timer_start(t0 + std::time::Duration::from_secs(20), Rc::new(|| {}));
+    assert_eq!(wait_any(&[p1, p2]), 0);
+    need_ok();
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(10),
+        "the waiter did not wait for the timer"
+    );
+    assert_eq!(entries(&l)[..2], ["p0", "p1"]);
+    assert!(timer_stop(timer));
+    finish();
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn polling_runs_the_started_pure_tasks_the_polled_task_waits_behind() {
+    // As above, for the polling threshold (`start_polled`): the polled pure
+    // task finishes after a few sleeps, not never.
+    start_test(1);
+    let l = log();
+    let p0 = spawn(job(&l, "p0"), 0, false);
+    sleep_ms(1);
+    assert_eq!(state(p0), TaskState::Running, "p0 started");
+    let p1 = spawn(job(&l, "p1"), 0, false);
+    let timer = timer_start(
+        std::time::Instant::now() + std::time::Duration::from_secs(20),
+        Rc::new(|| {}),
+    );
+    let mut sleeps = 0;
+    while state(p1) != TaskState::Finished {
+        assert!(sleeps < 100, "the polled task never ran");
+        sleep_ms(1);
+        sleeps += 1;
+    }
+    need_ok();
+    assert_eq!(entries(&l), ["p0", "p1"]);
+    assert!(timer_stop(timer));
+    finish();
+}
+
+// --- Review AR-27 (fixes-3): the per-task bookkeeping.
+
+#[test]
+fn the_slab_entry_is_56_bytes() {
+    // docs/sched.md, "Per-task cost": it was 80 (a 16-byte `Option<Instant>`,
+    // a 64-bit thread number, the priority in a byte of its own).
+    assert_eq!(task::ENTRY_SIZE, 56);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn queue_times_survive_the_move_of_their_origin() {
+    // `Sched::tick`: past 2^31 µs the origin moves on; a task queued before
+    // the new origin is still one queued long ago (`Gate::Before`), and an
+    // effect point lets it go first.
+    start_test(2);
+    let l = log();
+    let old = spawn(job(&l, "old"), 0, true);
+    // as if `old` had been queued 40 minutes ago
+    with(|s| s.age_ticks_for_test(std::time::Duration::from_secs(40 * 60)));
+    let fresh = spawn(job(&l, "fresh"), 0, true);
+    with(|s| {
+        assert_eq!(s.queued_at_of(old), Some(0), "before the new origin");
+        assert_eq!(s.queued_at_of(fresh), Some(1 << 30));
+    });
+    effect();
+    assert_eq!(entries(&l)[..1], ["old"], "a stale task goes first");
+    finish();
+    assert!(is_finished(old) && is_finished(fresh));
+}
+
+// --- Review AR-29 (fixes-3): `manager_running` is a thread-local flag.
+
+#[test]
+fn manager_running_follows_start() {
+    assert!(!manager_running(), "no task manager before start");
+    start_test(1);
+    assert!(manager_running());
+    with(|s| assert!(s.tk.started));
+    start_test(0);
+    assert!(!manager_running(), "LEAN_NUM_THREADS=0: no task manager");
+    with(|s| assert!(!s.tk.started));
+}
+
+// --- Review AR-32 (fixes-3, lean2rr's AR-S3): `running_worker`.
+
+thread_local! {
+    /// What `WorkerGlue`'s hooks saw.
+    static HOOKS_SAW: RefCell<Vec<(String, Option<u32>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// What each task saw: its tag and `running_worker()`.
+type Seen = Rc<RefCell<Vec<(&'static str, Option<u32>)>>>;
+
+/// A glue whose `task_begin` and `task_end` record `running_worker()`.
+struct WorkerGlue;
+
+impl Glue for WorkerGlue {
+    fn suspend(&self, _: Suspend<'_>) {
+        panic!("the crate's unit tests never suspend a context");
+    }
+    fn task_begin(&self, own: bool) {
+        HOOKS_SAW.with(|h| {
+            h.borrow_mut()
+                .push((format!("begin {own}"), running_worker()))
+        });
+    }
+    fn task_end(&self, own: bool) {
+        HOOKS_SAW.with(|h| {
+            h.borrow_mut()
+                .push((format!("end {own}"), running_worker()))
+        });
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn running_worker_names_a_pool_tasks_emulated_worker() {
+    assert_eq!(running_worker(), None, "the initializers");
+    start_with(Rc::new(WorkerGlue), 1, 1 << 20);
+    assert_eq!(running_worker(), None, "main");
+    let seen: Seen = Rc::default();
+    let rec = |tag: &'static str| -> Job {
+        let s = seen.clone();
+        Box::new(move || {
+            s.borrow_mut().push((tag, running_worker()));
+            Outcome::Done
+        })
+    };
+    let a = spawn(rec("a"), 0, true);
+    // a `sync` dependent of `a`, run in its walk, on its thread
+    depend(a, rec("sync"), 0, true, true);
+    let b = spawn(rec("b"), 0, false);
+    wait(a);
+    wait(b);
+    let d = spawn(rec("dedicated"), 9, true);
+    wait(d);
+    assert_eq!(running_worker(), None, "main again");
+    // two pool tasks on the one worker: one id; a `sync` dependent shares
+    // its thread's (review RF3-03); a dedicated task: none
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("a", Some(0)),
+            ("sync", Some(0)),
+            ("b", Some(0)),
+            ("dedicated", None)
+        ]
+    );
+    // the glue's hooks see the task's own, also after its walk
+    let saw = HOOKS_SAW.with(|h| h.borrow().clone());
+    let want: Vec<(String, Option<u32>)> = [
+        ("begin true", Some(0)),
+        ("begin false", Some(0)),
+        ("end false", Some(0)),
+        ("end true", Some(0)),
+        ("begin true", Some(0)),
+        ("end true", Some(0)),
+        ("begin true", None),
+        ("end true", None),
+    ]
+    .iter()
+    .map(|&(s, w)| (s.to_string(), w))
+    .collect();
+    assert_eq!(saw, want);
+    finish();
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_pool_task_run_by_a_pool_waiter_takes_the_next_id() {
+    // `a` waits for `c`, which runs on `a`'s stack: `a` still holds its
+    // worker id (natively its thread waits in `Task.get`), so `c` takes the
+    // next one; after both, the lowest is free again.
+    start_test(1);
+    let seen: Seen = Rc::default();
+    let s1 = seen.clone();
+    let s2 = seen.clone();
+    let c = spawn(
+        Box::new(move || {
+            s2.borrow_mut().push(("c", running_worker()));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    let a = spawn(
+        Box::new(move || {
+            s1.borrow_mut().push(("a before", running_worker()));
+            wait(c);
+            s1.borrow_mut().push(("a after", running_worker()));
+            Outcome::Done
+        }),
+        8,
+        true,
+    );
+    wait(a);
+    let s3 = seen.clone();
+    let e = spawn(
+        Box::new(move || {
+            s3.borrow_mut().push(("e", running_worker()));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    wait(e);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("a before", Some(0)),
+            ("c", Some(1)),
+            ("a after", Some(0)),
+            ("e", Some(0))
+        ]
+    );
+    finish();
+}
+
+// --- Review RF3-01 (fixes-3): a started pure task keeps the worker id of
+// the worker that started it, from the pick on.
+
+/// Two workers; pure task `p` is started (picked) by a free worker, then IO
+/// task `x` runs on the other worker, sets its stdout and does not restore
+/// it. Natively `p` runs on the worker that took it, with that worker's
+/// (fresh) streams. Before the fix `p` took the lowest free id when it ran,
+/// whose set `x` had used: `x`'s leftover stdout, and `x`'s id.
+#[cfg(feature = "io")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_started_pure_task_runs_with_its_workers_streams() {
+    use crate::io::streams::{self, StdStream};
+    fn out() -> u32 {
+        streams::current(StdStream::Stdout, || 0u32)
+    }
+    start_test(2);
+    // what `p` saw: its stdout and its worker id
+    type Saw = Option<(u32, Option<u32>)>;
+    let p_saw: Rc<Cell<Saw>> = Rc::default();
+    let x_saw: Rc<Cell<Option<u32>>> = Rc::default();
+    let (p2, x2) = (p_saw.clone(), x_saw.clone());
+    let p = spawn(
+        Box::new(move || {
+            p2.set(Some((out(), running_worker())));
+            Outcome::Done
+        }),
+        0,
+        false,
+    );
+    // `main` yields: a free worker starts `p` (a pick)
+    sleep_ms(1);
+    assert_eq!(state(p), TaskState::Running, "p started");
+    let x = spawn(
+        Box::new(move || {
+            x2.set(running_worker());
+            let _ = streams::set_stdout(5u32, || 0);
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    wait(x);
+    wait(p);
+    need_ok();
+    finish();
+    assert_eq!(x_saw.get(), Some(1), "x on the other worker");
+    assert_eq!(
+        p_saw.get(),
+        Some((0, Some(0))),
+        "p ran on the worker that started it, with its streams"
+    );
+}
+
+/// Review RF3-03: a `sync` dependent run on `main`'s thread (`resolve`
+/// there) shares `main`'s answer, `None`, as in threads mode.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_sync_dependent_shares_its_threads_worker() {
+    start_test(1);
+    let seen: Seen = Rc::default();
+    let s1 = seen.clone();
+    let p = promise_new().unwrap();
+    depend(
+        p,
+        Box::new(move || {
+            s1.borrow_mut().push(("sync on main", running_worker()));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    resolve(p, || {});
+    assert_eq!(*seen.borrow(), [("sync on main", None)]);
+    finish();
+}

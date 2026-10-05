@@ -1,0 +1,6 @@
+id = "picked_task_ticking_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's fixes-3 (LF3-02: a waiter must not wait for every wake of a sleeping worker; a control), batch fixes-3"
+streams = "separate"
+expect = { hang = 5 }

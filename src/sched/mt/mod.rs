@@ -335,13 +335,16 @@ pub fn end_running_task(id: TaskId) {
 #[inline]
 pub fn release(id: TaskId) {
     if id != TaskId::FINISHED {
-        release_live(id);
+        release_live(id.to_bits());
     }
 }
 
-/// [`release`] of a task that may still have an entry.
+/// [`release`] of a task that may still have an entry (its id's bits).
+/// `extern "C"`, so it cannot unwind, as the single-thread scheduler's
+/// (review AR-28): a panic in a destructor of the dropped job aborts.
 #[inline(never)]
-fn release_live(id: TaskId) {
+extern "C" fn release_live(bits: u64) {
+    let id = TaskId::from_bits(bits);
     let job = task::with_shared(|sh| sh.and_then(|sh| task::release(sh, id)));
     drop(job);
 }
@@ -362,6 +365,17 @@ pub fn in_sync_task() -> bool {
 /// mode may give instead.
 pub fn thread_number() -> u64 {
     task::thread_number()
+}
+
+/// The pool worker the calling thread is, as the single-thread scheduler
+/// offers it (review AR-32): the standard worker's index (the order the
+/// task manager made it in), on that thread whatever task runs there (a
+/// `sync` dependent run on a worker's thread included); `None` on a
+/// dedicated task's thread, `main`'s, the loop thread and any other. Here
+/// each thread has its own state natively, so a glue needs it less than
+/// with the single-thread scheduler, whose emulated workers it names.
+pub fn running_worker() -> Option<u32> {
+    task::running_worker()
 }
 
 /// Whether the task manager runs (`g_task_manager`).

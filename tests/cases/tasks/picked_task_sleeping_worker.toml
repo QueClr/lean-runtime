@@ -1,0 +1,10 @@
+id = "picked_task_sleeping_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime's review of fixes-3 (RF3-02: a waiter and a worker that only sleeps), batch fixes-3"
+streams = "separate"
+deviations = { lean_runtime = "LSCHED-03" }
+# `expected` is native's: a's worker takes t once a's sleep ends, while p still runs. lean-runtime
+# runs the oldest started pure task for the waiter at once, and p reaches no yield point, so t
+# comes after p: picked_task_sleeping_worker.alt1.*, written by hand, which `check` accepts
+# (docs/sched.md, "Known differences from native", LSCHED-03). No leanrs mark: an admitted delay.

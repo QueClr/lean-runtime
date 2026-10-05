@@ -1,0 +1,5 @@
+id = "picked_task_short_sleeper_long"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime's review of fixes-3 (RF3-05, the mirror image of RF3-02: a control), batch fixes-3"
+streams = "separate"

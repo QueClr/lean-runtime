@@ -1,0 +1,5 @@
+id = "worker_streams_at_process_exit"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's AR-24 (AR-33: the workers' streams at IO.Process.exit), batch fixes-3"
+streams = "separate"
