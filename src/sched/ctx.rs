@@ -91,17 +91,22 @@ pub trait Glue {
     fn suspend(&self, s: Suspend<'_>);
 
     /// The running context changes from `from` to `to` (every switch goes
-    /// through `main`'s context, so one of them is `MAIN`). Natively each
-    /// thread has its own current standard streams (`IO.setStdout` & co.);
-    /// the glue saves `from`'s and installs `to`'s. Runs on `main`'s stack,
-    /// before `to` runs or after `from` has stopped: it must not block or
-    /// yield. A panic in it aborts the process.
+    /// through `main`'s context, so one of them is `MAIN`): for the glue's
+    /// own per-thread state, which natively each thread has. The io layer's
+    /// (the current standard streams, the modelled `errno`) the scheduler
+    /// swaps itself, with the feature `io` (`slots`, review AR-24): the glue
+    /// must not swap `io::streams` too. Runs on `main`'s stack, before `to`
+    /// runs or after `from` has stopped: it must not block or yield. A panic
+    /// in it aborts the process.
     fn switched(&self, _from: CtxId, _to: CtxId) {}
 
-    /// A task starts running. `own_thread`: natively on a worker thread, so
-    /// with the process's standard streams; otherwise on the current thread
-    /// (a `sync` dependent, a task at priority `LEAN_SYNC_PRIO`), sharing its
-    /// streams.
+    /// A task starts running. `own_thread`: natively on a thread of its own
+    /// (a worker's pool task, a dedicated task); otherwise on the current
+    /// thread (a `sync` dependent, a task at priority `LEAN_SYNC_PRIO`),
+    /// sharing its state. For the glue's own per-task state: the io layer's
+    /// streams and `errno` are the scheduler's (`slots`: a pool task gets
+    /// the set of the emulated worker it occupies, which keeps what the
+    /// task leaves, as natively; review AR-24).
     fn task_begin(&self, _own_thread: bool) {}
 
     /// The task started by the matching `task_begin` has finished (its
@@ -701,6 +706,12 @@ fn hub() {
             HubStep::Main => return,
             HubStep::Resume(n, bounds) => {
                 let g = glue();
+                // the context's standard streams and `errno` in, `main`'s
+                // aside (`slots`, review AR-24); back after it, also when a
+                // panic unwinds from it
+                #[cfg(feature = "io")]
+                let slots =
+                    super::slots::ContextSlots::enter(n.0 as usize, with(|s| s.is_loop_ctx(n)));
                 hub_hook(|| g.switched(MAIN, n));
                 // From here until `resume` returns, `n` is the running
                 // context (S2). A Rust panic in it unwinds to its base, and
@@ -716,6 +727,8 @@ fn hub() {
                 let ended = matches!(r, Some(CoroutineResult::Return(())));
                 with(|s| s.after_resume(n, &mut co.0, ended));
                 hub_hook(|| g.switched(n, MAIN));
+                #[cfg(feature = "io")]
+                slots.leave(ended);
             }
             HubStep::Idle(d) => super::reactor::idle(d),
         }

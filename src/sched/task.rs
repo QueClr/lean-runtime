@@ -838,9 +838,10 @@ impl Sched {
         self.wake_progress();
     }
 
-    /// Task `i` (handed) starts running: its job, and whether it runs as on
-    /// a thread of its own (a worker's) rather than on the current thread.
-    fn begin(&mut self, i: u32) -> (Job, bool) {
+    /// Task `i` (handed) starts running: its job, whether it runs as on a
+    /// thread of its own (a worker's) rather than on the current thread, and
+    /// whether it is a dedicated task (a thread of its own natively).
+    fn begin(&mut self, i: u32) -> (Job, bool, bool) {
         let th = self.cur_thread();
         let epoch = self.tk.epoch;
         let e = self.ent_mut(i);
@@ -852,10 +853,11 @@ impl Sched {
         e.flags =
             (e.flags & !(INLINE | CHECKED | ON_THREAD | PICKED | QUEUED | WAITING)) | RUNNING | on;
         e.aux[1] = epoch;
+        let dedicated = e.prio as usize >= DEDICATED;
         let job = e.job.take().expect("lean-runtime: a task ran twice");
         self.st().running.push(i);
         self.refresh_holds(self.cx.cur);
-        (job, own)
+        (job, own, dedicated)
     }
 
     /// The running task `i` has finished: its dependents are to be walked
@@ -968,7 +970,16 @@ impl Sched {
     /// priority. When a walk is over, Lean's `notify_all` follows
     /// (`notify_all`). `None` when the base walk is over.
     fn walk_next(&mut self) -> Option<u32> {
+        self.walk_next_above(0)
+    }
+
+    /// `walk_next` that ends once the walks above `floor` have ended
+    /// (`end_running_task`, review RT2-15).
+    fn walk_next_above(&mut self, floor: usize) -> Option<u32> {
         loop {
+            if self.st_ref().walks.len() <= floor {
+                return None;
+            }
             let w = self.st_ref().walks.last()?;
             let (owner, thread, early, canceled) = (w.owner, w.thread, w.early, w.canceled);
             let d = self.ent(owner).head_dep;
@@ -1775,7 +1786,14 @@ impl Sched {
 /// and the walk of its dependents (or, for a bind task, its wait for the task
 /// it continues as).
 pub(crate) fn run_task(i: u32) {
-    let (job, own) = with(|s| s.begin(i));
+    let (job, own, dedicated) = with(|s| s.begin(i));
+    // its emulated thread's standard streams and `errno` (`slots`, review
+    // AR-24), until the end of the run: after the glue's `task_end`, also
+    // when a panic unwinds it (dropped after `Unwound`)
+    #[cfg(feature = "io")]
+    let _slots = super::slots::TaskSlots::begin(own, dedicated);
+    #[cfg(not(feature = "io"))]
+    let _ = dedicated;
     let g = glue_opt();
     if let Some(g) = &g {
         g.task_begin(own);
@@ -1791,12 +1809,19 @@ pub(crate) fn run_task(i: u32) {
     // the streams the job handed to writer threads: natively its thread was
     // in their `fclose` until the writes ended (review RFX1-07)
     super::writers_point();
+    // a job that called `end_running_task` has ended its task and walked
+    // its dependents already (AR-26): the task is no longer running here
+    let ended = with(|s| s.st_ref().running.last() != Some(&i));
     let leftover = match out {
+        Outcome::Done if ended => None,
         Outcome::Done => {
             if with(|s| s.end(i)) {
                 walk_loop();
             }
             None
+        }
+        Outcome::Continue(..) if ended => {
+            panic!("lean-runtime: a job that ended its task (end_running_task) returned Continue")
         }
         Outcome::Continue(t2, k) => with(|s| s.bind_wait(i, t2, k)),
     };
@@ -1857,6 +1882,71 @@ impl Drop for WalkUnwound {
 
 // ---------------------------------------------------------------------------
 // The translators' API
+
+/// The running task's job has stored the task's value and ends its task now,
+/// before it returns (review AR-26, lean2rr's AR-S1): what the scheduler
+/// does after a job returns `Outcome::Done` (a writers point, the task's
+/// end, the walk of its dependents, its `sync` ones running here) happens
+/// here, so the dependents run inside whatever the job set up, as natively
+/// they run in `handle_finished` on the finishing thread with what the task
+/// left installed. Example: a glue whose job opens the task's stream
+/// context (its own values, which only its own code can drop), runs the
+/// task, stores the value, calls `end_running_task(id)`, then closes the
+/// context: a `sync` dependent prints into the task's stream. The job then
+/// returns `Outcome::Done` (which the scheduler sees as already ended; a
+/// `Continue` after it is a panic), and the glue's `task_end` comes after
+/// as usual. After the call the job only finishes up: it must not wait. A
+/// glue whose streams live in `io::streams` needs none of this: the
+/// emulated thread's set stays installed through the walk (`slots`).
+///
+/// `id` is the job's own task, the id `spawn` or `depend` returned for it
+/// (review RT2-14): the call ends that task only if the scheduler runs its
+/// job in this frame (the innermost task it began on the running context);
+/// otherwise it does nothing. So a job the glue runs itself (the
+/// `dependent_runs_now` path, a `spawn` or `depend` without a task manager,
+/// which return `TaskId::FINISHED`), and a second call in one job, never end
+/// another task.
+///
+/// The walk is the task's own, to its end, whether the scheduler began the
+/// task itself or a walk handed it (a `sync` dependent; review RT2-15): so
+/// a chain of `sync` dependents whose jobs call it runs one level deeper on
+/// the stack per link, as natively (`handle_finished` runs `run_task`); a
+/// glue that calls it on `main`'s stack should know.
+pub fn end_running_task(id: TaskId) {
+    if id == TaskId::FINISHED {
+        return;
+    }
+    super::writers_point();
+    if let Some(floor) = with(|s| s.end_running(id)) {
+        walk_above(floor);
+    }
+}
+
+impl Sched {
+    /// `end_running_task`'s end of task `id`, if it is the innermost task
+    /// running on the running context: the number of walks below the one
+    /// its end opened, `None` otherwise.
+    fn end_running(&mut self, id: TaskId) -> Option<usize> {
+        let i = *self.st_ref().running.last()?;
+        if self.id_of(i) != id {
+            return None;
+        }
+        let floor = self.st_ref().walks.len();
+        self.end(i);
+        Some(floor)
+    }
+}
+
+/// The walks above `floor` to their end (`end_running_task`): the one the
+/// task's end opened, and the walks of the `sync` dependents it hands that
+/// do not walk their own; never the walks below (review RT2-15).
+fn walk_above(floor: usize) {
+    let guard = WalkUnwound(floor);
+    while let Some(d) = with(|s| s.walk_next_above(floor)) {
+        run_task(d);
+    }
+    std::mem::forget(guard);
+}
 
 /// `lean_task_spawn_core(c, prio, keep_alive)`: `Task.spawn` (`keep_alive`
 /// false) and `IO.asTask` (true). Without a task manager (during module

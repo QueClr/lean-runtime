@@ -23,7 +23,7 @@ impl Glue for TestGlue {}
 /// own, which check records by key.
 /// Without that feature they run one at a time all the same: each makes
 /// threads, and the host is shared.
-fn serial() -> std::sync::MutexGuard<'static, ()> {
+pub(super) fn serial() -> std::sync::MutexGuard<'static, ()> {
     #[cfg(feature = "stack-overflow")]
     let m = &crate::sched::stack_overflow::tests::SERIAL;
     #[cfg(not(feature = "stack-overflow"))]
@@ -868,6 +868,273 @@ fn the_glue_hooks_pair_up() {
             "thread end"
         ]
     );
+}
+
+/// Natively a task's standard streams (`IO.setStdout` & co.) and `errno`
+/// are its thread's (`io.cpp` 115-117, `MK_THREAD_LOCAL_GET`; review
+/// AR-24): a pool worker keeps them from one task to the next, and a new
+/// worker, a dedicated task's thread and `main` start with the process's
+/// streams and `errno` 0. Threads mode gets that from its real threads, with
+/// no glue hook: `main`'s redirection is not the tasks'; a task's
+/// redirection and `errno` reach its `sync` dependent, walked on its thread,
+/// and the next task of the same (only) worker; a dedicated task starts
+/// fresh; `main` keeps its own.
+#[cfg(feature = "io")]
+#[test]
+fn a_pool_worker_keeps_its_streams_and_errno() {
+    use crate::io::error::{errno, set_errno};
+    use crate::io::streams::{self, StdStream};
+    fn out() -> u32 {
+        streams::current(StdStream::Stdout, || 0u32)
+    }
+    let _s = serial();
+    start_test(1);
+    assert_eq!(streams::set_stdout(7u32, || 0), 0);
+    set_errno(9);
+    let go = Gate::default();
+    let g2 = go.clone();
+    let a: Slot<(u32, i32)> = Slot::default();
+    let ta = spawn(
+        filling(&a, move || {
+            g2.wait();
+            let seen = (out(), errno());
+            let _ = streams::set_stdout(5u32, || 0);
+            set_errno(2);
+            seen
+        }),
+        0,
+        true,
+    );
+    // walked on `a`'s worker, after its job
+    let d: Slot<(u32, i32)> = Slot::default();
+    let td = depend(ta, filling(&d, || (out(), errno())), 0, true, true);
+    go.open();
+    wait(td);
+    // the only worker, after `a`
+    let b: Slot<(u32, i32)> = Slot::default();
+    let tb = spawn(filling(&b, || (out(), errno())), 0, true);
+    let c: Slot<(u32, i32)> = Slot::default();
+    let tc = spawn(filling(&c, || (out(), errno())), 9, true);
+    wait(tb);
+    wait(tc);
+    finish();
+    assert_eq!(a.get(), Some(&(0, 0)), "a new worker starts fresh");
+    assert_eq!(d.get(), Some(&(5, 2)), "a sync dependent shares the thread");
+    assert_eq!(b.get(), Some(&(5, 2)), "the worker kept them");
+    assert_eq!(
+        c.get(),
+        Some(&(0, 0)),
+        "a dedicated task's thread starts fresh"
+    );
+    assert_eq!((out(), errno()), (7, 9), "main keeps its own");
+    assert_eq!(streams::set_stdout(0u32, || 0), 7);
+}
+
+thread_local! {
+    /// A glue's own per-task state (lean2rr's stream context), for the tests
+    /// of `end_running_task`.
+    static GLUE_CTX: Cell<&'static str> = const { Cell::new("a fresh thread's") };
+}
+
+/// The glue's protocol of review AR-26 (lean2rr's AR-S1) for a job whose
+/// task id `id` holds once it runs: open its own context (`name`), store the
+/// value, `end_running_task(id)` (unless `end_first` is false), close the
+/// context.
+fn protocol_job(name: &'static str, id: Slot<TaskId>, end_first: bool) -> Job {
+    Box::new(move || {
+        GLUE_CTX.with(|c| c.set(name));
+        if end_first {
+            end_running_task(*id.get().expect("the task's id"));
+        }
+        GLUE_CTX.with(|c| c.set("closed"));
+        Outcome::Done
+    })
+}
+
+/// A pool task whose job waits for `go`, then runs `job` (so the caller can
+/// store the returned id where the job reads it before it runs).
+fn gated(go: &Gate, job: Job) -> TaskId {
+    let g2 = go.clone();
+    spawn(
+        Box::new(move || {
+            g2.wait();
+            job()
+        }),
+        0,
+        true,
+    )
+}
+
+/// Review AR-26 (lean2rr's AR-S1): a job that opens its own context (a
+/// translator's stream context), stores the task's value, calls
+/// `end_running_task` and then closes the context: the task's `sync`
+/// dependent runs on the task's thread inside the context, its waiter wakes,
+/// and the glue's `task_end` comes once, after. A job that does not call it
+/// (the control) has its dependent run after the context closed.
+#[test]
+fn a_job_ends_its_task_before_it_closes_its_context() {
+    let _s = serial();
+    let sh = bind_local();
+    let l = log();
+    configure(&sh, Arc::new(LogGlue(l.clone())), 1, 256 << 10);
+    let mut seen = Vec::new();
+    for end_first in [true, false] {
+        let id: Slot<TaskId> = Slot::default();
+        let go = Gate::default();
+        let a = gated(&go, protocol_job("the task's", id.clone(), end_first));
+        let _ = id.set(a);
+        let s: Slot<&'static str> = Slot::default();
+        let d = depend(a, filling(&s, || GLUE_CTX.with(Cell::get)), 0, true, true);
+        go.open();
+        wait(d);
+        seen.push(*s.get().unwrap());
+    }
+    finish();
+    assert_eq!(seen, ["the task's", "closed"]);
+    let hooks = entries(&l);
+    assert_eq!(
+        hooks.iter().filter(|h| *h == "end own").count(),
+        2,
+        "one task_end per task: {hooks:?}"
+    );
+}
+
+/// Review RT2-14: `end_running_task(id)` ends task `id` only while this
+/// thread runs its job. A job that A's job runs itself (the glue's inline
+/// path: `TaskId::FINISHED`), and a second call, end nothing: A's `sync`
+/// dependent sees the value A stores after them. Before the fix the call
+/// ended the innermost running task, A, before A stored its value.
+#[test]
+fn rt2_14_end_running_task_ends_only_its_own_task() {
+    let _s = serial();
+    let sh = bind_local();
+    configure(&sh, Arc::new(TestGlue), 1, 256 << 10);
+    let value: Slot<u32> = Slot::default();
+    let seen: Slot<Option<u32>> = Slot::default();
+    let id: Slot<TaskId> = Slot::default();
+    let (v2, id2) = (value.clone(), id.clone());
+    let go = Gate::default();
+    let a = gated(
+        &go,
+        Box::new(move || {
+            let inner: Job = Box::new(|| {
+                end_running_task(TaskId::FINISHED);
+                Outcome::Done
+            });
+            let _ = inner();
+            let _ = v2.set(42);
+            end_running_task(*id2.get().unwrap());
+            end_running_task(*id2.get().unwrap());
+            Outcome::Done
+        }),
+    );
+    let _ = id.set(a);
+    let v3 = value.clone();
+    let d = depend(a, filling(&seen, move || v3.get().copied()), 0, true, true);
+    go.open();
+    wait(d);
+    finish();
+    assert_eq!(
+        seen.get(),
+        Some(&Some(42)),
+        "A's dependent ran before A stored its value"
+    );
+}
+
+/// Review RT2-15 (leanrs's AR26-01), threads mode: in a chain A -> B -> C of
+/// `sync` dependents, B (walked by A's thread) follows the protocol: C runs
+/// inside B's context, as in the single-thread scheduler and natively.
+#[test]
+fn rt2_15_end_running_task_in_a_walked_sync_dependent() {
+    let _s = serial();
+    let sh = bind_local();
+    configure(&sh, Arc::new(TestGlue), 1, 256 << 10);
+    let (ida, idb): (Slot<TaskId>, Slot<TaskId>) = (Slot::default(), Slot::default());
+    let go = Gate::default();
+    let a = gated(&go, protocol_job("A's", ida.clone(), true));
+    let _ = ida.set(a);
+    let b = depend(a, protocol_job("B's", idb.clone(), true), 0, true, true);
+    let _ = idb.set(b);
+    let seen: Slot<&'static str> = Slot::default();
+    let c = depend(
+        b,
+        filling(&seen, || GLUE_CTX.with(Cell::get)),
+        0,
+        true,
+        true,
+    );
+    go.open();
+    wait(c);
+    finish();
+    assert_eq!(seen.get(), Some(&"B's"));
+}
+
+/// The child process of `rt2_16_continue_after_end_running_task_aborts`.
+const RT2_16_CHILD: &str = "LEAN_RUNTIME_TEST_RT2_16_CHILD";
+
+/// Review RT2-16: a job that returns `Continue` after `end_running_task`
+/// aborts the process with the crate's message. Before the fix it panicked
+/// after its abort guard, with the scheduler's lock held: the worker ended
+/// while `live` still counted it, and `finish` waited for good (RT1-01's
+/// failure). In a child process, killed after 10 s.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn rt2_16_continue_after_end_running_task_aborts() {
+    if std::env::var_os(RT2_16_CHILD).is_none() {
+        let _s = serial();
+        let t0 = std::time::Instant::now();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "sched::mt::tests::rt2_16_continue_after_end_running_task_aborts",
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(RT2_16_CHILD, "1")
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let st = loop {
+            if let Some(st) = child.try_wait().unwrap() {
+                break st;
+            }
+            if t0.elapsed() > std::time::Duration::from_secs(10) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the child hangs (finish waits for the dead worker)");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let mut err = String::new();
+        use std::io::Read;
+        let _ = child.stderr.take().unwrap().read_to_string(&mut err);
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(st.signal(), Some(6), "an abort; stderr:\n{err}");
+        assert!(
+            err.contains("end_running_task"),
+            "the message; stderr:\n{err}"
+        );
+        return;
+    }
+    let sh = bind_local();
+    configure(&sh, Arc::new(TestGlue), 1, 256 << 10);
+    let src: Slot<u32> = Slot::default();
+    let s = spawn(filling(&src, || 1), 0, true);
+    wait(s);
+    let id: Slot<TaskId> = Slot::default();
+    let id2 = id.clone();
+    let go = Gate::default();
+    let a = gated(
+        &go,
+        Box::new(move || {
+            end_running_task(*id2.get().unwrap());
+            Outcome::Continue(s, Box::new(|| Outcome::Done))
+        }),
+    );
+    let _ = id.set(a);
+    go.open();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    finish();
 }
 
 #[test]

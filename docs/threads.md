@@ -1,11 +1,12 @@
 # Real threads for `sched` (threads mode)
 
-Status (2026-10-04): T1 is implemented: `sched::mt`, behind the cargo
-feature `threads` (`src/sched/threads.rs`, `src/sched/mt/`). T2 (io and
-`Std.Internal.UV` in threads mode) and T3 (the second driver, the recorded
-cases, the site) are open (section 5). The design below was written at main
-1c36a58; section 0 says where main e95ca47 and T1 changed it. The owner's
-direction (2026-10-03): "parallelism will be supported, not the focus now".
+Status (2026-10-04): T1 and T2 are implemented. T1 is `sched::mt`, behind
+the cargo feature `threads` (`src/sched/threads.rs`, `src/sched/mt/`). T2 is
+io and `Std.Internal.UV` in threads mode (0.5). T3 (the second driver, the
+recorded cases, the site's pages) and `net` in threads mode are open
+(section 5). The design below was written at main 1c36a58; section 0 says
+where main e95ca47, T1 and T2 changed it. The owner's direction
+(2026-10-03): "parallelism will be supported, not the focus now".
 
 The owner's decisions (2026-10-04):
 - lean2rr stays single-threaded for now: "reussir no change yet. lean2rr
@@ -23,7 +24,8 @@ are folded in (section 6). Its seven constraints for T1 (2026-10-04, from
 what its adoption of `sched` uses) are answered point by point in 0.3.
 
 This file is the implementors' reference. It covers:
-0. what changed since the design, T1's choices, and leanrs's constraints;
+0. what changed since the design, T1's and T2's choices, and leanrs's
+   constraints;
 1. the model, and how each rule of `sched` carries over;
 2. the contract a translator meets so that values can cross threads;
 3. the crate's shared state that needs locks or atomics;
@@ -38,9 +40,11 @@ Reussir: `docs/design/thread-safety.md` and
 `crates/reussir-codegen/src/lower/mod.rs` of lean2rr's checkout. leanrs:
 `rt/leanrs_rt/src/`, snapshot e3ff2ad2 (2026-10-03). This crate: main at
 1c36a58 (sched-1, io-2, semantics-3, cleanup-1) for sections 1 to 6;
-section 0 at e95ca47 and T1.
+section 0 at e95ca47, T1 (main 2df0ab5) and T2. libuv: 1.48.0, the version
+Lean 4.34.0 links (`src/unix/core.c` `uv_run`, `src/timer.c`
+`uv__run_timers`).
 
-## 0. Since the design: main e95ca47, and T1
+## 0. Since the design: main e95ca47, T1 and T2
 
 ### 0.1 What main gained, and what it means for the pool
 
@@ -131,26 +135,32 @@ LB (no wrong output). `sched::mt` returns the continuation in the job's
 result (`Outcome::Continue`) and stores it, or drops it for a released
 task, under the lock (both reviews of T1, 2026-10-04).
 
-**Not in threads mode yet (T2).** `sched::uv` (`Std.Internal.UV`'s loop,
-timers and signals) and `net`, both on the single-thread event loop; the
-working directory's lock rule and the routing of signals (3.2). `net` turns
-`sched` on, so `net` with `threads` is a compile error.
+**Since T2** (0.5): `sched::uv` (`Std.Internal.UV`'s loop, timers and
+signals) runs on a loop thread of its own, as natively; the working
+directory's lock rule and the routing of signals of 3.2 are in. `net`
+stays on the single-thread event loop: `net` turns `sched` on, so `net`
+with `threads` is a compile error. Networking in threads mode is a later
+item (section 5; networking is not a target now, owner 2026-10-04).
 
-### 0.2 Features (T1)
+### 0.2 Features (T1, T2)
 
-| Features | T1 | Why |
+| Features | Since T2 | Why |
 |---|---|---|
+| `threads` | Allowed. It depends on rustix and signal-hook, as `sched` does | `sched::uv`'s loop thread waits with `poll(2)` on an eventfd and the signal pipe (rustix), and the signal watchers use signal-hook's safe API (T2). Both crates are the crate's already, approved for `sched`; a plain `rustc` build of `threads` no longer works (cargo, offline, as `io` and `sched`) |
 | `threads` with `sched` | Compile error | A build has one scheduler (2.5) |
-| `threads` with `net` | Compile error | `net` turns `sched` on; the network needs the event loop, T2 |
-| `threads` with `io` | Allowed | io takes its plain path by the existing `cfg(feature = "sched")`, as without `sched`. One gap until T2 (review RT1-04): where `unshare(CLONE_FS)` is refused (Docker's default seccomp profile), a spawn with a `cwd` moves the whole process's working directory meanwhile (`fallback_spawn`, under `CWD_LOCK`), and another task's relative path operation, which takes no lock, resolves against the child's `cwd`. T2 adds the working directory's rule of 3.2 and `Std.Internal.UV` |
-| `threads` with `stack-overflow` | Allowed | `stack-overflow` no longer turns `sched` on; alone it is a compile error. Every worker and dedicated thread installs the report at its entry |
+| `threads` with `net` | Compile error | `net` turns `sched` on; the network needs the event loop. Networking in threads mode is a later item (section 5) |
+| `threads` with `io` | Allowed | io takes its plain path by the existing `cfg(feature = "sched")`, as without `sched`. Where `unshare(CLONE_FS)` is refused (Docker's default seccomp profile), a spawn with a `cwd` moves the whole process's working directory meanwhile (`fallback_spawn`, under `CWD_LOCK`); since T2 every lookup of a path the program supplies then holds `CWD_LOCK` shared, never across a wait, so none resolves against the child's `cwd` (3.2; reviews RT1-04, RT2-03) |
+| `threads` with `stack-overflow` | Allowed | `stack-overflow` no longer turns `sched` on; alone it is a compile error. Every worker, dedicated thread and the loop thread install the report at their entry |
 | `threads` with `proc-title`, `unsafe-fast` | Allowed | Nothing shared with the scheduler |
 
 A build without `threads` is unchanged: the same items and bounds, no
-`Arc` (`src/sched/mod.rs` and its files compile as before; only the shared
-plain items moved to `src/sched/common.rs`, re-exported under their old
-names). `check.sh` builds and tests `threads` and every feature that may go
-with it.
+`Arc`, no new lock (`src/sched/mod.rs` and its files compile as before;
+only plain items moved: `TaskState`, the messages and the priorities to
+`src/sched/common.rs` in T1, and the process-wide part of the signal
+watchers' delivery to `src/sched/uv_signals.rs` in T2, unchanged). `check.sh`
+builds and tests `threads` and every feature that may go with it; with
+`io,threads,proc-title,stack-overflow,unsafe-fast` the io twins run inside
+tasks and the uvloop twins over threads mode's `sched::uv` (0.5).
 
 ### 0.3 leanrs's constraints for T1
 
@@ -166,8 +176,10 @@ with it.
    `io::exit::after_main` is io's, unchanged. leanrs's DrainScope stays
    correct on a worker: the crate drops no translator value under its lock,
    and `resolve` runs a promise's walk on whatever thread calls it, after
-   the drop walk. Not met in T1: `sched::uv::LoopPromise`, which comes with
-   `sched::uv` in threads mode (T2).
+   the drop walk. Met in T2: `sched::uv` with `LoopPromise` (`is_resolved`,
+   `resolve`), `Timer`, `Signal`, `loop_configure` and `loop_alive`, the
+   single-thread module's names and shapes, with `LoopPromise: Clone + Send
+   + 'static` (0.5).
 2. **`Send` in one place.** `sched::Job` is `Box<dyn FnOnce() -> Outcome +
    Send>` in threads mode (`'static` is implied), and has no `Send` in the
    single-thread build.
@@ -191,17 +203,354 @@ with it.
 | Task table, queues, worker counts | `sched::mt`, `State` | Process-wide, under one lock |
 | The tasks running on a thread (`check_canceled`, `in_sync_task`, `wait`'s pool rule) | `sched::mt`, `CURRENT` | Per thread |
 | Thread number, no-suspend depth | `sched::mt` | Per thread |
-| Current standard streams | `io/streams.rs`, `CURRENT` | Per thread. The glue gives each task with `own_thread` fresh slots (`swap_context`) |
-| errno model | `io/error.rs`, `ERRNO` | Per thread |
+| Current standard streams | `io/streams.rs`, `CURRENT` | Per thread, as natively: a pool worker keeps them from one task to the next; a new worker, a dedicated task's thread and `main` start with the process's (0.5 item 2) |
+| errno model | `io/error.rs`, `ERRNO` | Per thread, as C's `errno`: a pool worker keeps it from one task to the next (0.5 item 2) |
 | Standard streams' `FILE`s, open-handle registry | `io/handle.rs`, `STDIN` & co., `OPEN` | Process-wide, a lock each |
 | Writer hand-offs of dropped streams | `io/coop.rs` | None: `io::coop` is `sched`'s |
 | `IO.Process.output`'s drains | `io/process.rs`, `DRAINS` | Process-wide; `finish` joins them (`after_main`) |
-| Working directory | The process's; `io/process.rs`, `CWD_LOCK` | Process-wide, as natively. Changes (`setCurrentDir`, `uv_chdir`) and reads (`currentDir`, `uv_cwd`) take `CWD_LOCK`; relative path operations take nothing, so where `unshare(CLONE_FS)` is refused a spawn with a `cwd` moves them too until T2 (RT1-04) |
+| Working directory | The process's; `io/process.rs`, `CWD_LOCK`, `NO_FALLBACK` | Process-wide, as natively. Changes (`setCurrentDir`, `uv_chdir`) and reads (`currentDir`, `uv_cwd`) take `CWD_LOCK`; since T2 the lookups of the paths the program supplies take it shared while a fallback spawn may happen, that is where `unshare(CLONE_FS)` is refused (3.2, RT1-04), absolute ones too, never across a wait (RT2-03) |
 | `environ` copy | `io/environ.rs`, `ENVIRON` | Process-wide, under a lock; the C environment changes through `std::env::set_var` (3.2) |
-| Spawner thread | `io/process.rs`, `SPAWNER`, `NO_PRIVATE_CWD` | Process-wide: one long-lived thread for the spawns with a `cwd`, which queue on it |
+| Spawner thread | `io/process.rs`, `SPAWNER`, `NO_PRIVATE_CWD` | Process-wide: one long-lived thread for the spawns with a `cwd`, which queue on it. Since T2 `sched::start` starts it, so the spawn path is decided before any task runs (3.2) |
+| `Std.Internal.UV`'s loop | `sched/mt/uv.rs`, `LOOP` | Process-wide, as native's `global_ev`: one loop thread (made at the first use), the loop lock, the armed timers and the listening signal watchers (T2) |
+| Signal handlers, the signal pipe, the watchers' counts | `sched/uv_signals.rs`, `HOOKED`, `PIPE` | Process-wide, in both modes (T2 moved them out of `sched/uv.rs`) |
 | Stack-overflow records | `sched/stack_overflow.rs` | One per registered thread |
 | Alternate signal stacks the crate makes | `sched/stack_overflow.rs`, `FREE_ALTSTACKS` | One per live registered thread that std gave none; given back to a process-wide free list when the thread ends, and reused (RT1-03) |
 | `Std.Sync` objects, `Ref`s | The translator's handles | Shared, a lock each |
+
+### 0.5 T2: io and `Std.Internal.UV` in threads mode
+
+T2 (branch threads-2, 2026-10-04; its review round RT2, both reviews, the
+same day) is four items. A build without `threads` takes no new lock and
+makes the same system calls; the single-thread scheduler changed in one
+rule only, the threads' state of item 2, which both modes follow.
+
+**1. The working directory** (review RT1-04; 3.2). `src/io/process.rs`,
+module comment item 4, "Threads mode".
+- `sched::start` (`start_with`, with `io`) decides the spawn path before
+  any task runs: it starts the spawner thread (`decide_spawn_path`). So the
+  spawner's file-system attributes, a copy taken at its `unshare` (its
+  `umask` and root directory; module comment, item 4), are the process's
+  at `sched::start`, not at the first spawn with a `cwd`. Lean has no
+  `umask`, so only foreign code could tell.
+- If the spawner unshares its file-system attributes (the common case), it
+  sets `NO_FALLBACK`, under `CWD_LOCK` held exclusively, so no fallback
+  spawn is in progress then. From then on no spawn takes the fallback, and
+  lookups take no lock.
+- Otherwise (`unshare(CLONE_FS)` refused, as under Docker's default seccomp
+  profile) every lookup of a path the program supplies holds `CWD_LOCK`
+  shared for the rest of the run: `io::process::with_path_lookup` and
+  `open_looked_up`, one uncontended read lock per call. A fallback spawn
+  holds `CWD_LOCK` exclusively while the process is in the child's `cwd`,
+  so it excludes them, as it already excluded `IO.currentDir` and
+  `uv_cwd`. The paths the crate names itself (`/proc/self/exe`,
+  `/dev/urandom`, `/dev/null`, ...) take no lock: none goes through the
+  working directory (review RT2-L-03).
+- **No wait under the lock** (review RT2-03). A fallback spawn waits for
+  every reader, and while it waits std's lock lets no new reader in. An
+  `open(2)` of a FIFO waits for its other end, which may be that spawn's
+  child: a deadlock, and every later lookup blocked behind it, where
+  natively all go on. So `Handle.mk`'s open (`io::process::open_looked_up`)
+  never waits under the lock:
+  - a creating open (`write`, `writeNew`, `append`) is the one open under
+    the lock with `O_NONBLOCK` added, which is then cleared (`O_APPEND`
+    kept). So every check of a creating open runs, the kernel's
+    `may_create_in_sticky` included (`fs.protected_regular`,
+    `fs.protected_fifos`: another user's file or FIFO in a sticky directory
+    such as `/tmp` is `EACCES`, as natively; review RT2-11, which found the
+    first fix's reopen without `O_CREAT` skipping it), and a missing name
+    is created as the one open creates it. Only when it would wait
+    (`ENXIO`: a FIFO with no reader; `EWOULDBLOCK`: a lease) is the file
+    opened as below: those errors come in `vfs_open`, after the lookup and
+    the sticky check and before any truncation;
+  - any other open resolves the path under the lock, `open(path, O_PATH |
+    O_CLOEXEC)`, which never opens the file itself, and opens the file
+    after the unlock through the descriptor, `open("/proc/self/fd/N",
+    flags)`: the same file and the same checks of its type and
+    permissions. The `O_PATH` descriptor then goes and the file's takes the
+    lowest free number (`F_DUPFD_CLOEXEC` from 0), as the one open's would
+    (review RT2-12);
+  - without `/proc`, or when the second descriptor is not to be had
+    (`EMFILE`, `ENFILE`, where the one open needs only one; RT2-12), it is
+    the one open under the lock, as before T2's fix.
+
+  Every other holder of the lock waits for nothing:
+  the other lookups (`stat`, `opendir`, `mkdir`, `rename`, ...), `getcwd`,
+  and `posix_spawn`, which returns once the child has called `execve`; so
+  the spawner's wait for the write lock (`NO_FALLBACK`) ends too.
+- The operations: `Handle.mk` (`open`), `createDir`, `removeDir`,
+  `removeFile`, `rename`, `hardLink`, `setAccessRights`, `realPath` (the
+  resolution, the working directory's length and the walk under one lock),
+  `readDir` (the `opendir`; `readdir` reads the descriptor), `metadata`,
+  `symlinkMetadata`, the temporary file's and directory's creation (a
+  relative `TMPDIR`), the `open(".")` of a spawn with a relative `cwd`, and
+  the stand-in of a child that cannot start (a spawn without a `cwd`).
+  Spawns without a `cwd` already held the lock shared (RIO2-13).
+- **Absolute paths take the lock too.** Skipping it is not safe. The kernel
+  resolves an absolute path from the root directory, which `chdir` does not
+  change, but the path can still reach the working directory: through
+  `/proc/self/cwd`, a magic link to the process's working directory (also
+  `/proc/thread-self/cwd` and `/proc/<pid>/cwd`), directly or through any
+  symbolic link whose target goes there. The test below sees the child's
+  `cwd` through `/proc/self/cwd/marker` without the lock.
+- **The lock order.** `SPAWNER`, then `CWD_LOCK` (`spawner` sets
+  `NO_FALLBACK` under both). Under `CWD_LOCK` the crate makes system calls
+  only, never a stream lock, the scheduler's lock or the loop lock, and a
+  thread never takes it twice (a second read lock can wait for good behind
+  a waiting writer). The caller's sink (`realPath`'s result) runs after the
+  unlock. `CWD_LOCK` may be taken while a stream lock or the loop lock is
+  held, never the other way.
+- **Deviation** (no Lean bug): once a spawner has unshared, a later refusal
+  of `unshare` (a helper thread's, `on_helper`; or a new spawner's after the
+  first one ended, which takes a Rust panic) does not take the fallback:
+  that spawn fails with `EAGAIN`, as a failed `fork` does. Natively the
+  forked child enters `cwd` itself. Taking the fallback there would move
+  the process while other threads' path lookups take no lock.
+- Tests: `io::process::tests::threads_path_lookups_never_see_a_fallback_spawns_cwd`
+  (with the test hook `FORCE_FALLBACK`: a thread loops over `metadata`,
+  `Handle.mk` and a read, `readDir`, `realPath`, `createDir` and
+  `removeDir` of relative paths, and `metadata` of
+  `/proc/self/cwd/marker`, while `main` makes 100 spawns in another
+  directory; without the lock it fails at its first look, and with the
+  lock for relative paths only it fails at the absolute path);
+  `threads_no_fallback_once_the_spawner_unshared` (the refusal, the working
+  directory unchanged); `rt2_03_a_fifo_open_does_not_block_a_fallback_spawn`
+  (a reader and a creating writer wait in their opens of FIFOs while
+  fallback spawns' children open the other ends: a deadlock before RT2-03,
+  killed at 10 s; both go on after); and
+  `threads_fallback_opens_keep_their_outcomes` (every mode on a new, an
+  existing, a directory, an unreadable, a dangling-link and a missing path:
+  the same errors, files and open-file status flags as the one `open(2)`;
+  with the added `O_NONBLOCK` left set it fails); and
+  `rt2_12_open_at_the_descriptor_limit` (the file's number is the one
+  open's, 4, where the first fix gave 5; with one descriptor left
+  `Handle.mk` succeeds, where it was `EMFILE`). The sticky check itself
+  needs a second user id, so no test runs it.
+- A translator's own system calls that resolve paths go through
+  `io::process::with_path_lookup` too, and none that can wait (a glue
+  duty, in threads mode).
+
+**2. A worker's streams and `errno`** (1.4; reviews RT2-L-01, AR-24). A
+task's current standard streams (`IO.setStdout` & co.) and its `errno` are
+its thread's: Lean's docs say `IO.setStdout` replaces "the stdout of the
+current thread", and both are thread-locals natively (`io.cpp` 115-117,
+`MK_THREAD_LOCAL_GET`; C's `errno`). So a pool worker keeps them from one
+task to the next: a task that sets a stream, or leaves `errno` set, and
+does not restore it, leaves it to the next task of that worker; a new
+worker, a dedicated task's thread and `main` start with the process's
+streams and `errno` 0; a `sync` task shares the thread it runs on. leanrs's
+probe (task A sets its stdout to a buffer and does not restore it; `main`
+waits for A; task B prints) put B's line into A's buffer in 10 runs of 10
+at `LEAN_NUM_THREADS` 1, 2 and 4. T2 first gave each task fresh streams,
+which was not one of native's outcomes; it now follows native, in both
+modes, and the glue does nothing for it:
+- **threads mode**: the real threads give it. The io layer's slots
+  (`io::streams`) and its modelled `errno` (`io::error`) are thread-locals,
+  so a worker keeps them; `Glue::task_begin` and `task_end` have nothing to
+  do for them (T2's `io::streams::task_begin` and `task_end` are gone);
+- **the single-thread scheduler** (with `io`): `src/sched/slots.rs` keeps a
+  `ThreadSlots` (the slots and the modelled `errno`) per context, swapped
+  by the hub around each resume, and per emulated thread, swapped by
+  `run_task`: a pool task runs with the set of the lowest free worker id
+  (free: no task of it runs; one waiting in `Task.get` holds it), which
+  keeps what the task leaves; a dedicated task with a fresh set; the event
+  loop's context keeps one set across loop contexts (native's one loop
+  thread). The glue's `switched` must not swap `io::streams` too now.
+  Which idle worker natively takes a task is the schedule's choice; the
+  lowest free id is one of its outcomes, and the one the cases record.
+
+**A glue with per-task state of its own** (review AR-26, lean2rr's
+AR-S1; lean2rr's case `RtTaskSyncStream`: a task sets stdout to a buffer,
+its `sync := true` dependent's line must land there). The crate's side
+holds in both modes: the task's `io::streams` set stays installed while its
+dependents are walked (threads mode: the real thread's; the single-thread
+scheduler: `TaskSlots` lives until the end of `run_task`, after the walk).
+A translator whose stream values are its own objects, which only its code
+can drop, cannot put them in `io::streams` (the crate would drop them);
+lean2rr opens a stream context in its job and closes it before the job
+returns, which was before the walk. So both schedulers have
+`sched::end_running_task(id)`: the job calls it after it stores the value,
+with its own task's id (the one `spawn` or `depend` returned for it, which
+the glue keeps in its task object); the task ends and its dependents are
+walked there, inside the job's context, then the job closes the context
+and returns `Outcome::Done` (the scheduler sees the task ended; only the
+glue's `task_end` is left).
+- The call ends task `id` only while the scheduler runs its job as the
+  innermost task of the calling thread (or context). A job the glue runs
+  itself (the `dependent_runs_now` path, a `spawn` or `depend` without a
+  task manager, which return `TaskId::FINISHED`) and a second call do
+  nothing (review RT2-14; before, the call ended the enclosing task).
+- The job may start before `spawn` or `depend` returns (a worker can take
+  it at once; a `LEAN_SYNC_PRIO` spawn or a `sync` dependent of a finished
+  task runs inside the call). The glue stores the id where the job reads
+  it before it gives the id to anyone: then a job that finds no id has no
+  dependent yet, and its call doing nothing is harmless.
+- The walk is the task's own, to its end, also for a `sync` dependent that
+  a walk handed (review RT2-15, leanrs's AR26-01; before, the single-thread
+  scheduler walked nothing there, and the dependent's own `sync`
+  dependents ran after its context closed).
+- A chain of `sync` dependents whose jobs call it runs one level deeper on
+  the stack per link, as natively (`handle_finished` runs `run_task`):
+  the scheduler's own walk is a loop, but this one is the job's. A glue
+  that calls it on `main`'s stack (8 MiB) should know.
+- A job that calls it and then returns `Continue` is the glue's error: a
+  panic in the single-thread scheduler, an abort with the crate's message
+  in threads mode (review RT2-16; before, a panic with the lock held, after
+  which `finish` waited for good).
+
+Unit tests in both schedulers: `a_job_ends_its_task_before_it_closes_its_context`
+(with a control job that does not call it: its dependent runs after the
+context closed), `rt2_14_end_running_task_ends_only_its_own_task` (an
+inline job's call and a second call end nothing),
+`rt2_15_end_running_task_in_a_walked_sync_dependent` (A -> B -> C: C sees
+B's context); and `rt2_16_continue_after_end_running_task_aborts` in
+threads mode. Each fails with its fix undone (checked by mutation; RT2-15's
+threads-mode twin passed before too).
+
+Cases (recorded natively with `cases.py expect`, 5 runs each, identical):
+`tasks/worker_keeps_streams` (B's line lands in A's buffer; while A sleeps
+with its redirection, `main` prints to its own stdout; a dedicated task
+prints to the real one) and `tasks/worker_keeps_errno`
+(`LEAN_NUM_THREADS=1`: B's `getLine` on a handle with its sticky error flag
+reports A's leftover `ENOTDIR`, `main`'s reports its own `EEXIST`; A's
+`ENOENT` would crash natively, LB-03). Both pass on the single-thread
+scheduler (`tests/sched-driver`) and in threads mode
+(`tests/threads_twins.rs`); with the single-thread swaps disabled (the old
+shared state) both fail. Unit tests: `a_pool_worker_keeps_its_streams_and_errno`
+in `sched::tests` and in `sched::mt::tests` (under Miri too, with
+`io,threads`).
+
+**3. `sched::uv` on threads** (`src/sched/mt/uv.rs`, re-exported as
+`sched::uv`; module comment).
+- **Which thread runs the loop.** A thread of its own, the loop thread, as
+  natively (`initialize_libuv`, `libuv.cpp` 19-27, starts an `lthread` that
+  runs `event_loop_run_loop` for the life of the process). Here it is made
+  at the first use of the loop, with the task manager's stack size and
+  Lean's stack-overflow report; it calls the glue's `thread_start` once, at
+  its start, or, made before `sched::start` (a Lean `initialize` that makes
+  a `Timer`), once a glue appears, before it runs translator code (review
+  RT2-05); it never ends.
+- **The loop lock** (`LoopLock`): native's recursive `event_loop_t` mutex
+  with `n_waiters` (`event_loop.cpp` 66-102). The loop thread holds it
+  during each iteration (`uv_run(UV_RUN_ONCE)`, libuv `core.c` 415-471):
+  it waits in `poll(2)` for the earliest timer, the signal pipe (while a
+  watcher listens) and the loop's async eventfd (chosen once, when the
+  loop is made: native's, from `io::startup`, when the glue has opened
+  native's startup descriptors by then, else its own; review RT2-04); then
+  it delivers the signals that came, and runs the timers due
+  (`uv__run_timers`, `timer.c` 165-195: the due timers collected first, in
+  deadline order, then start order). Every extern takes the lock first.
+  When another thread holds it, the extern counts itself a waiter and
+  writes the eventfd (`uv_async_send`), the loop thread ends its iteration,
+  and it waits while a waiter is left before its next iteration (85-91).
+  So an extern acts after the loop has handled what was due, as natively.
+  The lock is recursive per thread: a callback's `sync` dependent that
+  calls an extern on the loop thread goes on at once.
+- **`next` reads the promise's state once** per decision (review RT2-13):
+  the program may resolve the promise from another thread at any time;
+  RT2-07's first fix read it twice, and a resolution in between made `next`
+  panic (tests `rt2_13_{timer,signal}_next_with_a_promise_resolved_between_its_reads`:
+  a panic before, the same promise after).
+- **Who resolves what.** The loop thread resolves a timer's promise when
+  the timer fires (`handle_timer_event`) and a watcher's when its signal
+  came (`handle_signal_event`), through `LoopPromise::resolve`, with the
+  loop lock held: the promise's `sync` dependents run on the loop thread,
+  its other dependents go to the pool, its waiters wake. An extern resolves
+  nothing itself; it makes a handle's promise (`new_promise`, with no
+  handle state lock held, review RT2-07) and drops a handle's reference
+  (`stop`, `cancel`, a repeating handle's `next`) on the calling thread with
+  the loop lock held, as natively `lean_dec(m_promise)` runs under
+  `event_loop_lock`; the glue resolves a promise whose last reference goes
+  with `none` there.
+- **`stop` and `cancel`** change the handle's state before they release its
+  promise, as the single-thread module does (Lean master's `stop`, PR
+  #14793; `cancel` as lean-runtime's correction; LB-33, LB-34): the
+  release's `sync` dependents see a finished (or initial) handle. A `stop`
+  of a timer that does not run still releases its promise, as 4.34.0.
+- **Placeholders** (AR-22's shapes, review RT2-08): `Timer::placeholder()`
+  and `Signal::placeholder()` make an initial handle without the loop lock,
+  so they never wait for the loop, for a glue's `mem::take`-style moves.
+- **`LoopPromise`** has the single-thread module's methods (`is_resolved`,
+  `resolve`), with the bound `Clone + Send + 'static`: the loop thread
+  resolves and drops it. `Timer<P>` and `Signal<P>` are `Send + Sync`. The
+  names and shapes are the single-thread module's, so a glue switches with
+  a `cfg` (leanrs's point 1).
+- **Signals: one delivery for the process** (3.2). The handlers, the pipe
+  and the watchers' counts are process-wide (`src/sched/uv_signals.rs`,
+  shared with the single-thread scheduler, moved there unchanged); the
+  listening watchers are one list, the loop's. So a signal reaches the
+  watchers started on any thread, repeating ones first, then in creation
+  order, as libuv's one loop delivers to all its handles.
+- **The lock order.** The loop lock first. Under it: a handle's state lock
+  and the loop's `data` lock, each held only for plain data (a handle's
+  before `data`, never the other way); and, through translator code (a
+  promise's `new`, `resolve` and drop, and the `sync` dependents they run),
+  the scheduler's lock, the stream locks, `CWD_LOCK` and `uv_signals`'
+  locks. Nothing that holds one of those takes the loop lock, except
+  translator code that the loop lock's holder runs itself (the same
+  thread). So, as natively, a `sync` dependent on the loop thread that
+  waits for a task which calls an extern on another thread waits for good,
+  and a glue must not call an extern while it holds a stream's guard.
+- **LB-19 and LB-20 are not copied**: a one-shot timer or watcher is
+  finished before its promise resolves, and a failed `next` holds no extra
+  reference, as in the single-thread `sched::uv` (`docs/sched.md`).
+- **Deviations** (no Lean bug): the loop thread is made at the first use,
+  not at startup (a program that does not use `Std.Internal.UV` has no such
+  thread); `Loop.configure`'s `blockSigProfSignal` does not block `SIGPROF`
+  in the loop thread while it polls (natively that only decides which
+  thread runs a `SIGPROF` handler, which no Lean program can see), and
+  `accumulateIdleTime` turns on nothing (nothing in Lean reads the
+  metrics); occurrences of one signal between two iterations are one
+  delivery (libuv makes one per occurrence), as in the single-thread
+  module; an extern's timer counts from its own clock read, not from the
+  loop's cached time (`uv_timer_start` adds the timeout to `loop->time`,
+  which can be a little old). A repeating timer's next period counts from
+  the iteration's time, as libuv's `uv_timer_again` (review RT2-09).
+- Tests: the unit tests of `sched::mt::uv` (`src/sched/mt/uv_tests.rs`):
+  the loop lock (recursive; a waiter goes before the loop's next
+  iteration; under Miri too), one-shot and repeating timers resolved on
+  the loop thread, `cancel` and `stop`, an extern that interrupts a loop
+  thread waiting for a timer a minute away, externs in a resolution on the
+  loop thread (recursive lock, LB-20), an unknown signal, one SIGUSR2
+  that reaches a repeating watcher started on the test's thread and a
+  one-shot watcher started in a task (in a child process); and the
+  review's: `rt2_04_*` (native's descriptors opened after the loop's first
+  use: an extern waited 7.8 s before, at once after), `rt2_05_*`
+  (`thread_start` once, before the first resolution, on a loop made before
+  `start`), `rt2_07_*` (a promise maker that calls an extern on its handle:
+  a deadlock before, killed at 10 s), `rt2_08_*` (placeholders made while
+  another thread holds the loop lock return at once), `rt2_09_*` (the tick
+  after a late one came 301 ms later before, at once after). Each failed
+  before its fix and passes after.
+
+**4. The twins inside tasks.** In a threads build (`check.sh`'s
+`io,threads,proc-title,stack-overflow,unsafe-fast`):
+- every twin of `tests/io_cases.rs` and `tests/io2_cases.rs` runs inside a
+  task, on a worker, which `main` waits for (`tests/in_task/mod.rs`): the
+  program `IO.asTask (twin args)` then `IO.wait`. The same expected
+  outcomes pass, the title's twins included (they read the arguments'
+  memory and `/proc/self/cmdline`, not the thread's name);
+- `tests/threads_twins.rs` runs every case of `tests/cases/uvloop` (34,
+  LB-33's and LB-34's included) over threads mode's `sched::uv`, each twin
+  inside a task, and the two task cases of item 2 on `main`, with a
+  translator's values made thread-safe (`Arc`, `OnceLock`, `sched::Ref`),
+  and with native's startup descriptors (`signal_fds`: no descriptor
+  added). All give the cases' expected outcomes, `signal_sigio_default`'s
+  recorded alternative included. It calls `cases.py check --diff`, which
+  names a failing twin and prints its differences (review RT2-L-02).
+  Three windows were widened and re-recorded natively, since a loaded host
+  can stall a worker past them (review RT2-10): `timer_repeating`'s period
+  40 to 100 ms, `timer_oneshot`'s 60 to 150 ms, `timer_cancel_reset`'s 200
+  to 300 ms.
+
+**Left for T3 or later** (section 5):
+- T3: the second driver `tests/sched-driver-mt` (the `tasks/`, `sync/`,
+  `refs/` and `taskio/` cases over `sched::mt`), the new cases recorded
+  natively (4), the site's pages for threads mode;
+- later: `net` in threads mode (networking is not a target now, owner);
+  the real fix of the working directory's fallback,
+  `posix_spawn_file_actions_addchdir_np`, which needs `unsafe`;
+- `sched::uv`'s loop thread made at startup, as natively, only if a case
+  ever needs it (none does).
 
 ## Summary
 
@@ -236,7 +585,11 @@ with it.
   returning its own argument) stay fixed. Refs follow Lean 4.35 in both
   modes (3.1).
 - **The crate needs no `unsafe` for threads mode.** It uses std's threads,
-  locks, condition variables and atomics, and no new dependency.
+  locks, condition variables and atomics; its `sched::uv` (T2) also uses
+  rustix (`poll`, the eventfd) and signal-hook (the signal watchers), the
+  crates `sched` uses already, through their safe APIs only. The leanrs
+  coordinator approved them for `threads` (the delegated approver,
+  2026-10-04).
 - **The promise.** Every threads-mode outcome is one that native Lean could
   produce, except the documented deviations. A racy program's output varies
   from run to run, as it does natively. The recorded cases space their
@@ -400,16 +753,16 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | `Std.Sync` | Contexts block. The owner is a context plus a task's thread number | Threads block on condition variables. The owner is the OS thread |
 | A thunk forced on two threads | The glue's waiter list (`block_sync`, `wake`). Forced inside itself: `hang` | A blocking once-cell in the glue. Forced inside itself: its thread hangs (LB-08) |
 | Stack overflow | The crate's report (`install_stack_overflow_handler`, feature `stack-overflow`, AR-11): the guard of the registered thread's stack or of the context running on it | The guard of each OS thread. Each worker and each dedicated task's thread calls `install_stack_overflow_handler` at its entry, before the glue's `thread_start` (leanrs's point 4): its alternate signal stack and its record; the table grows with the live threads (review RS3-01) |
-| Current streams | Swapped per context; a task starts with the process's streams | Per OS thread. `task_begin` still starts each pool task with the process's streams |
+| Current streams, `errno` | Per context and per emulated worker (`slots`): a pool task gets the lowest free worker's set, which keeps what it leaves; a dedicated task a fresh one | Per OS thread: a pool worker keeps them from one task to the next, a new worker and a dedicated task's thread start fresh (0.5 item 2) |
 | `IO.getTID` | `main`'s id plus `thread_number()` | `main`'s id plus `thread_number()`: 0 on `start`'s thread, a number of its own on any other. A glue may give the thread's `gettid` instead, native's answer (`lean_io_get_tid`, `process.cpp` 340) |
 | `LEAN_NUM_THREADS=0` | Tasks run at once | The same |
 | A Rust panic in a job | Goes on as `main`'s panic | Aborts the process after Rust's message, since no thread can take it over (leanrs agrees, 6). So does a panic in a glue hook, on any thread, `main`'s included, and in the destructor of a value the crate drops (a released task's continuation, the glue; review RT1-01) |
 
-Starting each task with fresh streams is one of native's schedules. A
-native worker keeps its slots from one task to the next (`io.cpp` 115-117,
-`MK_THREAD_LOCAL_GET`); a fresh worker starts from the process's streams
-(`src/io/streams.rs`, module comment). Both modes do the same, so their
-outputs agree (leanrs agrees, 6).
+A native worker keeps its streams and `errno` from one task to the next
+(`io.cpp` 115-117, `MK_THREAD_LOCAL_GET`); a fresh worker starts from the
+process's streams. Both modes do the same (0.5 item 2; reviews RT2-L-01,
+AR-24, which corrected T2's first choice, fresh streams for every task), so
+their outputs agree.
 
 The single-thread mode runs a waited-for pending task inline on the
 waiter's stack. Threads mode does not: natively a waiter blocks and a worker
@@ -439,7 +792,7 @@ items with `sched`:
 | Jobs | `Box<dyn FnOnce() -> Outcome>` | `Box<dyn FnOnce() -> Outcome + Send>` |
 | Glue | `Rc<dyn Glue>`: `suspend`, `switched`, `task_begin`, `task_end` (sched-io removed `idle`: the hub waits in the scheduler's event loop) | `Arc<dyn mt::Glue>`, `Send + Sync`: `thread_start`, `thread_end`, `task_begin`, `task_end` |
 | `Std.Sync` | State in a `RefCell`, waiters by `CtxId` (`sync.rs`) | State in a `Mutex`, and a `Condvar` per object |
-| Streams | io's thread-local slots, swapped per context (`streams.rs`, `swap_context`) | The same slots, now one set per real thread |
+| Streams, `errno` | io's thread-local slots and modelled `errno`, swapped per context and per emulated worker (`slots.rs`) | The same thread-locals, one set per real thread |
 | Stack bounds | `running_stack()` and the report's record, per context | Not needed; each thread's record holds its own guard |
 | Emulation | `STALE`, `LATENCY_*`, `POLL_QUERIES`, `EARLY`, `PICKED`, `io_need` | None |
 
@@ -572,7 +925,7 @@ pub enum Outcome { Done, Continue(TaskId, Job) }
 pub trait Glue: Send + Sync {
     fn thread_start(&self) {}           // a new worker or dedicated thread
     fn thread_end(&self) {}
-    fn task_begin(&self, _own_thread: bool) {}  // streams, as in sched
+    fn task_begin(&self, _own_thread: bool) {}  // the glue's own state
     fn task_end(&self, _own_thread: bool) {}
 }
 pub fn start(glue: Arc<dyn Glue>);
@@ -587,6 +940,7 @@ pub fn wait_any(ids: &[TaskId]) -> usize;
 pub fn cancel(id: TaskId);
 pub fn check_canceled() -> bool;            // no lock
 pub fn release(id: TaskId);                 // from any thread
+pub fn end_running_task(id: TaskId);        // AR-26: a job ends its own task early
 pub fn in_sync_task() -> bool;
 pub fn thread_number() -> u64;
 pub fn manager_running() -> bool;
@@ -604,6 +958,20 @@ pub fn no_suspend() -> NoSuspendGuard;  pub fn in_no_suspend() -> bool;
 pub fn io_cooperative() -> bool;  pub fn coop_possible() -> bool;  // false
 pub struct Ref<T>;  // the 4.35 rule (3.1)
 pub mod sync { /* Mutex, Condvar, RecursiveMutex, SharedMutex: Send + Sync */ }
+pub mod uv {        // T2: Std.Internal.UV on the loop thread (0.5)
+    pub trait LoopPromise: Clone + Send + 'static {
+        fn is_resolved(&self) -> bool;
+        fn resolve(&self, value: i64);   // on the loop thread
+    }
+    pub struct Timer<P: LoopPromise>;   // new, next, reset, stop, cancel
+    pub struct Signal<P: LoopPromise>;  // new, next, stop, cancel
+    pub fn loop_configure(accumulate_idle_time: bool, block_sigprof: bool) -> Result<(), i32>;
+    pub fn loop_alive() -> bool;
+}
+    impl<P> Timer<P> { pub fn placeholder() -> Timer<P>; }   // RT2-08
+    impl<P> Signal<P> { pub fn placeholder() -> Signal<P>; }
+// with `io` (T2): io::process::with_path_lookup(f) for the glue's own path
+// lookups (none that can wait)
 ```
 
 The bounds, and why each is needed:
@@ -735,10 +1103,11 @@ its own refs (6).
 | `Handle.lock` | `io/handle.rs` `Handle::flock` | Waits in `flock` without the stream's lock (review RIO1-01) | Unchanged |
 | A sink under a stream's lock | `io/mod.rs` `ByteSink` | The sink must not call `io` or exit | Unchanged; the rule is per thread |
 | Open-handle list | `io/handle.rs` `OPEN`, `release` | `Mutex<BTreeMap<serial, Arc<FileStream>>>` (AR-7); every release under it | Unchanged. Opens racing the exit's walk behave as with glibc's list lock |
-| Current streams | `io/streams.rs` `CURRENT` | Thread-local, swapped per context (`swap_context`) | One set per real thread, as natively. `task_begin` gives each pool task fresh slots |
+| Current streams | `io/streams.rs` `CURRENT` | Thread-local, swapped per context and per emulated worker (`slots.rs`; review AR-24) | One set per real thread, as natively: a pool worker keeps it from one task to the next (0.5 item 2) |
 | Route of the runtime's stderr lines | `io/streams.rs` `StderrPut` | An `Rc` in the thread-local | Unchanged: it never leaves its thread |
 | errno model | `io/error.rs` `ERRNO` | Thread-local, shared by all contexts | Per thread, as C's `errno` |
-| Working directory | `io/process.rs` `CWD_LOCK` (`RwLock`) | Held for writing by the fallback spawn (`fallback_spawn`) and by `setCurrentDir` and `uv_chdir` (`with_cwd_change`); held for reading by `getcwd`, `uv_cwd` (`with_cwd_read`) and spawns without a `cwd`. Relative path operations take nothing. Gap documented: "another thread's relative path operation during the spawn ... still sees `cwd`" (module comment, item 4) | The gap becomes reachable (below) |
+| Working directory | `io/process.rs` `CWD_LOCK` (`RwLock`) | Held for writing by the fallback spawn (`fallback_spawn`) and by `setCurrentDir` and `uv_chdir` (`with_cwd_change`); held for reading by `getcwd`, `uv_cwd` (`with_cwd_read`) and spawns without a `cwd`. Relative path operations take nothing. Gap documented: "another thread's relative path operation during the spawn ... still sees `cwd`" (module comment, item 4) | The gap was reachable; since T2 path operations hold it for reading while a fallback spawn may happen (below) |
+| `Std.Internal.UV`'s loop, timers, signal watchers | `sched/uv.rs` over `sched/reactor.rs`; `sched/uv_signals.rs` | Per scheduler (thread): the loop context, its timers, its watcher list; the signal handlers and pipe process-wide | One loop thread for the process, as natively (`sched/mt/uv.rs`, T2): one loop lock, one timer list, one watcher list (below) |
 | Spawner thread | `io/process.rs` `SPAWNER`, `NO_PRIVATE_CWD` | `Mutex<Option<Sender>>`; one long-lived thread | Unchanged. Spawns with a `cwd` queue on it, where native's forks run in parallel: a speed difference only |
 | Modelled pids | `io/process.rs` `NEXT_MODELLED_PID` | `AtomicU32` | Unchanged |
 | `output`'s drains | `io/process.rs` `DRAINS` | A `Mutex<Vec<JoinHandle>>`; one thread per failed `output`, joined after `main` (AR-6); it keeps its bytes and may end the process with the out-of-memory panic (RFX1-04) | Unchanged |
@@ -749,23 +1118,24 @@ its own refs (6).
 | `forceExit` flag | `io/exit.rs` `EXITING_WITHOUT_FLUSH` | `AtomicBool`, `SeqCst` | Unchanged |
 | `semantics` | `src/semantics/` | No global state | Unchanged |
 
-**The working directory under threads.** Today the gap needs a second
-thread running Lean code. Threads mode decides the spawn path at
-`mt::start`, by starting the spawner thread there, before any task runs. If
-`unshare(CLONE_FS)` is refused, every relative-path operation takes
-`CWD_LOCK` for reading for the rest of the run (one uncontended read lock
-per call); if it works, the common case, nothing changes. The real fix stays
-the one `process.rs` names, `posix_spawn_file_actions_addchdir_np`, which
-nix does not wrap and the crate cannot call without `unsafe`. T1 does not
-have this rule yet: it is a T2 item (review RT1-04; 0.2).
+**The working directory under threads** (done in T2, 0.5 item 1). Without
+threads the gap needs a second thread running Lean code. Threads mode
+decides the spawn path at `mt::start`, by starting the spawner thread
+there, before any task runs. If `unshare(CLONE_FS)` is refused, every path
+operation takes `CWD_LOCK` for reading for the rest of the run (one
+uncontended read lock per call), absolute ones too (`/proc/self/cwd` leads
+to the working directory); if it works, the common case, nothing changes,
+and no spawn takes the fallback from then on. The real fix stays the one `process.rs` names,
+`posix_spawn_file_actions_addchdir_np`, which nix does not wrap and the
+crate cannot call without `unsafe` (review RT1-04).
 
-**Signals under threads.** `sched::uv`'s signal delivery keeps each
-signal's `arrived` flag process-wide, while the watcher lists are per
-thread (one per scheduler): with schedulers on two threads, a signal would
-reach only the thread whose loop takes the flag first (review RSIOB-15).
-Threads mode routes signals instead: one delivery for the process, which
-hands each signal to the watchers of every thread, as libuv's one loop
-does.
+**Signals under threads** (done in T2, 0.5 item 3). The single-thread
+`sched::uv` keeps each signal's `arrived` flag process-wide, while the
+watcher lists are per thread (one per scheduler): with schedulers on two
+threads, a signal would reach only the thread whose loop takes the flag
+first (review RSIOB-15). Threads mode routes signals instead: one delivery
+for the process, the loop thread's, which hands each signal to the
+watchers started on every thread, as libuv's one loop does.
 
 **IO under threads.** sched-io's cooperative path (a wait for the
 descriptor in the scheduler's event loop, `reactor::poll_fds`, then the same
@@ -786,8 +1156,7 @@ that depend on the machine's speed"). Its tests do not change.
 **Threads mode is not deterministic, and neither is native.** What it
 promises:
 - every outcome is one that native Lean 4.34.0 could produce, except the
-  documented deviations (LB-01 and LB-13 fixed; fresh streams per task,
-  which is one of native's schedules);
+  documented deviations (LB-01 and LB-13 fixed);
 - a recorded case gives its recorded outcome. Its events are tens of
   milliseconds apart, and native gave that outcome in every recorded run
   (5 runs for `cases.py expect`);
@@ -823,6 +1192,16 @@ becomes a hand-written `alt1`.
   locks and condition variables and reports data races (it cannot run
   corosensei's stack switch): `cargo miri test --features threads --lib --
   sched::mt`, in `check.sh` with `LEAN_RUNTIME_MIRI=1`.
+- **T2's unit tests** (0.5): `sched::mt::uv`'s (the loop lock, timers,
+  signals; only the loop lock's runs under Miri, the others need `poll(2)`,
+  an eventfd and signal handlers), `sched::mt::tests::each_task_sees_its_own_redirections`
+  (under Miri too, with `io`), and the working directory's
+  (`io::process::tests::threads_*`, child processes that spawn).
+- **The io and uvloop twins in threads mode** (T2, 0.5 item 4): with
+  `io,threads,...`, `tests/io_cases.rs` and `tests/io2_cases.rs` run every
+  twin inside a task, and `tests/threads_twins.rs` runs the uvloop cases
+  over threads mode's `sched::uv`, and the task cases of review AR-24, once
+  each.
 - **A second driver**, `tests/sched-driver-mt`, a package of its own:
   `threads` and the coroutine `sched` exclude each other in one build (2.5),
   so cargo builds it in a separate invocation. Its glue is over
@@ -862,8 +1241,9 @@ needs brute force.
 |---|---|---|---|---|
 | T0 | sched-io lands: cooperative IO in the single-thread mode | — | (its own batch) | — |
 | T1 | Done (2026-10-04, branch threads-1). `sched::mt`: the task manager (spawn, depend, wait, waitAny, state, cancel, release, promises, exit without LB-13), `mt::sync`, `mt::Glue`, `sched::Ref`, worker and dedicated threads with Lean's stack size, the stack-overflow report on them | T0: the IO switch, and the order the owner set | About 1,300 lines and 900 of unit tests | Yes, with Miri |
-| T2 | io in threads mode: the blocking path (since T1, io's plain path by `cfg`); the `CWD_LOCK` rule of 3.2, with `with_cwd_read` around every relative-path system call in threads builds where `unshare(CLONE_FS)` is refused (review RT1-04); per-task streams (the glue's `task_begin`, with `io::streams::swap_context`); `sched::uv` on threads (a loop thread for timers and signals, `LoopPromise` with `Send` bounds, the routing of signals of 3.2), then `net` | T1 | About 400 lines | Yes |
-| T3 | The second driver (`tests/sched-driver-mt`), `check.sh`, the new cases recorded natively, the docs (`sched.md`, the site) | T1, T2 | About 700 lines, and the cases | Yes |
+| T2 | Done (2026-10-04, branch threads-2; 0.5). io in threads mode: the blocking path (since T1, io's plain path by `cfg`); the `CWD_LOCK` rule of 3.2, `with_path_lookup` around every system call that looks up a path, in threads builds where `unshare(CLONE_FS)` is refused (review RT1-04); a worker's streams and `errno` kept from task to task, in both modes (reviews RT2-L-01, AR-24); `sched::uv` on threads (a loop thread for timers and signals, `LoopPromise` with `Send` bounds, the routing of signals of 3.2, the placeholders); the io and uvloop twins inside tasks, and the task cases of AR-24; the review round RT2 | T1 | About 2,000 lines, comments included (250 of them moved out of `sched/uv.rs`), and 2,500 of tests | Yes |
+| N | Later: `net` in threads mode (the network on the loop thread; `threads` with `net` stays a compile error until then). Networking is not a target now (owner, 2026-10-04), and leanrs's threads mode comes later | T2 | Medium | Yes |
+| T3 | The second driver (`tests/sched-driver-mt`: `tasks/`, `sync/`, `refs/`, `taskio/`), `check.sh`, the new cases recorded natively, the site's pages for threads mode | T1, T2 | About 700 lines, and the cases | Yes |
 | L1 | leanrs adopts the single-thread `sched` (already planned) | sched-io | leanrs's | No |
 | L2 | leanrs threads mode, behind a feature of leanrs's own: an `Arc` alias; twins of `Nat` (Lem-NT), `Shared` (Lem-SC), `Task`, `Thunk` and `IO.Ref`; `Lazy` for constants; the glue over `sched::mt` | T3, L1 | Medium to large | No |
 | R1 | Not now (owner, 2026-10-04: "reussir no change yet"). Later: a whole-program atomic mode, or `Arc` for arrays and closures plus an atomic flag on opaque types (2.3) | — | Large (Reussir's §7 items 1, 3, 4) | No |
@@ -901,6 +1281,12 @@ Miri.
   than native.
 - **One global lock, and one OS thread per blocked pool task** (1 GiB
   reserved): both as natively.
+- **The loop lock** (T2). As natively, the loop thread holds it while a
+  `sync` dependent of a timer's or a signal's promise runs there, and an
+  extern's thread holds it while a promise it drops runs its `sync`
+  dependents. Such a dependent that blocks stalls every extern and the
+  loop's timers and signals meanwhile, and one that waits for a task which
+  calls an extern on another thread waits for good (0.5 item 3).
 - **`unsafe`.** The crate needs none. The glue keeps its existing `unsafe`,
   now on every thread (the alternate signal stack and the guard lookup in
   `thread_start`). leanrs redoes two proofs: Lem-NT for an `Arc` `Nat` and
@@ -925,7 +1311,9 @@ Miri.
 - **The ref's code** is per translator. The crate gives the semantics, the
   cases and a reference implementation in the drivers, not a `Ref` type
   (leanrs; 3.1).
-- **Streams:** fresh per task in both modes (leanrs; 1.4).
+- **Streams:** per thread in both modes, a worker keeping its own from one
+  task to the next, as natively (reviews RT2-L-01, AR-24, 2026-10-04;
+  this replaces the first choice, fresh per task).
 - **A Rust panic in a job on a worker** aborts the process (leanrs; 1.4).
 - **Lean 4.35's refs:** read from tag `v4.35.0-rc1` (3.1).
 - **Refs, judged (2026-10-04):** a `set` lost during `modify` extends LB-01,

@@ -77,7 +77,10 @@ fn gen_name<T>(
             *b = LETTERS[(bits % 62) as usize];
             bits /= 62;
         }
-        match create(OsStr::from_bytes(&path)) {
+        // threads mode: never looked up in a fallback spawn's `cwd` (a
+        // relative `TMPDIR`; review RT1-04)
+        let made = super::process::with_path_lookup(|| create(OsStr::from_bytes(&path)));
+        match made {
             Ok(t) => return Ok((t, path)),
             Err(e) if e.raw_os_error() == Some(EEXIST) => {}
             Err(e) => return Err(uv(e.raw_os_error().unwrap_or(ENOENT))),

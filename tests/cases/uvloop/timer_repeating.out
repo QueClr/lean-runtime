@@ -2,6 +2,6 @@ first tick some ()
 tick 1: pending before true, same promise resolved: true
 tick 2: pending before true, same promise resolved: true
 tick 3: pending before true, same promise resolved: true
-3 periods took at least 120 ms: true
+3 periods took at least 300 ms: true
 after stop, next resolved: false
 timeout 0: first resolved, second resolved: false

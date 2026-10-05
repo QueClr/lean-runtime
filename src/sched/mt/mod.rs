@@ -27,7 +27,10 @@
 //!   two threads, a lazy constant) block the OS thread, with std's
 //!   `OnceLock` or a lock, as native's `lean_obj_once`; no crate API
 //!   (`block_sync`, `wake`, `CtxId` are the single-thread scheduler's);
-//! - `IO.Ref`: the 4.35 rule as a lock and a condition variable, `Ref`.
+//! - `IO.Ref`: the 4.35 rule as a lock and a condition variable, `Ref`;
+//! - `Std.Internal.UV` (`uv`, re-exported as `sched::uv`, T2): its loop on
+//!   a thread of its own, as natively, with the single-thread module's names
+//!   (`LoopPromise` is `Send`).
 //!
 //! Native bugs are not copied (docs/lean-bugs.md): a pool task enqueued
 //! after `main` returned runs (LB-13, `finish`); `Promise.result!` on a
@@ -40,6 +43,7 @@ pub mod sync;
 mod task;
 #[cfg(test)]
 mod tests;
+pub mod uv;
 
 pub use super::common::{TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED};
 pub use refs::Ref;
@@ -92,27 +96,33 @@ impl TaskId {
 /// process.
 pub trait Glue: Send + Sync {
     /// A thread the task manager made (a standard worker, a dedicated
-    /// task's thread) starts, before it runs a task. With the feature
-    /// `stack-overflow`, the crate has already installed Lean's report on
-    /// it (`install_stack_overflow_handler`).
+    /// task's thread) starts, before it runs a task; so does `sched::uv`'s
+    /// loop thread, which runs the `sync` dependents of the promises it
+    /// resolves: at its start, or, made before `sched::start`, once a glue
+    /// appears, before it runs translator code (review RT2-05). With the
+    /// feature `stack-overflow`,
+    /// the crate has already installed Lean's report on it
+    /// (`install_stack_overflow_handler`).
     fn thread_start(&self) {}
 
-    /// Such a thread ends (at `finish`, or after its dedicated task).
+    /// Such a thread ends (at `finish`, or after its dedicated task). The
+    /// loop thread never ends.
     fn thread_end(&self) {}
 
     /// A task starts running on the calling thread. `own_thread`: natively
-    /// on a thread of its own (a worker's pool task, a dedicated task), so
-    /// with the process's standard streams: the glue gives it fresh slots
-    /// (`io::streams::swap_context` with `StreamContext::default()`),
-    /// which is one of native's schedules (a fresh worker's), as in the
-    /// single-thread scheduler (docs/threads.md, 1.4). Otherwise a `sync`
-    /// task on the current thread (a `sync := true` dependent, a task at
-    /// priority `LEAN_SYNC_PRIO`), sharing its streams.
+    /// on a thread of its own (a worker's pool task, a dedicated task);
+    /// otherwise a `sync` task on the current thread (a `sync := true`
+    /// dependent, a task at priority `LEAN_SYNC_PRIO`). The io layer's
+    /// per-thread state (the current standard streams, the modelled
+    /// `errno`) needs nothing here: it is the real thread's, so a pool
+    /// worker keeps it from one task to the next, as natively (review
+    /// AR-24; docs/threads.md, 1.4). The hook is for the glue's own
+    /// per-task state.
     fn task_begin(&self, _own_thread: bool) {}
 
-    /// The task started by the matching `task_begin` has finished (its
-    /// `sync` dependents have run), or waits for the task its bind function
-    /// returned.
+    /// The task started by the matching `task_begin`, on the same thread,
+    /// has finished (its `sync` dependents have run), or waits for the task
+    /// its bind function returned.
     fn task_end(&self, _own_thread: bool) {}
 }
 
@@ -142,6 +152,11 @@ pub fn start_with(glue: Arc<dyn Glue>, workers: u32, stack_size: usize) {
     // installed it.
     #[cfg(feature = "stack-overflow")]
     super::stack_overflow::on_scheduler_thread();
+    // The spawn path, before any task runs: where the spawner thread can
+    // have a working directory of its own, relative path operations take no
+    // lock from now on (docs/threads.md, 3.2; review RT1-04).
+    #[cfg(feature = "io")]
+    crate::io::process::decide_spawn_path();
 }
 
 /// The final run (`lean_finalize_task_manager`, after `main` returns,
@@ -284,6 +299,28 @@ pub fn cancel(id: TaskId) {
 /// false outside tasks. Lock-free.
 pub fn check_canceled() -> bool {
     task::check_canceled()
+}
+
+/// The running task's job has stored the task's value and ends its task now,
+/// before it returns (review AR-26, lean2rr's AR-S1): the task finishes and
+/// its dependents are walked here (its `sync` ones run on this thread), as
+/// after its job returns `Outcome::Done`, so they run inside whatever the job
+/// set up, as natively they run in `handle_finished` with what the task left
+/// installed on its thread. The job then returns `Outcome::Done` (a
+/// `Continue` after it aborts the process, with a message); the glue's
+/// `task_end` comes after as usual. After the call the job only finishes
+/// up: it must not wait. A glue whose streams live in `io::streams` needs
+/// none of this (they are the thread's).
+///
+/// `id` is the job's own task, the id `spawn` or `depend` returned for it:
+/// the call ends it only if this thread runs its job now as the innermost
+/// task; otherwise (a job the glue runs itself, a `spawn` or `depend`
+/// without a task manager, which return `TaskId::FINISHED`; a second call)
+/// it does nothing (review RT2-14). A chain of `sync` dependents whose jobs
+/// call it runs one level deeper on the stack per link, as natively. The
+/// single-thread scheduler's `end_running_task` has the same contract.
+pub fn end_running_task(id: TaskId) {
+    task::end_running_task(id);
 }
 
 /// Lean's `deactivate_task`: the translator's last reference to task `id`

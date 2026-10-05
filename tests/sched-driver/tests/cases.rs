@@ -933,6 +933,8 @@ macro_rules! cases {
 
 cases!(
     checkcanceled_after_main,
+    worker_keeps_streams,
+    worker_keeps_errno,
     dropped_pure_task,
     exit_joins_before_flush,
     hasfinished_spin,

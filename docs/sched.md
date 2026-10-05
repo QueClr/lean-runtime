@@ -34,9 +34,11 @@ This file covers:
 | `src/sched/stack_overflow.rs` | Lean's stack-overflow report: the opt-in SIGSEGV handler that knows the contexts' guard pages (a native quirk with `unsafe`, AR-11; `docs/native-quirks.md`) |
 | `src/sched/reactor.rs` | The event loop (sched-io): descriptors and timers on epoll, the cooperative `poll_fds`, the loop context and its callbacks |
 | `src/sched/uv.rs` | `Std.Internal.UV`'s loop, timers and signals on the event loop |
+| `src/sched/slots.rs` | With `io`: the current standard streams and modelled `errno` of each context and each emulated worker, swapped in while it runs (review AR-24) |
+| `src/sched/uv_signals.rs` | The process-wide part of the signal watchers' delivery (signal-hook's handlers, the signal pipe, the counts), shared with threads mode's `sched::uv` (T2) |
 | `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
 | `src/sched/common.rs` | The plain items both modes share: `TaskState`, the messages, the priorities |
-| `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt` |
+| `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt`, with `sched::mt::uv`, `Std.Internal.UV` on a loop thread of its own (T2) |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
 | `src/io/coop.rs` | sched-io in the io layer (features `io` and `sched`): the cooperative reads, writes, `flock` and `waitpid`, and the stream locks |
 | `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included) |
@@ -587,6 +589,12 @@ rule still prints `main`'s line first).
 
 ### `Std.Internal.UV`: the loop, timers and signals
 
+Threads mode has its own `sched::uv` (`src/sched/mt/uv.rs`, T2), with the
+same names: a loop thread, a recursive loop lock and one watcher list for
+the process, as natively (`docs/threads.md`, 0.5). This section is the
+single-thread one; the process-wide part of the signals' delivery is
+shared (`src/sched/uv_signals.rs`).
+
 `src/sched/uv.rs` has the externs of `Std.Internal.UV.Loop`, `Timer` and
 `Signal` (Lean's `src/runtime/uv/event_loop.cpp`, `timer.cpp`, `signal.cpp`,
 over libuv 1.48). Natively a dedicated thread runs libuv's loop, and a
@@ -836,11 +844,19 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
        unsafe { (*s.yielder()).suspend(()) }
    }
    ```
-   The optional hooks:
-   - `switched(from, to)`: each thread's current standard streams
-     (`IO.setStdout` & co.);
-   - `task_begin` and `task_end`: a task on a thread of its own starts with
-     the process's streams.
+   The optional hooks, for the glue's own per-thread and per-task state:
+   - `switched(from, to)`: the running context changes;
+   - `task_begin` and `task_end`: a task begins and ends.
+
+   The io layer's per-thread state, the current standard streams
+   (`IO.setStdout` & co.) and the modelled `errno`, is the scheduler's (with
+   `io`; review AR-24, `src/sched/slots.rs`): each context has its own set,
+   swapped by the hub, and a task that natively has a thread of its own
+   runs with its emulated thread's: a pool task with the lowest free
+   worker's set, which keeps what the task leaves (natively a worker keeps
+   its thread-locals from one task to the next; cases
+   `tasks/worker_keeps_streams` and `worker_keeps_errno`), a dedicated task
+   with a fresh one. A glue must not swap `io::streams` in its hooks too.
 
    `switched` runs on `main`'s stack, inside the hub: it must not block or
    yield, and the scheduler panics if it tries. When nothing can run, the
@@ -879,8 +895,33 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    of the task sees their bytes delivered (one relaxed load when there is
    none; the scheduler's own points wait the same way, item 11). A glue
    that does not call it lets a waiter see the value before the wait at
-   the end of `run_task`, that is with the bytes still on their way. The
-   calls:
+   the end of `run_task`, that is with the bytes still on their way.
+
+   **A job with per-task state of the glue's own** (review AR-26, lean2rr's
+   AR-S1). The task's `sync` dependents natively run on the finishing
+   thread right after the task, with what the task left there (its current
+   streams: a dependent's line lands in the buffer the task set). The
+   scheduler walks them after the job returns, inside the emulated thread's
+   `io::streams` set, so a glue whose streams live there needs nothing. A
+   glue that opens its own per-task state in the job (lean2rr's stream
+   context, values only its generated code can drop) and closes it before
+   the job returns calls `end_running_task(id)` after it stores the value
+   and before it closes that state, with the id `spawn` or `depend`
+   returned for this job (kept in its task object): the task ends and its
+   dependents are walked there, to the end of its walk, inside the state;
+   the job then returns `Outcome::Done` (seen as already ended; `Continue`
+   after it is a panic) and only finishes up, with no wait. The call does
+   nothing for an id the scheduler is not running as the innermost task in
+   this context (`TaskId::FINISHED` from a job the glue runs itself, a
+   second call; review RT2-14). The job may start before `spawn` or
+   `depend` returns (a `LEAN_SYNC_PRIO` spawn, or a `sync` dependent of a
+   finished task, runs inside the call): the glue stores the id where the
+   job reads it before it gives the id to anyone, so that no dependent
+   exists yet when such a job finds no id and the call does nothing. A
+   chain of `sync` dependents whose jobs
+   call it recurses once per link, as natively (review RT2-15): mind
+   `main`'s stack. Threads mode has the same call and contract (a
+   `Continue` after it aborts there). The calls:
    - `Task.spawn`/`IO.asTask`: `spawn(job, prio, keep_alive)`;
    - `Task.map`/`bind`, `IO.mapTask`/`bindTask`: when
      `dependent_runs_now(src, sync)` is true, apply `f` at once; otherwise

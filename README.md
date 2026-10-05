@@ -102,8 +102,16 @@ first batch, T1: `sched::mt`, Lean 4.34.0's task manager on real threads
 more worker while a pool task waits, one lock), promises, `Std.Sync`, the
 4.35 rule for refs (`sched::Ref`) and the exit without LB-13, re-exported as
 `sched` with the single-thread scheduler's names. With `io`, io takes its
-plain blocking path. Its unit tests run under Miri too. io's own items in
-threads mode and `Std.Internal.UV` come next (T2). See `docs/threads.md`.
+plain blocking path. Its unit tests run under Miri too. The second batch,
+T2, added io's own items in threads mode: the working directory's lock
+rule for path lookups where `unshare(CLONE_FS)` is refused (review
+RT1-04, RT2-03), and `sched::uv`, `Std.Internal.UV`'s loop on a thread of
+its own as natively, with the single-thread module's names. In both modes
+a pool worker keeps its standard streams and `errno` from one task to the
+next, as natively (review AR-24). The io and uvloop cases' twins run inside
+tasks in a threads build. Next is T3 (a second driver for
+the task cases, newly recorded native cases); `net` in threads mode comes
+later. See `docs/threads.md`.
 
 `net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
 externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code
@@ -147,7 +155,8 @@ that order. See `docs/development.md`, the rules for implementors.
 - The crate builds offline, with no nightly features, on the Rust
   toolchains both translators use. The default build has no dependencies;
   `io` uses rustix, nix and io-uring, `sched` corosensei, rustix and
-  signal-hook, `threads` nothing, `stack-overflow` nix, and `net` dns-lookup (pinned exactly;
+  signal-hook, `threads` rustix and signal-hook (its `sched::uv`),
+  `stack-overflow` nix, and `net` dns-lookup (pinned exactly;
   its `unsafe` audited in
   `UNSAFE.md`), pinned by `Cargo.lock` and built offline from cargo's local
   registry cache.

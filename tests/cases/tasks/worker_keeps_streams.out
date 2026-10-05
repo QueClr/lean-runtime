@@ -1,0 +1,3 @@
+main: while A sleeps
+C: a thread of its own
+A's buffer: "A: before its sleep\nA: after its sleep\nB: after A, on A's worker\n"

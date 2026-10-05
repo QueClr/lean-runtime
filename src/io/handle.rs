@@ -55,7 +55,7 @@ impl FsMode {
     }
 
     /// The `open` flags of `lean_io_prim_handle_mk`, `O_CLOEXEC` included.
-    fn open_flags(self) -> OFlags {
+    pub(crate) fn open_flags(self) -> OFlags {
         OFlags::CLOEXEC
             | match self {
                 FsMode::Read => OFlags::RDONLY,
@@ -371,6 +371,8 @@ impl Handle {
         if path.contains(&0) {
             return Err(IoError::embedded_nul(path));
         }
+        // threads mode: never in a fallback spawn's `cwd` (review RT1-04),
+        // and the lock never held across the open's wait (RT2-03)
         match sys::open(path, mode.open_flags()) {
             Ok(fd) => Ok(Handle::fdopen(fd, mode)),
             Err(e) => Err(IoError::decode_io_error(e, Some(path))),

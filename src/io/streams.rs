@@ -17,15 +17,14 @@
 //! the translator's stream object, as Lean's `object_ref`), whose clone is a
 //! count increment; a structure of several closures would clone each.
 //!
-//! A task that runs as a coroutine on a thread that other tasks share has its
-//! own slots: [`swap_context`] exchanges the thread's slots with the task's,
-//! and a new task starts from [`StreamContext::default`], the process's
-//! streams. Natively a task runs on a pool worker whose slots persist from
-//! one task to the next, so a task that sets a stream and does not restore it
-//! leaves it to whichever task the worker runs next; which one that is
-//! depends on the schedule. Starting each task from the process's streams is
-//! one of native's outcomes (a fresh worker's) and the one a program can rely
-//! on: a schedule-dependent difference, documented, not a semantic one.
+//! Natively a task runs on a pool worker whose slots persist from one task to
+//! the next, so a task that sets a stream and does not restore it leaves it
+//! to the next task that worker runs (review AR-24, case
+//! `tasks/worker_keeps_streams`); a new worker, a dedicated task's thread and
+//! `main` start with the process's streams. Threads mode gets that from its
+//! real threads. The single-thread scheduler, whose contexts share one
+//! thread, keeps each context's slots and each emulated worker's
+//! ([`swap_context`], `ThreadSlots`, `sched::slots`).
 //!
 //! The runtime's own standard-error lines (panic messages, `dbgTrace`,
 //! `timeit`) go to the current standard error stream, as Lean's
@@ -161,10 +160,43 @@ pub fn put_current_stderr(line: &[u8]) -> bool {
 
 /// Exchanges the calling thread's current streams with `ctx`: a scheduler
 /// running tasks as coroutines on one thread calls it when it switches to a
-/// task and back, so each task has a thread's streams of its own (a new task
-/// starts with `StreamContext::default()`, see the module comment).
+/// context and back, so each has a thread's streams of its own (a new one
+/// starts with `StreamContext::default()`, the process's streams; see the
+/// module comment). The crate's single-thread scheduler does it itself
+/// (`sched::slots`).
 pub fn swap_context(ctx: &mut StreamContext) {
     let _ = CURRENT.try_with(|c| std::mem::swap(&mut *c.borrow_mut(), ctx));
+}
+
+// ---------------------------------------------------------------------------
+// A native thread's own state, for a scheduler that emulates threads
+
+/// What a native thread keeps from one task to the next, as the crate
+/// models it: its current standard streams and its `errno`
+/// (`super::error`). A pool worker's are those its last task left (review
+/// AR-24): natively a task that sets a stream, or leaves `errno` set, and
+/// does not restore it, leaves it to the next task of that worker. The
+/// single-thread scheduler (feature `sched`) keeps one set per context and
+/// per emulated worker, and swaps it in while that context or task runs
+/// (`sched::slots`). Threads mode needs none: each task runs on a real
+/// thread, whose thread-locals are its own.
+#[cfg(feature = "sched")]
+#[derive(Default)]
+pub(crate) struct ThreadSlots {
+    streams: StreamContext,
+    errno: i32,
+}
+
+#[cfg(feature = "sched")]
+impl ThreadSlots {
+    /// Exchanges the calling thread's current streams and modelled `errno`
+    /// with these.
+    pub(crate) fn swap(&mut self) {
+        swap_context(&mut self.streams);
+        let e = super::error::errno();
+        super::error::set_errno(self.errno);
+        self.errno = e;
+    }
 }
 
 #[cfg(test)]

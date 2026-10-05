@@ -160,11 +160,12 @@ fn isatty(fd: BorrowedFd<'_>) -> Result<(), i32> {
 }
 
 /// `open(2)` with `flags` and mode `0666` (`lean_io_prim_handle_mk`); `path`
-/// holds no NUL byte.
+/// holds no NUL byte. In threads mode, never with the working directory's
+/// lock held across a wait (`process::open_looked_up`, review RT2-03).
 pub(crate) fn open(path: &[u8], flags: rustix::fs::OFlags) -> Result<OwnedFd, i32> {
     let p =
         std::path::Path::new(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(path));
-    rustix::fs::open(p, flags, rustix::fs::Mode::from_raw_mode(0o666)).map_err(fail)
+    super::process::open_looked_up(p, flags, rustix::fs::Mode::from_raw_mode(0o666)).map_err(fail)
 }
 
 /// Where `fread` stores its bytes (`CFile::read`, `read_uninit`, `read_vec`):

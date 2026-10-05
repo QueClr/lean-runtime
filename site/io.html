@@ -257,8 +257,11 @@ A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the par
     <code>IO.setStdout</code> replaces the calling thread's stream and returns the old one.</li>
   <li><code>io::streams</code> keeps these slots per thread.
     The slots are type-erased, because each translator has its own <code>IO.FS.Stream</code> value.</li>
-  <li>A task that runs as a coroutine has its own slots.
-    The scheduler's glue swaps them at each switch.</li>
+  <li>A pool worker keeps its slots from one task to the next, as natively.
+    So a stream that a task sets and does not restore reaches the next task on that worker.
+    The same holds for <code>errno</code>.</li>
+  <li>The single-thread scheduler keeps one set of slots per coroutine and per emulated worker.
+    It swaps them at each switch.</li>
   <li>The runtime's own stderr lines (panic messages, <code>dbgTrace</code>, <code>timeit</code>) go to the current stderr stream, as natively.</li>
 </ul>
 

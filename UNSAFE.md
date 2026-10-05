@@ -63,9 +63,11 @@ There are no entries yet.
 
 The crate's `unsafe` beyond this file's entries is in vetted dependencies:
 rustix and nix (system calls, feature `io`; nix's `sigaction` and its
-re-exported libc also for the feature `stack-overflow`), corosensei
-(stack switching, `sched`) and signal-hook (signal handlers, its safe API
-only, `sched`),
+re-exported libc also for the feature `stack-overflow`; rustix also for
+`sched` and `threads`, the event loop's `poll`, `epoll` and eventfd),
+corosensei (stack switching, `sched`) and signal-hook (signal handlers, its
+safe API only, `sched`, and `threads` for `sched::uv`'s signal watchers,
+T2),
 approved by the owner; io-uring, accepted by leanrs's shared-runtime
 coordinator under the owner's delegation of dependency decisions
 (2026-10-04); and, for the feature `net`, dns-lookup (approved the same

@@ -93,7 +93,10 @@
 //! eventfd only while a DNS lookup of `net` is pending (its helpers wake the
 //! loop through it, and the loop drains it): registering a readable
 //! descriptor that nothing drains would wake the loop for good. The polling ring's watch never fires: nothing is
-//! submitted to it, so it has no completion.
+//! submitted to it, so it has no completion. In threads mode (feature
+//! `threads`) the epoll descriptor stays as opened: `sched::uv`'s loop
+//! thread, made at the first use of the loop, waits with `poll(2)` on the
+//! eventfd and the signal pipe instead.
 //!
 //! Source: lean2rr's `runtime/leanrt/src/rt.rs` (`reserve_libuv_descriptors`,
 //! `kernel_version`), rewritten over rustix's safe API and the io-uring
@@ -173,7 +176,7 @@ struct Descriptors {
     /// in `sched::uv`, or a translator's own; [`claim_signal_pipe`];
     /// docs/sched.md, "Std.Internal.UV").
     signal_pipe: (OwnedFd, OwnedFd),
-    #[cfg_attr(not(feature = "net"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "net", feature = "threads")), allow(dead_code))]
     eventfd: OwnedFd,
 }
 
@@ -242,8 +245,9 @@ pub fn claim_signal_pipe() -> Option<(BorrowedFd<'static>, BorrowedFd<'static>)>
 
 /// The loop's async eventfd (`loop->async_io_watcher`), once
 /// [`open_native_descriptors`] has opened it: libuv's thread pool wakes the
-/// loop through it, and so do `net`'s DNS helpers.
-#[cfg(feature = "net")]
+/// loop through it, and so do `net`'s DNS helpers; in threads mode the
+/// externs wake `sched::uv`'s loop thread through it (`uv_async_send`).
+#[cfg(any(feature = "net", feature = "threads"))]
 pub(crate) fn loop_eventfd() -> Option<BorrowedFd<'static>> {
     match DESCRIPTORS.get() {
         Some(Ok(d)) => Some(d.eventfd.as_fd()),

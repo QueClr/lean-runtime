@@ -1086,3 +1086,360 @@ fn child_environment() {
     assert_eq!(inherited, expect);
     assert_eq!(environ::entries(), parent);
 }
+
+// ---------------------------------------------------------------------------
+// Threads mode: the working directory's rule (docs/threads.md, 3.2; review
+// RT1-04)
+
+/// Threads mode, where a spawn takes the fallback (forced by the test hook):
+/// another thread's path operations (`metadata`, `Handle.mk`, `readDir`,
+/// `realPath`, `createDir`, `removeDir` of relative paths, and `metadata`
+/// of an absolute path through `/proc/self/cwd`) never resolve against the
+/// spawn's `cwd`, since they hold `CWD_LOCK` shared (`with_path_lookup`).
+/// Before T2 they took no lock, and the first look saw the spawn's `cwd` (a
+/// missing `marker`). In a child process (it changes the working
+/// directory), with the fallback forced.
+#[cfg(feature = "threads")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn threads_path_lookups_never_see_a_fallback_spawns_cwd() {
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        let out =
+            run_self("io::process::tests::threads_path_lookups_never_see_a_fallback_spawns_cwd");
+        assert!(out.status.success(), "{out:?}");
+        return;
+    }
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::atomic::AtomicUsize;
+    FORCE_FALLBACK.store(true, Ordering::Relaxed);
+    // as `sched::start` does: the spawn path stays the fallback
+    decide_spawn_path();
+    assert!(fallback_possible());
+    let base = std::env::temp_dir().join(format!("lean-runtime-rt104-{}", std::process::id()));
+    let (here, there) = (base.join("here"), base.join("there"));
+    std::fs::create_dir_all(&here).unwrap();
+    std::fs::create_dir_all(&there).unwrap();
+    std::fs::write(here.join("marker"), "here").unwrap();
+    let here = here.canonicalize().unwrap();
+    let there = there.canonicalize().unwrap();
+    crate::io::fs::set_current_dir(here.as_os_str().as_bytes()).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let looks = Arc::new(AtomicUsize::new(0));
+    let busy = {
+        let (stop, looks, here) = (stop.clone(), looks.clone(), here.clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let n = looks.fetch_add(1, Ordering::Relaxed);
+                assert!(crate::io::fs::metadata(b"marker").is_ok(), "metadata {n}");
+                assert!(
+                    crate::io::fs::metadata(b"/proc/self/cwd/marker").is_ok(),
+                    "metadata of /proc/self/cwd/marker {n}"
+                );
+                let h = Handle::open(b"marker", FsMode::Read).expect("Handle.mk");
+                let mut b = [0u8; 4];
+                assert_eq!(h.read(&mut b).unwrap(), 4, "read {n}");
+                assert_eq!(&b, b"here");
+                drop(h);
+                let mut names = Vec::new();
+                crate::io::fs::read_dir(b".", |e| names.push(e.to_vec())).unwrap();
+                assert!(names.iter().any(|e| e == b"marker"), "readDir {n}");
+                let mut real = Vec::new();
+                crate::io::fs::real_path(b"marker", &mut real).unwrap();
+                assert_eq!(
+                    real,
+                    here.join("marker").as_os_str().as_bytes(),
+                    "realPath {n}"
+                );
+                crate::io::fs::create_dir(b"sub").unwrap();
+                crate::io::fs::remove_dir(b"sub").unwrap();
+            }
+        })
+    };
+    for i in 0..100 {
+        let got = pwd_in(there.to_str().unwrap()).unwrap().1;
+        assert_eq!(got, format!("{}\n", there.display()), "spawn {i}");
+    }
+    stop.store(true, Ordering::Relaxed);
+    busy.join().unwrap();
+    assert!(looks.load(Ordering::Relaxed) > 0);
+    assert!(!there.join("sub").exists());
+    crate::io::fs::set_current_dir(b"/").unwrap();
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// Threads mode, where `unshare(CLONE_FS)` works: `sched::start` starts the
+/// spawner, from then on no spawn takes the fallback (a fallback spawn is
+/// refused with `EAGAIN`, and the working directory stays), and relative
+/// path operations take no lock. In a child process (the decision is the
+/// process's for good).
+#[cfg(feature = "threads")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn threads_no_fallback_once_the_spawner_unshared() {
+    if !unshare_allowed() {
+        eprintln!("note: unshare(CLONE_FS) is refused here: not checked");
+        return;
+    }
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        let out = run_self("io::process::tests::threads_no_fallback_once_the_spawner_unshared");
+        assert!(out.status.success(), "{out:?}");
+        return;
+    }
+    decide_spawn_path();
+    assert!(!fallback_possible());
+    let here = std::env::current_dir().unwrap();
+    let spec = Spec::new(&args(b"true", &[]));
+    let r = fallback_spawn(&spec, &[], b"/", false);
+    assert!(matches!(r, Err(SpawnError::Os(EAGAIN))), "{r:?}");
+    assert_eq!(std::env::current_dir().unwrap(), here);
+    // the spawner still enters `cwd` for its spawns
+    assert_eq!(pwd_in("/").unwrap().1, "/\n");
+}
+
+/// Runs this test binary's `test` in a child process with
+/// `LEAN_RUNTIME_TEST_CHILD=1`; kills it after `secs` seconds and fails if
+/// it had not ended by then (a deadlock).
+#[cfg(feature = "threads")]
+fn run_self_within(test: &str, secs: u64) {
+    use std::time::{Duration, Instant};
+    let t0 = Instant::now();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .env("LEAN_RUNTIME_TEST_CHILD", "1")
+        .spawn()
+        .unwrap();
+    loop {
+        if let Some(st) = child.try_wait().unwrap() {
+            assert!(st.success(), "{test}: {st:?}");
+            return;
+        }
+        if t0.elapsed() > Duration::from_secs(secs) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{test}: the child did not end within {secs} s (a deadlock)");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// RT2-03 (review of threads-2): where a spawn takes the fallback, a path
+/// lookup that blocks must not hold `CWD_LOCK`. Opening a FIFO waits for
+/// its other end; a spawn with a `cwd` whose child is that other end waits
+/// for the exclusive lock, and (std's lock prefers a waiting writer) so
+/// does every later path operation. So `Handle.mk` only resolves the path
+/// under the lock (`O_PATH`), and opens it after the unlock. Here a reader
+/// (`Handle.mk .read`) and a creating writer (`Handle.mk .write`, which
+/// natively blocks on an existing FIFO too) wait in their opens while
+/// fallback spawns' children open the other ends. Before the fix: a
+/// deadlock (killed at 10 s); natively, and after, both go on. In a child
+/// process, with the fallback forced.
+#[cfg(feature = "threads")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn rt2_03_a_fifo_open_does_not_block_a_fallback_spawn() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::time::Duration;
+    let name = "io::process::tests::rt2_03_a_fifo_open_does_not_block_a_fallback_spawn";
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        run_self_within(name, 10);
+        return;
+    }
+    FORCE_FALLBACK.store(true, Ordering::Relaxed);
+    let base = std::env::temp_dir().join(format!("lean-runtime-rt2-fifo-{}", std::process::id()));
+    std::fs::create_dir_all(&base).unwrap();
+    for f in ["f", "g"] {
+        assert!(std::process::Command::new("mkfifo")
+            .arg(base.join(f))
+            .status()
+            .unwrap()
+            .success());
+    }
+    let dir = base.as_os_str().as_bytes();
+    // a reader waits in its open
+    let f = base.join("f").as_os_str().as_bytes().to_vec();
+    let reader = std::thread::spawn(move || {
+        let h = Handle::open(&f, FsMode::Read).expect("open the FIFO");
+        read_all(&h)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let r = run(
+        &SpawnArgs {
+            cwd: Some(dir),
+            ..args(b"sh", &[b"-c", b"echo hi > f"])
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(r.0, 0, "{r:?}");
+    assert_eq!(reader.join().unwrap(), b"hi\n");
+    // a creating writer waits in its open
+    let g = base.join("g").as_os_str().as_bytes().to_vec();
+    let writer = std::thread::spawn(move || {
+        let h = Handle::open(&g, FsMode::Write).expect("open the FIFO");
+        h.put_str(b"there\n").unwrap();
+        h.flush().unwrap();
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let r = run(
+        &SpawnArgs {
+            cwd: Some(dir),
+            ..args(b"cat", &[b"g"])
+        },
+        None,
+    )
+    .unwrap();
+    writer.join().unwrap();
+    assert_eq!(r, (0, "there\n".to_owned(), String::new()));
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// Threads mode, where a spawn takes the fallback: `Handle.mk`'s open in
+/// two steps (the path resolved under `CWD_LOCK`, the file opened after
+/// through `/proc/self/fd`; review RT2-03) gives what the one `open(2)`
+/// gives, in each mode: the same errors (a missing file, an existing one
+/// with `writeNew`, a directory opened for writing, a file without
+/// permission), and the same files (created, truncated, appended to, the
+/// target of a dangling symbolic link created). Each case runs in two
+/// directories set up alike: once through `Handle::open`, once through the
+/// one `open(2)`. In a child process, with the fallback forced.
+#[cfg(feature = "threads")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn threads_fallback_opens_keep_their_outcomes() {
+    use std::os::unix::ffi::OsStrExt;
+    let name = "io::process::tests::threads_fallback_opens_keep_their_outcomes";
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        run_self_within(name, 60);
+        return;
+    }
+    FORCE_FALLBACK.store(true, Ordering::Relaxed);
+    assert!(fallback_possible());
+    let root = nix::unistd::Uid::effective().is_root();
+    let base = std::env::temp_dir().join(format!("lean-runtime-rt2-opens-{}", std::process::id()));
+    let setup = |d: &std::path::Path| {
+        std::fs::create_dir_all(d.join("dir")).unwrap();
+        std::fs::write(d.join("old"), "old\n").unwrap();
+        std::fs::write(d.join("locked"), "x").unwrap();
+        std::fs::set_permissions(d.join("locked"), std::fs::Permissions::from_mode(0o200)).unwrap();
+        std::os::unix::fs::symlink(d.join("target"), d.join("dangling")).unwrap();
+    };
+    let (a, b) = (base.join("a"), base.join("b"));
+    setup(&a);
+    setup(&b);
+    let modes = [
+        FsMode::Read,
+        FsMode::Write,
+        FsMode::WriteNew,
+        FsMode::ReadWrite,
+        FsMode::Append,
+    ];
+    for file in ["new", "old", "dir", "locked", "dangling", "missing/x"] {
+        for &mode in &modes {
+            let (pa, pb) = (a.join(file), b.join(file));
+            let got = Handle::open(pa.as_os_str().as_bytes(), mode).map(|h| {
+                let _ = h.put_str(b"w\n");
+                let _ = h.flush();
+            });
+            let want = rustix::fs::open(
+                &pb,
+                mode.open_flags(),
+                rustix::fs::Mode::from_raw_mode(0o666),
+            )
+            .map(|fd| {
+                let _ = rustix::io::write(&fd, b"w\n");
+            });
+            let label = format!("{file} {mode:?}");
+            match (&got, &want) {
+                (Ok(()), Ok(())) => {}
+                (Err(e), Err(w)) => assert_eq!(
+                    *e,
+                    IoError::decode_io_error(w.raw_os_error(), Some(pa.as_os_str().as_bytes())),
+                    "{label}"
+                ),
+                _ if root && file == "locked" => {}
+                _ => panic!("{label}: {got:?} where the one open gives {want:?}"),
+            }
+        }
+    }
+    // the files are alike
+    for file in ["new", "old", "locked", "target"] {
+        assert_eq!(
+            std::fs::read(a.join(file)).ok(),
+            std::fs::read(b.join(file)).ok(),
+            "{file}"
+        );
+    }
+    // and so are the open files' status flags: a creating open's added
+    // `O_NONBLOCK` is cleared, its `O_APPEND` kept (review RT2-11)
+    for &mode in &modes[..] {
+        if mode == FsMode::WriteNew {
+            continue;
+        }
+        let flags = mode.open_flags();
+        let m = rustix::fs::Mode::from_raw_mode(0o666);
+        let ours = open_looked_up(&a.join("old"), flags, m).unwrap();
+        let one = rustix::fs::open(b.join("old"), flags, m).unwrap();
+        assert_eq!(
+            rustix::fs::fcntl_getfl(&ours).unwrap(),
+            rustix::fs::fcntl_getfl(&one).unwrap(),
+            "{mode:?}"
+        );
+    }
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// Review RT2-12: in the fallback regime `Handle.mk`'s open needs no more
+/// descriptors than the one `open(2)`, and its file gets the number the one
+/// open would get. Before the fix the two-step open held the `O_PATH`
+/// descriptor while it reopened: with one descriptor left it failed with
+/// `EMFILE` where the one open succeeds, and otherwise the file got the
+/// second-lowest free number. In a child process, with the fallback forced.
+#[cfg(feature = "threads")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn rt2_12_open_at_the_descriptor_limit() {
+    let name = "io::process::tests::rt2_12_open_at_the_descriptor_limit";
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        let out = run_self(name);
+        assert!(out.status.success(), "{out:?}");
+        return;
+    }
+    use rustix::fs::{Mode, OFlags};
+    FORCE_FALLBACK.store(true, Ordering::Relaxed);
+    let file = std::env::current_exe().unwrap();
+    let path = file.as_os_str().as_encoded_bytes().to_vec();
+    let flags = FsMode::Read.open_flags();
+    // the number of the one open(2), then of the two-step one
+    let one = rustix::fs::open(&file, flags, Mode::empty()).unwrap();
+    let n_one = one.as_raw_fd();
+    drop(one);
+    let two = open_looked_up(&file, flags, Mode::empty()).unwrap();
+    assert_eq!(two.as_raw_fd(), n_one, "the file's number");
+    drop(two);
+    // one descriptor left
+    let lim = rustix::process::getrlimit(rustix::process::Resource::Nofile);
+    rustix::process::setrlimit(
+        rustix::process::Resource::Nofile,
+        rustix::process::Rlimit {
+            current: Some(64),
+            maximum: lim.maximum,
+        },
+    )
+    .unwrap();
+    let mut fill = Vec::new();
+    while let Ok(f) = rustix::fs::open("/dev/null", OFlags::RDONLY, Mode::empty()) {
+        fill.push(f);
+    }
+    fill.pop();
+    let direct = rustix::fs::open(&file, flags, Mode::empty());
+    assert!(direct.is_ok());
+    drop(direct);
+    let via = Handle::open(&path, FsMode::Read);
+    assert!(
+        via.is_ok(),
+        "Handle.mk with one descriptor left: {:?}",
+        via.err()
+    );
+    drop(via);
+    drop(fill);
+}

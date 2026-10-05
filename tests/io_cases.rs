@@ -17,6 +17,10 @@
 //! LB-03 in `docs/lean-bugs.md`; native's is then in the case's `native`
 //! field). A twin whose case is missing fails the run (`NO CASE`).
 //!
+//! In a threads build (feature `threads`) every twin runs inside a task,
+//! on a worker thread, which `main` waits for (`tests/in_task/mod.rs`):
+//! the same expected outcomes, checked on a thread that is not `main`'s.
+//!
 //! The binary runs without libtest (`harness = false`): as a twin it writes
 //! only what the program writes. It is each case's twin when started under
 //! the case's name (the checker runs symbolic links named after the cases),
@@ -33,6 +37,9 @@
 //! ([`NEED_PROC_TITLE`]) is not checked.
 
 use lean_runtime::io::{debug, env, exit, fs as lfs, startup, uvsys, FsMode, Handle, IoError};
+
+#[cfg(feature = "threads")]
+mod in_task;
 
 // ---- the glue a translator adds ----
 
@@ -898,6 +905,10 @@ fn main() {
             finish(Err(e));
         }
         let twin = TWINS.iter().find(|(n, _)| *n == id).unwrap().1;
+        // a threads build runs the twin inside a task (`in_task`)
+        #[cfg(feature = "threads")]
+        finish(in_task::run(twin, args));
+        #[cfg(not(feature = "threads"))]
         finish(twin(&args));
     }
     if cfg!(miri) {

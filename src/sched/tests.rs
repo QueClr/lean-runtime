@@ -1168,3 +1168,203 @@ fn poll_fds_without_tasks_is_poll() {
     rustix::io::write(&w, b"x").unwrap();
     assert!(wait_fd(r.as_fd(), Interest::READ).unwrap().read);
 }
+
+/// Review AR-24: natively a task's standard streams (`IO.setStdout` & co.)
+/// and `errno` are its thread's: a pool worker keeps them from one task to
+/// the next; a new worker, a dedicated task's thread and `main` start with
+/// the process's streams and `errno` 0. Here (one emulated worker,
+/// `LEAN_NUM_THREADS=1`) a pool task's redirection and `errno` reach its
+/// `sync` dependent (its thread's walk) and the next pool task; a dedicated
+/// task starts fresh; `main` keeps its own. Before the fix every context
+/// and task shared the thread's one set: `a` saw `main`'s, `main` saw `a`'s.
+#[cfg(feature = "io")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_pool_worker_keeps_its_streams_and_errno() {
+    use crate::io::error::{errno, set_errno};
+    use crate::io::streams::{self, StdStream};
+    type Seen = Rc<Cell<Option<(u32, i32)>>>;
+    fn out() -> u32 {
+        streams::current(StdStream::Stdout, || 0u32)
+    }
+    fn record(seen: &Seen) -> Job {
+        let seen = seen.clone();
+        Box::new(move || {
+            seen.set(Some((out(), errno())));
+            Outcome::Done
+        })
+    }
+    start_test(1);
+    assert_eq!(streams::set_stdout(7u32, || 0), 0);
+    set_errno(9);
+    let a: Seen = Rc::default();
+    let a2 = a.clone();
+    let ta = spawn(
+        Box::new(move || {
+            a2.set(Some((out(), errno())));
+            let _ = streams::set_stdout(5u32, || 0);
+            set_errno(2);
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    let d: Seen = Rc::default();
+    let td = depend(ta, record(&d), 0, true, true);
+    wait(td);
+    let b: Seen = Rc::default();
+    let tb = spawn(record(&b), 0, true);
+    wait(tb);
+    let c: Seen = Rc::default();
+    let tc = spawn(record(&c), 9, true);
+    wait(tc);
+    finish();
+    assert_eq!(a.get(), Some((0, 0)), "a new worker starts fresh");
+    assert_eq!(d.get(), Some((5, 2)), "a sync dependent shares the thread");
+    assert_eq!(b.get(), Some((5, 2)), "the worker kept them");
+    assert_eq!(
+        c.get(),
+        Some((0, 0)),
+        "a dedicated task's thread starts fresh"
+    );
+    assert_eq!((out(), errno()), (7, 9), "main keeps its own");
+    assert_eq!(streams::set_stdout(0u32, || 0), 7);
+}
+
+thread_local! {
+    /// A glue's own per-task state (lean2rr's stream context), for the tests
+    /// of `end_running_task`.
+    static GLUE_CTX: Cell<&'static str> = const { Cell::new("main's") };
+}
+
+/// The glue's protocol of review AR-26 (lean2rr's AR-S1) for a job whose
+/// task id `id` holds once the scheduler runs it: open its own context
+/// (`name`), store the value, `end_running_task(id)` (unless `end_first` is
+/// false), close the context.
+fn protocol_job(name: &'static str, id: Rc<Cell<TaskId>>, end_first: bool) -> Job {
+    Box::new(move || {
+        GLUE_CTX.with(|c| c.set(name));
+        if end_first {
+            end_running_task(id.get());
+        }
+        GLUE_CTX.with(|c| c.set("closed"));
+        Outcome::Done
+    })
+}
+
+/// A `sync` dependent of `src` that records the glue's context it runs in.
+fn context_seen_by_sync_dependent(src: TaskId) -> (TaskId, Rc<Cell<Option<&'static str>>>) {
+    let seen: Rc<Cell<Option<&'static str>>> = Rc::default();
+    let s2 = seen.clone();
+    let d = depend(
+        src,
+        Box::new(move || {
+            s2.set(Some(GLUE_CTX.with(Cell::get)));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    (d, seen)
+}
+
+/// Review AR-26 (lean2rr's AR-S1): a job that opens its own context (a
+/// translator's stream context, values only its code can drop), stores the
+/// task's value, calls `end_running_task` and then closes the context: the
+/// task's `sync` dependent runs inside the context, as natively it runs in
+/// `handle_finished` with what the task left installed. A job that does not
+/// call it (the control) has its dependent run after the context closed.
+#[test]
+fn a_job_ends_its_task_before_it_closes_its_context() {
+    start_test(1);
+    let ida: Rc<Cell<TaskId>> = Rc::new(Cell::new(TaskId::FINISHED));
+    let a = spawn(protocol_job("the task's", ida.clone(), true), 0, true);
+    ida.set(a);
+    let (da, sa) = context_seen_by_sync_dependent(a);
+    wait(da);
+    let idb: Rc<Cell<TaskId>> = Rc::new(Cell::new(TaskId::FINISHED));
+    let b = spawn(protocol_job("the task's", idb.clone(), false), 0, true);
+    idb.set(b);
+    let (db, sb) = context_seen_by_sync_dependent(b);
+    wait(db);
+    assert!(is_finished(a) && is_finished(b));
+    finish();
+    assert_eq!(sa.get(), Some("the task's"));
+    assert_eq!(sb.get(), Some("closed"));
+}
+
+/// Review RT2-14: `end_running_task(id)` ends task `id` only while the
+/// scheduler runs its job. A job that task A's job runs itself (the glue's
+/// inline path: no task, so `TaskId::FINISHED`; or A's own id passed by
+/// mistake from a second call) ends nothing: A's `sync` dependent still
+/// sees the value A stores after it. Before the fix the call ended the
+/// innermost running task, A, before A stored its value.
+#[test]
+fn rt2_14_end_running_task_ends_only_its_own_task() {
+    start_test(1);
+    let value: Rc<Cell<Option<u32>>> = Rc::default();
+    let id: Rc<Cell<TaskId>> = Rc::new(Cell::new(TaskId::FINISHED));
+    let (v2, id2) = (value.clone(), id.clone());
+    let a = spawn(
+        Box::new(move || {
+            let inner: Job = Box::new(|| {
+                end_running_task(TaskId::FINISHED);
+                Outcome::Done
+            });
+            let _ = inner();
+            v2.set(Some(42));
+            end_running_task(id2.get());
+            // a second call: nothing
+            end_running_task(id2.get());
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    id.set(a);
+    let seen: Rc<Cell<Option<Option<u32>>>> = Rc::default();
+    let (s2, v3) = (seen.clone(), value.clone());
+    let d = depend(
+        a,
+        Box::new(move || {
+            s2.set(Some(v3.get()));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    wait(d);
+    finish();
+    assert_eq!(
+        seen.get(),
+        Some(Some(42)),
+        "A's dependent ran before A stored its value"
+    );
+}
+
+/// Review RT2-15 (leanrs's AR26-01): in a chain A -> B -> C of `sync`
+/// dependents, B (handed by A's walk) follows the protocol: C runs inside
+/// B's context, as it does in threads mode and natively (`handle_finished`
+/// runs C on the finishing thread). Before the fix `end` returned false for
+/// a walked task, `end_running_task` walked nothing, and C ran after B's job
+/// closed its context.
+#[test]
+fn rt2_15_end_running_task_in_a_walked_sync_dependent() {
+    start_test(1);
+    let ida: Rc<Cell<TaskId>> = Rc::new(Cell::new(TaskId::FINISHED));
+    let a = spawn(protocol_job("A's", ida.clone(), true), 0, true);
+    ida.set(a);
+    let idb: Rc<Cell<TaskId>> = Rc::new(Cell::new(TaskId::FINISHED));
+    let b = depend(a, protocol_job("B's", idb.clone(), true), 0, true, true);
+    idb.set(b);
+    let (c, seen) = context_seen_by_sync_dependent(b);
+    wait(c);
+    finish();
+    assert_eq!(
+        seen.get(),
+        Some("B's"),
+        "C ran after B's job closed its context"
+    );
+}

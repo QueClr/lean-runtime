@@ -1,5 +1,5 @@
 pending after next: true
-resolved some (), after at least 60 ms: true
+resolved some (), after at least 150 ms: true
 second next resolved at once: true
 after reset and cancel, next resolved: true
 after stop, next resolved: false

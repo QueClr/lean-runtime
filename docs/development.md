@@ -84,8 +84,9 @@ once.
   the committed `Cargo.lock` and the crates taken from cargo's local
   registry cache (`cargo fetch --locked` fills it once; `scripts/check.sh`
   says so when a crate is missing). Nothing is vendored. `threads` (threads
-  mode) has no dependency, so `rustc --cfg 'feature="threads"'` builds it
-  too; it excludes `sched` and `net` (a compile error when both are on).
+  mode) depends on rustix and signal-hook for its `sched::uv` loop thread
+  (T2), as `sched` does, so it is built with cargo too; it excludes `sched`
+  and `net` (a compile error when both are on).
 - **Dependencies.** Requirements are carets compatible with leanrs's
   offline registry, which leanrs resolves in its own workspace (it ignores
   `Cargo.lock`), with only the features the crate uses. Before adding a

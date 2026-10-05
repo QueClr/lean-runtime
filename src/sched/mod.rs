@@ -33,7 +33,13 @@ pub mod sync;
 mod task;
 #[cfg(test)]
 mod tests;
+// Each context's and each emulated worker's standard streams and `errno`
+// (review AR-24).
+#[cfg(feature = "io")]
+mod slots;
 pub mod uv;
+// The process-wide part of `uv`'s signal delivery, shared with threads mode.
+mod uv_signals;
 
 pub use ctx::{running_stack, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
@@ -57,9 +63,9 @@ pub(crate) fn reactor_coop_on_for_tests() {
     reactor::coop_on();
 }
 pub use task::{
-    cancel, check_canceled, current_context, depend, dependent_runs_now, effect, finish,
-    in_sync_task, is_finished, manager_running, option_get_or_block, poll, promise_new, release,
-    resolve, sleep_ms, spawn, state, thread_number, wait, wait_any, Job, Outcome, TaskId,
+    cancel, check_canceled, current_context, depend, dependent_runs_now, effect, end_running_task,
+    finish, in_sync_task, is_finished, manager_running, option_get_or_block, poll, promise_new,
+    release, resolve, sleep_ms, spawn, state, thread_number, wait, wait_any, Job, Outcome, TaskId,
     TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED,
 };
 

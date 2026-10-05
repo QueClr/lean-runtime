@@ -10,6 +10,11 @@
 //! (`metadata`, `symlinkMetadata`, `removeFile`, `hardLink`), which libuv
 //! performs with `errno` cleared first (`uv__fs_work`).
 //!
+//! In threads mode (feature `threads`), every call that looks up a path
+//! holds the working directory's lock shared while a spawn may move the
+//! process into its `cwd` (`process::with_path_lookup`; docs/threads.md,
+//! 3.2; review RT1-04). Without the feature the calls are as before.
+//!
 //! Results of unbounded size (a path, a directory entry's name) are appended
 //! to the caller's [`ByteSink`] or passed to its callback, as bytes; the
 //! caller decodes them as Lean's `mk_string` does (lossily).
@@ -83,16 +88,25 @@ fn uv_err(e: &std::io::Error, fname: &[u8]) -> IoError {
     IoError::decode_uv_error(-code(e), Some(fname))
 }
 
+/// The system calls `f`, which look up paths: in threads mode, never in
+/// another thread's fallback spawn's `cwd` (`process::with_path_lookup`,
+/// review RT1-04); otherwise just the calls.
+fn lookup<T>(f: impl FnOnce() -> T) -> T {
+    super::process::with_path_lookup(f)
+}
+
 /// `IO.FS.createDir` (`lean_io_create_dir`, `mkdir(p, 0777)`).
 pub fn create_dir(p: &[u8]) -> Result<(), IoError> {
     super::effect_point();
-    std::fs::create_dir(c_path(p)?).map_err(c_err(p))
+    let path = c_path(p)?;
+    lookup(|| std::fs::create_dir(path)).map_err(c_err(p))
 }
 
 /// `IO.FS.removeDir` (`lean_io_remove_dir`, `rmdir`).
 pub fn remove_dir(p: &[u8]) -> Result<(), IoError> {
     super::effect_point();
-    std::fs::remove_dir(c_path(p)?).map_err(c_err(p))
+    let path = c_path(p)?;
+    lookup(|| std::fs::remove_dir(path)).map_err(c_err(p))
 }
 
 /// `IO.FS.removeFile` (`lean_io_remove_file`, libuv's `uv_fs_unlink`).
@@ -100,7 +114,7 @@ pub fn remove_file(p: &[u8]) -> Result<(), IoError> {
     super::effect_point();
     let path = c_path(p)?;
     set_errno(0);
-    std::fs::remove_file(path).map_err(|e| uv_err(&e, p))
+    lookup(|| std::fs::remove_file(path)).map_err(|e| uv_err(&e, p))
 }
 
 /// `IO.FS.rename` (`lean_io_rename`, `rename`): the paths are checked in
@@ -109,7 +123,7 @@ pub fn rename(from: &[u8], to: &[u8]) -> Result<(), IoError> {
     super::effect_point();
     let a = c_path(from)?;
     let b = c_path(to)?;
-    std::fs::rename(a, b).map_err(|e| {
+    lookup(|| std::fs::rename(a, b)).map_err(|e| {
         let mut both = from.to_vec();
         both.extend_from_slice(b" and/or ");
         both.extend_from_slice(to);
@@ -124,14 +138,16 @@ pub fn hard_link(orig: &[u8], link: &[u8]) -> Result<(), IoError> {
     let a = c_path(orig)?;
     let b = c_path(link)?;
     set_errno(0);
-    std::fs::hard_link(a, b).map_err(|e| uv_err(&e, orig))
+    lookup(|| std::fs::hard_link(a, b)).map_err(|e| uv_err(&e, orig))
 }
 
 /// `IO.Prim.setAccessRights` (`lean_chmod`, `chmod(p, mode)`).
 pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
     super::effect_point();
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(c_path(p)?, std::fs::Permissions::from_mode(mode)).map_err(c_err(p))
+    let path = c_path(p)?;
+    lookup(|| std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)))
+        .map_err(c_err(p))
 }
 
 /// `IO.FS.realPath` (`lean_io_realpath`), appended to `out`. A path holding a
@@ -150,7 +166,9 @@ pub fn set_access_rights(p: &[u8], mode: u32) -> Result<(), IoError> {
 /// (glibc's first `getcwd` into a 1024-byte buffer; review RIO1-16).
 pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoError> {
     let path = c_path(p)?;
-    match std::fs::canonicalize(path) {
+    // the resolution, the working directory's length and the walk see one
+    // working directory (`lookup`); the caller's sink runs after
+    let r = lookup(|| match std::fs::canonicalize(path) {
         Ok(r) if r.as_os_str().len() < PATH_MAX => {
             // a relative path starts from `getcwd` into glibc's 1024-byte
             // scratch buffer, which fails with ERANGE first for a longer
@@ -163,8 +181,7 @@ pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoEr
             if walk_reads_non_link(path) {
                 set_errno(EINVAL);
             }
-            out.extend_from_slice(r.as_os_str().as_bytes());
-            Ok(())
+            Ok(r)
         }
         Ok(_) => {
             set_errno(ENAMETOOLONG);
@@ -174,7 +191,9 @@ pub fn real_path<S: ByteSink + ?Sized>(p: &[u8], out: &mut S) -> Result<(), IoEr
             code(&e);
             Err(IoError::file_not_found(p))
         }
-    }
+    })?;
+    out.extend_from_slice(r.as_os_str().as_bytes());
+    Ok(())
 }
 
 /// Whether glibc's `realpath` (`stdlib/canonicalize.c`) calls `readlink` on a
@@ -244,7 +263,9 @@ fn walk_reads_non_link(path: &Path) -> bool {
 pub fn read_dir(p: &[u8], mut entry: impl FnMut(&[u8])) -> Result<(), IoError> {
     // a descriptor is allocated: the context's handed-off streams end first
     super::effect_point();
-    let dir = std::fs::read_dir(c_path(p)?).map_err(c_err(p))?;
+    // only the `opendir` looks the path up; `readdir` reads the descriptor
+    let path = c_path(p)?;
+    let dir = lookup(|| std::fs::read_dir(path)).map_err(c_err(p))?;
     for e in dir {
         match e {
             Ok(e) => entry(e.file_name().as_bytes()),
@@ -287,7 +308,7 @@ fn metadata_of(m: &std::fs::Metadata) -> Metadata {
 pub fn metadata(p: &[u8]) -> Result<Metadata, IoError> {
     let path = c_path(p)?;
     set_errno(0);
-    std::fs::metadata(path)
+    lookup(|| std::fs::metadata(path))
         .map(|m| metadata_of(&m))
         .map_err(|e| uv_err(&e, p))
 }
@@ -297,7 +318,7 @@ pub fn metadata(p: &[u8]) -> Result<Metadata, IoError> {
 pub fn symlink_metadata(p: &[u8]) -> Result<Metadata, IoError> {
     let path = c_path(p)?;
     set_errno(0);
-    std::fs::symlink_metadata(path)
+    lookup(|| std::fs::symlink_metadata(path))
         .map(|m| metadata_of(&m))
         .map_err(|e| uv_err(&e, p))
 }

@@ -9,8 +9,10 @@
 //! so that a translator's glue compiles against either mode with a `cfg` on
 //! its `Glue` implementation and its `start` call only (leanrs's
 //! constraints for T1, point 1). What only the single-thread scheduler has
-//! (`Glue::suspend`, contexts, `block_sync` and `wake`, the event loop and
-//! `sched::uv`) is not here: a blocked task blocks its own thread.
+//! (`Glue::suspend`, contexts, `block_sync` and `wake`, the event loop's
+//! `watch` and `timer_start`) is not here: a blocked task blocks its own
+//! thread. `sched::uv` is `mt::uv`: `Std.Internal.UV`'s loop on a thread of
+//! its own, as natively, with the single-thread module's names (T2).
 //!
 //! Shared with the single-thread scheduler: `common` (the task states, the
 //! messages, the priorities), `env` (`LEAN_NUM_THREADS`,
@@ -20,6 +22,9 @@
 mod common;
 mod env;
 pub mod mt;
+// The process-wide part of `uv`'s signal delivery (`mt::uv`, re-exported as
+// `sched::uv`), shared with the single-thread scheduler.
+mod uv_signals;
 // `publish` is the single-thread hub's: threads mode has no context to
 // publish, so it is unused here.
 #[cfg(feature = "stack-overflow")]

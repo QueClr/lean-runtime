@@ -9,9 +9,10 @@ output, and check a translator's executables against it.
       and <id>.code next to the case (a non-terminating case records the
       output seen before its timeout and the code "timeout").
 
-  scripts/cases.py check --exe-dir DIR [--translator NAME] [CASE...]
+  scripts/cases.py check --exe-dir DIR [--translator NAME] [--diff] [CASE...]
       Run DIR/<id> (a translator's build of each case; DIR may be relative)
-      and compare with the recorded expected files. With --translator NAME
+      and compare with the recorded expected files (with --diff, a failing
+      case's differences are printed too). With --translator NAME
       (a key of `deviations`: lean2rr, leanrs), a case whose `deviations`
       give NAME a documented deviation that names no Lean bug (a DVnn, for
       example) reports a missing executable or a different outcome as
@@ -275,6 +276,20 @@ def cmd_expect(ns):
                 f"code {c} x{runs.count((o, e, c))}" for o, e, c in distinct))
     return 0 if ok else 1
 
+def show_diff(stem, got, want):
+    """`check --diff`: the differences between a run's stdout, stderr and
+    code and the expected ones, as a unified diff (at most 40 lines each)."""
+    import difflib
+    for name, g, w in (("stdout", got[0], want[0]), ("stderr", got[1], want[1])):
+        if g == w:
+            continue
+        lines = list(difflib.unified_diff(
+            w.decode(errors="replace").splitlines(), g.decode(errors="replace").splitlines(),
+            f"{stem}.{name} expected", f"{stem}.{name} got", lineterm=""))
+        print("\n".join(lines[:40]) + ("\n..." if len(lines) > 40 else ""))
+    if got[2] != want[2]:
+        print(f"{stem}: code {got[2]}, expected {want[2]}")
+
 def cmd_check(ns):
     failed = 0
     excused = 0
@@ -321,6 +336,8 @@ def cmd_check(ns):
             else:
                 print(f"FAIL {case.stem}: {what}")
                 failed += 1
+            if ns.diff:
+                show_diff(case.stem, (out, err, code), want)
     print(f"{failed} failed" + (f", {excused} deviations of {ns.translator}" if ns.translator else ""))
     return 1 if failed else 0
 
@@ -330,6 +347,7 @@ def main():
     e = sub.add_parser("expect"); e.add_argument("--runs", type=int, default=5); e.add_argument("cases", nargs="*")
     c = sub.add_parser("check"); c.add_argument("--exe-dir", required=True)
     c.add_argument("--translator", help="a key of `deviations` (lean2rr, leanrs): its documented non-Lean-bug deviations report DEVIATION, not FAIL")
+    c.add_argument("--diff", action="store_true", help="print each failing case's differences")
     c.add_argument("cases", nargs="*")
     ns = ap.parse_args()
     sys.exit(cmd_expect(ns) if ns.cmd == "expect" else cmd_check(ns))

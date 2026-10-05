@@ -93,6 +93,8 @@ pub fn lookup(id: &str) -> Option<Case> {
         "set_during_modify" => (no_init, set_during_modify),
         "get_during_modify" => (no_init, get_during_modify),
         "swap_during_modify" => (no_init, swap_during_modify),
+        "worker_keeps_streams" => (no_init, worker_keeps_streams),
+        "worker_keeps_errno" => (no_init, worker_keeps_errno),
         // tests/cases/taskio: blocking IO in programs with tasks (sched-io)
         "output_big_stdout" => (no_init, output_big_stdout),
         "output_both_overflow" => (no_init, output_both_overflow),
@@ -4875,5 +4877,82 @@ fn sync_dep_waits_queued_task(_: &[String]) -> u32 {
     r.set(Some(q));
     sleep(300);
     eprintln("main done");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// tests/cases/tasks/worker_keeps_{streams,errno}.lean (review RT2-L-01,
+// AR-24): a pool worker keeps its thread's streams and `errno` from one task
+// to the next; the scheduler swaps each context's and each emulated
+// worker's (`lean_runtime::sched`'s `slots`).
+
+/// The current stdout as these twins set it: a buffer
+/// (`IO.FS.Stream.ofBuffer`), or `None` for the process's stream.
+type OutStream = Option<Rc<RefCell<Vec<u8>>>>;
+
+/// `IO.println` on the current stdout.
+fn out_println(s: &str) {
+    use lean_runtime::io::streams::{current, StdStream};
+    let cur: OutStream = current(StdStream::Stdout, || None);
+    match cur {
+        Some(b) => {
+            lean_runtime::sched::effect();
+            b.borrow_mut()
+                .extend_from_slice(format!("{s}\n").as_bytes());
+        }
+        None => println(s),
+    }
+}
+
+fn worker_keeps_streams(_: &[String]) -> u32 {
+    let buf: Rc<RefCell<Vec<u8>>> = Rc::default();
+    let b2 = buf.clone();
+    let a = as_task(
+        move || {
+            let _ = lean_runtime::io::streams::set_stdout(Some(b2) as OutStream, || None);
+            out_println("A: before its sleep");
+            sleep(200);
+            out_println("A: after its sleep");
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(100);
+    out_println("main: while A sleeps");
+    a.get();
+    let b = as_task(|| out_println("B: after A, on A's worker"), PRIO_DEFAULT);
+    b.get();
+    let c = as_task(|| out_println("C: a thread of its own"), PRIO_DEDICATED);
+    c.get();
+    let text = String::from_utf8(buf.borrow().clone()).expect("UTF-8");
+    out_println(&format!("A's buffer: {}", quote(&text)));
+    0
+}
+
+fn worker_keeps_errno(_: &[String]) -> u32 {
+    use lean_runtime::io::fs;
+    ok(lio::write_file("e.txt", "line1\n"));
+    let h = ok(Handle::open(b"e.txt", FsMode::Read));
+    let _ = h.put_str(b"x").and_then(|()| h.flush());
+    let a = as_task(
+        || {
+            let _ = fs::remove_dir(b"e.txt");
+        },
+        PRIO_DEFAULT,
+    );
+    a.get();
+    let _ = fs::create_dir(b"e.txt");
+    let h2 = h.clone();
+    let b = as_task(
+        move || match lio::get_line(&h2) {
+            Ok(l) => format!("ok {}", quote(&l)),
+            Err(e) => lio::error_text(&e),
+        },
+        PRIO_DEFAULT,
+    );
+    println(&format!("B's getLine: {}", b.get()));
+    match lio::get_line(&h) {
+        Ok(l) => println(&format!("main's getLine: ok {}", quote(&l))),
+        Err(e) => println(&format!("main's getLine: {}", lio::error_text(&e))),
+    }
     0
 }

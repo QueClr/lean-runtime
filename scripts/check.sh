@@ -14,7 +14,9 @@
 # compile no `unsafe` code of the crate (the root forbids it); `threads`
 # (threads mode, docs/threads.md, which excludes `sched` and `net`), also
 # with every feature that may go with it
-# (`io,threads,proc-title,stack-overflow,unsafe-fast`); `io,proc-title`,
+# (`io,threads,proc-title,stack-overflow,unsafe-fast`: there the io twins,
+# tests/io_cases.rs and tests/io2_cases.rs, run inside tasks, and the
+# uvloop twins, tests/uvloop_mt.rs, over threads mode's `sched::uv`); `io,proc-title`,
 # with the native quirk of the process title (src/io/argv_title.rs: its unit
 # tests and the twins of the cases that set a title), and `io` without
 # `sched`; `sched,stack-overflow`, with the native quirk of Lean's
@@ -104,15 +106,13 @@ for tc in "${TOOLCHAINS[@]}"; do
   echo "== $tc release test libm_folding"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --release --offline --quiet --test libm_folding
   # A driver without cargo builds the dependency-free configuration with
-  # plain rustc; `io` needs its dependencies' build scripts and `sched`
-  # corosensei, so they are built with cargo, offline and from Cargo.lock.
-  # `threads` has no dependency, so it builds with plain rustc too.
+  # plain rustc; `io` needs its dependencies' build scripts, `sched`
+  # corosensei, and `threads` rustix and signal-hook (its `sched::uv`, T2),
+  # so they are built with cargo, offline and from Cargo.lock.
   echo "== $tc plain rustc"
   out=$(mktemp -d)
   rustc +"$tc" --edition 2021 --crate-type rlib --crate-name lean_runtime \
     --out-dir "$out" src/lib.rs
-  rustc +"$tc" --edition 2021 --crate-type rlib --crate-name lean_runtime \
-    --cfg 'feature="threads"' --out-dir "$out" src/lib.rs
   rm -rf "$out"
   echo "== $tc cargo build --offline --locked --features io,sched,net"
   capped cargo +"$tc" build --offline --locked --quiet --features io,sched,net
@@ -132,8 +132,9 @@ cargo +"$last" fmt --all --check
 
 # Miri runs where `unsafe` can be: the unsafe-fast configurations, and with
 # `proc-title` the native quirk's unit tests (UNSAFE.md); and on threads
-# mode's unit tests (`sched::mt`, feature `threads`: std's threads, locks and
-# condition variables, where Miri finds data races and leaks). It is opt-in
+# mode's unit tests (`sched::mt`, features `io,threads`: std's threads, locks
+# and condition variables, where Miri finds data races and leaks; the tests
+# that need system calls are ignored under Miri). It is opt-in
 # (LEAN_RUNTIME_MIRI=1): the default build has no `unsafe`, so Miri checks
 # little there for a large CPU cost on the shared host (owner, 2026-10-04).
 # Run it when an `unsafe` item changes (docs/development.md).
@@ -158,8 +159,10 @@ elif cargo +"$last" miri --version >/dev/null 2>&1; then
       ${filter:+--lib -- "$filter"}
   done
   if [[ -z "$filter" ]]; then
-    echo "== miri features=[threads] unit tests of sched::mt"
-    capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet --features threads \
+    # with `io`, so that the tests of the io layer's per-thread state in
+    # threads mode run too (review RT2-06)
+    echo "== miri features=[io,threads] unit tests of sched::mt"
+    capped "${TEST_TIMEOUT[@]}" cargo +"$last" miri test --offline --quiet --features io,threads \
       --lib -- sched::mt
   fi
 else

@@ -258,6 +258,8 @@ static NEXT_NUMBER: AtomicU64 = AtomicU64::new(1);
 
 /// A task running on this thread (native `g_current_task_object`).
 struct Frame {
+    /// The task (`end_running_task`).
+    id: u64,
     /// A pool task (priority 0..=8, not `sync`): its `wait` raises the
     /// pool's limit (`wait_for`'s `in_pool`, 1031).
     pool: bool,
@@ -371,7 +373,7 @@ fn hook(f: impl FnOnce()) {
 /// value or of the glue (whose destructors may panic). A panic in it aborts
 /// (review RT1-01: a destructor's panic on a worker must not end that
 /// worker while `live` still counts it).
-fn guarded(what: &'static str, f: impl FnOnce()) {
+pub(crate) fn guarded(what: &'static str, f: impl FnOnce()) {
     let guard = AbortOnUnwind(what);
     f();
     std::mem::forget(guard);
@@ -395,7 +397,7 @@ fn thread_create_failed(e: &std::io::Error) -> ! {
 }
 
 /// A thread with Lean's stack size (`lthread`: `pthread_attr_setstacksize`).
-fn spawn_thread(stack_size: usize, f: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
+pub(crate) fn spawn_thread(stack_size: usize, f: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
     match std::thread::Builder::new().stack_size(stack_size).spawn(f) {
         Ok(h) => h,
         Err(e) => thread_create_failed(&e),
@@ -421,6 +423,20 @@ fn thread_entry(sh: &Arc<Shared>) {
             drop(gl);
         });
     }
+}
+
+/// What a thread of the crate's own that runs translator code (`sched::uv`'s
+/// loop thread) takes from the calling thread's task manager: its glue (for
+/// `thread_start`) and the stack size of the threads it makes (`lthread`'s);
+/// without a task manager, no glue and Lean's stack size.
+pub(crate) fn glue_and_stack_size() -> (Option<Arc<dyn Glue>>, usize) {
+    with_shared(|sh| match sh {
+        Some(sh) => {
+            let g = sh.lock();
+            (g.glue.clone(), g.stack_size)
+        }
+        None => (None, crate::sched::thread_stack_size()),
+    })
 }
 
 /// The end of such a thread: the glue's `thread_end`.
@@ -700,6 +716,7 @@ fn run_one<'a>(
     let flag = Arc::new(AtomicBool::new(e.canceled));
     e.cancel_flag = Some(flag.clone());
     let frame = Frame {
+        id,
         // on a thread of its own at a pool priority: a worker's task. A
         // `sync` task, or a task run at once after `finish` (`own` false),
         // runs on the thread below it and holds no worker (RT1-02).
@@ -731,24 +748,30 @@ fn run_one<'a>(
 
     let mut g = sh.lock();
     match out {
-        Outcome::Done => {
-            let e = g
-                .tasks
-                .remove(&id)
-                .expect("lean-runtime: a running task left the table");
-            walks.push(Walk {
-                deps: e.deps,
-                canceled: e.canceled,
-                notify: e.flags & (DELETED | UNREFERENCED) == 0,
-                end: Some(own),
-            });
-            (g, None)
-        }
+        Outcome::Done => match g.tasks.remove(&id) {
+            Some(e) => {
+                walks.push(Walk {
+                    deps: e.deps,
+                    canceled: e.canceled,
+                    notify: e.flags & (DELETED | UNREFERENCED) == 0,
+                    end: Some(own),
+                });
+                (g, None)
+            }
+            // the job ended its task and walked its dependents itself
+            // (`end_running_task`, AR-26): only the glue's `task_end` is left
+            None => (task_end(sh, g, own), None),
+        },
         Outcome::Continue(src, k) => {
-            let e = g
-                .tasks
-                .get_mut(&id)
-                .expect("lean-runtime: a running task left the table");
+            let Some(e) = g.tasks.get_mut(&id) else {
+                // a job that ended its task (`end_running_task`) returned
+                // `Continue`: the glue's error; an abort with the message,
+                // as a panic on a thread the crate made (review RT2-16)
+                drop(AbortOnUnwind(
+                    "a job that ended its task (end_running_task) and returned Continue",
+                ));
+                unreachable!("AbortOnUnwind's drop aborts");
+            };
             e.flags &= !RUNNING;
             e.cancel_flag = None;
             let mut again = None;
@@ -1066,6 +1089,37 @@ pub(crate) fn resolve(sh: &Arc<Shared>, id: TaskId, store: impl FnOnce()) -> boo
     };
     drop(drive(sh, g, None, vec![w]));
     true
+}
+
+/// `end_running_task` (AR-26): task `id`, the innermost task running on
+/// this thread, whose job has stored its value, ends now: it leaves the
+/// table and its dependents are walked here (its `sync` ones run here), then
+/// its waiters wake, as after its job returns `Outcome::Done`, but with the
+/// job's own state still in place. The glue's `task_end` stays for
+/// `run_one`. Nothing when `id` is not the innermost task this thread runs
+/// (a job the glue runs itself; review RT2-14), or once it has ended (a
+/// second call).
+pub(crate) fn end_running_task(id: TaskId) {
+    if innermost(|f| f.id) != Some(id.0) {
+        return;
+    }
+    let id = id.0;
+    with_shared(|sh| {
+        let Some(sh) = sh else {
+            return;
+        };
+        let mut g = sh.lock();
+        let Some(e) = g.tasks.remove(&id) else {
+            return;
+        };
+        let w = Walk {
+            deps: e.deps,
+            canceled: e.canceled,
+            notify: e.flags & (DELETED | UNREFERENCED) == 0,
+            end: None,
+        };
+        drop(drive(sh, g, None, vec![w]));
+    })
 }
 
 /// LB-32's wake (`option_get_or_block`): every waiter looks again, so the

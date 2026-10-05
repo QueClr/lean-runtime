@@ -60,14 +60,16 @@
 //!    `uv_cwd`) and spawns without a `cwd` take shared, so none of them runs
 //!    while the process is in `cwd` (reviews RIO2-13, RIO2-20). Limits
 //!    remain there:
-//!    - another thread's relative path operation during the spawn (an open,
-//!      a metadata query, a directory listing, a removal: every call that
-//!      takes a path relative to the working directory) still sees `cwd`.
-//!      The single-thread scheduler runs Lean code on one thread, so there
-//!      only a translator's own threads can do that; in threads mode
-//!      (feature `threads`) every other task can, until batch T2 takes
-//!      `CWD_LOCK` for reading around those calls (docs/threads.md, 0.2 and
-//!      3.2; review RT1-04);
+//!    - another thread's path operation during the spawn (an open, a
+//!      metadata query, a directory listing, a removal: every call that
+//!      takes a path relative to the working directory, or one through
+//!      `/proc/self/cwd`) still sees `cwd`, in a build without the feature
+//!      `threads`. The single-thread scheduler runs Lean code on one thread,
+//!      so there only a translator's own threads can do that. In threads
+//!      mode every task can, so there the lookups of every path the program
+//!      supplies hold the lock shared ([`with_path_lookup`],
+//!      [`open_looked_up`]) while a fallback spawn may happen
+//!      (docs/threads.md, 3.2; review RT1-04): see "Threads mode" below;
 //!    - the way back, checked before leaving, fails only if another process
 //!      changes the directory's mode (or moves it, where the way back is a
 //!      path), and the process then stays in `cwd`;
@@ -80,6 +82,57 @@
 //!    `posix_spawn_file_actions_addchdir_np` (POSIX 2024's
 //!    `posix_spawn_file_actions_addchdir`), which `nix` does not wrap yet and
 //!    this crate cannot call without `unsafe`.
+//!
+//!    **Threads mode** (feature `threads`; docs/threads.md, 3.2). `sched::start`
+//!    decides the spawn path before any task runs: it starts the spawner
+//!    thread ([`decide_spawn_path`]).
+//!    - If the spawner unshares its file-system attributes (the common
+//!      case), `NO_FALLBACK` is set, under `CWD_LOCK` held exclusively. From
+//!      then on no spawn takes the fallback: `fallback_spawn` refuses one
+//!      with `EAGAIN` (only a later refusal of `unshare`, after a first
+//!      success, gets there). So lookups take no lock.
+//!    - Otherwise every lookup of a path the program supplies holds
+//!      `CWD_LOCK` shared for the rest of the run ([`with_path_lookup`],
+//!      [`open_looked_up`]), so a fallback spawn's stay in `cwd` excludes
+//!      them, as it excludes `currentDir`. One uncontended read lock per
+//!      call.
+//!    - Such paths take it when absolute too. An absolute path is resolved
+//!      from the root directory, which `chdir` does not change, but it can
+//!      still reach the working directory: through `/proc/self/cwd` (a
+//!      magic link to the process's working directory; also
+//!      `/proc/thread-self/cwd` and `/proc/<pid>/cwd`), directly or through
+//!      any symbolic link whose target goes there. So no path the program
+//!      supplies is safe to look up without the lock while the process may
+//!      be in another thread's `cwd`. The paths the crate names itself
+//!      (`/proc/self/exe`, `/proc/self/environ`, `/proc/self/fd/N`,
+//!      `/dev/urandom`, `/dev/null`, `/bin/sh`) take no lock: none goes
+//!      through the working directory (review RT2-L-03).
+//!
+//!    **No wait under `CWD_LOCK`** (review RT2-03). A fallback spawn waits for
+//!    every reader of `CWD_LOCK`, and while it waits std's lock lets no new
+//!    reader in. So no holder of it waits for another thread or process:
+//!    its readers are lookups that never wait (an `open(2)` of a path the
+//!    program supplies is made under the lock only with `O_NONBLOCK`, or as
+//!    an `O_PATH` resolution, the file then opened after the unlock,
+//!    [`open_looked_up`]), `getcwd`, and `posix_spawn`, which
+//!    returns once the child has called `execve` (spawns without a `cwd`,
+//!    the stand-in); its writers are a `chdir`, a fallback spawn (a
+//!    `posix_spawn` too) and the spawner's first success (`NO_FALLBACK`), so
+//!    the spawner's wait for the write lock ends too.
+//!
+//!    **Lock order.** `SPAWNER`, then `CWD_LOCK`: `spawner` sets
+//!    `NO_FALLBACK` under both; no holder of `CWD_LOCK` takes `SPAWNER`.
+//!    `CWD_LOCK` is a leaf otherwise: under it the crate makes only system
+//!    calls (and a spawn, which takes no other lock of the crate), never a
+//!    stream lock, the scheduler's lock or `sched::uv`'s loop lock, and runs
+//!    no translator code (a caller's sink is filled after the unlock). It
+//!    may be taken while those are held (a glue that holds a stream's guard,
+//!    a `sync` dependent that runs under the loop lock and opens a file),
+//!    never the other way, so no cycle goes through it. It is never taken
+//!    twice by one thread ([`with_path_lookup`] is never called with it
+//!    held: a second read lock waits behind a waiting writer). The
+//!    scheduler's lock is never held across io (no translator code runs
+//!    under it), so it is never held with `CWD_LOCK` either.
 //! 5. **`setsid`** is `POSIX_SPAWN_SETSID`. `posix_spawn` resets no signal
 //!    disposition, so an ignored `SIGPIPE` stays ignored, as across `fork`.
 //! 6. **A child that cannot start.** Lean's `spawn` succeeds even when `cwd`
@@ -658,7 +711,8 @@ pub(crate) static FORCE_NO_SHELL: AtomicBool = AtomicBool::new(false);
 /// `cwd`, [`with_cwd_change`] (`setCurrentDir`, `uv_chdir`) exclusively,
 /// [`with_cwd_read`] (`currentDir`, `getCurrentDir`, `uv_cwd`) and spawns
 /// without a `cwd` shared (module comment, item 4; reviews RIO2-13,
-/// RIO2-20).
+/// RIO2-20); in threads mode also path operations ([`with_path_lookup`])
+/// while a fallback spawn may happen (review RT1-04).
 static CWD_LOCK: RwLock<()> = RwLock::new(());
 
 /// Runs `f`, a change of the process's working directory, never during a
@@ -674,6 +728,182 @@ pub(crate) fn with_cwd_change<T>(f: impl FnOnce() -> T) -> T {
 pub(crate) fn with_cwd_read<T>(f: impl FnOnce() -> T) -> T {
     let _g = CWD_LOCK.read().unwrap_or_else(PoisonError::into_inner);
     f()
+}
+
+/// Threads mode: a spawner thread has unshared its file-system attributes,
+/// so no spawn takes the fallback from now on (`fallback_spawn` refuses
+/// one), and path operations need no lock (module comment, item 4,
+/// "Threads mode"). Set once, under `CWD_LOCK` held exclusively, so no
+/// fallback spawn is in progress when it becomes true; never cleared.
+#[cfg(feature = "threads")]
+static NO_FALLBACK: AtomicBool = AtomicBool::new(false);
+
+/// Threads mode: whether a spawn may still take the fallback, so that a
+/// path operation must hold `CWD_LOCK` shared. True until the
+/// spawner has unshared (or forever where `unshare(CLONE_FS)` is refused),
+/// and while the test hook forces the fallback.
+#[cfg(feature = "threads")]
+fn fallback_possible() -> bool {
+    // Acquire: pairs with the Release store, made after the last fallback
+    // spawn's way back (under the same exclusive lock), so a caller that
+    // sees `true` makes its call after that way back
+    !NO_FALLBACK.load(Ordering::Acquire) || fallback_forced()
+}
+
+/// Runs `f`, system calls that look up paths (an open, a `stat`, a
+/// directory listing, a creation, a removal, a rename, a link, a `chmod`, a
+/// `realpath`), so that in threads mode no path resolves against the `cwd`
+/// of another thread's fallback spawn (module comment, item 4;
+/// docs/threads.md, 3.2; review RT1-04):
+/// - in a build with the feature `threads`, while a spawn may take the
+///   fallback, `f` holds `CWD_LOCK` shared, as `IO.currentDir` does; an
+///   absolute path too, since it can reach the working directory through
+///   `/proc/self/cwd` (module comment, item 4);
+/// - in a build without it, `f()`: no lock, the same system calls as
+///   before.
+///
+/// `f` makes system calls only: no translator code, no other lock of the
+/// crate, and **no call that can wait for another thread or process** (an
+/// `open(2)` of a FIFO waits for its other end): a fallback spawn waits for
+/// every reader of `CWD_LOCK`, and with std's lock, which prefers a waiting
+/// writer, so does every later lookup (review RT2-03). An open of a path the
+/// program supplies goes through [`open_looked_up`] instead. A translator's
+/// own system calls that resolve paths go through it too. It must not be
+/// called with `CWD_LOCK` held (inside a spawn, a change or a read of the
+/// working directory): a second read lock of one thread can wait for good
+/// behind a waiting writer.
+#[inline]
+pub fn with_path_lookup<T>(f: impl FnOnce() -> T) -> T {
+    #[cfg(feature = "threads")]
+    if fallback_possible() {
+        return with_cwd_read(f);
+    }
+    f()
+}
+
+/// `open(2)` of a path the program supplies (`Handle.mk`), with `flags` and
+/// `mode`. In a build without the feature `threads`, and in threads mode
+/// once no spawn takes the fallback, it is that one call. In threads mode
+/// while a spawn may take the fallback (module comment, item 4), `CWD_LOCK`
+/// is held shared only while the path is looked up, never while the open
+/// waits (an open of a FIFO waits for its other end, which a fallback
+/// spawn's child may be: review RT2-03):
+/// - **a creating open** (`O_CREAT`) is the one open under the lock, with
+///   `O_NONBLOCK` added, so it never waits, then `O_NONBLOCK` cleared
+///   (`O_APPEND` kept). So every check of a creating open runs, the
+///   kernel's `may_create_in_sticky` included (`fs.protected_regular`,
+///   `fs.protected_fifos`: another user's file or FIFO in a sticky
+///   directory is `EACCES`; review RT2-11), and a new name is created as
+///   the one open creates it, through a dangling symbolic link too. Only
+///   when that open would wait (`ENXIO`: a FIFO opened for writing with no
+///   reader; `EWOULDBLOCK`: a lease to break) is the file opened as below,
+///   without `O_CREAT`: the kernel gives those errors in `vfs_open`, after
+///   the lookup and after `may_create_in_sticky` (`do_open`), and before any
+///   truncation, so the checks have passed and nothing has changed. If the
+///   name goes before it is looked up again, the creating open is tried
+///   again with `O_NONBLOCK`. `O_NONBLOCK` is not neutral for every
+///   character device: a serial port without `CLOCAL` skips the open's
+///   carrier wait (later IO waits as natively), and an exclusive device
+///   gives `EBUSY` where a blocking open would wait (narrow; not handled);
+/// - **any other open** resolves the path under the lock, `open(path,
+///   O_PATH | O_CLOEXEC)`, which never opens the file itself, lets go of
+///   the lock, and opens the file through the descriptor,
+///   `open("/proc/self/fd/N", flags)`: the same file, the same checks of
+///   its type and permissions (`EACCES`, `EISDIR`, `ETXTBSY`) and the same
+///   waits. Then the `O_PATH` descriptor goes, and the file's descriptor
+///   takes the lowest free number, as the one open's would (review RT2-12);
+/// - where that cannot work, it is the one open under the lock, as before:
+///   without `/proc` (`/proc/self/fd/N` is `ENOENT`), and when the second
+///   descriptor is not to be had (`EMFILE`, `ENFILE`: the one open needs
+///   one only; RT2-12). Such an open of a FIFO can still wait under the
+///   lock.
+pub(crate) fn open_looked_up(
+    p: &std::path::Path,
+    flags: rustix::fs::OFlags,
+    mode: rustix::fs::Mode,
+) -> rustix::io::Result<OwnedFd> {
+    #[cfg(feature = "threads")]
+    if fallback_possible() {
+        return open_unlocked_wait(p, flags, mode);
+    }
+    rustix::fs::open(p, flags, mode)
+}
+
+/// [`open_looked_up`] while a spawn may take the fallback.
+#[cfg(feature = "threads")]
+fn open_unlocked_wait(
+    p: &std::path::Path,
+    flags: rustix::fs::OFlags,
+    mode: rustix::fs::Mode,
+) -> rustix::io::Result<OwnedFd> {
+    use rustix::fs::{Mode, OFlags};
+    use rustix::io::Errno;
+    let locked_open = || with_cwd_read(|| rustix::fs::open(p, flags, mode));
+    let found = loop {
+        if flags.contains(OFlags::CREATE) {
+            match with_cwd_read(|| rustix::fs::open(p, flags | OFlags::NONBLOCK, mode)) {
+                Ok(fd) => {
+                    if !flags.contains(OFlags::NONBLOCK) {
+                        let now = rustix::fs::fcntl_getfl(&fd)?;
+                        rustix::fs::fcntl_setfl(&fd, now - OFlags::NONBLOCK)?;
+                    }
+                    return Ok(fd);
+                }
+                // it would wait: opened below, its checks passed
+                Err(Errno::NXIO | Errno::WOULDBLOCK) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        match with_cwd_read(|| rustix::fs::open(p, OFlags::PATH | OFlags::CLOEXEC, Mode::empty())) {
+            Ok(found) => break found,
+            // the name went meanwhile: a creating open tries again with
+            // `O_NONBLOCK`, not a blocking open under the lock (the name may
+            // be a FIFO again by then: review RT2-11, re-check note 3)
+            Err(Errno::NOENT) if flags.contains(OFlags::CREATE) => continue,
+            Err(e) => return Err(e),
+        }
+    };
+    let fd = format!("/proc/self/fd/{}", found.as_raw_fd());
+    let reflags = flags - (OFlags::CREATE | OFlags::EXCL);
+    match rustix::fs::open(fd.as_str(), reflags, Mode::empty()) {
+        Ok(file) => {
+            drop(found);
+            Ok(lowest_number(file, flags))
+        }
+        // no `/proc`, or no second descriptor
+        Err(Errno::NOENT | Errno::MFILE | Errno::NFILE) => {
+            drop(found);
+            locked_open()
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// `fd` at the lowest free descriptor number (`F_DUPFD_CLOEXEC` from 0, the
+/// higher one closed), as the one `open(2)` would have numbered it (review
+/// RT2-12); `fd` itself when it has the lowest, when it is not close-on-exec
+/// (rustix's `F_DUPFD` without the flag is not on Linux; `Handle.mk` always
+/// opens close-on-exec), or when the duplication fails.
+#[cfg(feature = "threads")]
+fn lowest_number(fd: OwnedFd, flags: rustix::fs::OFlags) -> OwnedFd {
+    if !flags.contains(rustix::fs::OFlags::CLOEXEC) {
+        return fd;
+    }
+    match rustix::io::fcntl_dupfd_cloexec(&fd, 0) {
+        Ok(low) if low.as_raw_fd() < fd.as_raw_fd() => low,
+        _ => fd,
+    }
+}
+
+/// Threads mode (`sched::start`, before any task runs): decide the spawn
+/// path now, by starting the spawner thread, so that path operations take
+/// no lock from then on where `unshare(CLONE_FS)` works (module comment,
+/// item 4, "Threads mode"). A failure to start the thread changes nothing:
+/// the first spawn with a `cwd` tries again, and until then path operations
+/// take the lock.
+#[cfg(feature = "threads")]
+pub(crate) fn decide_spawn_path() {
+    let _ = spawner();
 }
 
 fn fallback_forced() -> bool {
@@ -714,6 +944,14 @@ fn spawner() -> Result<Option<mpsc::Sender<Job>>, i32> {
         .map_err(thread_error)?;
     if ready_rx.recv() == Ok(true) {
         *g = Some(tx.clone());
+        // Threads mode: no fallback spawn from now on. Under `CWD_LOCK`
+        // held exclusively, so none is in progress (lock order: `SPAWNER`,
+        // then `CWD_LOCK`; module comment, item 4).
+        #[cfg(feature = "threads")]
+        {
+            let _w = CWD_LOCK.write().unwrap_or_else(PoisonError::into_inner);
+            NO_FALLBACK.store(true, Ordering::Release);
+        }
         Ok(Some(tx))
     } else {
         NO_PRIVATE_CWD.store(true, Ordering::Relaxed);
@@ -739,7 +977,9 @@ fn spawn_in(spec: &Arc<Spec>, dups: Vec<(i32, i32)>, cwd: &[u8]) -> Result<Pid, 
                 spec: spec.clone(),
                 dups,
                 base: if relative {
-                    Base::here().map_err(SpawnError::Os)?
+                    // `open(".")`: a lookup (no lock in fact: the spawner
+                    // runs, so no fallback spawn happens)
+                    with_path_lookup(Base::here).map_err(SpawnError::Os)?
                 } else {
                     Base::Unused
                 },
@@ -788,6 +1028,14 @@ fn fallback_spawn(
     relative: bool,
 ) -> Result<Pid, SpawnError> {
     let _g = CWD_LOCK.write().unwrap_or_else(PoisonError::into_inner);
+    // Threads mode: once a spawner has unshared, other threads' path
+    // operations take no lock, so the process must not move; only a
+    // later refusal of `unshare` (a helper's, or a new spawner's after the
+    // first one ended) gets here then. `EAGAIN`, as a failed `fork`.
+    #[cfg(feature = "threads")]
+    if !fallback_possible() {
+        return Err(SpawnError::Os(EAGAIN));
+    }
     // the way back, checked before leaving
     let back = Base::here().map_err(SpawnError::Os)?;
     match back.enter() {
@@ -1052,13 +1300,17 @@ fn stand_in(
     } else {
         None
     };
-    let pid = spawn_stand_in(
-        &ends.dups(),
-        &release,
-        pending_end.as_ref(),
-        &message,
-        session,
-    )
+    // a spawn without a `cwd`: in threads mode never while a fallback
+    // spawn has the process in its `cwd` (`with_path_lookup`)
+    let pid = with_path_lookup(|| {
+        spawn_stand_in(
+            &ends.dups(),
+            &release,
+            pending_end.as_ref(),
+            &message,
+            session,
+        )
+    })
     .ok()?;
     drop(release);
     drop(pending_end);

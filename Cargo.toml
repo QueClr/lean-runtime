@@ -29,8 +29,11 @@ path = "src/lib.rs"
 # - `stack-overflow`: nix (its `sigaction` and re-exported libc, for the
 #   native quirk of Lean's stack-overflow report, `sched::stack_overflow`;
 #   AR-11).
-# `threads` (threads mode, `sched::mt`) has no dependency: std's threads,
-# locks, condition variables and atomics only.
+# - `threads` (threads mode, `sched::mt`): the task manager uses std's
+#   threads, locks, condition variables and atomics only; its
+#   `Std.Internal.UV` loop thread (`sched::uv` in threads mode, T2) uses
+#   rustix (`poll` and the async eventfd) and signal-hook (the signal
+#   watchers' delivery), as `sched`'s loop does.
 # The requirements are carets compatible with leanrs's offline registry (nix
 # 0.31.3, rustix 1.1.4, io-uring 0.7.13, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
 # uses; leanrs resolves them in its own workspace. lean-runtime's own builds
@@ -61,14 +64,15 @@ sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
 # scheduler's names. It excludes `sched` (and so `net`, which turns `sched`
 # on): a build has one scheduler, and both on is a compile error. With `io`
 # (allowed), the io layer takes its plain blocking path, as without `sched`:
-# a blocking call blocks its own thread, as natively; the io items of
-# threads mode (the working directory's lock rule, `Std.Internal.UV`'s
-# timers and signals) are batch T2. Until then, where `unshare(CLONE_FS)` is
-# refused (Docker's default seccomp profile), a spawn with a `cwd` moves the
-# process's working directory while other tasks' relative path operations
-# take no lock (review RT1-04). With `stack-overflow`, every worker and
-# dedicated thread installs Lean's report at its entry.
-threads = []
+# a blocking call blocks its own thread, as natively. Where
+# `unshare(CLONE_FS)` is refused (Docker's default seccomp profile), a spawn
+# with a `cwd` moves the process's working directory meanwhile, so there
+# every lookup of a path the program supplies holds the working directory's
+# lock shared (review RT1-04, T2). `sched::uv` is `Std.Internal.UV`'s loop on
+# a thread of its own, as natively (T2). With `stack-overflow`, every
+# worker, dedicated thread and the loop thread installs Lean's report at its
+# entry.
+threads = ["dep:rustix", "dep:signal-hook"]
 # Networking (Std.Internal.UV.TCP/UDP/DNS, Std.Net.interfaceAddresses) on the
 # scheduler's event loop: an optional module a translator admits per program.
 net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
@@ -114,6 +118,15 @@ required-features = ["io"]
 name = "io2_cases"
 harness = false
 required-features = ["io"]
+
+# Program cases in threads mode (tests/threads_twins.rs): the uvloop cases
+# over `sched::uv` on its loop thread, each twin inside a task, and the task
+# cases of review AR-24. The binary is also each case's twin, so it runs
+# without libtest.
+[[test]]
+name = "threads_twins"
+harness = false
+required-features = ["io", "threads"]
 
 # Review RT1-03's check (scripts/check.sh runs it): with a C-style entry, the
 # alternate signal stacks of the threads that threads mode ends are reused.

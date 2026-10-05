@@ -27,6 +27,10 @@
 //! checked in both builds, since its accepted alternative (LQ1-01) is that
 //! `ENOBUFS`.
 //!
+//! In a threads build (feature `threads`) every twin runs inside a task,
+//! on a worker thread, which `main` waits for (`tests/in_task/mod.rs`):
+//! the same expected outcomes, checked on a thread that is not `main`'s.
+//!
 //! The binary runs without libtest (`harness = false`).
 
 use std::cell::RefCell;
@@ -39,6 +43,9 @@ use lean_runtime::io::{
 };
 use lean_runtime::semantics::array;
 use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
+
+#[cfg(feature = "threads")]
+mod in_task;
 
 // ---- the glue a translator adds ----
 
@@ -3105,6 +3112,10 @@ fn main() {
         .or_else(|| TWINS.iter().find(|(n, _)| *n == argv0_name))
     {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        // a threads build runs the twin inside a task (`in_task`)
+        #[cfg(feature = "threads")]
+        finish(in_task::run(*twin, args));
+        #[cfg(not(feature = "threads"))]
         finish(twin(&args));
     }
     let root = env!("CARGO_MANIFEST_DIR");
