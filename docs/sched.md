@@ -1755,7 +1755,16 @@ bytes (`Cell<u32>`, `u32::MAX` for no runner): leanrs's thunk cell for a
 **The keyed table** is per thread: `{ key, runner, waiters }` entries, and
 a `const` count for `done_keyed`'s inline test. An entry lives from a
 keyed claim or a first wait to the value's store, so the table usually
-holds no entry, or one or two during a constant's initialization.
+holds no entry, or a few during a constant's initialization (one per
+constant whose initialization is in progress). Its first 8 entries are in
+places of the thread-local itself, the others in a `Vec`, so a claim and
+its store with no waiter allocate nothing (AR-40; `ref_keyed`'s table
+keeps 4 the same way). An allocation there on lean2rr's `main` thread,
+at its first claim of a constant, had shifted the layout of its heap (one
+more 2 MiB huge page at the peak of a benchmark). `tests/keyed_alloc.rs`
+checks both tables with a counting allocator. The table keeps its
+destructor (the waiter lists), so at thread teardown it is gone, as W6
+says.
 
 **Before the task manager runs** the running context is `main`'s, found
 without building the scheduler's state, as the frame of 3.2 is: there is
@@ -2617,10 +2626,24 @@ None of these has been timed.
   - the translator's slot.
 
   A thin job (a function pointer and a word, without a `Box`) was
-  considered and left out: as a second form of `Job`, it makes the
-  optional job 24 bytes (two 16-byte forms leave no spare bits for the
-  tag), and keeping it at 16 needs `unsafe`. It would save one 16-byte
-  allocation per task for a translator whose job captures one pointer.
+  considered and left out (fixes-3; again for AR-35 in perf-1). It would
+  save one 16-byte allocation per task for a translator whose job
+  captures one word (lean2rr's captures its slot and serial). No safe form
+  keeps the entry at 56 bytes:
+  - as a second form of `Job`, it makes the optional job 24 bytes: the
+    compiler uses one spare value of the boxed form's fat pointer (a null
+    pointer), which `Option` takes, and the thin form's two words leave
+    none for the tag. Every entry would grow to 64 bytes, 8 more per task,
+    boxed jobs (leanrs's) included;
+  - a thin form of one word (a function that finds its data through the
+    task's id) makes a 16-byte `Job`, but its `Option` is 24 bytes again:
+    the one spare value goes to the form's tag;
+  - 16 bytes with both forms needs `unsafe` (the tag in a pointer's spare
+    bits).
+
+  A thin form would also need a second function for a job the scheduler
+  drops without running it (lean2rr's job is a guard whose drop marks its
+  task unrun), which a closure's destructor does now.
 
   Probe (2026-10-04, a scratch program, not committed): TaskHeavy's first
   two phases (100 000 live pure tasks, awaited in order, then a

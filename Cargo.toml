@@ -145,6 +145,13 @@ name = "ctor_alloc"
 harness = false
 required-features = ["io"]
 
+# AR-40: a keyed claim of a constant and a keyed take of a reference, with
+# their stores and no waiter, allocate nothing (tests/keyed_alloc.rs, a
+# binary of its own with a counting allocator).
+[[test]]
+name = "keyed_alloc"
+required-features = ["sched"]
+
 # Program cases in threads mode (tests/threads_twins.rs): the uvloop cases
 # over `sched::uv` on its loop thread, each twin inside a task, and the task
 # cases of review AR-24. The binary is also each case's twin, so it runs

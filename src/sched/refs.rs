@@ -42,7 +42,7 @@
 //! closing store still runs. A Rust panic leaves the reference empty; the
 //! glue ends the process rather than going on.
 
-use super::wait::{before_block, wake_in_order, WaitList};
+use super::wait::{before_block, wake_in_order, Table, WaitList};
 use super::{alive, before_publish, block_sync, current_context, ref_read, with, CtxId, MAIN};
 use std::cell::RefCell;
 
@@ -265,13 +265,13 @@ pub mod ref_keyed {
 
     thread_local! {
         /// The references taken now (usually none or one: a `modify` whose
-        /// function blocked).
-        static TAKEN: RefCell<Vec<Taken>> = const { RefCell::new(Vec::new()) };
+        /// function runs). Its first 4 entries need no allocation (AR-40).
+        static TAKEN: RefCell<Table<Taken, 4>> = const { RefCell::new(Table::new()) };
         /// `TAKEN`'s length, for the points' inline test.
         static TAKEN_LEN: Cell<u32> = const { Cell::new(0) };
     }
 
-    fn set_len(t: &[Taken]) {
+    fn set_len(t: &Table<Taken, 4>) {
         let _ = TAKEN_LEN.try_with(|n| n.set(t.len() as u32));
     }
 
@@ -309,7 +309,7 @@ pub mod ref_keyed {
     /// The frame that took `key`, if it is taken.
     fn taker(key: usize) -> Option<Frame> {
         TAKEN
-            .try_with(|t| t.borrow().iter().find(|e| e.key == key).map(|e| e.taker))
+            .try_with(|t| t.borrow().find(|e| e.key == key).map(|e| e.taker))
             .ok()
             .flatten()
     }
@@ -324,7 +324,7 @@ pub mod ref_keyed {
         let registered = TAKEN
             .try_with(|t| {
                 let mut t = t.borrow_mut();
-                match t.iter_mut().find(|e| e.key == key) {
+                match t.find_mut(|e| e.key == key) {
                     Some(e) => {
                         e.waiters.push(me);
                         true
@@ -345,8 +345,7 @@ pub mod ref_keyed {
         let ws = TAKEN
             .try_with(|t| {
                 let mut t = t.borrow_mut();
-                let k = t.iter().position(|e| e.key == key)?;
-                let e = t.remove(k);
+                let e = t.remove(|e| e.key == key)?;
                 set_len(&t);
                 Some(e.waiters)
             })
@@ -457,6 +456,6 @@ pub mod ref_keyed {
     /// Whether `key` is taken (unit tests).
     #[cfg(test)]
     pub(crate) fn is_taken(key: usize) -> bool {
-        TAKEN.with(|t| t.borrow().iter().any(|e| e.key == key))
+        TAKEN.with(|t| t.borrow().find(|e| e.key == key).is_some())
     }
 }

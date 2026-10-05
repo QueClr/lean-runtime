@@ -34,7 +34,8 @@
 # (src/io/startup_fds.rs: its unit tests, and the io twins with the crate's
 # constructor in place of the test glue's). tests/ctor_alloc.rs
 # (AR-36: no global allocator in the crate's constructors) runs wherever
-# `io` is on. Miri runs its own
+# `io` is on, tests/keyed_alloc.rs (AR-40: no allocation for a keyed claim
+# or take with no waiter) wherever `sched` is. Miri runs its own
 # configurations (below), which leave `stack-overflow` out: Miri cannot
 # model signal delivery. tests/sched-driver builds the crate with
 # `stack-overflow` (the twin of `tasks/stack_overflow_in_task`, the `so_*`

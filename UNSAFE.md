@@ -214,6 +214,8 @@ plumbing only:
   `unsafe impl GlobalAlloc` that forwards every call to `System`) and an ELF
   constructor of its own in plain `.init_array`, which records the count
   after the crate's constructors;
+- `tests/keyed_alloc.rs` (AR-40) has a counting global allocator too (it
+  forwards every call to `System`, and counts per thread);
 - `tests/sched-driver/src/glue.rs` is the glue a translator writes around
   `sched`:
   - its `Glue::suspend` dereferences the yielder pointer the scheduler hands

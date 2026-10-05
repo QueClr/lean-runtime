@@ -282,17 +282,85 @@ struct Keyed {
     waiters: Vec<CtxId>,
 }
 
+/// A thread's table of entries, each found by its key (the keyed table
+/// here, `ref_keyed`'s in `refs.rs`): the first `N` entries in places of
+/// their own, the others in a `Vec`. So a thread whose table never holds
+/// more than `N` entries at a time allocates nothing for it (AR-40:
+/// lean2rr's `main` thread claims constants, and the first claim's
+/// allocation of a `Vec` shifted the layout of its heap). The order of the
+/// entries is not kept: a key has at most one entry.
+pub(super) struct Table<E, const N: usize> {
+    inline: [Option<E>; N],
+    spill: Vec<E>,
+}
+
+impl<E, const N: usize> Table<E, N> {
+    pub(super) const fn new() -> Self {
+        Table {
+            inline: [const { None }; N],
+            spill: Vec::new(),
+        }
+    }
+
+    /// The number of entries.
+    pub(super) fn len(&self) -> usize {
+        self.inline.iter().filter(|e| e.is_some()).count() + self.spill.len()
+    }
+
+    /// The first entry `which` accepts.
+    pub(super) fn find(&self, which: impl Fn(&E) -> bool) -> Option<&E> {
+        self.inline
+            .iter()
+            .flatten()
+            .chain(&self.spill)
+            .find(|e| which(e))
+    }
+
+    /// The same, to change it.
+    pub(super) fn find_mut(&mut self, which: impl Fn(&E) -> bool) -> Option<&mut E> {
+        self.inline
+            .iter_mut()
+            .flatten()
+            .chain(&mut self.spill)
+            .find(|e| which(e))
+    }
+
+    /// Add `e` in the first free place, or at the end of the `Vec`.
+    pub(super) fn push(&mut self, e: E) {
+        match self.inline.iter_mut().find(|p| p.is_none()) {
+            Some(p) => *p = Some(e),
+            None => self.spill.push(e),
+        }
+    }
+
+    /// Take out the first entry `which` accepts.
+    pub(super) fn remove(&mut self, which: impl Fn(&E) -> bool) -> Option<E> {
+        if let Some(p) = self
+            .inline
+            .iter_mut()
+            .find(|p| p.as_ref().is_some_and(&which))
+        {
+            return p.take();
+        }
+        let k = self.spill.iter().position(which)?;
+        Some(self.spill.swap_remove(k))
+    }
+}
+
 thread_local! {
     /// The computations that have a runner in the table or a waiter: an
     /// entry lives from a keyed claim or the first wait to the value's
-    /// store (`done_keyed`). Usually empty, or one or two entries during a
-    /// constant's initialization, so the slow paths scan it.
-    static KEYED: RefCell<Vec<Keyed>> = const { RefCell::new(Vec::new()) };
+    /// store (`done_keyed`). Usually empty, or a few entries during a
+    /// constant's initialization (one per constant whose initialization
+    /// is in progress), so the slow paths scan it. Its first 8 entries need
+    /// no allocation (AR-40). It has a destructor (the waiter lists), so
+    /// it is gone at thread teardown (W6).
+    static KEYED: RefCell<Table<Keyed, 8>> = const { RefCell::new(Table::new()) };
     /// `KEYED`'s length, for the inline test of `done_keyed`.
     static KEYED_LEN: Cell<u32> = const { Cell::new(0) };
 }
 
-fn set_len(t: &[Keyed]) {
+fn set_len(t: &Table<Keyed, 8>) {
     let _ = KEYED_LEN.try_with(|n| n.set(t.len() as u32));
 }
 
@@ -302,7 +370,7 @@ fn keyed_wait(key: usize, me: CtxId) {
     let registered = KEYED
         .try_with(|t| {
             let mut t = t.borrow_mut();
-            match t.iter_mut().find(|e| e.key == key) {
+            match t.find_mut(|e| e.key == key) {
                 Some(e) => e.waiters.push(me),
                 None => {
                     t.push(Keyed {
@@ -352,7 +420,7 @@ pub extern "C" fn step_keyed(key: usize) -> bool {
     let me = me().unwrap_or(MAIN);
     let s = KEYED.try_with(|t| {
         let mut t = t.borrow_mut();
-        match t.iter_mut().find(|e| e.key == key) {
+        match t.find_mut(|e| e.key == key) {
             None => {
                 t.push(Keyed {
                     key,
@@ -413,8 +481,8 @@ pub extern "C" fn wait_running_keyed(key: usize) {
     let own = KEYED
         .try_with(|t| {
             t.borrow()
-                .iter()
-                .any(|e| e.key == key && e.runner == me.index())
+                .find(|e| e.key == key && e.runner == me.index())
+                .is_some()
         })
         .unwrap_or(false);
     if own {
@@ -442,8 +510,7 @@ extern "C" fn done_keyed_slow(key: usize) {
     let ws = KEYED
         .try_with(|t| {
             let mut t = t.borrow_mut();
-            let k = t.iter().position(|e| e.key == key)?;
-            let e = t.swap_remove(k);
+            let e = t.remove(|e| e.key == key)?;
             set_len(&t);
             Some(e.waiters)
         })
@@ -472,7 +539,7 @@ pub(crate) mod tests {
     /// The runner the keyed table records for `key`, and its waiters.
     pub(crate) fn keyed_entry(key: usize) -> Option<(Option<u32>, Vec<CtxId>)> {
         KEYED.with(|t| {
-            t.borrow().iter().find(|e| e.key == key).map(|e| {
+            t.borrow().find(|e| e.key == key).map(|e| {
                 (
                     (e.runner != NO_RUNNER).then_some(e.runner),
                     e.waiters.clone(),

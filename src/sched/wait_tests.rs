@@ -131,6 +131,38 @@ fn keyed_claims_with_odd_keys() {
     assert_eq!(keyed_len(), 0);
 }
 
+/// AR-40: the keyed table keeps 8 entries in places of its own and the
+/// others in a `Vec`. Claims nested past them (a constant whose
+/// initialization claims another, 20 deep) are each recorded; stores in
+/// any order remove each one, inline or not; later claims take the freed
+/// places. (`tests/keyed_alloc.rs` checks that the first 8 allocate
+/// nothing.)
+#[test]
+fn keyed_claims_past_the_inline_places() {
+    let key = |slot: usize| (slot << 1) | 1;
+    for s in 0..20 {
+        assert!(step_keyed(key(s)));
+        assert_eq!(keyed_len(), s as u32 + 1);
+    }
+    for s in 0..20 {
+        assert_eq!(keyed_entry(key(s)), Some((Some(MAIN.index()), vec![])));
+    }
+    for s in [3, 15, 0, 19, 7, 8, 11] {
+        done_keyed(key(s));
+        assert_eq!(keyed_entry(key(s)), None);
+    }
+    assert_eq!(keyed_len(), 13);
+    for s in 20..25 {
+        assert!(step_keyed(key(s)));
+    }
+    assert_eq!(keyed_len(), 18);
+    for s in 0..25 {
+        done_keyed(key(s));
+        assert_eq!(keyed_entry(key(s)), None);
+    }
+    assert_eq!(keyed_len(), 0);
+}
+
 /// Before the task manager runs, the claims and stores of constants and
 /// thunks, a reference's take and closing store, and a wake with no waiter
 /// build no scheduler state: a program that creates no tasks pays nothing
@@ -221,6 +253,49 @@ fn a_keyed_wait_wakes_at_done_keyed() {
         answers.push(step_keyed(key));
     }
     assert_eq!(answers, [false], "one wait, never a claim");
+    assert_eq!(keyed_len(), 0);
+    finish();
+}
+
+/// AR-40: the same wait for an entry the keyed table keeps in its `Vec`,
+/// past its 8 places: the waiter is recorded there, and `done_keyed` wakes
+/// it.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_keyed_wait_past_the_inline_places_wakes_at_done_keyed() {
+    start_test(1);
+    let inline = |s: usize| (s << 1) | 1;
+    for s in 0..8 {
+        assert!(step_keyed(inline(s)));
+    }
+    let key = (100 << 1) | 1;
+    set_keyed_runner(key, 1000);
+    let seen = Rc::new(RefCell::new(None));
+    let s2 = seen.clone();
+    let _store = spawn(
+        Box::new(move || {
+            *s2.borrow_mut() = Some(keyed_entry(key));
+            done_keyed(key);
+            Outcome::Done
+        }),
+        9,
+        true,
+    );
+    let mut answers = Vec::new();
+    while seen.borrow().is_none() {
+        answers.push(step_keyed(key));
+    }
+    assert_eq!(answers, [false], "one wait, never a claim");
+    assert_eq!(
+        *seen.borrow(),
+        Some(Some((Some(1000), vec![MAIN]))),
+        "the waiter recorded"
+    );
+    assert_eq!(keyed_entry(key), None);
+    assert_eq!(keyed_len(), 8);
+    for s in 0..8 {
+        done_keyed(inline(s));
+    }
     assert_eq!(keyed_len(), 0);
     finish();
 }
@@ -339,6 +414,34 @@ fn keyed_take_then_the_closing_store_in_the_same_frame() {
     ref_keyed::take(key);
     ref_keyed::put(key);
     assert!(!ref_keyed::is_taken(key));
+}
+
+/// AR-40: `ref_keyed`'s table keeps 4 entries in places of its own and the
+/// others in a `Vec`. Ten nested takes (a `modify` inside another's
+/// function, ten deep) are each recorded; closing stores and puts in any
+/// order close each one, inline or not; a later take takes a freed place.
+#[test]
+fn keyed_takes_past_the_inline_places() {
+    let key = |i: usize| (i + 1) * 64;
+    for i in 0..10 {
+        ref_keyed::take(key(i));
+    }
+    assert!((0..10).all(|i| ref_keyed::is_taken(key(i))));
+    for i in [1, 6, 0, 9] {
+        ref_keyed::put(key(i));
+    }
+    for i in [2, 8] {
+        assert!(ref_keyed::write_point());
+        ref_keyed::store(key(i));
+    }
+    let open = [3, 4, 5, 7];
+    assert!((0..10).all(|i| ref_keyed::is_taken(key(i)) == open.contains(&i)));
+    ref_keyed::take(key(10));
+    for i in open.into_iter().chain([10]) {
+        ref_keyed::store(key(i));
+    }
+    assert!((0..=10).all(|i| !ref_keyed::is_taken(key(i))));
+    assert!(!ref_keyed::write_point());
 }
 
 /// The frame: `main`'s outside any task is the same before and after the
