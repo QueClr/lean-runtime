@@ -3,5 +3,3 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs exit probes, 2026-10-03"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: the task runs at its creation, before main returns

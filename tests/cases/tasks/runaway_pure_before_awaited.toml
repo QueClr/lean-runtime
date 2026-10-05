@@ -4,7 +4,7 @@ lean_version = "4.34.0"
 source = "lean-runtime's deviation LSCHED-02 of the deferred model, from the fix of review AR-25, batch fixes-3"
 streams = "separate"
 expect = { hang = 3 }
-deviations = { lean_runtime = "LSCHED-02" }
+deviations = { lean_runtime = "LSCHED-02", leanrs = "DV26 (a)" }
 # `expected` is native's: the second worker finishes `q` and runs `t`, `main` prints, and the exit
 # waits for the runaway `p`. lean-runtime runs the oldest started pure task to free a worker for the
 # waiter, which is `p`, so nothing is printed before the hang: runaway_pure_before_awaited.alt1.*,

@@ -3,7 +3,7 @@ area = "refs"
 lean_version = "4.34.0"
 source = "docs/threads.md 3.1 (threads-design, 2026-10-04): native 4.34.0's swap of a reference that modify has taken; LB-18 (judge refs2, JR-2, 2026-10-04); upstream lean4 #14584 / PR #14585"
 streams = "separate"
-deviations = { lean2rr = "LB-18", leanrs = "LB-18; DV2" }
+deviations = { lean2rr = "LB-18", leanrs = "LB-18" }
 native = { stdout = "swap during modify returned: 100, at once\nafter modify: 1\n", stderr = "", code = "0" }
 # `expected` (the .out, .err and .code files) is the correct outcome,
 # written by hand: `swap` is atomic and returns the reference's previous
@@ -13,4 +13,3 @@ native = { stdout = "swap during modify returned: 100, at once\nafter modify: 1\
 # 1523-1540) gets its own argument back from the empty slot and returns
 # it at once, and modify's set overwrites it (LB-18). The values are
 # scalars, so native's run frees nothing it still uses.
-# leanrs DV2: the task runs at its creation, so it never interleaves with main's modify

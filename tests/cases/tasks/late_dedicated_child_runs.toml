@@ -3,5 +3,3 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "control for LB-13 (docs/lean-bugs.md; review RS1S-02 of sched-1, lean2rr-side judge, 2026-10-03)"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: the late task runs at its creation, before main returns

@@ -4,8 +4,7 @@ lean_version = "4.34.0"
 source = "LB-33 (docs/lean-bugs.md; lean2rr-side judge 2026-10-04, leanrs cross-check agreed; the judge's cases list, judge/lb33/LB-33.md); probe TimerMainThread.lean"
 streams = "separate"
 expect = { hang = 5 }
-deviations = { lean2rr = "LB-33", leanrs = "LB-33; DV2" }
-# leanrs: DV2 until it adopts sched/ (it refuses Std.Internal.UV's timers and signals at translation, so it has no executable for uvloop's cases).
+deviations = { lean2rr = "LB-33", leanrs = "LB-33" }
 native = { stdout = "0th tick: some\nstop: begin\ndependent 1: value none\nstop: end\ndependent runs: 1\nmain: end\n", stderr = "", code = "timeout" }
 # `expected` (the .out, .err and .code files) is the correct outcome: the
 # timer is finished before the promise is released (Lean master's `stop`,

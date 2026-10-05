@@ -3,5 +3,3 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs's review of lean-runtime's sched (AR-9, api-requests 2026-10-04), batch sched-3"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts sched

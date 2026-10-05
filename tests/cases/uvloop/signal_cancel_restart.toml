@@ -3,7 +3,5 @@ area = "uvloop"
 lean_version = "4.34.0"
 source = "sched-io Part B review RSIOB-04 (review-sched-io-b/repro/r4_signal_cancel_restart.lean)"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs: DV2 until it adopts sched/ (it refuses Std.Internal.UV's timers and signals at translation, so it has no executable for uvloop's cases).
 # The first argument is the native busy loop's length (about 2 s natively);
 # the second is the twin's, in ms (a pure computation of that duration).

@@ -3,5 +3,3 @@ area = "uvloop"
 lean_version = "4.34.0"
 source = "sched-io Part B review RSIOB-05 and leanrs R2 (review-sched-io-b/repro/r6_fds.lean)"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs: DV2 until it adopts sched/ (it refuses Std.Internal.UV's timers and signals at translation, so it has no executable for uvloop's cases).

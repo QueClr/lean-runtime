@@ -11,5 +11,3 @@ expect = { hang = 3 }
 # waiter of `r` wakes only when another task finishes (`resolve_core`'s
 # `notify_all`). Native's outcome is followed: not LB-32, which covers
 # `Promise.result!`'s permanent block only.
-deviations = { leanrs = "DV2" }
-# leanrs DV2: IO.Promise refused at translation

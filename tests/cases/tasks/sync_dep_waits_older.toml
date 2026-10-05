@@ -4,5 +4,3 @@ lean_version = "4.34.0"
 source = "review round 4 of lean-runtime sched-1 (probe SyncDepWaitsOlder.lean), 2026-10-04"
 streams = "separate"
 expect = { hang = 3 }
-deviations = { leanrs = "DV2" }
-# leanrs DV2: tasks run at their creation, so the wait finishes where native's never does

@@ -3,5 +3,3 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "lean2rr tests/runtime/RtTaskSyncDep.lean; requested by leanrs as a sched/ adoption gate (A830), 2026-10-03"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: tasks run at their creation, so the order of the dependents' output differs

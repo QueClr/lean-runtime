@@ -4,5 +4,3 @@ lean_version = "4.34.0"
 source = "our review of lean-runtime sched-4 at 6814ee1 (RS4-01, probe SyncSelfWait: a sync dependent's endless wait inside a walk freed the worker), 2026-10-04"
 streams = "separate"
 expect = { hang = 3 }
-deviations = { leanrs = "DV2" }
-# leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts sched

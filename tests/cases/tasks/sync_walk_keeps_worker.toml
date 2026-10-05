@@ -3,7 +3,5 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs's review of lean-runtime sched-4 (AR-16: a pool task's worker was free during its walk of sync dependents), 2026-10-04"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts sched
 # Native with LEAN_NUM_THREADS=20 (10 of 10): "B ran", "D done", "main done"; the driver's test
 # `sync_walk_keeps_worker_w20` checks the twin against it.

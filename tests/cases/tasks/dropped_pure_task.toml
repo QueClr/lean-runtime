@@ -11,5 +11,3 @@ streams = "separate"
 # here shows another native schedule, not a semantic error. It is the
 # adoption target for sched/.
 schedule_dependent = true
-deviations = { leanrs = "DV2" }
-# leanrs DV2: the runaway pure task runs at its creation, so the run never ends where native drops it

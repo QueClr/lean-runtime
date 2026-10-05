@@ -3,7 +3,5 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs's review of lean-runtime sched-3 (AR-9/AR-10 at b72ab2b: waitAny ran a task inline while a listed task had finished without a notification yet), 2026-10-04"
 streams = "separate"
-deviations = { leanrs = "DV2" }
-# leanrs DV2: tasks beyond its eager model are refused or run at once until it adopts sched
 # Native gives the same outcome with LEAN_NUM_THREADS 2 and 20 (leanrs's probe, 10 of 10 each);
 # the driver's test `wait_any_finished_unnotified_w20` runs the twin with 20.
