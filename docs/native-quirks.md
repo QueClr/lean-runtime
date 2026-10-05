@@ -497,9 +497,12 @@ handler:
   thread's key (the address of its `errno`), the guard below its own stack
   (`pthread_getattr_np`, as Lean computes it), and the guard of the context
   running on it. A thread's `Registration`, a thread-local with a
-  destructor, frees the record for reuse when the thread ends, and gives
-  the crate's alternate stack, if it made one, back to a free list for the
-  next registration (I6, review RT1-03). The table
+  destructor, frees the record for reuse when the thread ends. In threads
+  mode only, it also gives the crate's alternate stack, if it made one,
+  back to a free list for the next registration (I6, review RT1-03). With
+  `sched`, a registered thread ends only at the exit, so a block stays
+  with its thread, and a `sched` build compiles the code of fb8f548 there
+  (review AR-30: no `unsafe` that nothing needs). The table
   is a list of chunks of 64 records: a thread that finds every record taken
   appends a chunk (`OnceLock<Box<Chunk>>`, allocated at registration, never
   freed), so the table grows with the number of live registered threads,
@@ -545,6 +548,14 @@ All are in `src/sched/stack_overflow.rs`:
   mask before restored).
 - **U14.** `sigaltstack` with `SS_DISABLE`, at a thread's end, before its
   block goes to the free list (review RT1-03); U11's query comes first.
+  Threads mode only (feature `threads`, review AR-30).
+
+Which items each mode compiles (review AR-30): with `sched`, U1 to U13,
+and I6 without its free list; with `threads`, U1 to U14, and I6 with its
+free list. The free list (`FREE_ALTSTACKS`, `give_back_altstack`, the
+thread-local `OWN_ALTSTACK`) and its reuse in `ensure_altstack` (an
+address exposed with `expose_provenance` and taken back with
+`with_exposed_provenance_mut`) exist only with `threads`.
 
 ### What it relies on
 
@@ -633,7 +644,9 @@ All are in `src/sched/stack_overflow.rs`:
   calls `ensure_altstack` before it claims the record. An alternate stack
   the crate makes is `AT_MINSIGSTKSZ` (the kernel's largest signal frame on
   this machine, at least `SIGSTKSZ`) plus 64 KiB, a heap block kept for the
-  life of the process, never referenced by Rust code. **A block is the
+  life of the process, never referenced by Rust code. With `sched`, each
+  block is made for one thread and stays its alternate stack (as at
+  fb8f548). In threads mode only (review AR-30), **a block is the
   alternate stack of at most one live thread** (review RT1-03): a new one,
   or one taken from the free list (`FREE_ALTSTACKS`), which holds only
   blocks that no thread has as its alternate stack. A thread puts its block
@@ -773,18 +786,19 @@ All are in `src/sched/stack_overflow.rs`:
   and only then restored.
 - **U11** passes a null new stack and a `MaybeUninit<stack_t>` to write,
   read only on success. **U12** gives the kernel `size` bytes of a block
-  allocated for that and leaked (`Box::into_raw`), or of such a block from
-  the free list: valid for the rest of the process, no Rust reference
-  points into it, so the kernel's writes alias nothing, and no other thread
-  has it as its alternate stack (I6). It is set only when the thread had no
-  alternate stack (`SS_DISABLE`), so the thread does not run on one at that
-  moment. A block whose `sigaltstack` fails goes back to the free list.
-- **U14** (RT1-03) disables the calling thread's alternate stack in its
-  `Registration`'s destructor, outside any handler, after U11 showed that
-  the block is the current one and that the thread does not run on it
-  (`SS_ONSTACK` clear). Disabling hands the kernel no memory. From then on
-  the kernel delivers no signal of this thread on the block, so another
-  thread may take it from the free list (I6).
+  allocated for that and leaked (`Box::into_raw`), or, in threads mode, of
+  such a block from the free list: valid for the rest of the process, no
+  Rust reference points into it, so the kernel's writes alias nothing, and
+  no other thread has it as its alternate stack (I6). It is set only when
+  the thread had no alternate stack (`SS_DISABLE`), so the thread does not
+  run on one at that moment. In threads mode, a block whose `sigaltstack`
+  fails goes back to the free list.
+- **U14** (RT1-03, threads mode only) disables the calling thread's
+  alternate stack in its `Registration`'s destructor, outside any handler,
+  after U11 showed that the block is the current one and that the thread
+  does not run on it (`SS_ONSTACK` clear). Disabling hands the kernel no
+  memory. From then on the kernel delivers no signal of this thread on the
+  block, so another thread may take it from the free list (I6).
 
 ### What is outside the proof, as natively
 
@@ -808,8 +822,9 @@ All are in `src/sched/stack_overflow.rs`:
 - **Another handler installed later** (by the program or a library)
   replaces `on_fault`; the report is then that handler's business.
 - **The alternate stacks the crate makes** are kept for the life of the
-  process and reused: one per registered thread that had none, given back
-  to a free list when the thread ends (I6, review RT1-03). A thread has
+  process: one per registered thread that had none. In threads mode they
+  are given back to a free list when the thread ends, and reused (I6,
+  review RT1-03); with `sched`, a registered thread ends only at the exit. A thread has
   none when std installed no handler at its runtime start, so it spawns its
   threads without one: a C-style entry (lean2rr's `leanrt`), SIGSEGV or
   SIGBUS ignored when the program started, or another handler installed
@@ -839,7 +854,10 @@ All are in `src/sched/stack_overflow.rs`:
   before the crate's: one `prev`, then 139, as without the crate).
 - The unit tests in `stack_overflow.rs`: the guard arithmetic, a record
   covering both guards (the window, A3), and a registered thread's record,
-  alternate stack and release at its end.
+  alternate stack and release at its end; in threads mode only, the reuse
+  of the alternate stacks (`ended_threads_give_their_alternate_stacks_back`,
+  review RT1-03). `scripts/check.sh` runs them with `sched,stack-overflow`
+  and with `threads` and `stack-overflow` (review AR-30).
 - Mutation checks (2026-10-04): forwarding always to the default fails
   `so_rust_thread_overflow`; no publication fails
   `stack_overflow_in_task` and `so_task_overflow_after_switches`; no
