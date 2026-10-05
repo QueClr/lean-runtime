@@ -3,3 +3,6 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "lean2rr's step-5 review RS5-04, lean-runtime review AR-37 (fixes-5): a pool task and a dedicated task started after it had the same IO.getTID on the single-thread scheduler"
 streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: IO.getTID refused at translation (leanrs chapter 02 R30/D28: every task runs on the
+# program's one OS thread, so a thread id would not tell tasks apart)
