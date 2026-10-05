@@ -3,3 +3,7 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "lean2rr's judge of the wait cores' design, question L4 (nested-free order of dropped promises, 2026-10-05; review-step4 RS4-10): a step-4 regression of lean2rr, fixed by core 3.3's R5"
 streams = "separate"
+deviations = { leanrs = "DV11" }
+# leanrs DV11: leanrs drops an array's elements first to last, so part 2's #[pB, pA] frees pB
+# first and prints B, C, A where native (last to first, lean_del_core's LIFO todo stack) prints
+# C, A, B; the crate's guarantee "pC before pB iff pA before pB" still holds.
