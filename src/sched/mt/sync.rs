@@ -10,10 +10,13 @@
 //! object keeps its state under a lock of its own (never held together with
 //! another object's, a `Ref`'s or the scheduler's), so every method may be
 //! called from any thread. The rules are sched-1's:
-//! - the owner of a lock is a thread: the OS thread, and whether the task
-//!   manager ran when it locked (natively the module initializers run on
-//!   the process's main thread, and `main` on a thread of its own,
-//!   `lean_run_main`);
+//! - the owner of a lock is the OS thread (natively the module initializers
+//!   run on the process's first thread, and `main` on a thread of its own,
+//!   `lean_run_main`, or on the same thread with `LEAN_MAIN_USE_THREAD=0`).
+//!   Before AR-39 (lean2rr's review RS7-02) it also held whether the task
+//!   manager ran when it locked, so that, with workers, `main` on the
+//!   initializers' thread waited for good for a recursive mutex an
+//!   initializer kept locked, which natively it locks again;
 //! - locking a `BaseMutex` that the same thread holds waits forever, as
 //!   glibc's does; unlocking one that the caller does not hold just unlocks
 //!   it;
@@ -35,7 +38,6 @@ use std::sync::{Condvar as StdCondvar, Mutex as StdMutex, MutexGuard, PoisonErro
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Owner {
     thread: u64,
-    started: bool,
 }
 
 /// A number for each OS thread, from a process-wide counter (0 while the
@@ -51,7 +53,6 @@ fn thread_tag() -> u64 {
 fn me() -> Owner {
     Owner {
         thread: thread_tag(),
-        started: super::manager_running(),
     }
 }
 

@@ -1361,6 +1361,47 @@ fn a_recursive_mutex_counts_its_owner() {
     finish();
 }
 
+/// AR-39 (lean2rr's review RS7-02): a lock's owner is the OS thread. An
+/// initializer keeps a recursive mutex locked before the task manager runs:
+/// `main` on the same OS thread (`LEAN_MAIN_USE_THREAD=0`) locks it again
+/// after `start`, and another OS thread (`main` on a thread of its own)
+/// cannot take it, with workers and with none, as natively. Before AR-39 the
+/// owner also held whether the task manager ran, so with workers the
+/// relock on the same thread waited for good.
+#[test]
+fn a_recursive_lock_is_the_os_threads_across_the_start() {
+    let _s = serial();
+    for workers in [2, 0] {
+        std::thread::spawn(move || {
+            // the initializers
+            let m = Arc::new(RecursiveMutex::new());
+            m.lock();
+            // `main`, on the initializers' thread
+            start_test(workers);
+            assert!(m.try_lock(), "workers {workers}");
+            m.lock();
+            // `main` on a thread of its own
+            let other = m.clone();
+            std::thread::spawn(move || assert!(!other.try_lock(), "workers {workers}"))
+                .join()
+                .unwrap();
+            for _ in 0..3 {
+                m.unlock();
+            }
+            let other = m.clone();
+            std::thread::spawn(move || {
+                assert!(other.try_lock(), "workers {workers}");
+                other.unlock();
+            })
+            .join()
+            .unwrap();
+            finish();
+        })
+        .join()
+        .unwrap();
+    }
+}
+
 #[test]
 fn a_shared_mutex_lets_readers_share_and_writers_exclude() {
     let _s = serial();

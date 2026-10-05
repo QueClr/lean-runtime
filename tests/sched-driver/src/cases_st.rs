@@ -132,6 +132,10 @@ pub fn lookup(id: &str) -> Option<Case> {
         "adv_block_in_drop_during_unwind" => (no_init, adv_block_in_drop_during_unwind),
         "adv_panic_in_sync_dep_of_drop" => (no_init, adv_panic_in_sync_dep_of_drop),
         "adv_exit_from_task" => (no_init, adv_exit_from_task),
+        // Not a case of `tests/cases`: AR-39 (lean2rr's review RS7-02), an
+        // initializer keeps a recursive mutex locked and `main` locks it
+        // again on the same OS thread.
+        "rs7_init_reclock" => (rs7_init_reclock_init, rs7_init_reclock),
         // tests/cases/net: networking (net-1)
         _ => return crate::netcases::lookup(id),
     })
@@ -159,6 +163,74 @@ fn rust_panic_through_effect(_: &[String]) -> u32 {
     // (`STALE` is 5), so the effect point lets it go first
     std::thread::sleep(std::time::Duration::from_millis(10));
     eprintln("not reached");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// AR-39 (lean2rr's review RS7-02, its probe `RS7Init` with `RS7=reclock`): a
+// lock's owner is the OS thread, not whether the scheduler has started. Not
+// a case of `tests/cases`: natively the outcome depends on
+// `LEAN_MAIN_USE_THREAD` (on a thread of its own, `main` waits forever), and
+// this glue runs `main` on the initializers' thread, as
+// `LEAN_MAIN_USE_THREAD=0` does natively.
+//
+// initialize held : BaseRecursiveMutex ← do
+//   let r ← BaseRecursiveMutex.new
+//   r.lock
+//   pure r
+//
+// def tryInTask (what : String) : IO Unit := do
+//   let t ← IO.asTask (prio := .dedicated) do
+//     let ok ← held.tryLock
+//     IO.println s!"{what}: {ok}"
+//     if ok then held.unlock
+//   let _ ← IO.wait t
+//
+// def main : IO Unit := do
+//   IO.println s!"main tryLock: {← held.tryLock}"
+//   held.lock
+//   IO.println "main has the lock"
+//   tryInTask "task tryLock"
+//   held.unlock; held.unlock; held.unlock
+//   tryInTask "task tryLock after the unlocks"
+
+thread_local! {
+    static HELD: std::cell::RefCell<Option<Obj<lean_runtime::sched::sync::RecursiveMutex>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn rs7_init_reclock_init() {
+    let r = Obj::new(lean_runtime::sched::sync::RecursiveMutex::new());
+    r.lock();
+    HELD.with(|h| *h.borrow_mut() = Some(r));
+}
+
+fn rs7_init_reclock(_: &[String]) -> u32 {
+    let held = HELD
+        .with(|h| h.borrow().clone())
+        .expect("the initializer ran");
+    let try_in_task = |what: &'static str| {
+        let h = held.clone();
+        as_task(
+            move || {
+                let ok = h.try_lock();
+                println(&format!("{what}: {ok}"));
+                if ok {
+                    h.unlock();
+                }
+            },
+            PRIO_DEDICATED,
+        )
+        .get()
+    };
+    println(&format!("main tryLock: {}", held.try_lock()));
+    held.lock();
+    println("main has the lock");
+    try_in_task("task tryLock");
+    held.unlock();
+    held.unlock();
+    held.unlock();
+    try_in_task("task tryLock after the unlocks");
     0
 }
 

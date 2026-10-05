@@ -1086,11 +1086,12 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      `sched_started()` is false (so `current_context()` is not needed: it
      is `MAIN`), and `finish()` builds nothing. At the start, `ST.Ref`
      reads become polling points (`set_ref_read_yields(true)`). Every
-     `Std.Sync` operation in `main` starts it first, so a lock's owner is
-     the same thread before and after `main`'s first task (lean2rr's
-     review RS4-05). Single-thread scheduler only (threads mode starts
-     eagerly). `tests/sched-driver`'s `lazy_start_cases` runs cases
-     through it, one per kind of entry point.
+     `Std.Sync` operation starts it first, since a wait needs the
+     scheduler's contexts. A lock's owner does not depend on the start
+     (item 6): `main` is the same owner before and after its first task
+     (lean2rr's review RS4-05). Single-thread scheduler only (threads
+     mode starts eagerly). `tests/sched-driver`'s `lazy_start_cases` runs
+     cases through it, one per kind of entry point.
    - `set_ref_read_yields(true)` if the program creates tasks (the lazy
      start does it itself).
    - Run `main`, with a scheduler as Lean's `lean_run_main` does if the
@@ -1288,6 +1289,24 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    `SharedMutex` in the translator's handle for `BaseMutex` & co.
    `Std.Channel`, `Barrier`, `Semaphore` and the rest of `Std.Sync` are Lean
    code over these and promises. They need nothing more.
+
+   The owner of a lock is a thread: the OS thread, the context on that
+   thread's scheduler, and the thread number of the innermost task running
+   on the context (`sched::sync`'s module comment). The OS thread tells the
+   module initializers from `main` as natively: a `BaseRecursiveMutex` an
+   initializer keeps locked is `main`'s to lock again when `main` runs on
+   the initializers' thread (`LEAN_MAIN_USE_THREAD=0`, or a glue without
+   `run_main`), and `main` waits for it forever on `run_main`'s thread of
+   its own (with no other context, `hang_thread`: no panic). Before AR-39
+   (lean2rr's review RS7-02) the owner held whether the scheduler had
+   started instead of the OS thread, which was wrong both ways: with
+   workers, `main` on the initializers' thread waited for good; with
+   `LEAN_NUM_THREADS=0`, `main` on its own thread took the lock. Threads
+   mode had the same flag next to its OS thread, and dropped it too. Unit
+   tests `a_recursive_lock_is_the_os_threads_across_the_start`,
+   `a_recursive_lock_from_another_os_thread_waits` and
+   `relocking_from_another_os_thread_hangs`; driver case
+   `rs7_init_reclock`.
 7. **Waits of the glue's own objects.** The crate's wait cores do them
    ("The wait cores", core 3.1): a thunk or a static with room for 4 bytes
    holds a `Gate` (`step`, then `finish`, which makes the writers point

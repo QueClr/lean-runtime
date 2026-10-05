@@ -276,10 +276,11 @@ type LazyStart = (Rc<dyn Glue>, u32, usize);
 ///   ([`set_ref_read_yields`]`(true)`): before it no other context exists,
 ///   so no read needs to poll (decisions Q5 refinement B, decided when the
 ///   program first needs a scheduler);
-/// - `Std.Sync`'s lock owners tell an initializer's thread from `main`'s by
-///   the scheduler having started, so every operation in `main` starts it
-///   first: an object an initializer made, locked by `main` before its first
-///   task and again after it, has one owner (lean2rr's review RS4-05).
+/// - `Std.Sync`'s operations start it too, since a wait needs the
+///   scheduler's contexts; a lock's owner does not depend on the start (it
+///   names the OS thread, `sync`'s module comment, AR-39), so an object an
+///   initializer made, locked by `main` before its first task and again
+///   after it, has one owner (lean2rr's review RS4-05).
 ///
 /// Call it on the thread that runs `main` (inside `io::startup::run_main`'s
 /// body, with `main` and `finish`: the state is this thread's), after the

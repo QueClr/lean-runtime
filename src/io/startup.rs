@@ -663,11 +663,18 @@ fn main_uses_thread(lean_main_use_thread: Option<&[u8]>) -> bool {
 /// - When it cannot be made, the process aborts with libc++'s report of
 ///   Lean's uncaught `failed to create thread: <strerror>`
 ///   ([`crate::sched::thread_create_failed`]; status 134).
-/// - `body`'s value is returned; `Err` holds the payload of a Rust panic
-///   that ended `body` (a runtime bug: Lean code does not panic in Rust),
-///   on its thread or on the calling one, after the panic hook printed it.
-///   The glue decides how to end then (lean2rr: exit status 101, its streams
-///   written, as a Rust program).
+/// - `body`'s value is returned. A Rust panic (a bug of the runtime or of
+///   the translator: Lean code does not panic in Rust) comes back as `Err`,
+///   with its payload, only when it unwinds out of `body` through frames
+///   that can unwind, on `main`'s thread or on the calling one, after the
+///   panic hook printed it; the glue decides how the process ends then. A
+///   panic in frames that cannot unwind (a translator's generated
+///   `extern "C"` code, the crate's own `extern "C"` points) aborts the
+///   process where it happens, before `run_main` sees it: status 134
+///   (`SIGABRT`), with the bytes buffered in the standard streams not
+///   written. On a thread of its own, the panic hook's header names the
+///   thread `'<unnamed>'`, as the thread has no name (as native's
+///   `lthread`); with `LEAN_MAIN_USE_THREAD=0` it names the calling thread.
 /// - [`main_on_thread`] says which thread `body` runs on.
 ///
 /// The caller's duties:

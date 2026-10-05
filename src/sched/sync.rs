@@ -16,35 +16,70 @@
 //! forever, and unlocking one that is not locked by the caller just unlocks
 //! it. A released mutex is handed to the thread that has waited longest.
 //!
+//! The owner also names the OS thread the scheduler runs on (`os_thread`):
+//! natively the module initializers run on the process's first thread and
+//! `main` on a thread of its own (`lean_run_main`; a translator's
+//! `io::startup::run_main`), or on the same thread with
+//! `LEAN_MAIN_USE_THREAD=0`, and each OS thread has a scheduler of its own.
+//! So a `BaseRecursiveMutex` an initializer keeps locked is `main`'s to lock
+//! again only when `main` runs on the initializers' thread; on a thread of
+//! its own, `main` waits for it forever, as natively (AR-39, lean2rr's review
+//! RS7-02). Before AR-39 the owner held whether the scheduler had started
+//! instead, which got both cases wrong: `main` on the initializers' thread,
+//! with workers, waited for good, and on a thread of its own with
+//! `LEAN_NUM_THREADS=0` it took the lock.
+//!
 //! The objects are plain values; the glue keeps each in its own handle (an
 //! `Rc`, or the translator's external object) and calls these methods with
 //! it. Each method starts the scheduler first if [`super::start_lazy`] is
-//! waiting for it (`ensure_started`): a lock's owner records whether the
-//! scheduler has started, which tells an initializer's thread from `main`'s,
-//! so every operation in `main` must see it started (lean2rr's review
-//! RS4-05). A separate module, so that a translator can admit `Std.Sync` on
-//! its own (decisions Q8).
+//! waiting for it (`ensure_started`), since a wait needs the scheduler's
+//! contexts. A lock's owner does not depend on the start: `main`'s thread is
+//! the same OS thread and the same context before and after it, so a
+//! recursive mutex locked by `main` before its first task and again after it
+//! has one owner (lean2rr's review RS4-05). A separate module, so that a
+//! translator can admit `Std.Sync` on its own (decisions Q8).
 
 use super::{block_sync, current_context, wake, with, CtxId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The thread that runs now (see the module comment): a context, the thread
-/// of the innermost task running on it, and whether `main` has started
-/// (module initializers run before the task manager, on another thread than
-/// `main` natively).
+/// The thread that runs now (see the module comment): the OS thread, the
+/// context on its scheduler, and the thread of the innermost task running
+/// on that context.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Owner {
+    os: u64,
     ctx: CtxId,
     thread: u64,
-    started: bool,
 }
 
 fn me() -> Owner {
+    let os = os_thread();
     with(|s| Owner {
+        os,
         ctx: s.cx.cur,
         thread: s.cur_thread(),
-        started: s.tk.started,
+    })
+}
+
+/// A number naming the calling OS thread, from a process-wide counter at
+/// the thread's first call: a thread-local load after that, no allocation
+/// (`std::thread::current()` would clone an `Arc`). The local is a constant
+/// with no destructor, so it can be read at any time, while the thread's
+/// locals are being destroyed included. Numbers are not reused.
+fn os_thread() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    thread_local! {
+        static OS_THREAD: Cell<u64> = const { Cell::new(0) };
+    }
+    OS_THREAD.with(|t| match t.get() {
+        0 => {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            t.set(n);
+            n
+        }
+        n => n,
     })
 }
 

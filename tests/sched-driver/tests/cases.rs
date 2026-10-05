@@ -194,6 +194,41 @@ fn adv_exit_from_task() {
     assert!(got.out.is_empty());
 }
 
+/// AR-39 (lean2rr's review RS7-02): an initializer keeps a recursive mutex
+/// locked and `main`, on the same OS thread (this glue's, as
+/// `LEAN_MAIN_USE_THREAD=0` natively), locks it again: with workers (the
+/// eager start and the lazy one) a dedicated task cannot take it, and can
+/// once `main` has unlocked it three times; with `LEAN_NUM_THREADS=0` the
+/// tasks run at once on `main`'s thread, so the first takes it too. Before
+/// AR-39 the owner held whether the scheduler had started, and with workers
+/// `main`'s `tryLock` was false and its `lock` waited for good.
+#[test]
+fn rs7_init_reclock() {
+    let env = |kv: &[(&str, &str)]| -> Vec<(String, String)> {
+        kv.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let with_workers = "main tryLock: true\nmain has the lock\ntask tryLock: false\n\
+                        task tryLock after the unlocks: true\n";
+    let no_workers = "main tryLock: true\nmain has the lock\ntask tryLock: true\n\
+                      task tryLock after the unlocks: true\n";
+    for (kv, want) in [
+        (&[][..], with_workers),
+        (&[("SCHED_DRIVER_LAZY", "1")][..], with_workers),
+        (&[("LEAN_NUM_THREADS", "0")][..], no_workers),
+        (
+            &[("LEAN_NUM_THREADS", "0"), ("SCHED_DRIVER_LAZY", "1")][..],
+            no_workers,
+        ),
+    ] {
+        let got = run_with("rs7_init_reclock", &[], &env(kv), Some(10), false);
+        assert_eq!(got.code, "0", "{kv:?}: stderr {:?}", err_of(&got));
+        assert_eq!(out_of(&got), want, "{kv:?}");
+        assert!(got.err.is_empty(), "{kv:?}: stderr {:?}", err_of(&got));
+    }
+}
+
 /// RNET-01 of net-1's review: a receive's allocation that ends the process
 /// (Lean's internal panic, an effect point) while a task uses the same
 /// socket ends it as native does, not with a Rust panic.

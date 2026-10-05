@@ -204,8 +204,10 @@ fn the_lazy_start_comes_with_std_sync() {
 
 /// lean2rr's review RS4-05: a recursive mutex made by an initializer
 /// (before `start_lazy`), locked by `main` before its first task and again
-/// after it, has one owner: its first lock in `main` starts the scheduler,
-/// so both locks are the same thread's and the nested one does not wait.
+/// after it, has one owner, so the nested lock does not wait: `main`'s OS
+/// thread and context are the same before the lazy start and after it
+/// (AR-39; before AR-39 the owner held whether the scheduler had started,
+/// and the first lock in `main` had to start it).
 #[test]
 fn std_sync_in_main_starts_it_first() {
     let _t = lazy_test();
@@ -222,6 +224,162 @@ fn std_sync_in_main_starts_it_first() {
     wait(a);
     assert_eq!(entries(&l), ["a"]);
     finish();
+}
+
+/// How `main` starts the scheduler in the owner tests (AR-39): lazily or at
+/// once, with workers or with none (`LEAN_NUM_THREADS=0`).
+const STARTS: [(bool, u32); 4] = [(true, 2), (true, 0), (false, 2), (false, 0)];
+
+fn start_main(lazy: bool, workers: u32) {
+    if lazy {
+        start_lazy_test(workers);
+    } else {
+        start_test(workers);
+    }
+}
+
+/// AR-39 (lean2rr's review RS7-02, two of its four shapes): a lock's owner
+/// is the OS thread, not whether the scheduler has started. An initializer
+/// keeps a recursive mutex locked, and `main` runs on the same OS thread
+/// (`LEAN_MAIN_USE_THREAD=0`): it locks the mutex again, with workers and
+/// with none, after a lazy start and after an eager one, as natively. Before
+/// AR-39, with workers, `main`'s `try_lock` failed and its `lock` waited for
+/// good.
+#[test]
+fn a_recursive_lock_is_the_os_threads_across_the_start() {
+    let _t = lazy_test();
+    for (lazy, workers) in STARTS {
+        // each on a thread of its own: the scheduler's state is the thread's
+        std::thread::spawn(move || {
+            // the initializers
+            let m = RecursiveMutex::new();
+            m.lock();
+            assert!(!sched_started());
+            // `main`, on the initializers' thread
+            start_main(lazy, workers);
+            assert!(m.try_lock(), "lazy {lazy}, workers {workers}");
+            assert!(sched_started());
+            m.lock();
+            for _ in 0..3 {
+                m.unlock();
+            }
+            // free again: a dedicated task (another thread) takes it
+            let took = Rc::new(Cell::new(false));
+            let t = spawn(
+                Box::new({
+                    let (m, took) = (Rc::new(m), took.clone());
+                    move || {
+                        took.set(m.try_lock());
+                        Outcome::Done
+                    }
+                }),
+                9,
+                true,
+            );
+            wait(t);
+            assert!(took.get(), "lazy {lazy}, workers {workers}");
+            finish();
+        })
+        .join()
+        .unwrap();
+    }
+}
+
+/// AR-39, the other two shapes: an initializer on the process's first
+/// thread keeps a recursive mutex locked, and `main` runs on a thread of its
+/// own (`run_main`): the mutex is another thread's, with workers and with
+/// none, as natively. Before AR-39, with no workers, `main` took it (both
+/// owners were `main`'s context of a scheduler with no task manager).
+/// `relocking_from_another_os_thread_hangs` shows `main`'s `lock` waiting.
+#[test]
+fn a_recursive_lock_from_another_os_thread_waits() {
+    let _t = lazy_test();
+    for (lazy, workers) in STARTS {
+        // the initializers, on a thread that then ends (the object is
+        // `Send`: plain data)
+        let m = std::thread::spawn(|| {
+            let m = RecursiveMutex::new();
+            m.lock();
+            m
+        })
+        .join()
+        .unwrap();
+        std::thread::spawn(move || {
+            start_main(lazy, workers);
+            assert!(!m.try_lock(), "lazy {lazy}, workers {workers}");
+            assert!(sched_started());
+        })
+        .join()
+        .unwrap();
+    }
+}
+
+/// AR-39: `main` on a thread of its own with no workers
+/// (`LEAN_NUM_THREADS=0`) locks a recursive mutex that an initializer, on
+/// another OS thread, keeps locked: it waits forever, as natively (a
+/// deadlock). With no other context the hub has nothing to run, and the
+/// thread sleeps for good (`hang_thread`): no Rust panic, and nothing
+/// printed. Before AR-39 it took the lock. In a child process, which the
+/// test kills.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn relocking_from_another_os_thread_hangs() {
+    const CHILD: &str = "LEAN_RUNTIME_TEST_RELOCK_HANGS";
+    if std::env::var_os(CHILD).is_some() {
+        let m = std::thread::spawn(|| {
+            let m = RecursiveMutex::new();
+            m.lock();
+            m
+        })
+        .join()
+        .unwrap();
+        std::thread::spawn(move || {
+            start_lazy_test(0);
+            println!("main locks");
+            m.lock();
+            println!("main took the lock");
+        })
+        .join()
+        .unwrap();
+        return;
+    }
+    use std::io::{BufRead, Read};
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sched::tests::relocking_from_another_os_thread_hangs",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut seen = String::new();
+    while !seen.contains("main locks\n") {
+        let n = out.read_line(&mut seen).unwrap();
+        assert!(n > 0, "the child ended before its lock; stdout {seen:?}");
+    }
+    // a lock that does not wait returns at once: the child would print and
+    // end well within this
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let still = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let _ = child.wait();
+    out.read_to_string(&mut seen).unwrap();
+    let mut err = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    assert!(still, "the child ended: stdout {seen:?}, stderr {err:?}");
+    assert!(!seen.contains("main took the lock"), "stdout {seen:?}");
+    assert!(!err.contains("panicked"), "stderr {err:?}");
 }
 
 /// With no workers (`LEAN_NUM_THREADS=0`) nothing is deferred: tasks run
