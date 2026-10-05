@@ -54,24 +54,65 @@
 //!   (LB-20 not copied), and a failed `next` holds no extra reference (LB-19
 //!   not copied), as in the single-thread `sched::uv` (docs/sched.md).
 //!
-//! **Lock order.** The loop lock first. Under it: a handle's state lock and
-//! the loop's `data` lock, each held only for plain data and never across a
-//! promise's resolution or drop (a handle's state lock may be held while
-//! `data` is taken, never the other way); and, through translator code (a
-//! promise's `new`, `resolve` and drop, and the `sync` dependents they run),
-//! the scheduler's lock, the stream locks, `CWD_LOCK` and `uv_signals`'
-//! locks. Nothing holding one of those takes the loop lock, except
-//! translator code that the loop lock's holder runs itself (recursive, the
-//! same thread). So a `sync` dependent on the loop thread that waits for a
-//! task which calls an extern on another thread waits for good, as natively
-//! (the loop thread holds the lock meanwhile). A glue must not call an
-//! extern while it holds a stream's guard (`io::Handle::file()`).
+//! **Lock order.** The loop lock first. Under it: a handle's state lock (a
+//! timer's, a signal watcher's, with `net` a socket's) and the loop's `data`
+//! lock, each held only for plain data and never across a promise's
+//! resolution or drop (a handle's state lock may be held while `data` is
+//! taken, never the other way); and, through translator code (a promise's
+//! `new`, `resolve` and drop, and the `sync` dependents they run), the
+//! scheduler's lock, the stream locks, `CWD_LOCK` and `uv_signals`' locks.
+//! Nothing holding one of those takes the loop lock, except translator code
+//! that the loop lock's holder runs itself (recursive, the same thread). So a
+//! `sync` dependent on the loop thread that waits for a task which calls an
+//! extern on another thread waits for good, as natively (the loop thread
+//! holds the lock meanwhile). A glue must not call an extern while it holds a
+//! stream's guard (`io::Handle::file()`), nor drop a socket's last handle
+//! then: the drop is Lean's finalizer, which takes the loop lock.
+//!
+//! With `net`, the leaf locks (held only around plain data, taking no other
+//! lock): the async queue's (`posted`, taken without the loop lock too), and
+//! `net`'s registry of open sockets, its table of lookups in progress and
+//! its spare descriptor (`mode_mt`'s `SOCKETS` and `PENDING`, `tcp`'s
+//! `EMFILE_FD`). A socket's state lock is taken only under the loop lock;
+//! the translator code that runs under it is the glue's `SendData::get` and
+//! `RecvBuf::target`, which only hand out bytes: they call nothing of the
+//! crate, take no lock, never wait and drop no translator value.
 //!
 //! **Signals**: one delivery for the process (docs/threads.md, 3.2). The
 //! handlers, the pipe and the counts are `super::super::uv_signals`, shared
 //! with the single-thread scheduler; the watchers that listen are one list
 //! here, the loop's, so a signal reaches the watchers started on any thread,
 //! as libuv's one loop delivers to all of its handles.
+//!
+//! **Networking** (feature `net`, docs/threads.md 0.7): the loop thread also
+//! runs libuv's io watchers for `net`'s sockets ([`watch`]: an epoll
+//! instance polled with the eventfd and the signal pipe), libuv's pending
+//! queue ([`pending`], `uv__io_feed`) and an async queue ([`post`]: the
+//! thread pool's completions, `uv_async_send`), in libuv's order within an
+//! iteration (`uv_run`, `uv__io_poll`): the pending callbacks; the poll; the
+//! io callbacks (batches of up to 1024 events, again while a batch comes
+//! back full, at most 48 batches, one when a signal came), then the async
+//! queue, then the signals ("Run signal watchers last", `linux.c`); the
+//! pending callbacks again (at most 8 rounds); the timers. With a pending
+//! callback at the start of the iteration, the poll does not wait (libuv's
+//! `can_sleep`). libuv's async watcher is one more io watcher, called in
+//! epoll's order among the sockets' events; here the async queue runs
+//! after all of them, which is one of the orders epoll can give.
+//!
+//! **After the task manager's finalization** (`sched::finish` has
+//! returned), the loop thread runs no callback any more: no timer, signal,
+//! socket, pending or async callback, so no promise resolves (natively one
+//! resolved then crashes the exit, LB-27). It looks at the start of each
+//! iteration, again after its wait (which may have begun before), and
+//! before each callback: a socket's io callback, an async or a pending
+//! item, a signal watcher's delivery, a timer. So only the one callback
+//! already running when `finish` returns runs to its end (its `sync`
+//! dependents included); no other starts, and none that has not run is
+//! taken out of its list (a timer's drop could drop its promise, resolving
+//! it with `none`). Two atomic loads per callback. It only lets the
+//! externs of the exit (a value's drop, a socket's finalizer) take the
+//! loop lock. So does the single-thread scheduler, whose loop context does
+//! not run after `finish`.
 //!
 //! What differs from native:
 //! - the loop thread is made at the first use, not at startup;
@@ -84,10 +125,14 @@
 //!   (libuv makes one per occurrence), as in the single-thread `sched::uv`.
 
 use super::task::{glue_and_stack_size, guarded, spawn_thread};
+#[cfg(feature = "net")]
+use crate::sched::common::{Interest, Ready};
 use crate::sched::uv_signals::{self, native_signum, EINVAL};
 use rustix::event::{PollFd, PollFlags, Timespec};
 use rustix::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::collections::BTreeMap;
+#[cfg(feature = "net")]
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Once, OnceLock, PoisonError};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -223,6 +268,12 @@ impl LoopLock {
     /// Whether the calling thread holds the lock (tests).
     #[cfg(test)]
     pub(super) fn held_here(&self) -> bool {
+        self.held_by_me()
+    }
+
+    /// Whether the calling thread holds the lock (`net`'s debug checks).
+    #[cfg(any(test, feature = "net"))]
+    fn held_by_me(&self) -> bool {
         locked(&self.holder).owner == Some(std::thread::current().id())
     }
 }
@@ -255,8 +306,9 @@ struct Entry {
 }
 
 /// What the loop lock protects: the armed timers and the listening signal
-/// watchers. Its own lock is held only around plain data; what leaves it (a
-/// callback, a watcher) is dropped after that lock is let go.
+/// watchers; with `net`, the io watchers and the pending queue. Its own lock
+/// is held only around plain data; what leaves it (a callback, a watcher)
+/// is dropped after that lock is let go.
 #[derive(Default)]
 struct Data {
     /// The armed timers, in deadline order, then start order.
@@ -265,6 +317,13 @@ struct Data {
     serial: u64,
     /// The listening signal watchers, in the order they started.
     listeners: Vec<Entry>,
+    /// libuv's io watchers (`net`'s sockets).
+    #[cfg(feature = "net")]
+    io: IoWatchers,
+    /// libuv's pending queue (`uv__io_feed`): run by the loop thread in its
+    /// next iteration, in order.
+    #[cfg(feature = "net")]
+    pending: VecDeque<Task>,
 }
 
 /// The process's loop (native `global_ev`).
@@ -275,10 +334,36 @@ struct Loop {
     /// loop polls the one that the externs write (review RT2-04); `None`
     /// when none could be made.
     wake: Option<BorrowedFd<'static>>,
+    /// The async queue ([`post`]): callbacks handed to the loop thread from
+    /// any thread without the loop lock (libuv's thread pool completions,
+    /// `uv__work_done`), with a lock of its own.
+    #[cfg(feature = "net")]
+    posted: Mutex<VecDeque<Task>>,
 }
 
 static LOOP: OnceLock<Loop> = OnceLock::new();
 static LOOP_THREAD: Once = Once::new();
+/// The loop thread's id, once it runs ([`on_loop_thread`]).
+static LOOP_THREAD_ID: OnceLock<ThreadId> = OnceLock::new();
+
+/// Whether the calling thread holds the loop lock (`net`'s unit tests).
+#[cfg(all(test, feature = "net"))]
+pub(crate) fn lock_held_here() -> bool {
+    LOOP.get().is_some_and(|lp| lp.lock.held_by_me())
+}
+
+/// How many threads wait for the loop lock (`net`'s unit tests).
+#[cfg(all(test, feature = "net"))]
+pub(crate) fn lock_waiters() -> u32 {
+    LOOP.get().map_or(0, |lp| locked(&lp.lock.holder).waiters)
+}
+
+/// Whether the calling thread is the loop thread: a glue that pairs the
+/// `thread_start` and `thread_end` of the threads the crate makes can tell
+/// it apart there, since the loop thread never ends (no `thread_end`).
+pub fn on_loop_thread() -> bool {
+    LOOP_THREAD_ID.get() == Some(&std::thread::current().id())
+}
 
 /// How long the loop thread waits at most when it has no async eventfd
 /// (none could be made when the loop was made: `EMFILE`): an extern then
@@ -291,6 +376,8 @@ fn the_loop() -> &'static Loop {
         lock: LoopLock::new(),
         data: Mutex::new(Data::default()),
         wake: wake_fd(),
+        #[cfg(feature = "net")]
+        posted: Mutex::new(VecDeque::new()),
     });
     LOOP_THREAD.call_once(|| start_loop_thread(lp));
     lp
@@ -328,7 +415,7 @@ fn interrupt(lp: &Loop) {
 }
 
 /// The loop lock, held by the calling thread until the guard goes.
-struct LoopGuard {
+pub(crate) struct LoopGuard {
     lp: &'static Loop,
 }
 
@@ -339,8 +426,9 @@ impl Drop for LoopGuard {
 }
 
 /// `event_loop_lock(&global_ev)`: every extern's first step (see the module
-/// comment); the loop and its thread are made at the first call.
-fn lock() -> LoopGuard {
+/// comment), `net`'s too; the loop and its thread are made at the first
+/// call.
+pub(crate) fn lock() -> LoopGuard {
     let lp = the_loop();
     lp.lock.acquire(|| interrupt(lp));
     LoopGuard { lp }
@@ -360,18 +448,54 @@ fn lock() -> LoopGuard {
 fn start_loop_thread(lp: &'static Loop) {
     let (glue, stack_size) = glue_and_stack_size();
     drop(spawn_thread(stack_size, move || {
+        let _ = LOOP_THREAD_ID.set(std::thread::current().id());
         #[cfg(feature = "stack-overflow")]
         crate::sched::install_stack_overflow_handler();
-        let mut started = glue.is_some();
+        let mut lt = LoopThread {
+            glue_started: glue.is_some(),
+            #[cfg(feature = "net")]
+            events: Vec::with_capacity(EVENTS),
+        };
         if let Some(g) = glue {
             guarded("a glue hook", move || g.thread_start());
         }
         guarded("sched::uv's loop thread", || loop {
             lp.lock.acquire_as_loop();
-            lp.iterate(&mut started);
+            lp.iterate(&mut lt);
             lp.lock.release();
         });
     }));
+}
+
+/// What the loop thread keeps from one iteration to the next.
+struct LoopThread {
+    /// The glue's `thread_start` has run on it (RT2-05).
+    glue_started: bool,
+    /// `uv__io_poll`'s buffer of epoll events ([`EVENTS`] of them), made
+    /// once: an iteration allocates none for them.
+    #[cfg(feature = "net")]
+    events: Vec<rustix::event::epoll::Event>,
+}
+
+/// How many events one `epoll_wait` takes at most (`uv__io_poll`'s
+/// `events[1024]`).
+#[cfg(feature = "net")]
+const EVENTS: usize = 1024;
+
+/// How many batches of events one iteration takes at most while they come
+/// back full (`uv__io_poll`'s `count = 48`).
+#[cfg(feature = "net")]
+const BATCHES: u32 = 48;
+
+/// The glue's `thread_start` on the loop thread, once, as soon as a glue
+/// exists, before the loop runs translator code (RT2-05).
+fn glue_check(glue_started: &mut bool) {
+    if !*glue_started {
+        if let (Some(g), _) = glue_and_stack_size() {
+            *glue_started = true;
+            guarded("a glue hook", move || g.thread_start());
+        }
+    }
 }
 
 impl Loop {
@@ -380,12 +504,37 @@ impl Loop {
     /// (while a watcher listens) and the async eventfd; then the glue's
     /// `thread_start` if it is still due (`glue_started`); then deliver the
     /// signals that came (`uv__io_poll`'s signal callback) and run the
-    /// timers due (`uv__run_timers`).
-    fn iterate(&self, glue_started: &mut bool) {
+    /// timers due (`uv__run_timers`). With `net` (module comment): the
+    /// pending queue first (then the poll does not wait), the io watchers'
+    /// epoll instance polled too; after the poll its callbacks, then the
+    /// async queue, then the signals (libuv runs signal watchers last), then
+    /// the pending queue again (at most 8 rounds), before the timers. After
+    /// the task manager's finalization it only waits for an extern
+    /// (`wait_for_externs`, module comment).
+    fn iterate(&self, lt: &mut LoopThread) {
+        if super::manager_finished() {
+            self.wait_for_externs();
+            return;
+        }
+        let glue_started = &mut lt.glue_started;
+        // `net`: `uv__run_pending` first, the poll not waiting if it ran
+        // something (libuv's `can_sleep`); the glue's `thread_start` before
+        // that, as before any callback (RT2-05)
+        #[cfg(feature = "net")]
+        let can_sleep = {
+            glue_check(glue_started);
+            !self.run_pending()
+        };
+        #[cfg(not(feature = "net"))]
+        let can_sleep = true;
         let (deadline, listening) = {
             let d = locked(&self.data);
             (d.timers.keys().next().map(|k| k.0), !d.listeners.is_empty())
         };
+        #[cfg(feature = "net")]
+        let epoll = locked(&self.data).io.epoll;
+        #[cfg(not(feature = "net"))]
+        let epoll: Option<BorrowedFd<'static>> = None;
         let wake = self.wake;
         let pipe = if listening {
             uv_signals::pipe_read()
@@ -396,6 +545,9 @@ impl Loop {
         if wake.is_none() {
             timeout = Some(timeout.map_or(NO_WAKE_POLL, |t| t.min(NO_WAKE_POLL)));
         }
+        if !can_sleep {
+            timeout = Some(Duration::ZERO);
+        }
         // at most `INT_MAX` ms, as libuv clamps it (`uv__io_poll`)
         let ts = timeout.map(|t| {
             let t = t.min(Duration::from_millis(i32::MAX as u64));
@@ -404,13 +556,17 @@ impl Loop {
                 tv_nsec: t.subsec_nanos() as i64,
             }
         });
-        // `fds[0]` the eventfd, `fds[1]` the pipe, each when present
-        let mut fds: Vec<PollFd<'_>> = Vec::with_capacity(2);
+        // `fds[0]` the eventfd, `fds[1]` the pipe, `fds[2]` the epoll
+        // instance of `net`'s io watchers, each when present
+        let mut fds: Vec<PollFd<'_>> = Vec::with_capacity(3);
         if let Some(w) = wake {
             fds.push(PollFd::from_borrowed_fd(w, PollFlags::IN));
         }
         if let Some(p) = pipe {
             fds.push(PollFd::from_borrowed_fd(p, PollFlags::IN));
+        }
+        if let Some(e) = epoll {
+            fds.push(PollFd::from_borrowed_fd(e, PollFlags::IN));
         }
         // `EINTR` (a signal handler ran on this thread): the iteration goes
         // on, and the signal pipe is looked at below
@@ -418,22 +574,61 @@ impl Loop {
         let ready: Vec<bool> = fds.iter().map(|f| !f.revents().is_empty()).collect();
         drop(fds);
         let woken = wake.is_some() && ready[0];
-        let signalled = pipe.is_some() && (polled.is_err() || ready[usize::from(wake.is_some())]);
+        let at_pipe = usize::from(wake.is_some());
+        let signalled = pipe.is_some() && (polled.is_err() || ready[at_pipe]);
+        let io_ready = epoll.is_some() && ready[at_pipe + usize::from(pipe.is_some())];
         if let (true, Some(w)) = (woken, wake) {
             let mut b = [0u8; 8];
             let _ = rustix::io::read(w, &mut b);
         }
-        // the glue's `thread_start`, once, before any callback (RT2-05)
-        if !*glue_started {
-            if let (Some(g), _) = glue_and_stack_size() {
-                *glue_started = true;
-                guarded("a glue hook", move || g.thread_start());
-            }
+        // the wait may have begun before the task manager's finalization
+        // ended (`finish` does not interrupt it): no callback after it
+        if super::manager_finished() {
+            return;
         }
+        // the glue's `thread_start`, once, before any callback (RT2-05)
+        glue_check(glue_started);
+        // `uv__io_poll`'s callbacks: the io watchers' (the sockets', then
+        // the async queue's), the signal watchers' last
+        #[cfg(feature = "net")]
+        {
+            if let (true, Some(e)) = (io_ready, epoll) {
+                // a signal ends the batches (`if (have_signals != 0) break;`)
+                let batches = if signalled { 1 } else { BATCHES };
+                self.dispatch_io(e, &mut lt.events, batches);
+            }
+            self.run_posted();
+        }
+        #[cfg(not(feature = "net"))]
+        let _ = io_ready;
         if signalled {
             self.deliver_signals();
         }
+        // `for (r = 0; r < 8 && !uv__queue_empty(&loop->pending_queue);
+        // r++) uv__run_pending(loop);`
+        #[cfg(feature = "net")]
+        for _ in 0..8 {
+            if !self.run_pending() {
+                break;
+            }
+        }
         self.run_due_timers();
+    }
+
+    /// The iteration after the task manager's finalization: no callback;
+    /// wait on the eventfd (an extern's `uv_async_send`) and return, so that
+    /// the waiting extern takes the loop lock. Without an eventfd, a short
+    /// sleep.
+    fn wait_for_externs(&self) {
+        match self.wake {
+            Some(w) => {
+                let mut fds = [PollFd::from_borrowed_fd(w, PollFlags::IN)];
+                let _ = rustix::event::poll(&mut fds, None);
+                let mut b = [0u8; 8];
+                let _ = rustix::io::read(w, &mut b);
+            }
+            None => std::thread::sleep(NO_WAKE_POLL),
+        }
     }
 
     /// `uv__run_timers` (libuv 1.48): the timers due now, in deadline order,
@@ -449,6 +644,12 @@ impl Loop {
             .map(|(k, _)| *k)
             .collect();
         for k in due {
+            // before the timer leaves the list: once `finish` has returned
+            // it neither runs nor is dropped (its drop could drop the
+            // timer's promise, resolving it with `none`)
+            if super::manager_finished() {
+                return;
+            }
             let cb = locked(&self.data).timers.remove(&k);
             if let Some(cb) = cb {
                 cb(TimerId(k.0, k.1), now);
@@ -468,6 +669,11 @@ impl Loop {
                 .collect();
             ls.sort_by_key(|&(rep, seq, _)| (!rep, seq));
             for (.., l) in ls {
+                // no delivery once `finish` has returned (the list keeps
+                // the watchers: these are clones)
+                if super::manager_finished() {
+                    return;
+                }
                 l.deliver();
             }
         }
@@ -487,6 +693,270 @@ impl Loop {
     /// is still armed, for the caller to drop after its locks.
     fn timer_stop(&self, id: TimerId) -> Option<Callback> {
         locked(&self.data).timers.remove(&(id.0, id.1))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// libuv's io watchers, pending queue and async queue, for `net`
+
+/// A callback of the pending queue or the async queue, run once on the loop
+/// thread with the loop lock held.
+#[cfg(feature = "net")]
+pub(crate) type Task = Box<dyn FnOnce() + Send>;
+
+/// A watch's callback: it gets what the loop saw on the descriptor.
+#[cfg(feature = "net")]
+pub(crate) type WatchCb = Arc<dyn Fn(Ready) + Send + Sync>;
+
+/// A descriptor the loop watches ([`watch`]): a number given once, never
+/// reused, which is also the epoll registration's data, so an event of a
+/// watch that ended in the same iteration finds nothing. The numbers start
+/// above [`WATCH_BASE`], above every descriptor number: native's startup
+/// epoll instance, which the loop uses when the glue opened it, has libuv's
+/// polling ring registered with its descriptor number as data
+/// (`io::startup`), and an event of it finds no watch.
+#[cfg(feature = "net")]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct WatchId(u64);
+
+/// Below the first watch's number.
+#[cfg(feature = "net")]
+const WATCH_BASE: u64 = 1 << 32;
+
+#[cfg(feature = "net")]
+struct IoWatch {
+    /// The descriptor, held until `unwatch` (a clone of the socket's).
+    fd: Arc<OwnedFd>,
+    interest: Interest,
+    cb: WatchCb,
+}
+
+/// libuv's io watchers (`uv__io_t`): the epoll instance (made at the first
+/// watch: native's startup one when the glue opened it, else one of the
+/// crate's own, kept for the life of the process) and the watches.
+#[cfg(feature = "net")]
+#[derive(Default)]
+struct IoWatchers {
+    epoll: Option<BorrowedFd<'static>>,
+    serial: u64,
+    watches: HashMap<u64, IoWatch>,
+}
+
+#[cfg(feature = "net")]
+impl IoWatchers {
+    fn epoll(&mut self) -> rustix::io::Result<BorrowedFd<'static>> {
+        if let Some(e) = self.epoll {
+            return Ok(e);
+        }
+        #[cfg(feature = "io")]
+        if let Some(fd) = crate::io::startup::claim_loop_epoll() {
+            self.epoll = Some(fd);
+            return Ok(fd);
+        }
+        static OWN: OnceLock<OwnedFd> = OnceLock::new();
+        let fd = match OWN.get() {
+            Some(fd) => fd.as_fd(),
+            None => {
+                let fd = rustix::event::epoll::create(rustix::event::epoll::CreateFlags::CLOEXEC)?;
+                OWN.get_or_init(|| fd).as_fd()
+            }
+        };
+        self.epoll = Some(fd);
+        Ok(fd)
+    }
+}
+
+/// `uv__io_start` of a new watcher, with the loop lock held: the loop thread
+/// runs `cb` whenever `fd` is ready for `interest` (level-triggered, as
+/// libuv's), until [`unwatch`]. The loop holds `fd` meanwhile.
+#[cfg(feature = "net")]
+pub(crate) fn watch(
+    fd: Arc<OwnedFd>,
+    interest: Interest,
+    cb: WatchCb,
+) -> rustix::io::Result<WatchId> {
+    use rustix::event::epoll;
+    let lp = the_loop();
+    debug_assert!(
+        lp.lock.held_by_me(),
+        "lean-runtime: watch without the loop lock"
+    );
+    let mut d = locked(&lp.data);
+    let ep = d.io.epoll()?;
+    d.io.serial += 1;
+    let id = WATCH_BASE + d.io.serial;
+    epoll::add(
+        ep,
+        &*fd,
+        epoll::EventData::new_u64(id),
+        interest.epoll_flags(),
+    )?;
+    d.io.watches.insert(id, IoWatch { fd, interest, cb });
+    Ok(WatchId(id))
+}
+
+/// `uv__io_start` / `uv__io_stop` of a watcher that keeps waiting for
+/// something, with the loop lock held: from now on it waits for `interest`.
+#[cfg(feature = "net")]
+pub(crate) fn watch_modify(id: WatchId, interest: Interest) -> rustix::io::Result<()> {
+    use rustix::event::epoll;
+    let lp = the_loop();
+    debug_assert!(
+        lp.lock.held_by_me(),
+        "lean-runtime: watch_modify without the loop lock"
+    );
+    let mut d = locked(&lp.data);
+    let ep = d.io.epoll()?;
+    let Some(w) = d.io.watches.get_mut(&id.0) else {
+        return Err(rustix::io::Errno::NOENT);
+    };
+    epoll::modify(
+        ep,
+        &*w.fd,
+        epoll::EventData::new_u64(id.0),
+        interest.epoll_flags(),
+    )?;
+    w.interest = interest;
+    Ok(())
+}
+
+/// `uv__io_stop` of everything, or `uv__io_close`, with the loop lock held:
+/// the watch ends (an event of it still to be dispatched in this iteration
+/// finds nothing), its epoll registration goes before the loop lets go of
+/// its clone of the descriptor, and its callback is dropped after the
+/// loop's data lock.
+#[cfg(feature = "net")]
+pub(crate) fn unwatch(id: WatchId) {
+    let lp = the_loop();
+    debug_assert!(
+        lp.lock.held_by_me(),
+        "lean-runtime: unwatch without the loop lock"
+    );
+    let gone = {
+        let mut d = locked(&lp.data);
+        let w = d.io.watches.remove(&id.0);
+        if let (Some(w), Some(ep)) = (&w, d.io.epoll) {
+            let _ = rustix::event::epoll::delete(ep, &*w.fd);
+        }
+        w
+    };
+    drop(gone);
+}
+
+/// `uv__io_feed`: run `cb` on the loop thread in its next iteration
+/// (libuv's pending queue), with the loop lock held by the caller. A caller
+/// on another thread holds the lock, so the loop thread is between two
+/// iterations, and its next one runs `cb` first.
+#[cfg(feature = "net")]
+pub(crate) fn pending(cb: Task) {
+    let lp = the_loop();
+    debug_assert!(
+        lp.lock.held_by_me(),
+        "lean-runtime: pending without the loop lock"
+    );
+    locked(&lp.data).pending.push_back(cb);
+}
+
+/// `uv_async_send` with a callback: run `cb` on the loop thread, with the
+/// loop lock held, from any thread, without taking the loop lock (libuv's
+/// thread pool hands its completions to the loop this way, `uv__work_done`):
+/// it queues `cb` and wakes the loop thread through its eventfd. Callbacks
+/// run in the order they were posted. One still queued when the process
+/// exits never runs and is never dropped.
+#[cfg(feature = "net")]
+pub(crate) fn post(cb: Task) {
+    let lp = the_loop();
+    locked(&lp.posted).push_back(cb);
+    interrupt(lp);
+}
+
+#[cfg(feature = "net")]
+impl Loop {
+    /// `uv__run_pending`: the callbacks queued until now, in order (one
+    /// queued meanwhile waits for the next round); whether any ran.
+    fn run_pending(&self) -> bool {
+        let n = locked(&self.data).pending.len();
+        for _ in 0..n {
+            // each taken out only to run: once `finish` has returned, none
+            // runs, and none is dropped
+            if super::manager_finished() {
+                return false;
+            }
+            let cb = locked(&self.data).pending.pop_front();
+            if let Some(cb) = cb {
+                cb();
+            }
+        }
+        n > 0
+    }
+
+    /// The async queue's callbacks posted until now, in order (each taken
+    /// out only to run, as in `run_pending`).
+    fn run_posted(&self) {
+        let n = locked(&self.posted).len();
+        for _ in 0..n {
+            if super::manager_finished() {
+                return;
+            }
+            let cb = locked(&self.posted).pop_front();
+            if let Some(cb) = cb {
+                cb();
+            }
+        }
+    }
+
+    /// `uv__io_poll`'s dispatch, after `poll(2)` saw the epoll instance
+    /// ready: the events epoll has (without waiting), in batches of up to
+    /// [`EVENTS`] into the loop thread's buffer, again while a batch comes
+    /// back full, at most `batches` of them; each event to its watch's
+    /// callback if the watch still exists, kept to what the watch waits for
+    /// now plus errors and hang-ups (`pe->events &= w->pevents | POLLERR |
+    /// POLLHUP`); an event left with nothing is not called back.
+    fn dispatch_io(
+        &self,
+        ep: BorrowedFd<'_>,
+        events: &mut Vec<rustix::event::epoll::Event>,
+        batches: u32,
+    ) {
+        use rustix::event::epoll;
+        let zero = Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        for _ in 0..batches {
+            events.clear();
+            if epoll::wait(
+                ep,
+                rustix::buffer::spare_capacity(&mut *events),
+                Some(&zero),
+            )
+            .is_err()
+            {
+                return;
+            }
+            let n = events.len();
+            for e in events.iter() {
+                // no callback once `finish` has returned
+                if super::manager_finished() {
+                    return;
+                }
+                let (flags, id) = (e.flags, e.data.u64());
+                let ready = Ready::from_epoll(flags);
+                let found = {
+                    let d = locked(&self.data);
+                    d.io.watches.get(&id).map(|w| (w.interest, w.cb.clone()))
+                };
+                let Some((interest, cb)) = found else {
+                    continue;
+                };
+                if ready.meets(interest) || ready.error || ready.hangup {
+                    cb(ready);
+                }
+            }
+            if n < EVENTS {
+                return;
+            }
+        }
     }
 }
 

@@ -1,14 +1,15 @@
 # Real threads for `sched` (threads mode)
 
-Status (2026-10-04): T1, T2 and T3 are done. T1 is `sched::mt`, behind
+Status (2026-10-05): T1, T2, T3 and N are done. T1 is `sched::mt`, behind
 the cargo feature `threads` (`src/sched/threads.rs`, `src/sched/mt/`). T2 is
 io and `Std.Internal.UV` in threads mode (0.5). T3 is the second driver,
 `tests/sched-driver-mt`, which runs the task, sync, refs and taskio cases in
 threads mode, 5 times each, with the single-thread driver's ports; the new
-cases recorded natively; and the site's page for threads mode (0.6). Later
-items (section 5): `net` in threads mode (N), the translators' threads modes
-(leanrs's L2, lean2rr's E2), and the measurement step P, which needs the
-owner's permission. The design below was written at main 1c36a58; section 0
+cases recorded natively; and the site's page for threads mode (0.6). N is
+`net` in threads mode, on `sched::uv`'s loop thread, with the `net` cases in
+the second driver (0.7). Later items (section 5): the translators' threads
+modes (leanrs's L2, lean2rr's E2), and the measurement step P, which needs
+the owner's permission. The design below was written at main 1c36a58; section 0
 says where main e95ca47, T1, T2 and T3 changed it. The owner's direction
 (2026-10-03): "parallelism will be supported, not the focus now".
 
@@ -146,18 +147,17 @@ task, under the lock (both reviews of T1, 2026-10-04).
 
 **Since T2** (0.5): `sched::uv` (`Std.Internal.UV`'s loop, timers and
 signals) runs on a loop thread of its own, as natively; the working
-directory's lock rule and the routing of signals of 3.2 are in. `net`
-stays on the single-thread event loop: `net` turns `sched` on, so `net`
-with `threads` is a compile error. Networking in threads mode is a later
-item (section 5; networking is not a target now, owner 2026-10-04).
+directory's lock rule and the routing of signals of 3.2 are in. **Since N**
+(0.7): `net` runs in threads mode too, on that loop thread; `net` no longer
+turns `sched` on.
 
-### 0.2 Features (T1, T2)
+### 0.2 Features (T1, T2, N)
 
-| Features | Since T2 | Why |
+| Features | Since T2 (N for `net`) | Why |
 |---|---|---|
 | `threads` | Allowed. It depends on rustix and signal-hook, as `sched` does | `sched::uv`'s loop thread waits with `poll(2)` on an eventfd and the signal pipe (rustix), and the signal watchers use signal-hook's safe API (T2). Both crates are the crate's already, approved for `sched`; a plain `rustc` build of `threads` no longer works (cargo, offline, as `io` and `sched`) |
 | `threads` with `sched` | Compile error | A build has one scheduler (2.5) |
-| `threads` with `net` | Compile error | `net` turns `sched` on; the network needs the event loop. Networking in threads mode is a later item (section 5) |
+| `threads` with `net` | Allowed (N) | `net` runs on `sched::uv`'s loop thread, as natively on libuv's (0.7). `net` no longer turns `sched` on: it needs `sched` or `threads`, and alone it is a compile error |
 | `threads` with `io` | Allowed | io takes its plain path by the existing `cfg(feature = "sched")`, as without `sched`. Where `unshare(CLONE_FS)` is refused (Docker's default seccomp profile), a spawn with a `cwd` moves the whole process's working directory meanwhile (`fallback_spawn`, under `CWD_LOCK`); since T2 every lookup of a path the program supplies then holds `CWD_LOCK` shared, never across a wait, so none resolves against the child's `cwd` (3.2; reviews RT1-04, RT2-03) |
 | `threads` with `stack-overflow` | Allowed | `stack-overflow` no longer turns `sched` on; alone it is a compile error. Every worker, dedicated thread and the loop thread install the report at their entry |
 | `threads` with `proc-title`, `unsafe-fast` | Allowed | Nothing shared with the scheduler |
@@ -165,12 +165,15 @@ item (section 5; networking is not a target now, owner 2026-10-04).
 A build without `threads` is unchanged: the same items and bounds, no
 `Arc`, no new lock (`src/sched/mod.rs` and its files compile as before;
 only plain items moved: `TaskState`, the messages and the priorities to
-`src/sched/common.rs` in T1, and the process-wide part of the signal
-watchers' delivery to `src/sched/uv_signals.rs` in T2, unchanged). `check.sh`
-builds and tests `threads` and every feature that may go with it; with
-`io,threads,proc-title,startup-fds,stack-overflow,unsafe-fast` the io
-twins run inside tasks and the uvloop twins over threads mode's
-`sched::uv` (0.5).
+`src/sched/common.rs` in T1, the process-wide part of the signal watchers'
+delivery to `src/sched/uv_signals.rs` in T2, and `Interest` and `Ready` to
+`src/sched/common.rs` in N, unchanged; `net`'s code is one source for both
+modes, its single-thread side in `src/net/mode_st.rs`, with the same calls
+as before N). `check.sh` builds and tests `threads` and every feature that
+may go with it: with `io,threads,proc-title,startup-fds,stack-overflow,
+unsafe-fast` the io twins run inside tasks and the uvloop twins over
+threads mode's `sched::uv` (0.5); with `io,threads,net,proc-title,
+stack-overflow`, `net`'s unit tests of threads mode (0.7).
 
 ### 0.3 leanrs's constraints for T1
 
@@ -224,7 +227,8 @@ twins run inside tasks and the uvloop twins over threads mode's
 | Working directory | The process's; `io/process.rs`, `CWD_LOCK`, `NO_FALLBACK` | Process-wide, as natively. Changes (`setCurrentDir`, `uv_chdir`) and reads (`currentDir`, `uv_cwd`) take `CWD_LOCK`; since T2 the lookups of the paths the program supplies take it shared while a fallback spawn may happen, that is where `unshare(CLONE_FS)` is refused (3.2, RT1-04), absolute ones too, never across a wait (RT2-03) |
 | `environ` copy | `io/environ.rs`, `ENVIRON` | Process-wide, under a lock; the C environment changes through `std::env::set_var` (3.2) |
 | Spawner thread | `io/process.rs`, `SPAWNER`, `NO_PRIVATE_CWD` | Process-wide: one long-lived thread for the spawns with a `cwd`, which queue on it. Since T2 `sched::start` starts it, so the spawn path is decided before any task runs (3.2) |
-| `Std.Internal.UV`'s loop | `sched/mt/uv.rs`, `LOOP` | Process-wide, as native's `global_ev`: one loop thread (made at the first use), the loop lock, the armed timers and the listening signal watchers (T2) |
+| `Std.Internal.UV`'s loop | `sched/mt/uv.rs`, `LOOP` | Process-wide, as native's `global_ev`: one loop thread (made at the first use), the loop lock, the armed timers and the listening signal watchers (T2); with `net`, the io watchers (an epoll instance), the pending queue and the async queue (N) |
+| `net`'s open sockets, lookups in progress | `net/mode_mt.rs`, `SOCKETS`, `PENDING` | Process-wide, each under a lock held only around plain data; a socket's state has a lock of its own, taken only under the loop lock (N, 0.7) |
 | Signal handlers, the signal pipe, the watchers' counts | `sched/uv_signals.rs`, `HOOKED`, `PIPE` | Process-wide, in both modes (T2 moved them out of `sched/uv.rs`) |
 | Stack-overflow records | `sched/stack_overflow.rs` | One per registered thread |
 | Alternate signal stacks the crate makes | `sched/stack_overflow.rs`, `FREE_ALTSTACKS` | One per live registered thread that std gave none; given back to a process-wide free list when the thread ends, and reused (RT1-03) |
@@ -575,9 +579,8 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   40 to 100 ms, `timer_oneshot`'s 60 to 150 ms, `timer_cancel_reset`'s 200
   to 300 ms.
 
-**Left for later** (section 5; T3 is done, 0.6):
-- `net` in threads mode (networking is not a target now, owner); the real
-  fix of the working directory's fallback,
+**Left for later** (section 5; T3 is done, 0.6; N is done, 0.7):
+- the real fix of the working directory's fallback,
   `posix_spawn_file_actions_addchdir_np`, which needs `unsafe`;
 - `sched::uv`'s loop thread made at startup, as natively, only if a case
   ever needs it (none does).
@@ -668,6 +671,176 @@ two dedicated tasks).
 
 **`scripts/check.sh`** runs both drivers, in a debug and a release build,
 on both toolchains, and clippy on both packages.
+
+### 0.7 N: networking in threads mode
+
+N (branch net-threads, 2026-10-05) runs `net` (TCP, UDP, DNS and the
+interface list) in threads mode, on `sched::uv`'s loop thread, as natively
+on libuv's loop thread. The design:
+
+- **Where the sockets run.** `sched::uv`'s loop thread (0.5, item 3) gains
+  libuv's io watchers: an epoll instance (native's startup one when the
+  glue opened it, else its own), polled with the eventfd and the signal
+  pipe. A socket's watch callback (`uv__stream_io`, `uv__server_io`,
+  `uv__udp_io`) and a `uv__io_feed` (libuv's pending queue) run on the loop
+  thread, in libuv's order (below): the pending callbacks; the poll and
+  its io callbacks, the signal watchers last; the pending callbacks again;
+  the timers.
+- **Promises.** The loop thread resolves an operation's promise in its
+  callback, with the loop lock held: the `sync` dependents run there, and
+  the waiters on other threads wake. An extern that resolves at once does
+  so after it releases the loop lock, as natively (`accept` of a
+  connection the loop already took; an empty `send` takes no lock).
+- **Locks.** Every extern holds the loop lock from its start to its end
+  (`event_loop_lock` ... `event_loop_unlock`), and so does Lean's finalizer
+  of a socket (the last handle's drop, on any thread): a glue must not drop
+  a socket's last handle while it holds a stream's guard, as it must not
+  call an extern then (0.5, item 3). A socket's state has a lock of its own
+  (so that it is `Send + Sync`), taken only under the loop lock. The order
+  is the loop lock, then a socket's state, then the socket registry or the
+  loop's data. The leaf locks, held only around plain data and taking no
+  other lock, are the loop's async queue (`posted`, taken without the loop
+  lock too), the registry of open sockets and the table of lookups in
+  progress (`mode_mt`'s `SOCKETS` and `PENDING`) and libuv's spare
+  descriptor (`tcp`'s `EMFILE_FD`). The translator code that `net` runs (a
+  `done` closure, the drop of a promise, `alloc`) runs with only the loop
+  lock held, as natively; under a socket's state lock run only the glue's
+  `SendData::get` and `RecvBuf::target`, which hand out bytes and nothing
+  else (no call into the crate, no lock, no wait, no drop of a translator
+  value). `net` looks up no path, so `CWD_LOCK` is not involved; the rule
+  of 0.5 item 1 stays (a holder of `CWD_LOCK` never takes the loop lock).
+- **DNS.** The same two helper threads as in the single-thread mode
+  (libuv's pool runs at most two lookups at a time). A helper hands its
+  answer to the loop thread through an async queue and the loop's eventfd
+  (`uv_async_send`), never through the loop lock (a helper waiting for it
+  could deadlock the exit's join); the loop thread resolves the promise.
+  The exit waits for the running lookups and drops their answers, as in
+  the single-thread mode (LB-27), and no answer is delivered once the task
+  manager's finalization is over (below).
+- **After the task manager's finalization** (`sched::finish` has
+  returned), the loop thread starts no callback: no timer, signal watcher,
+  socket, pending or async callback, so no promise resolves then, as the
+  single-thread scheduler's loop context does not run after `finish`
+  (natively a promise resolved then crashes the exit, LB-27). It looks at
+  the start of each iteration, again after its wait (which may have begun
+  before), and before each callback (two atomic loads), so only the one
+  callback already running when `finish` returns runs to its end, its
+  `sync` dependents included. Nothing that has not run is taken out of
+  its list (a timer's drop could drop its promise, resolving it with
+  `none`); the queued bytes of a partly written `send` are not written. It
+  then only lets the exit's externs (a value's drop, a socket's finalizer)
+  take the loop lock. A DNS answer whose callback still runs then is
+  dropped, its `done` neither called nor dropped. This also applies to
+  T2's timers and signal watchers, which until N resolved their promises
+  after `finish` too.
+- **One core.** `tcp.rs`, `udp.rs` and `dns.rs` are one source for both
+  modes. A mode layer gives what differs: `src/net/mode_st.rs` (the
+  socket's `RefCell` in an `Rc`, the thread's registry, `sched::watch`, a
+  timer due now for `uv__io_feed`, `sched::catch_up` as the loop lock, the
+  DNS watch of the eventfd) and `src/net/mode_mt.rs` (a `Mutex` in an
+  `Arc`, a process-wide registry, `sched::uv`'s watches, its pending and
+  async queues and its loop lock). `net::MaybeSend` names the one bound
+  that differs, on a `done` closure, `SendData` and `RecvBuf`: none in the
+  single-thread mode, `Send` in threads mode.
+- **Features.** `net` no longer turns on `sched`: it needs a scheduler,
+  `sched` or `threads`, and alone it is a compile error, as
+  `stack-overflow` is. `threads` with `net` is allowed. lean2rr's list
+  names `sched` (`io, sched, net, proc-title, startup-fds,
+  stack-overflow`), so its build is unchanged; leanrs does not enable
+  `net`.
+
+**What the loop thread does in an iteration**, with `net` (libuv 1.48's
+`uv_run(UV_RUN_ONCE)` and `uv__io_poll`, `linux.c` 1333-1560): the pending
+queue (`uv__run_pending`; then the poll does not wait); `poll(2)` on the
+eventfd, the signal pipe and the epoll instance; the io callbacks of the
+events epoll has, in batches of up to 1024 into a buffer the loop thread
+keeps (the events need no allocation per iteration; the iteration's small
+`poll(2)` list, from T2, still allocates), again while a batch comes back full,
+at most 48 batches (one when a signal came: libuv stops then), each event
+kept to what its watch waits for now plus errors and hang-ups, none for a
+watch that ended meanwhile; the async queue; the signals last ("Run signal
+watchers last"); the pending queue again, at most 8 rounds; the timers.
+libuv's async watcher is one more io watcher, called in epoll's order
+among the sockets' events; running the async queue after all of them is
+one of the orders epoll can give. A watch's epoll data is its number,
+which starts above `2^32`: native's startup epoll instance has libuv's
+polling ring registered with its descriptor number, and an event of it
+finds no watch.
+
+**Other glue-visible points.** `sched::uv::on_loop_thread()` tells a glue
+that the calling thread is the loop thread, whose `thread_start` has no
+`thread_end` (the driver's glue checks the pairs with it). The loop
+thread's `thread_start` runs as the thread starts, at the first extern, so
+it may still run while `main` returns and `finish` ends (case
+`net/dns_pending_at_exit`): a glue that counts its hooks counts that one
+apart (the driver's first count did not, and failed 1 run in 5 of that
+case in one release run of the full check). A `done`
+closure, `SendData` and `RecvBuf` are `Send` in threads mode
+(`net::MaybeSend`); `TcpSocket` and `UdpSocket` are `Send + Sync`.
+
+**Tests.**
+- The ports of the `net/` cases are one file for both drivers
+  (`tests/sched-driver/src/netcases.rs`, with its glue `lnet.rs`), as T3
+  shares the task cases: a port names only what both drivers' `lean.rs`
+  define (`Val`, `UvPromise`, the task functions) and the crate's
+  `MaybeSend`. `tests/sched-driver-mt` runs every `net/` case 5 times; no
+  case is single-thread-only and none needed an alternative.
+- Three new cases, recorded natively with `scripts/cases.py expect` (5
+  runs, identical), which both drivers run: `net/extern_in_sync_dependent`
+  (review RNT-08: a `sync` dependent of a receive's promise, which runs on
+  the loop thread with the loop lock held, sets `noDelay` and sends a
+  reply on its socket; four dedicated tasks send datagrams to one UDP
+  socket, printed sorted; three dedicated tasks look up `localhost` at
+  once); and two that use the network from several tasks:
+  `net/clients_in_tasks` (a server task accepts four connections and echoes
+  each in a dedicated task while four dedicated client tasks connect, send
+  and read: every extern from a thread of its own in threads mode) and
+  `net/socket_across_tasks` (a receive started in a task whose socket loses
+  every other reference: it still completes, and then the socket closes;
+  a receive cancelled by another task stays unresolved, and the next
+  receive gets the bytes).
+- Unit tests of threads mode (`src/net/tests_mt.rs`): a socket's last
+  handle dropped on another thread while a receive or a connect is pending
+  (the operation completes on the loop thread, then the socket closes),
+  while the loop thread watches it with a connection waiting (closed at
+  once, under the loop lock), or with a `uv__io_feed` queued (TCP and UDP:
+  the feed then finds nothing); `cancelRecv` on another thread (TCP and
+  UDP: the `done` dropped uncalled there, with the loop lock held); a
+  `done` on the loop thread that calls externs on its own socket;
+  `accept`'s immediate resolution after the loop lock; DNS answers
+  resolved on the loop thread; externs from four threads at once; the
+  order within an iteration (a timer's callback makes a socket readable
+  and raises `SIGUSR1`: the receive's promise resolves before the signal
+  watcher's; review RNT-01); no callback after `finish` (a timer due and
+  bytes that come then resolve nothing, and the exit's externs still take
+  the loop lock; RNT-03), also within the iteration whose callback is
+  running when `finish` returns (a receive's `done` waits for `finish`'s
+  return while a timer falls due: the timer's promise does not resolve;
+  RNT-10, which fails with the one check after the wait). The feed test reads the loop thread's count of
+  socket callbacks through the async queue (the feeds found nothing); the
+  tests take `sched::mt`'s test lock, as `uv`'s do. The dropped-while-
+  watched test fails with the finalizer's loop lock removed, the `accept`
+  test with the resolution moved under the lock, the order test with the
+  signals before the io callbacks, and the `finish` test with the check
+  made only at an iteration's start (checked by mutation).
+
+**Results** (2026-10-05): the 27 `net/` cases, 5 runs each, in threads
+mode, and once each over the single-thread scheduler, with their expected
+outcomes; no difference from native recorded.
+
+**Review round RNT** (2026-10-05, 9 low findings, all judged real and
+fixed): the signal watchers run last in an iteration (RNT-01); `UdpSocket::bind`
+releases the state lock before the loop lock (RNT-02: a tail expression's
+temporary); no callback after `finish` (RNT-03); comments and the cost
+paragraph of `docs/net.md` (RNT-04, RNT-05); the lock order's finalizer,
+leaf locks and `SendData::get`/`RecvBuf::target` (RNT-06); 1024 events per
+`epoll_wait`, up to 48 batches (RNT-07); the tests above and `check.sh`'s
+set `io,threads,net` without `unsafe` (RNT-08); with both schedulers on,
+`net` takes the single-thread side, so only `src/lib.rs`'s error shows
+(RNT-09). Its re-review found RNT-10 (judged real, fixed): the check
+after the wait left the rest of that iteration's callbacks running when
+`finish` returned during one of them; the loop thread now checks before
+each callback.
 
 ## Summary
 
@@ -1342,9 +1515,11 @@ becomes a hand-written `alt1`.
   `tests/sched-driver-mt`, a package of its own (`threads` and the
   coroutine `sched` exclude each other in one build, 2.5, so cargo builds
   it in a separate invocation), runs the ports of the `tasks/`, `sync/`,
-  `refs/` and `taskio/` cases, the same file, over `sched::mt`, with `Arc`
-  values, a `OnceLock` slot, `sched::Ref` for `IO.Ref` (3.1) and a glue
-  whose hooks check their contract. It runs every case 5 times and accepts
+  `refs/` and `taskio/` cases, the same file, and since N those of the
+  `net/` cases (`netcases.rs`, with its glue `lnet.rs`; 0.7), over
+  `sched::mt`, with `Arc` values, a `OnceLock` slot, `sched::Ref` for
+  `IO.Ref` (3.1) and a glue whose hooks check their contract. It runs every
+  case 5 times and accepts
   the recorded outcome or a recorded alternative, but no alternative of an
   `LSCHED-xx` case (the deferred model's); a Lean-bug case (`native`) must
   give the corrected outcome every time. A case whose port needs the
@@ -1361,7 +1536,9 @@ becomes a hand-written `alt1`.
   dedicated task (`tasks/stack_overflow_in_task`,
   `stack_overflow_in_dedicated`); an exit while tasks still enqueue, LB-13
   (`tasks/late_tasks_while_enqueuing`, and the `late_*` cases); a mutex
-  handed between real threads (`sync/mutex_handoff`, `condvar_turns`).
+  handed between real threads (`sync/mutex_handoff`, `condvar_turns`);
+  since N, the network used from several tasks (`net/clients_in_tasks`,
+  `net/socket_across_tasks`, 0.7).
 - **The translators** run their program cases (`cases.py check --exe-dir`)
   against a single-thread build and a threads build of each case.
 
@@ -1387,7 +1564,7 @@ needs brute force.
 | T0 | sched-io lands: cooperative IO in the single-thread mode | — | (its own batch) | — |
 | T1 | Done (2026-10-04, branch threads-1). `sched::mt`: the task manager (spawn, depend, wait, waitAny, state, cancel, release, promises, exit without LB-13), `mt::sync`, `mt::Glue`, `sched::Ref`, worker and dedicated threads with Lean's stack size, the stack-overflow report on them | T0: the IO switch, and the order the owner set | About 1,300 lines and 900 of unit tests | Yes, with Miri |
 | T2 | Done (2026-10-04, branch threads-2; 0.5). io in threads mode: the blocking path (since T1, io's plain path by `cfg`); the `CWD_LOCK` rule of 3.2, `with_path_lookup` around every system call that looks up a path, in threads builds where `unshare(CLONE_FS)` is refused (review RT1-04); a worker's streams and `errno` kept from task to task, in both modes (reviews RT2-L-01, AR-24); `sched::uv` on threads (a loop thread for timers and signals, `LoopPromise` with `Send` bounds, the routing of signals of 3.2, the placeholders); the io and uvloop twins inside tasks, and the task cases of AR-24; the review round RT2 | T1 | About 2,000 lines, comments included (250 of them moved out of `sched/uv.rs`), and 2,500 of tests | Yes |
-| N | Later: `net` in threads mode (the network on the loop thread; `threads` with `net` stays a compile error until then). Networking is not a target now (owner, 2026-10-04), and leanrs's threads mode comes later | T2 | Medium | Yes |
+| N | Done (2026-10-05, branch net-threads; 0.7). `net` in threads mode: the sockets and lookups on `sched::uv`'s loop thread (its io watchers, pending queue and async queue), every extern and a socket's finalizer under the loop lock, one source for both modes (`src/net/mode_st.rs`, `mode_mt.rs`); `net` no longer turns `sched` on; the `net` cases in `tests/sched-driver-mt`, 5 runs each; unit tests of the paths that cross threads | T2 | About 1,000 lines with tests, the shared core refactored | Yes |
 | T3 | Done (2026-10-04, branch threads-3; 0.6). The second driver (`tests/sched-driver-mt`: the `tasks/`, `sync/`, `refs/` and `taskio/` cases, 5 runs each, with the single-thread driver's ports, shared), `check.sh`, the new cases recorded natively, the site's page for threads mode | T1, T2 | About 700 lines of driver and test, the shared ports moved, and 4 cases | Yes |
 | L1 | leanrs adopts the single-thread `sched` (already planned) | sched-io | leanrs's | No |
 | L2 | leanrs threads mode, behind a feature of leanrs's own: an `Arc` alias; twins of `Nat` (Lem-NT), `Shared` (Lem-SC), `Task`, `Thunk` and `IO.Ref`; `Lazy` for constants; the glue over `sched::mt` | T3, L1 | Medium to large | No |

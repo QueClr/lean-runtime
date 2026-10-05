@@ -6,8 +6,8 @@
 //! values: pure semantics on views and plain data (`semantics`), OS-level IO
 //! (`io`, feature `io`), the task scheduler (`sched`, feature `sched`, on
 //! one thread; or feature `threads`, threads mode, on real threads:
-//! `sched::mt`, re-exported as `sched`) and networking on the single-thread
-//! scheduler's event loop (`net`, feature `net`).
+//! `sched::mt`, re-exported as `sched`) and networking on the scheduler's
+//! event loop (`net`, feature `net`, with `sched` or `threads`).
 //! Each translator keeps its own value representations, memory protocol and
 //! hot paths in its own glue, and calls this crate for the rest.
 //!
@@ -51,7 +51,12 @@ pub mod io;
 #[cfg(all(feature = "sched", feature = "threads"))]
 compile_error!(
     "lean-runtime: the features `threads` (threads mode, `sched::mt`) and `sched` (the \
-     single-thread scheduler; `net` turns it on) exclude each other: a build has one scheduler"
+     single-thread scheduler) exclude each other: a build has one scheduler"
+);
+#[cfg(all(feature = "net", not(any(feature = "sched", feature = "threads"))))]
+compile_error!(
+    "lean-runtime: the feature `net` runs on a scheduler's event loop: enable `sched` (the \
+     single-thread scheduler) or `threads` (threads mode) with it"
 );
 #[cfg(all(
     feature = "stack-overflow",

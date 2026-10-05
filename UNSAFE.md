@@ -171,9 +171,11 @@ Windows only. Audited at 2.1.1 (`src/addrinfo.rs`, `src/nameinfo.rs`,
   called.
 
 How it is checked: the unit tests of `net` (`src/net/tests.rs`, the sync
-errors and the EAI mapping) and the program cases `dns_localhost` and
-`dns_pending_at_exit` against native Lean, in the debug and release builds
-of `tests/sched-driver`. Miri does not run foreign calls.
+errors and the EAI mapping; `src/net/tests_mt.rs`, lookups in threads
+mode) and the program cases `dns_localhost` and `dns_pending_at_exit`
+against native Lean, in the debug and release builds of
+`tests/sched-driver` and, in threads mode, `tests/sched-driver-mt`. Miri
+does not run foreign calls.
 
 The audit holds for socket2 0.6.5 (`SockAddr::try_init`, `as_socket`), the
 version `Cargo.lock` pins under dns-lookup 2.1.1 (whose requirement admits

@@ -1,0 +1,7 @@
+id = "extern_in_sync_dependent"
+area = "net"
+lean_version = "4.34.0"
+source = "net-threads review (RNT-08): a sync dependent of a network promise that calls externs on its socket (on the loop thread, the loop lock held, in threads mode), and UDP and DNS from several tasks"
+streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

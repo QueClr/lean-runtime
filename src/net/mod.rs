@@ -1,6 +1,8 @@
 //! Networking (feature `net`): Lean 4.34.0's TCP, UDP, DNS and interface
 //! externs (`src/runtime/uv/tcp.cpp`, `udp.cpp`, `dns.cpp`, `net_addr.cpp`,
-//! over libuv 1.48), on the scheduler's event loop.
+//! over libuv 1.48), on the scheduler's event loop: the single-thread
+//! scheduler's (feature `sched`) or, in threads mode (feature `threads`),
+//! `sched::uv`'s loop thread, as natively (docs/threads.md, 0.7).
 //!
 //! # Layout
 //!
@@ -33,12 +35,24 @@
 //! where native resolves the promise before returning (an empty `send`, an
 //! `accept` of a connection the loop already took).
 //!
+//! **Both modes, one core.** This module, `tcp`, `udp` and `dns` are one
+//! source for both schedulers; `mode` (`mode_st.rs` or `mode_mt.rs`) gives
+//! what differs: the socket's cell and counted reference (`RefCell` in an
+//! `Rc`, or a lock in an `Arc`), the registry of open sockets (the thread's
+//! or the process's), the io watcher and `uv__io_feed` (the scheduler's
+//! loop context, or the loop thread), the loop's lock (`sched::catch_up`,
+//! or `sched::uv`'s lock held through the extern), and [`MaybeSend`], the
+//! bound on what a pending operation keeps (none, or `Send`). In threads
+//! mode the loop thread runs the callbacks with the loop lock held, a
+//! socket's state lock is taken only under it, and Lean's finalizer of a
+//! socket (the drop of its last handle, on any thread) takes it too.
+//!
 //! **Lifetime.** A socket closes when the translator's last handle goes
 //! (Lean's finalizer, `uv_close`), unless an operation is pending: a pending
 //! operation holds the socket, as native's `lean_inc(socket)`. The loop's
 //! callbacks (the watch of the descriptor, a due `uv__io_feed`) hold no
-//! reference to the socket, only its number in the thread's registry of open
-//! sockets ([`Handle`]); one that runs after the socket closed finds nothing
+//! reference to the socket, only its number in the registry of open sockets
+//! ([`Handle`]); one that runs after the socket closed finds nothing
 //! and does nothing. So only the program's handles and the pending
 //! operations keep a socket open, and no reference cycle goes through the
 //! loop.
@@ -60,29 +74,33 @@
 //! See `docs/net.md` for the design, the cases and the differences.
 
 use crate::io::IoError;
-use crate::sched::{self, Interest, Ready, WatchId};
+use crate::sched::{Interest, Ready};
+use mode::{Cell, Shared, SocketId, WatchId};
 use rustix::fd::{BorrowedFd, OwnedFd};
 use rustix::net::SocketAddrAny;
-use std::any::Any;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::mem::MaybeUninit;
-use std::rc::Rc;
-use std::time::Instant;
 
 pub mod dns;
 pub mod iface;
+// The scheduler's side, one per mode (docs/threads.md, 0.7). With both
+// schedulers on, `sched` is the single-thread one (src/lib.rs), so its side
+// is taken and only src/lib.rs's error is reported.
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[path = "mode_st.rs"]
+mod mode;
+#[cfg(all(feature = "threads", not(feature = "sched")))]
+#[path = "mode_mt.rs"]
+mod mode;
 pub mod tcp;
 pub mod udp;
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "threads", not(feature = "sched")))]
+mod tests_mt;
 
+pub use mode::{Done, MaybeSend};
 pub use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-
-/// A pending operation's completion: it holds the translator's promise
-/// (see the module comment).
-pub type Done<T> = Box<dyn FnOnce(Result<T, IoError>)>;
 
 // libuv's error codes on Linux (`uv-errno.h`): the negated `errno`, and
 // libuv's own codes.
@@ -101,14 +119,16 @@ pub(crate) const UV_EALREADY: i32 = -114;
 pub(crate) const UV_EINPROGRESS: i32 = -115;
 pub(crate) const UV_ECANCELED: i32 = -125;
 
-/// `event_loop_lock`: natively an extern takes the loop's lock, which makes
-/// the loop thread finish its iteration first, so the callbacks of what
-/// became ready meanwhile run before the extern acts. Here the loop context
-/// runs what is due (`sched::catch_up`, as `sched::uv`'s externs do). Called
+/// `event_loop_lock`, held until the guard goes: natively an extern takes
+/// the loop's lock, which makes the loop thread finish its iteration first,
+/// so the callbacks of what became ready meanwhile run before the extern
+/// acts. The single-thread mode lets the loop context run what is due
+/// (`sched::catch_up`, as `sched::uv`'s externs do) and holds nothing;
+/// threads mode holds `sched::uv`'s loop lock until the guard goes. Called
 /// with no socket borrowed: the callbacks may use the socket.
 #[inline]
-pub(crate) fn loop_lock() {
-    sched::catch_up();
+pub(crate) fn loop_lock() -> mode::LoopGuard {
+    mode::loop_lock()
 }
 
 /// `UV__ERR(errno)`: libuv's code of a failed system call.
@@ -193,8 +213,8 @@ impl Ev {
 }
 
 /// A libuv io watcher (`uv__io_t`): the events its handle waits for
-/// (`uv__io_start`, `uv__io_stop`), kept in step with one `sched::watch` of
-/// the descriptor (none while it waits for nothing).
+/// (`uv__io_start`, `uv__io_stop`), kept in step with one watch of the
+/// descriptor by the loop (`mode::watch`; none while it waits for nothing).
 #[derive(Default)]
 pub(crate) struct IoWatcher {
     want: Interest,
@@ -210,9 +230,9 @@ impl IoWatcher {
     /// exists).
     pub(crate) fn set(
         &mut self,
-        fd: Option<&Rc<OwnedFd>>,
+        fd: Option<&Fd>,
         want: Interest,
-        cb: impl FnOnce() -> Rc<dyn Fn(Ready)>,
+        cb: impl FnOnce() -> mode::WatchCb,
     ) {
         let Some(fd) = fd else {
             self.want = want;
@@ -221,17 +241,14 @@ impl IoWatcher {
         let empty = !want.read && !want.write;
         match self.id {
             Some(id) if empty => {
-                sched::unwatch(id);
+                mode::unwatch(id);
                 self.id = None;
             }
             Some(id) if want != self.want => {
-                // the watch is this handle's: `NOENT` cannot happen
-                let _ = sched::watch_modify(id, want);
+                mode::watch_modify(id, want);
             }
             None if !empty => {
-                // epoll refusing (no memory) is libuv's abort; here the
-                // handle just waits on
-                self.id = sched::watch(fd.clone(), want, cb()).ok();
+                self.id = mode::watch(fd, want, cb());
             }
             _ => {}
         }
@@ -246,86 +263,73 @@ impl IoWatcher {
     /// descriptor at once).
     pub(crate) fn close(&mut self) {
         if let Some(id) = self.id.take() {
-            sched::unwatch(id);
+            mode::unwatch(id);
         }
         self.want = Interest::default();
     }
 }
 
-/// A socket's number in the thread's registry of open sockets: given once,
-/// never reused.
-pub(crate) type SocketId = u64;
-
-/// The open sockets of the thread (TCP and UDP), by number. The loop's
-/// callbacks hold a socket's number, not a reference to it, and find the
-/// socket here while it is open ([`on_socket`]).
-///
-/// An entry exists exactly while the socket's [`Handle`] does (made by
-/// [`Handle::new`], removed by its drop), and the handle holds the socket's
-/// state too: the registry is never the last owner of a socket, so removing
-/// an entry, or the registry itself at the thread's end, never closes one.
-#[derive(Default)]
-struct Registry {
-    /// The last number given.
-    last: Cell<SocketId>,
-    open: RefCell<HashMap<SocketId, Rc<dyn Any>>>,
-}
-
-thread_local! {
-    static SOCKETS: Registry = Registry::default();
-}
-
 #[cfg(test)]
 thread_local! {
-    /// How many loop callbacks found their socket (the unit tests').
-    pub(crate) static CALLBACKS_RUN: Cell<u32> = const { Cell::new(0) };
+    /// How many loop callbacks of this thread found their socket (the unit
+    /// tests'; in threads mode the loop thread's).
+    pub(crate) static CALLBACKS_RUN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// A socket as the program holds it: `TcpSocket` and `UdpSocket` are an
-/// `Rc` of one, which a pending operation clones (native's
-/// `lean_inc(socket)`). It owns the socket's state and its entry in the
-/// registry. When the last clone goes (the program's last reference, and no
-/// operation pending), its drop removes the entry and lets go of the state,
-/// whose own drop closes the descriptor (Lean's finalizer, `uv_close`): at
-/// once, unless a loop callback is running on the socket, which holds the
-/// state until it returns ([`on_socket`]).
-pub(crate) struct Handle<T: 'static> {
+/// A socket as the program holds it: `TcpSocket` and `UdpSocket` are a
+/// counted reference (`mode::Shared`) to one, which a pending operation
+/// clones (native's `lean_inc(socket)`). It owns the socket's state and its
+/// entry in the registry of open sockets (`mode::register`: the thread's,
+/// or in threads mode the process's), by number, a number given once and
+/// never reused. The loop's callbacks hold a socket's number, not a
+/// reference to it, and find the socket there while it is open
+/// ([`on_socket`]). An entry exists exactly while the socket's handle does
+/// (made by [`Handle::new`], removed by its drop), and the handle holds the
+/// socket's state too: the registry is never the last owner of a socket,
+/// so removing an entry, or the registry itself at the thread's end, never
+/// closes one.
+///
+/// When the last clone goes (the program's last reference, and no
+/// operation pending), its drop (Lean's finalizer, which takes the loop's
+/// lock: `mode::finalizer_lock`) removes the entry and lets go of the
+/// state, whose own drop closes the descriptor (`uv_close`): at once,
+/// unless a loop callback is running on the socket, which holds the state
+/// until it returns ([`on_socket`]).
+pub(crate) struct Handle<T: MaybeSend + 'static> {
     id: SocketId,
-    state: Rc<RefCell<T>>,
+    /// Always `Some` until the drop, which lets go of it under the loop's
+    /// lock.
+    state: Option<Shared<Cell<T>>>,
 }
 
-impl<T: 'static> Handle<T> {
+impl<T: MaybeSend + 'static> Handle<T> {
     /// A new socket: its number, its state `make(id)`, its entry.
     pub(crate) fn new(make: impl FnOnce(SocketId) -> T) -> Handle<T> {
-        let id = SOCKETS.with(|r| {
-            let id = r.last.get() + 1;
-            r.last.set(id);
-            id
-        });
-        let state = Rc::new(RefCell::new(make(id)));
-        let entry: Rc<dyn Any> = state.clone();
-        SOCKETS.with(|r| r.open.borrow_mut().insert(id, entry));
-        Handle { id, state }
+        let id = mode::new_id();
+        let state = Shared::new(Cell::new(make(id)));
+        mode::register(id, &state);
+        Handle {
+            id,
+            state: Some(state),
+        }
     }
 }
 
 /// The socket's state.
-impl<T: 'static> std::ops::Deref for Handle<T> {
-    type Target = RefCell<T>;
-    fn deref(&self) -> &RefCell<T> {
-        &self.state
+impl<T: MaybeSend + 'static> std::ops::Deref for Handle<T> {
+    type Target = Cell<T>;
+    fn deref(&self) -> &Cell<T> {
+        self.state.as_deref().expect("a live handle has its state")
     }
 }
 
-impl<T: 'static> Drop for Handle<T> {
+impl<T: MaybeSend + 'static> Drop for Handle<T> {
     fn drop(&mut self) {
+        let _l = mode::finalizer_lock();
         // nothing to remove once the thread's locals are gone
-        let entry = SOCKETS
-            .try_with(|r| r.open.borrow_mut().remove(&self.id))
-            .ok()
-            .flatten();
-        drop(entry);
-        // `self.state` goes next: the socket's drop, if nothing else holds it
+        mode::unregister(self.id);
+        // the socket's drop, if nothing else holds it, under the loop's lock
+        drop(self.state.take());
     }
 }
 
@@ -339,12 +343,8 @@ impl<T: 'static> Drop for Handle<T> {
 /// watch's callback always finds its socket (the socket's drop ends the
 /// watch, `IoWatcher::close`, before any other callback can run); a
 /// `uv__io_feed` due after the socket closed does not.
-pub(crate) fn on_socket<T: 'static>(id: SocketId, f: impl FnOnce(&RefCell<T>)) {
-    let entry = SOCKETS
-        .try_with(|r| r.open.borrow().get(&id).cloned())
-        .ok()
-        .flatten();
-    let Some(s) = entry.and_then(|e| e.downcast::<RefCell<T>>().ok()) else {
+pub(crate) fn on_socket<T: MaybeSend + 'static>(id: SocketId, f: impl FnOnce(&Cell<T>)) {
+    let Some(s) = mode::lookup::<T>(id) else {
         return;
     };
     #[cfg(test)]
@@ -352,40 +352,37 @@ pub(crate) fn on_socket<T: 'static>(id: SocketId, f: impl FnOnce(&RefCell<T>)) {
     f(&s);
 }
 
-/// `uv__io_feed`: run `io(FEED)` on the loop context soon (once until it has
-/// run), as libuv's pending queue runs the watcher with `POLLOUT` at its
-/// next turn. The timer holds the socket's number only.
-pub(crate) fn feed<T: 'static>(
+/// `uv__io_feed`: run `io(FEED)` on the loop soon (once until it has run),
+/// as libuv's pending queue runs the watcher with `POLLOUT` at its next
+/// turn. The callback holds the socket's number only.
+pub(crate) fn feed<T: MaybeSend + 'static>(
     w: &mut IoWatcher,
     id: SocketId,
-    io: fn(&RefCell<T>, Ev),
+    io: fn(&Cell<T>, Ev),
     fed: fn(&mut T) -> &mut IoWatcher,
 ) {
     if w.fed {
         return;
     }
     w.fed = true;
-    sched::timer_start(
-        Instant::now(),
-        Rc::new(move || {
-            on_socket(id, |s: &RefCell<T>| {
-                fed(&mut s.borrow_mut()).fed = false;
-                io(s, Ev::FEED);
-            })
-        }),
-    );
+    mode::feed_soon(move || {
+        on_socket(id, |s: &Cell<T>| {
+            fed(&mut s.borrow_mut()).fed = false;
+            io(s, Ev::FEED);
+        })
+    });
 }
 
 /// The watch callback of socket `id`: `io(events)` while the socket is
 /// open. It holds the socket's number only.
-pub(crate) fn watch_cb<T: 'static>(
+pub(crate) fn watch_cb<T: MaybeSend + 'static>(
     id: SocketId,
-    io: fn(&RefCell<T>, Ev),
+    io: fn(&Cell<T>, Ev),
     want: fn(&T) -> Interest,
     conv: fn(Ready, Interest) -> Ev,
-) -> Rc<dyn Fn(Ready)> {
-    Rc::new(move |r| {
-        on_socket(id, |s: &RefCell<T>| {
+) -> mode::WatchCb {
+    mode::watch_cb(move |r| {
+        on_socket(id, |s: &Cell<T>| {
             let w = want(&s.borrow());
             io(s, conv(r, w));
         })
@@ -408,10 +405,11 @@ pub(crate) fn socket_address(a: SocketAddrAny) -> Option<SocketAddr> {
 }
 
 /// The translator's buffers of a `send` (Lean's `Array ByteArray`), kept by
-/// the crate until the write completes. Its methods run while the crate
-/// holds the socket's state: they must only read the bytes, not call into
-/// the crate or yield (no effect point, no wait).
-pub trait SendData: 'static {
+/// the crate until the write completes (in threads mode the loop thread
+/// writes and drops them: [`MaybeSend`] is `Send` there). Its methods run
+/// while the crate holds the socket's state: they must only read the bytes,
+/// not call into the crate or yield (no effect point, no wait).
+pub trait SendData: MaybeSend + 'static {
     /// The number of buffers.
     fn count(&self) -> usize;
     /// The bytes of buffer `i`.
@@ -451,12 +449,14 @@ impl RecvTarget<'_> {
     }
 }
 
-/// The translator's new `ByteArray` for one receive (see [`RecvTarget`]).
-/// `target` runs while the crate holds the socket's state: it must only
-/// hand out the storage, not call into the crate or yield. (The `alloc`
-/// closure of `recv`, which makes the buffer, runs with nothing held and
-/// may end the process through the glue's internal panic.)
-pub trait RecvBuf: 'static {
+/// The translator's new `ByteArray` for one receive (see [`RecvTarget`]; in
+/// threads mode the loop thread reads into it and hands it to `done`:
+/// [`MaybeSend`] is `Send` there). `target` runs while the crate holds the
+/// socket's state: it must only hand out the storage, not call into the
+/// crate or yield. (The `alloc` closure of `recv`, which makes the buffer,
+/// runs with no socket held and may end the process through the glue's
+/// internal panic; in threads mode with the loop lock held, as natively.)
+pub trait RecvBuf: MaybeSend + 'static {
     /// Its storage.
     fn target(&mut self) -> RecvTarget<'_>;
 }
@@ -526,7 +526,7 @@ pub(crate) fn recv_into(
 
 /// A socket's descriptor (shared with the loop's watch while one is
 /// registered).
-pub(crate) type Fd = Rc<OwnedFd>;
+pub(crate) type Fd = Shared<OwnedFd>;
 
 /// Close a socket's descriptor: a standard descriptor (0 to 2) is left
 /// open, as libuv's `uv__stream_close` leaves it. libuv's `uv__udp_close`
@@ -537,7 +537,7 @@ pub(crate) type Fd = Rc<OwnedFd>;
 pub(crate) fn close_fd(fd: Option<Fd>) {
     if let Some(fd) = fd {
         if rustix::fd::AsRawFd::as_raw_fd(&*fd) <= 2 {
-            if let Ok(owned) = Rc::try_unwrap(fd) {
+            if let Ok(owned) = Shared::try_unwrap(fd) {
                 std::mem::forget(owned);
             }
         }

@@ -11,9 +11,10 @@
 //! This driver has none, so its hooks check the crate's side of their
 //! contract while every case runs:
 //! - `thread_start` and `thread_end` pair up on each thread the task manager
-//!   makes, and once `finish` has returned every such thread has ended
-//!   (`Std.Internal.UV`'s loop thread, which never ends, would be the one
-//!   exception; no case of these areas uses it);
+//!   makes, and once `finish` has returned every such thread has ended;
+//!   `Std.Internal.UV`'s loop thread (the `net` cases') gets one
+//!   `thread_start` and, since it never ends, no `thread_end`
+//!   (`sched::uv::on_loop_thread` names it);
 //! - `task_begin` and `task_end` pair up on the calling thread, nested (a
 //!   `sync` task inside the walk of the task below it), each `task_end`
 //!   with its `task_begin`'s `own_thread`, and no task is open at
@@ -44,9 +45,14 @@ thread_local! {
     static MADE: Cell<bool> = const { Cell::new(false) };
 }
 
-/// The threads whose `thread_start` ran, and those whose `thread_end` ran.
+/// The threads but the loop thread whose `thread_start` ran, and those whose
+/// `thread_end` ran; and the loop thread's `thread_start` (at most one),
+/// counted apart: it may run at any time, also while `main` checks the
+/// others after `finish` (the loop thread is made at the first extern and
+/// calls the hook as it starts), and it has no `thread_end`.
 static STARTED: AtomicU64 = AtomicU64::new(0);
 static ENDED: AtomicU64 = AtomicU64::new(0);
+static LOOP_STARTED: AtomicU64 = AtomicU64::new(0);
 
 /// The calls of `workers_end`.
 static WORKERS_END: AtomicU64 = AtomicU64::new(0);
@@ -76,6 +82,11 @@ impl Glue for DriverGlue {
         );
         assert_eq!(open_tasks(), 0, "sched-cases-mt: thread_start in a task");
         MADE.set(true);
+        if sched::uv::on_loop_thread() {
+            let before = LOOP_STARTED.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(before, 0, "sched-cases-mt: a second loop thread");
+            return;
+        }
         STARTED.fetch_add(1, Ordering::SeqCst);
         if sched::running_worker().is_some() {
             WORKERS_STARTED.fetch_add(1, Ordering::SeqCst);
@@ -86,6 +97,10 @@ impl Glue for DriverGlue {
         assert!(
             MADE.get(),
             "sched-cases-mt: thread_end without thread_start"
+        );
+        assert!(
+            !sched::uv::on_loop_thread(),
+            "sched-cases-mt: thread_end on the loop thread"
         );
         assert_eq!(
             open_tasks(),
@@ -160,7 +175,8 @@ pub fn run(init: impl FnOnce(), main: impl FnOnce(&[String]) -> u32, args: &[Str
     WORKERS_AT_FINISH.store(WORKERS_STARTED.load(Ordering::SeqCst), Ordering::SeqCst);
     sched::finish();
     // The hooks' contract at the end: every thread the task manager made has
-    // ended, and no task is open on `main`'s thread.
+    // ended (the loop thread, counted apart, never ends), and no task is open
+    // on `main`'s thread.
     let (started, ended) = (STARTED.load(Ordering::SeqCst), ENDED.load(Ordering::SeqCst));
     assert_eq!(
         started, ended,

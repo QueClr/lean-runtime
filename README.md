@@ -21,7 +21,7 @@ values.
 | `semantics`: hashing, float and character formatting, `UIntN`/`IntN` rows, `Nat`/`Int` rules over a big-number trait, string-position algorithms on UTF-8 bytes, array edge rules, IP address text | The representation of Lean values (`Nat` words, strings, arrays, user types) |
 | `io` (feature `io`): glibc `FILE` buffering, files and handles, directories, environment, clock, `errno` to `IO.Error`, `main` on a thread with Lean's stack (`io::startup::run_main`, with a scheduler); with the feature `proc-title` (it turns on `io`), `setProcessTitle`'s write into the arguments' memory, a native quirk written with `unsafe` (without it, `setProcessTitle` fails with `ENOBUFS`); with the feature `startup-fds` (it turns on `io`), an ELF constructor that opens native Lean's startup descriptors before Rust's runtime starts, a native quirk written with `unsafe` (without it, a glue writes that constructor itself) | The memory protocol: reference counting, ownership, freeing |
 | `sched` (feature `sched`): deferred tasks run as coroutines, yield points, promises, `Std.Sync`, Lean's exit behaviour, and a lazy start (`sched::start_lazy`: the scheduler built at the first task; single-thread only, threads mode starts eagerly); or, with the feature `threads` instead (threads mode, `docs/threads.md`), Lean's task manager on real threads, with the same functions and `Send` bounds; with the feature `stack-overflow` (with `sched` or `threads`), Lean's stack-overflow report for the scheduler's stacks, a native quirk written with `unsafe` (without it, a task's stack overflow is a plain SIGSEGV, status 139) | Hot paths on the translator's own types (the `Nat` fast path, in-place string and array updates) |
-| `net` (feature `net`, with `io` and `sched`): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
+| `net` (feature `net`, with `io`; it needs a scheduler, `sched` or `threads`, and turns none on): TCP, UDP, DNS and interface addresses (`Std.Internal.UV`, `Std.Net`) on the scheduler's event loop, in threads mode on `sched::uv`'s loop thread | Its promises and `ByteArray`s (the crate calls back to resolve and to allocate them) |
 
 Functions take views (`&[u8]`, `&str`) and plain data (`u64`, `f64`), and
 return plain data or write into a buffer the caller supplies, so either
@@ -98,7 +98,7 @@ native"). In fixes-3, a pure task a worker has started keeps that worker
 until it runs, as natively (AR-25), with two more known differences,
 LSCHED-02 and LSCHED-03.
 
-Threads mode (feature `threads`, which excludes `sched` and `net`) has its
+Threads mode (feature `threads`, which excludes `sched`) has its
 first batch, T1: `sched::mt`, Lean 4.34.0's task manager on real threads
 (a pool of `LEAN_NUM_THREADS` workers, a thread per dedicated task, one
 more worker while a pool task waits, one lock), promises, `Std.Sync`, the
@@ -115,17 +115,22 @@ tasks in a threads build. The third batch, T3, runs the task, sync, refs
 and taskio cases in threads mode through a second driver
 (`tests/sched-driver-mt`), 5 runs each, with the single-thread driver's
 ports of the same cases, and adds four cases that need real contention,
-recorded natively. `net` in threads mode, and the translators' threads
-modes, come later. See `docs/threads.md`.
+recorded natively. The batch net-threads (N) runs `net` in threads mode:
+the sockets and lookups on `sched::uv`'s loop thread, as natively, every
+extern and a socket's finalizer under the loop lock, one source for both
+modes (a mode layer, `src/net/mode_st.rs` and `mode_mt.rs`); the cases of
+`tests/cases/net` pass through the second driver too, 5 runs each. The
+translators' threads modes come later. See `docs/threads.md`.
 
-`net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
-externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code
-over non-blocking sockets, on the scheduler's event loop), `DNS` (glibc's
+`net` (feature `net`; it turns on `io`, and needs `sched` or `threads`) has
+Lean's networking externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's
+stream and UDP code over non-blocking sockets, on the scheduler's event
+loop, or in threads mode on `sched::uv`'s loop thread), `DNS` (glibc's
 `getaddrinfo` and `getnameinfo` through dns-lookup, on two helper threads)
 and `Std.Net.interfaceAddresses`. The cases of `tests/cases/net` pass
 through the driver; eight native bugs are not reproduced (LB-21 to LB-28).
 Its second batch, net-2, holds no `Weak` reference: the loop's callbacks
-hold a socket's number in the thread's registry of open sockets, so only
+hold a socket's number in the registry of open sockets, so only
 the program's handles and the pending operations keep a socket open
 (AR-12). See `docs/net.md`.
 

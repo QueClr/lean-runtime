@@ -12,7 +12,8 @@
 //! (`Glue::suspend`, contexts, `block_sync` and `wake`, the event loop's
 //! `watch` and `timer_start`) is not here: a blocked task blocks its own
 //! thread. `sched::uv` is `mt::uv`: `Std.Internal.UV`'s loop on a thread of
-//! its own, as natively, with the single-thread module's names (T2).
+//! its own, as natively, with the single-thread module's names (T2); with
+//! the feature `net`, `net`'s sockets and lookups run on it too (N).
 //!
 //! Shared with the single-thread scheduler: `common` (the task states, the
 //! messages, the priorities), `env` (`LEAN_NUM_THREADS`,
@@ -43,6 +44,11 @@ mod ctx {
 }
 
 pub use common::{await_task, thread_create_failed};
+// What `net`'s io watchers wait for and saw, on `sched::uv`'s loop thread
+// (docs/threads.md, 0.7); the single-thread scheduler exports them as its
+// own loop's.
+#[cfg(feature = "net")]
+pub(crate) use common::{Interest, Ready};
 pub use drain::{
     defer, deferred_pending, run_deferred, Deferred, DrainScope, RESOLVE_IN_NO_SUSPEND,
 };

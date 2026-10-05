@@ -43,6 +43,10 @@ pub mod sync;
 mod task;
 #[cfg(test)]
 mod tests;
+/// The unit tests' lock (`net`'s tests of threads mode take it too: they
+/// share the loop thread with `uv`'s).
+#[cfg(all(test, feature = "net"))]
+pub(crate) use tests::serial as test_serial;
 pub mod uv;
 
 pub use super::common::{TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER, PROMISE_DROPPED};
@@ -403,6 +407,14 @@ pub fn running_worker() -> Option<u32> {
 /// Whether the task manager runs (`g_task_manager`).
 pub fn manager_running() -> bool {
     task::with_shared(|sh| sh.is_some_and(|sh| sh.started()))
+}
+
+/// Whether the task manager's finalization is over (`finish` has returned:
+/// native's `g_task_manager` is null again), as opposed to never started.
+/// `sched::uv`'s loop thread runs no callback from then on (two atomic
+/// loads).
+pub(crate) fn manager_finished() -> bool {
+    task::with_shared(|sh| sh.is_some_and(|sh| sh.finished()))
 }
 
 /// `IO.Promise.new` (`lean_promise_new`), and the task that

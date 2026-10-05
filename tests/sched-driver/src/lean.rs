@@ -56,6 +56,11 @@ pub type Obj<T> = Rc<T>;
 /// here, a lock in threads mode, both with `borrow` and `borrow_mut`.
 pub type Var<T> = RefCell<T>;
 
+/// What a value of the shared ports needs (`lnet.rs`, `netcases.rs`):
+/// `Clone` here, and `Send + Sync` too in threads mode.
+pub trait Val: Clone + 'static {}
+impl<T: Clone + 'static> Val for T {}
+
 /// `Task.Priority.default`, `Task.Priority.dedicated`.
 pub const PRIO_DEFAULT: u64 = 0;
 pub const PRIO_DEDICATED: u64 = 9;

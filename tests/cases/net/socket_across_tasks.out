@@ -1,0 +1,6 @@
+the receive is pending: true
+the receive got one
+the peer reads the end of the stream
+the cancelled receive is resolved: false
+after the peer's send: false
+the next receive got two

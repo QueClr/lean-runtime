@@ -9,9 +9,11 @@
 //! data (the host, service and family, or the address) and send back plain
 //! data (the addresses or names, or libuv's error code), then wake the loop
 //! through the loop's eventfd (native's async descriptor, `io::startup`; one
-//! of the crate's own if the glue did not open native's). The loop context
-//! resolves the promise. No Lean value crosses threads, and the helpers are
-//! not Lean-visible parallelism: they only wait in the C library. At exit
+//! of the crate's own if the glue did not open native's). The loop resolves
+//! the promise: the single-thread scheduler's loop context, or in threads
+//! mode `sched::uv`'s loop thread, through its async queue (`mode`'s
+//! `dns_client`). No Lean value crosses threads, and the helpers are not
+//! Lean-visible parallelism: they only wait in the C library. At exit
 //! the process waits for the lookups in progress and drops their answers,
 //! as natively (libuv's `uv_library_shutdown` destructor joins its thread
 //! pool), without native's crash (LB-27): `exit_wait`, from
@@ -30,15 +32,11 @@
 //!   Lean (`otherError`, "unknown node or service (error code: 3008)" for
 //!   `EAI_NONAME`).
 
-use super::{uv_error, UV_EINVAL};
+use super::mode::{self, DnsDone};
+use super::{uv_error, MaybeSend, UV_EINVAL};
 use crate::io::IoError;
-use crate::sched;
-use rustix::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::net::{IpAddr, SocketAddr};
-use std::rc::Rc;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 
@@ -80,9 +78,6 @@ pub(crate) enum Answer {
     AddrInfo(Result<Vec<IpAddr>, i32>),
     NameInfo(Result<(String, String), i32>),
 }
-
-/// A lookup's id and answer.
-type Reply = (u64, Answer);
 
 /// A job of the pool: the lookup, and where its answer goes (a channel to
 /// the loop and the loop's wake-up, or a test's channel).
@@ -358,106 +353,11 @@ pub(crate) fn idna_ok(host: &[u8]) -> bool {
     !host.is_empty() && host.len() < 256
 }
 
-/// The loop's side: the promises of the lookups in progress, and the watch
-/// of the wake-up descriptor while there are any.
-#[derive(Default)]
-struct Client {
-    next: u64,
-    pending: HashMap<u64, Box<dyn FnOnce(Answer)>>,
-    replies: Option<(Sender<Reply>, Receiver<Reply>)>,
-    watch: Option<sched::WatchId>,
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        // at thread exit: the promises are not dropped (their destructors
-        // would call into the scheduler during its destruction)
-        for (_, done) in self.pending.drain() {
-            std::mem::forget(done);
-        }
-    }
-}
-
-thread_local! {
-    static CLIENT: RefCell<Client> = RefCell::new(Client::default());
-}
-
-/// The loop's wake-up descriptor: native's async eventfd (opened by the
-/// glue at startup), or one of the crate's own.
-fn wake_fd() -> Result<BorrowedFd<'static>, IoError> {
-    if let Some(fd) = crate::io::startup::loop_eventfd() {
-        return Ok(fd);
-    }
-    // made once; a failure is not kept, so a later lookup tries again
-    // (review RNET-05)
-    static OWN: OnceLock<OwnedFd> = OnceLock::new();
-    if let Some(fd) = OWN.get() {
-        return Ok(fd.as_fd());
-    }
-    let fd = rustix::event::eventfd(
-        0,
-        rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
-    )
-    .map_err(|e| IoError::decode_io_error(e.raw_os_error(), None))?;
-    Ok(OWN.get_or_init(|| fd).as_fd())
-}
-
-/// Submit `query`; `done` runs on the loop context with the answer.
-fn submit(query: Query, done: Box<dyn FnOnce(Answer)>) -> Result<(), IoError> {
-    let wake = wake_fd()?;
-    let (id, reply, watch) = CLIENT.with(|c| {
-        let mut c = c.borrow_mut();
-        c.next += 1;
-        let id = c.next;
-        c.pending.insert(id, done);
-        let reply = c.replies.get_or_insert_with(channel).0.clone();
-        (id, reply, c.watch.is_none())
-    });
-    if watch {
-        let cb: Rc<dyn Fn(sched::Ready)> = Rc::new(move |_| deliver(wake));
-        let w = sched::watch(wake, sched::Interest::READ, cb).ok();
-        CLIENT.with(|c| c.borrow_mut().watch = w);
-    }
-    pool().submit(Job {
-        query,
-        deliver: Box::new(move |answer| {
-            if reply.send((id, answer)).is_ok() {
-                // `uv_async_send`: wake the loop
-                let _ = rustix::io::write(wake, &1u64.to_ne_bytes());
-            }
-        }),
-    });
+/// Submit `query`; `done` runs on the loop with the answer.
+fn submit(query: Query, done: DnsDone) -> Result<(), IoError> {
+    let deliver = mode::dns_client(done)?;
+    pool().submit(Job { query, deliver });
     Ok(())
-}
-
-/// The wake-up descriptor is readable: resolve the answered lookups, in the
-/// order the helpers answered; stop watching once none is left.
-fn deliver(wake: BorrowedFd<'static>) {
-    let mut buf = [0u8; 8];
-    let _ = rustix::io::read(wake, &mut buf);
-    loop {
-        let next = CLIENT.with(|c| {
-            let mut c = c.borrow_mut();
-            let (id, answer) = c.replies.as_ref()?.1.try_recv().ok()?;
-            let done = c.pending.remove(&id)?;
-            Some((done, answer))
-        });
-        let Some((done, answer)) = next else {
-            break;
-        };
-        done(answer);
-    }
-    let w = CLIENT.with(|c| {
-        let mut c = c.borrow_mut();
-        if c.pending.is_empty() {
-            c.watch.take()
-        } else {
-            None
-        }
-    });
-    if let Some(w) = w {
-        sched::unwatch(w);
-    }
 }
 
 /// `DNS.getAddrInfo` (`lean_uv_dns_get_info`, `uv_getaddrinfo`): the
@@ -468,9 +368,9 @@ pub fn get_addr_info(
     host: &str,
     service: &str,
     family: u8,
-    done: impl FnOnce(Result<Vec<IpAddr>, IoError>) + 'static,
+    done: impl FnOnce(Result<Vec<IpAddr>, IoError>) + MaybeSend + 'static,
 ) -> Result<(), IoError> {
-    crate::sched::ensure_started();
+    mode::ensure_started();
     crate::io::effect_point();
     if !safe_ascii(host.as_bytes()) {
         return Err(IoError::InvalidArgument(
@@ -486,7 +386,7 @@ pub fn get_addr_info(
             "service is not ASCII".to_owned(),
         ));
     }
-    super::loop_lock();
+    let _l = super::loop_lock();
     if !idna_ok(host.as_bytes()) {
         return Err(uv_error(UV_EINVAL));
     }
@@ -514,11 +414,11 @@ pub fn get_addr_info(
 /// them on the loop.
 pub fn get_name_info(
     addr: SocketAddr,
-    done: impl FnOnce(Result<(String, String), IoError>) + 'static,
+    done: impl FnOnce(Result<(String, String), IoError>) + MaybeSend + 'static,
 ) -> Result<(), IoError> {
-    crate::sched::ensure_started();
+    mode::ensure_started();
     crate::io::effect_point();
-    super::loop_lock();
+    let _l = super::loop_lock();
     let addr = match addr {
         SocketAddr::V6(a) => SocketAddr::V6(std::net::SocketAddrV6::new(*a.ip(), a.port(), 0, 0)),
         a => a,

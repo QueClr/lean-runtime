@@ -147,3 +147,80 @@ mod tests {
         );
     }
 }
+
+/// What a wait or a watch waits for on a descriptor: the single-thread
+/// loop's (`sched::watch`, `sched::poll_fds`) and, in threads mode,
+/// `sched::uv`'s io watchers for `net` (docs/threads.md, 0.7).
+#[cfg(any(feature = "sched", feature = "net"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Interest {
+    /// Readable (`POLLIN`; end of file and errors count).
+    pub read: bool,
+    /// Writable (`POLLOUT`; errors and a hang-up count).
+    pub write: bool,
+}
+
+#[cfg(any(feature = "sched", feature = "net"))]
+// in threads mode the constants are crate-private, and `net` names them only
+// in its tests
+#[cfg_attr(not(feature = "sched"), allow(dead_code))]
+impl Interest {
+    pub const READ: Interest = Interest {
+        read: true,
+        write: false,
+    };
+    pub const WRITE: Interest = Interest {
+        read: false,
+        write: true,
+    };
+    pub const BOTH: Interest = Interest {
+        read: true,
+        write: true,
+    };
+
+    pub(crate) fn epoll_flags(self) -> rustix::event::epoll::EventFlags {
+        use rustix::event::epoll::EventFlags as E;
+        let mut f = E::empty();
+        if self.read {
+            f |= E::IN;
+        }
+        if self.write {
+            f |= E::OUT;
+        }
+        f
+    }
+}
+
+/// What the loop saw on a descriptor.
+#[cfg(any(feature = "sched", feature = "net"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Ready {
+    /// A read would not block (data, end of file, or an error).
+    pub read: bool,
+    /// A write would not block (room, or an error).
+    pub write: bool,
+    /// `POLLHUP`: the other end is closed.
+    pub hangup: bool,
+    /// `POLLERR`.
+    pub error: bool,
+}
+
+#[cfg(any(feature = "sched", feature = "net"))]
+impl Ready {
+    pub(crate) fn from_epoll(f: rustix::event::epoll::EventFlags) -> Ready {
+        use rustix::event::epoll::EventFlags as E;
+        let error = f.contains(E::ERR);
+        let hangup = f.contains(E::HUP);
+        Ready {
+            read: f.intersects(E::IN | E::PRI | E::RDHUP) || error || hangup,
+            write: f.contains(E::OUT) || error || hangup,
+            hangup,
+            error,
+        }
+    }
+
+    /// Whether this answers `i`.
+    pub fn meets(self, i: Interest) -> bool {
+        (i.read && self.read) || (i.write && self.write)
+    }
+}

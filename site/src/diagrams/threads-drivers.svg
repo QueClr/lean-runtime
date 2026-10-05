@@ -1,17 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 400" role="img" aria-labelledby="th2-t th2-d">
   <title id="th2-t">Two drivers, one set of ports</title>
-  <desc id="th2-d">Each case of tasks, sync, refs and taskio has its recorded outcomes: native Lean 4.34.0's, or the correct one where native has a Lean bug. One Rust port of each case is in cases.rs. Both drivers compile it. sched-cases runs it over the single-thread scheduler, with Rc values and the suspend step in its glue, once per case. sched-cases-mt runs it over threads mode, with Arc values and a glue whose hooks check their contract, five times per case. The runner compares each run with the recorded outcomes.</desc>
+  <desc id="th2-d">Each case of tasks, sync, refs, taskio and net has its recorded outcomes: native Lean 4.34.0's, or the correct one where native has a Lean bug. One Rust port of each case is in cases.rs or netcases.rs. Both drivers compile them. sched-cases runs it over the single-thread scheduler, with Rc values and the suspend step in its glue, once per case. sched-cases-mt runs it over threads mode, with Arc values and a glue whose hooks check their contract, five times per case. The runner compares each run with the recorded outcomes.</desc>
   <defs>
     <marker id="th2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
   </defs>
   <rect class="k-lean" x="20" y="16" width="250" height="88" rx="6"/>
   <text class="tb" x="145" y="38" text-anchor="middle">tests/cases/</text>
-  <text class="ts" x="145" y="56" text-anchor="middle">tasks, sync, refs, taskio</text>
+  <text class="ts" x="145" y="56" text-anchor="middle">tasks, sync, refs, taskio, net</text>
   <text class="ts" x="145" y="74" text-anchor="middle">recorded outcomes: native's, or</text>
   <text class="ts" x="145" y="90" text-anchor="middle">the correct one for a Lean bug</text>
 
   <rect class="k-test" x="330" y="20" width="230" height="70" rx="6"/>
-  <text class="tc" x="445" y="48" text-anchor="middle">cases.rs</text>
+  <text class="tc" x="445" y="48" text-anchor="middle">cases.rs, netcases.rs</text>
   <text class="ts" x="445" y="68" text-anchor="middle">one Rust port per case</text>
   <line class="ar" x1="270" y1="55" x2="326" y2="55" marker-end="url(#th2-a)"/>
 

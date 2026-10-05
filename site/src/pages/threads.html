@@ -2,8 +2,8 @@
 <p class="lead">Threads mode (feature <code>threads</code>) is Lean 4.34.0's task manager on real OS threads.
 It is the module <code>sched::mt</code>, which a <code>threads</code> build uses in place of the single-thread scheduler.</p>
 
-<div class="note"><p>Threads mode came in three batches on 2026-10-04.
-T1 is the task manager, T2 is <code>io</code> and <code>Std.Internal.UV</code> on threads, and T3 is the second test driver.
+<div class="note"><p>Threads mode came in three batches on 2026-10-04, and a fourth on 2026-10-05.
+T1 is the task manager, T2 is <code>io</code> and <code>Std.Internal.UV</code> on threads, T3 is the second test driver, and N is <code>net</code> on threads.
 The owner chose native's worker pool, and atomic values in every threads-mode program (2026-10-04).
 No translator uses threads mode yet.
 leanrs plans it; lean2rr stays single-threaded for now.</p></div>
@@ -13,6 +13,7 @@ leanrs plans it; lean2rr stays single-threaded for now.</p></div>
   <li><a href="#pool">The worker pool</a></li>
   <li><a href="#per-thread">What each thread has</a></li>
   <li><a href="#values">Values that cross threads</a></li>
+  <li><a href="#net">Networking</a></li>
   <li><a href="#differences">Known differences</a></li>
   <li><a href="#tests">How it is tested</a></li>
   <li><a href="#later">Later</a></li>
@@ -21,7 +22,8 @@ leanrs plans it; lean2rr stays single-threaded for now.</p></div>
 <h2 id="what">What the mode is</h2>
 <ul>
   <li><strong>One scheduler per build.</strong> A translator chooses the mode when it builds a program.
-    The feature <code>threads</code> excludes <code>sched</code> and <code>net</code>: a build with both is a compile error.</li>
+    The feature <code>threads</code> excludes <code>sched</code>: a build with both is a compile error.
+    The feature <code>net</code> goes with either scheduler (N).</li>
   <li><strong>The same names.</strong> A <code>threads</code> build re-exports <code>sched::mt</code> as <code>sched</code>.
     So the glue calls <code>sched::spawn</code>, <code>sched::wait</code> and the other functions by the same names in both modes.</li>
   <li><strong>What changes for the glue:</strong>
@@ -58,7 +60,8 @@ The loop thread exists only after the program's first use of <code>Std.Internal.
     The other dependents go to the queue.
     The waiters of a task wake when the walk of its dependents ends, as natively.</li>
   <li><strong>The loop thread.</strong> <code>Std.Internal.UV</code>'s timers and signals run on a thread of their own, as natively (T2).
-    That thread resolves their promises.</li>
+    That thread resolves their promises.
+    With <code>net</code>, the sockets and the name lookups run there too (N).</li>
   <li><strong>Exit.</strong> After <code>main</code>, <code>finish</code> sets Lean's shutdown flag, and works in this order, as native's task manager does:
     <ol>
       <li>It waits until the queue is empty and joins the standard workers.
@@ -86,7 +89,10 @@ A pool worker keeps it from one task to the next.</td></tr>
 <tr><td>The <code>FILE</code>s of the standard streams, the open handles</td><td>One for the process, with a lock each, as glibc's.</td></tr>
 <tr><td>The working directory</td><td>One for the process, as natively.
 Where the kernel refuses <code>unshare(CLONE_FS)</code>, path lookups hold a lock while a spawn changes the directory.</td></tr>
-<tr><td><code>Std.Internal.UV</code>'s loop</td><td>One for the process: one loop thread and one loop lock.</td></tr>
+<tr><td><code>Std.Internal.UV</code>'s loop</td><td>One for the process: one loop thread and one loop lock.
+With <code>net</code>, the loop thread also watches the sockets.</td></tr>
+<tr><td>The open sockets of <code>net</code></td><td>One registry for the process, under a lock.
+Each socket has a lock of its own, which only the holder of the loop lock takes.</td></tr>
 </tbody></table></div>
 
 <h2 id="values">Values that cross threads</h2>
@@ -103,6 +109,28 @@ Where the kernel refuses <code>unshare(CLONE_FS)</code>, path lookups hold a loc
     A <code>swap</code> never returns its own argument (<a href="lean-bugs.html#lb-18">LB-18</a>).</li>
   <li><strong>Thunks and lazy constants</strong> block their thread with std's <code>OnceLock</code>, as native's <code>lean_obj_once</code> does.</li>
   <li><strong>Rust panics.</strong> A Rust panic in a job or in a hook ends the process with an abort, on any thread.</li>
+</ul>
+
+<h2 id="net">Networking</h2>
+<p>With the feature <code>net</code>, threads mode runs <code>Std.Internal.UV</code>'s TCP, UDP and name lookups on the loop thread, as natively (N, 2026-10-05).</p>
+<ul>
+  <li><strong>The loop lock.</strong> Each extern holds the loop lock from its start to its end, as natively.
+    When the loop thread holds the lock, the extern interrupts the loop and waits for the end of its iteration.
+    So the loop handles what is ready before the extern acts.</li>
+  <li><strong>Callbacks.</strong> The loop thread reads, accepts and writes the rest of a send.
+    It resolves the promises with the loop lock held, so their sync dependents run on the loop thread.</li>
+  <li><strong>The last handle.</strong> The drop of a socket's last handle takes the loop lock, on any thread, and closes the socket at once.
+    A pending operation holds the socket.
+    So a socket that a worker drops during a receive stays open until the loop thread completes the receive.</li>
+  <li><strong>Name lookups.</strong> Two helper threads call glibc, as in the single-thread mode.
+    A helper gives its answer to the loop thread through a queue, without the loop lock.</li>
+  <li><strong>Order.</strong> In each iteration, the loop thread runs the callbacks of the sockets first and the signal watchers last, as libuv does.</li>
+  <li><strong>After the exit's wait</strong> the loop thread starts no callback, so no promise resolves.
+    It checks before each callback, so only a callback that already runs then goes to its end.
+    The single-thread scheduler's loop does not run then either.
+    Natively a promise resolved then can crash the exit (<a href="lean-bugs.html#lb-27">LB-27</a>).</li>
+  <li><strong>One source.</strong> The TCP, UDP and DNS code is the same in both modes.
+    A small mode layer gives the part that differs (<a href="repo:src/net/mode_mt.rs">mode_mt.rs</a>, <a href="repo:src/net/mode_st.rs">mode_st.rs</a>).</li>
 </ul>
 
 <h2 id="differences">Known differences</h2>
@@ -132,7 +160,7 @@ Both compile the same Rust port of each case; only the glue and the values diffe
 <ul>
   <li><strong>Unit tests</strong> of <code>sched::mt</code>, also under <a href="glossary.html#g-miri">Miri</a> (opt-in), which finds data races.</li>
   <li><strong>The io and uvloop twins</strong> run inside tasks in a threads build (T2).</li>
-  <li><strong>The second driver</strong> (T3), <a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a>, runs every case of <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code>.
+  <li><strong>The second driver</strong> (T3), <a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a>, runs every case of <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code>, and since N of <code>net/</code>.
     It runs the same Rust ports as the single-thread driver.
     Cargo builds it alone, because one build cannot have both schedulers.</li>
   <li><strong>Five runs.</strong> The driver runs each case 5 times.
@@ -151,13 +179,12 @@ Both compile the same Rust port of each case; only the glue and the values diffe
       <li><code>stack_overflow_in_dedicated</code>: Lean's report on a dedicated task's thread;</li>
       <li><code>late_tasks_while_enqueuing</code>: the exit while a task still enqueues tasks (LB-13).</li>
     </ul></li>
+  <li><strong>The network's own tests</strong> (N): unit tests drop a socket or cancel a receive on another thread while the loop thread waits for the socket.</li>
   <li><strong>The check.</strong> <code>scripts/check.sh</code> runs both drivers, in debug and release builds, on both toolchains.</li>
 </ul>
 
 <h2 id="later">Later</h2>
 <ul>
-  <li><code>net</code> in threads mode.
-    Networking is not a target now (owner, 2026-10-04).</li>
   <li>leanrs's threads mode: <code>Arc</code> values and its glue over <code>sched::mt</code>.</li>
   <li>lean2rr's threads mode.
     It needs atomic counts in Reussir first.
@@ -166,6 +193,6 @@ Both compile the same Rust port of each case; only the glue and the values diffe
     This needs the owner's permission.</li>
 </ul>
 
-<p class="more">Detail: <a href="repo:docs/threads.md">docs/threads.md</a> (the design, T1 to T3), and <a href="repo:src/sched/mt/mod.rs">src/sched/mt/</a>:
+<p class="more">Detail: <a href="repo:docs/threads.md">docs/threads.md</a> (the design, T1 to T3 and N), and <a href="repo:src/sched/mt/mod.rs">src/sched/mt/</a>:
 <a href="repo:src/sched/mt/task.rs">task.rs</a>, <a href="repo:src/sched/mt/refs.rs">refs.rs</a>, <a href="repo:src/sched/mt/sync.rs">sync.rs</a> and <a href="repo:src/sched/mt/uv.rs">uv.rs</a>.
 The drivers are <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> and <a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a>.</p>

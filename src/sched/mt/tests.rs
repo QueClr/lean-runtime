@@ -24,7 +24,7 @@ impl Glue for TestGlue {}
 /// own, which check records by key.
 /// Without that feature they run one at a time all the same: each makes
 /// threads, and the host is shared.
-pub(super) fn serial() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn serial() -> std::sync::MutexGuard<'static, ()> {
     #[cfg(feature = "stack-overflow")]
     let m = &crate::sched::stack_overflow::tests::SERIAL;
     #[cfg(not(feature = "stack-overflow"))]

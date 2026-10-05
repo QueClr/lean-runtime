@@ -110,6 +110,9 @@ The crate's constructors use no global allocator (AR-36).</td></tr>
 <tr><td><code>shared-3</code></td><td>The panic and exit executor that both translators kept moves into the crate (<code>io::panic</code>).
 A translator gives its streams through a glue trait, whose defaults are native's behaviour.
 The internal panic builds its line on the stack, with no allocation.</td></tr>
+<tr><td><code>net-threads</code></td><td><a href="threads.html#net">Networking in threads mode</a> (N): TCP, UDP and name lookups on the loop thread, as natively.
+The feature <code>net</code> no longer turns on <code>sched</code>.
+The second test driver runs every <code>net/</code> case in threads mode, 5 times.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>

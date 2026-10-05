@@ -1,11 +1,14 @@
 //! Rust ports of `tests/cases/net/*.lean`, line by line, over
 //! `lean_runtime::net` with the glue of `lnet.rs`: the same externs in the
 //! same order, each value dropped where compiled Lean releases it (a socket
-//! closes when its last reference goes).
+//! closes when its last reference goes). Both drivers compile it, over the
+//! single-thread scheduler and in threads mode (`tests/sched-driver-mt`, by
+//! `#[path]`, as `cases.rs`): a port names only what both drivers' `lean.rs`
+//! define.
 
 use crate::cases::Case;
 use crate::glue::println;
-use crate::lean::{as_task, sleep, PRIO_DEDICATED};
+use crate::lean::{as_task, map_task, sleep, Val, PRIO_DEDICATED, PRIO_DEFAULT};
 use crate::lio::{error_text, quote, R};
 use crate::lnet::*;
 use lean_runtime::io::IoError;
@@ -13,38 +16,61 @@ use lean_runtime::net::tcp::TcpSocket;
 use lean_runtime::net::udp::UdpSocket;
 use lean_runtime::net::{iface, IpAddr, SocketAddr};
 
+/// No initializer (Lean's module has no `initialize` declaration).
+fn no_init() {}
+
+/// The ports of `tests/cases/net`, both drivers': the id, its initializer
+/// and `main`.
+pub const CASES: &[(&str, Case)] = &[
+    ("tcp_echo", (no_init, tcp_echo)),
+    ("tcp_errors", (no_init, tcp_errors)),
+    ("tcp_v6", (no_init, tcp_v6)),
+    ("udp_basic", (no_init, udp_basic)),
+    ("udp_errors", (no_init, udp_errors)),
+    ("dns_localhost", (no_init, dns_localhost)),
+    ("dns_pending_at_exit", (no_init, dns_pending_at_exit)),
+    ("iface_lo", (no_init, iface_lo)),
+    ("accept_parallel", (no_init, accept_parallel)),
+    ("accept_parallel_try", (no_init, accept_parallel)),
+    ("keepalive_zero_delay", (no_init, keepalive_zero_delay)),
+    ("multicast_ipv6_long", (no_init, multicast_ipv6_long)),
+    ("recv_huge_overflow", (no_init, recv_huge)),
+    ("recv_huge_oom", (no_init, recv_huge)),
+    ("udp_recv_huge_overflow", (no_init, recv_huge)),
+    ("udp_cancel_recv_leak", (no_init, udp_cancel_recv_leak)),
+    ("tcp_shutdown_fail_leak", (no_init, tcp_shutdown_fail_leak)),
+    ("recv_zero_eof", (no_init, recv_zero)),
+    ("recv_zero_data_eof", (no_init, recv_zero)),
+    ("recv_zero_data", (no_init, recv_zero)),
+    ("udp_recv_zero", (no_init, recv_zero)),
+    ("shutdown_during_connect", (no_init, shutdown_connect)),
+    ("shutdown_after_queued_write", (no_init, shutdown_connect)),
+    ("shutdown_after_connect", (no_init, shutdown_connect)),
+    ("clients_in_tasks", (no_init, clients_in_tasks)),
+    ("socket_across_tasks", (no_init, socket_across_tasks)),
+    (
+        "extern_in_sync_dependent",
+        (no_init, extern_in_sync_dependent),
+    ),
+];
+
+/// Not cases: regression programs of net-1's review, which the
+/// single-thread driver's tests run.
+pub const REVIEW: &[(&str, Case)] = &[
+    ("rnet_alloc_reentry", (no_init, rnet_alloc_reentry)),
+    (
+        "rnet_shutdown_in_connect",
+        (no_init, rnet_shutdown_in_connect),
+    ),
+];
+
+/// The port or the program `id`.
 pub fn lookup(id: &str) -> Option<Case> {
-    fn no_init() {}
-    Some(match id {
-        "tcp_echo" => (no_init, tcp_echo),
-        "tcp_errors" => (no_init, tcp_errors),
-        "tcp_v6" => (no_init, tcp_v6),
-        "udp_basic" => (no_init, udp_basic),
-        "udp_errors" => (no_init, udp_errors),
-        "dns_localhost" => (no_init, dns_localhost),
-        "dns_pending_at_exit" => (no_init, dns_pending_at_exit),
-        "iface_lo" => (no_init, iface_lo),
-        "accept_parallel" => (no_init, accept_parallel),
-        "accept_parallel_try" => (no_init, accept_parallel),
-        "keepalive_zero_delay" => (no_init, keepalive_zero_delay),
-        "multicast_ipv6_long" => (no_init, multicast_ipv6_long),
-        "recv_huge_overflow" => (no_init, recv_huge),
-        "recv_huge_oom" => (no_init, recv_huge),
-        "udp_recv_huge_overflow" => (no_init, recv_huge),
-        "udp_cancel_recv_leak" => (no_init, udp_cancel_recv_leak),
-        "tcp_shutdown_fail_leak" => (no_init, tcp_shutdown_fail_leak),
-        "recv_zero_eof" => (no_init, recv_zero),
-        "recv_zero_data_eof" => (no_init, recv_zero),
-        "recv_zero_data" => (no_init, recv_zero),
-        "udp_recv_zero" => (no_init, recv_zero),
-        "shutdown_during_connect" => (no_init, shutdown_connect),
-        "shutdown_after_queued_write" => (no_init, shutdown_connect),
-        "shutdown_after_connect" => (no_init, shutdown_connect),
-        // Not cases: regression programs of net-1's review.
-        "rnet_alloc_reentry" => (no_init, rnet_alloc_reentry),
-        "rnet_shutdown_in_connect" => (no_init, rnet_shutdown_in_connect),
-        _ => return None,
-    })
+    CASES
+        .iter()
+        .chain(REVIEW)
+        .find(|(n, _)| *n == id)
+        .map(|&(_, c)| c)
 }
 
 /// A program's `main` ending with an uncaught error: Lean's message after
@@ -69,7 +95,7 @@ fn try_io(name: &str, act: impl FnOnce() -> R<String>) {
 }
 
 /// `wait p f`: `, then <f v>`, `, then <e>`, or ` (dropped)`.
-fn then<T: Clone + 'static>(p: &P<T>, f: impl FnOnce(T) -> String) -> String {
+fn then<T: Val>(p: &P<T>, f: impl FnOnce(T) -> String) -> String {
     match wait(p) {
         None => " (dropped)".into(),
         Some(Ok(v)) => format!(", then {}", f(v)),
@@ -502,7 +528,7 @@ fn shown(a: SocketAddr) -> String {
 }
 
 /// `get p`: the value, or the error thrown.
-fn get<T: Clone + 'static>(p: P<T>) -> R<T> {
+fn get<T: Val>(p: P<T>) -> R<T> {
     match wait(&p) {
         Some(r) => r,
         None => Err(IoError::user_error("dropped")),
@@ -1203,7 +1229,7 @@ fn say(s: &str) {
 
 /// `waitFor p fmt`: the promise's value if it resolves within 2 s (40 waits
 /// of 50 ms), else `pending`.
-fn wait_for<T: Clone + 'static>(p: &P<T>, fmt: impl FnOnce(Option<R<T>>) -> String) -> String {
+fn wait_for<T: Val>(p: &P<T>, fmt: impl FnOnce(Option<R<T>>) -> String) -> String {
     for _ in 0..40 {
         if is_resolved(p) {
             return fmt(wait(p));
@@ -1278,6 +1304,234 @@ fn shutdown_connect(args: &[String]) -> u32 {
             ));
         }
         say("done");
+        Ok(())
+    })())
+}
+
+// ---------------------------------------------------------------------------
+// clients_in_tasks, socket_across_tasks (net-threads: the network used from
+// several tasks; in threads mode each on a thread of its own)
+
+/// `text b`: the bytes as text, or the end of the stream.
+fn text(b: &Option<Vec<u8>>) -> String {
+    match b {
+        None => "the end of the stream".into(),
+        Some(b) => String::from_utf8(b.clone()).unwrap_or_else(|_| "?".into()),
+    }
+}
+
+/// `echo c`: read a message, send it back after `echo `, shut down.
+fn echo(c: TcpSocket) -> R<()> {
+    let m = get(tcp_recv(&c, 64)?)?;
+    let mut b = b"echo ".to_vec();
+    b.extend(m.unwrap_or_default());
+    get(tcp_send(&c, vec![b])?)?;
+    get(tcp_shutdown(&c)?)?;
+    Ok(())
+}
+
+/// `client ip port name`.
+fn client(ip: std::net::Ipv4Addr, port: u16, name: &str) -> R<String> {
+    let c = new_tcp();
+    get(tcp_connect(&c, at4(ip, port))?)?;
+    get(tcp_send(&c, vec![name.as_bytes().to_vec()])?)?;
+    let r = get(tcp_recv(&c, 64)?)?;
+    let e = get(tcp_recv(&c, 64)?)?;
+    Ok(format!("{name}: {}, then {}", text(&r), text(&e)))
+}
+
+fn clients_in_tasks(args: &[String]) -> u32 {
+    run((|| {
+        let ip = v4(&args[0]);
+        let s = new_tcp();
+        s.bind(at4(ip, 0))?;
+        s.listen(16)?;
+        let port = s.sock_name()?.port();
+        // the server task takes `s`, main's last use
+        let server = as_task(
+            move || -> R<()> {
+                let mut hs = Vec::new();
+                for _ in 0..4 {
+                    let c = get(tcp_accept(&s)?)?;
+                    hs.push(as_task(move || echo(c), PRIO_DEDICATED));
+                }
+                for h in hs {
+                    h.get()?;
+                }
+                Ok(())
+            },
+            PRIO_DEDICATED,
+        );
+        let clients: Vec<_> = ["ann", "bob", "cyd", "dee"]
+            .iter()
+            .map(|n| {
+                let n = n.to_string();
+                as_task(move || client(ip, port, &n), PRIO_DEDICATED)
+            })
+            .collect();
+        for t in clients {
+            match t.get() {
+                Ok(r) => println(&r),
+                Err(e) => println(&format!("client: {}", error_text(&e))),
+            }
+        }
+        match server.get() {
+            Ok(()) => println("server done"),
+            Err(e) => println(&format!("server: {}", error_text(&e))),
+        }
+        Ok(())
+    })())
+}
+
+fn socket_across_tasks(args: &[String]) -> u32 {
+    run((|| {
+        let ip = v4(&args[0]);
+        let addr = |p| at4(ip, p);
+        let s = new_tcp();
+        s.bind(addr(0))?;
+        s.listen(16)?;
+        let port = s.sock_name()?.port();
+        // a receive started in a task; the socket's other references go
+        let pa = tcp_accept(&s)?;
+        let c = new_tcp();
+        get(tcp_connect(&c, addr(port))?)?;
+        let peer = get(pa)?;
+        // the task's closure takes `c`, main's last use
+        let t = as_task(move || tcp_recv(&c, 64), PRIO_DEDICATED);
+        let p = t.get()?;
+        drop(t);
+        sleep(50);
+        println(&format!("the receive is pending: {}", !is_resolved(&p)));
+        get(tcp_send(&peer, vec![b"one".to_vec()])?)?;
+        println(&format!("the receive got {}", text(&get(p)?)));
+        println(&format!(
+            "the peer reads {}",
+            text(&get(tcp_recv(&peer, 64)?)?)
+        ));
+        // a receive cancelled by another task
+        let pa2 = tcp_accept(&s)?;
+        let d = new_tcp();
+        get(tcp_connect(&d, addr(port))?)?;
+        let peer2 = get(pa2)?;
+        let p2 = tcp_recv(&d, 64)?;
+        let d2 = d.clone();
+        let k = as_task(
+            move || -> R<()> {
+                d2.cancel_recv();
+                Ok(())
+            },
+            PRIO_DEDICATED,
+        );
+        k.get()?;
+        drop(k);
+        println(&format!(
+            "the cancelled receive is resolved: {}",
+            is_resolved(&p2)
+        ));
+        get(tcp_send(&peer2, vec![b"two".to_vec()])?)?;
+        sleep(50);
+        println(&format!("after the peer's send: {}", is_resolved(&p2)));
+        println(&format!(
+            "the next receive got {}",
+            text(&get(tcp_recv(&d, 64)?)?)
+        ));
+        Ok(())
+    })())
+}
+
+// ---------------------------------------------------------------------------
+// extern_in_sync_dependent (net-threads review RNT-08)
+
+fn extern_in_sync_dependent(args: &[String]) -> u32 {
+    run((|| {
+        let ip = v4(&args[0]);
+        let addr = |p| at4(ip, p);
+        // a sync dependent of a receive's promise calls externs on its socket
+        let s = new_tcp();
+        s.bind(addr(0))?;
+        s.listen(16)?;
+        let port = s.sock_name()?.port();
+        let pa = tcp_accept(&s)?;
+        let c = new_tcp();
+        get(tcp_connect(&c, addr(port))?)?;
+        let peer = get(pa)?;
+        let p = tcp_recv(&c, 64)?;
+        // the dependent takes `c`, main's last use; `p`'s last use is its
+        // `result?`
+        let dep = map_task(
+            move |r: Option<R<Option<Vec<u8>>>>| -> R<String> {
+                c.no_delay()?;
+                drop(tcp_send(&c, vec![b"pong".to_vec()])?);
+                Ok(match r {
+                    Some(Ok(b)) => text(&b),
+                    _ => "?".into(),
+                })
+            },
+            p.result_opt(),
+            PRIO_DEFAULT,
+            true,
+            true,
+        );
+        drop(p);
+        get(tcp_send(&peer, vec![b"ping".to_vec()])?)?;
+        match dep.get() {
+            Ok(m) => println(&format!("the dependent got {m} and replied")),
+            Err(e) => println(&format!("the dependent: {}", error_text(&e))),
+        }
+        drop(dep);
+        println(&format!(
+            "the peer reads {}",
+            text(&get(tcp_recv(&peer, 64)?)?)
+        ));
+        // datagrams from several tasks
+        let u = new_udp();
+        u.bind(addr(0))?;
+        let uport = u.sock_name()?.port();
+        let senders: Vec<_> = ["d1", "d2", "d3", "d4"]
+            .iter()
+            .map(|n| {
+                let n = n.to_string();
+                as_task(
+                    move || -> R<()> {
+                        let v = new_udp();
+                        v.bind(at4(ip, 0))?;
+                        get(udp_send(&v, vec![n.into_bytes()], Some(at4(ip, uport)))?)?;
+                        Ok(())
+                    },
+                    PRIO_DEDICATED,
+                )
+            })
+            .collect();
+        for t in senders {
+            if let Err(e) = t.get() {
+                println(&format!("sender: {}", error_text(&e)));
+            }
+        }
+        let mut got = Vec::new();
+        for _ in 0..4 {
+            let (b, _) = get(udp_recv(&u, 64)?)?;
+            got.push(String::from_utf8(b).unwrap_or_else(|_| "?".into()));
+        }
+        got.sort();
+        println(&format!("the datagrams: #[{}]", got.join(", ")));
+        // lookups from several tasks
+        let lookups: Vec<_> = (0..3)
+            .map(|_| {
+                as_task(
+                    move || -> R<Vec<String>> {
+                        let a = get(get_addr_info("localhost", "", 1)?)?;
+                        Ok(a.iter().map(ip_text).collect())
+                    },
+                    PRIO_DEDICATED,
+                )
+            })
+            .collect();
+        for t in lookups {
+            match t.get() {
+                Ok(a) => println(&format!("lookup: #[{}]", a.join(", "))),
+                Err(e) => println(&format!("lookup: {}", error_text(&e))),
+            }
+        }
         Ok(())
     })())
 }

@@ -1,13 +1,15 @@
 //! `sched-cases-mt ID [ARGS...]`: the Rust port of
-//! `tests/cases/{tasks,sync,refs,taskio}/ID.lean` in threads mode, Lean's
-//! task manager on real threads (`lean_runtime::sched`, which a `threads`
-//! build re-exports from `sched::mt`), with the glue a translator writes.
+//! `tests/cases/{tasks,sync,refs,taskio,net}/ID.lean` in threads mode,
+//! Lean's task manager on real threads (`lean_runtime::sched`, which a
+//! `threads` build re-exports from `sched::mt`), and `net` on `sched::uv`'s
+//! loop thread, with the glue a translator writes.
 //!
-//! The ports are the single-thread driver's (`tests/sched-driver/src/cases.rs`,
-//! with Lean's IO definitions in `lio.rs` and the scheduler-independent glue
-//! in `glue_common.rs`), included by path. This package gives what differs
-//! in threads mode: the values (`lean.rs`: `Arc`, a `OnceLock` slot, the
-//! 4.35 rule of `sched::Ref`) and the `Glue` with the program's entry
+//! The ports are the single-thread driver's (`tests/sched-driver/src/cases.rs`
+//! and `netcases.rs`, with Lean's IO definitions in `lio.rs`, the glue of
+//! `net` in `lnet.rs` and the scheduler-independent glue in
+//! `glue_common.rs`), included by path. This package gives what differs in
+//! threads mode: the values (`lean.rs`: `Arc`, a `OnceLock` slot, the 4.35
+//! rule of `sched::Ref`) and the `Glue` with the program's entry
 //! (`glue.rs`).
 //!
 //! `sched-cases-mt --list` prints the ids it runs, one per line;
@@ -24,6 +26,10 @@ mod lean;
 #[allow(dead_code)]
 #[path = "../../sched-driver/src/lio.rs"]
 mod lio;
+#[path = "../../sched-driver/src/lnet.rs"]
+mod lnet;
+#[path = "../../sched-driver/src/netcases.rs"]
+mod netcases;
 
 /// The reason case `id` runs over the single-thread scheduler only, if it
 /// does.
@@ -42,7 +48,7 @@ fn main() {
     };
     match id.as_str() {
         "--list" => {
-            for (id, _) in cases::CASES {
+            for (id, _) in cases::CASES.iter().chain(netcases::CASES) {
                 if single_thread_only(id).is_none() {
                     println!("{id}");
                 }
@@ -61,7 +67,7 @@ fn main() {
         eprintln!("sched-cases-mt: {id} runs over the single-thread scheduler only: {why}");
         std::process::exit(2)
     }
-    let Some((init, main)) = cases::lookup(id) else {
+    let Some((init, main)) = cases::lookup(id).or_else(|| netcases::lookup(id)) else {
         eprintln!("sched-cases-mt: no case {id}");
         std::process::exit(2)
     };

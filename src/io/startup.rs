@@ -130,9 +130,13 @@
 //! loop through it, and the loop drains it): registering a readable
 //! descriptor that nothing drains would wake the loop for good. The polling ring's watch never fires: nothing is
 //! submitted to it, so it has no completion. In threads mode (feature
-//! `threads`) the epoll descriptor stays as opened: `sched::uv`'s loop
-//! thread, made at the first use of the loop, waits with `poll(2)` on the
-//! eventfd and the signal pipe instead.
+//! `threads`) `sched::uv`'s loop thread, made at the first use of the loop,
+//! waits with `poll(2)` on the eventfd and the signal pipe, and, with `net`,
+//! on the epoll descriptor too: its io watchers claim it at the first
+//! socket watch and register the sockets there (their epoll data starts
+//! above `2^32`, so the polling ring's registration, whose data is its
+//! descriptor number, finds no watch); without `net` the epoll descriptor
+//! stays as opened.
 //!
 //! Opening them allocates nothing ([`open_native_descriptors`] runs in an
 //! ELF constructor with `startup-fds`; AR-36): the rings are kept in an
@@ -222,7 +226,7 @@ impl StartupFailure {
 /// The descriptors, kept open for the life of the process, as libuv keeps
 /// them.
 struct Descriptors {
-    #[cfg_attr(not(feature = "sched"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "sched", feature = "net")), allow(dead_code))]
     epoll: OwnedFd,
     /// The polling ring and the control ring, each if the kernel gave it (an
     /// array, not a `Vec`: no allocation, AR-36).
@@ -290,10 +294,11 @@ pub(crate) fn descriptors_opened() -> bool {
 pub use super::startup_fds::ensure_native_descriptors;
 
 /// libuv's loop descriptor (an epoll instance), for the scheduler's event
-/// loop (`sched`'s reactor), once [`open_native_descriptors`] has opened
-/// it: the first caller gets it, so one scheduler registers its descriptors
-/// there, as libuv's one loop does; later callers make their own.
-#[cfg(feature = "sched")]
+/// loop (`sched`'s reactor; in threads mode with `net`, `sched::uv`'s io
+/// watchers), once [`open_native_descriptors`] has opened it: the first
+/// caller gets it, so one loop registers its descriptors there, as libuv's
+/// one loop does; later callers make their own.
+#[cfg(any(feature = "sched", feature = "net"))]
 pub(crate) fn claim_loop_epoll() -> Option<BorrowedFd<'static>> {
     use std::sync::atomic::{AtomicBool, Ordering};
     static CLAIMED: AtomicBool = AtomicBool::new(false);

@@ -1,6 +1,7 @@
 //! `Std.Internal.UV.UDP.Socket` (Lean 4.34.0 `src/runtime/uv/udp.cpp`) over
 //! libuv 1.48's `uv_udp_t` (`src/unix/udp.c`), on the scheduler's event
-//! loop.
+//! loop (in threads mode `sched::uv`'s loop thread, with the loop lock held
+//! by every extern and callback).
 //!
 //! What a Lean program sees, in short (cases `tests/cases/net/udp_*`):
 //! - a new socket has no descriptor; `bind` makes one (with `SO_REUSEADDR`),
@@ -15,9 +16,10 @@
 //! - `recv n` gives at most `n` bytes of the next datagram (the rest of it
 //!   is lost) and its sender; one receive at a time (`EALREADY`).
 
+use super::mode::{self, Cell, Shared, SocketId};
 use super::{
     close_fd, feed, on_socket, sockaddr, socket_address, uv_err, uv_error, with_code, Done, Ev, Fd,
-    Handle, IoWatcher, RecvBuf, RecvTarget, SendData, SocketId, UV_EAFNOSUPPORT, UV_EAGAIN,
+    Handle, IoWatcher, MaybeSend, RecvBuf, RecvTarget, SendData, UV_EAFNOSUPPORT, UV_EAGAIN,
     UV_EALREADY, UV_EBADF, UV_EDESTADDRREQ, UV_EINVAL, UV_EISCONN, UV_ENOBUFS,
 };
 use crate::io::IoError;
@@ -28,17 +30,16 @@ use rustix::net::{
     sockopt, AddressFamily, MMsgHdr, SendAncillaryBuffer, SendFlags, SocketAddrAny, SocketFlags,
     SocketType,
 };
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::IoSlice;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
 
 /// `Std.Internal.UV.UDP.Socket`: a translator keeps one in its external
 /// object (clones name the same socket). The socket closes when the last
-/// clone goes and no operation is pending (Lean's finalizer; `Handle`).
+/// clone goes and no operation is pending (Lean's finalizer; `Handle`). In
+/// threads mode it is `Send + Sync`.
 #[derive(Clone)]
-pub struct UdpSocket(Rc<Handle<Udp>>);
+pub struct UdpSocket(Shared<Handle<Udp>>);
 
 /// The outcome of one libuv receive callback.
 enum RecvOutcome {
@@ -56,7 +57,7 @@ enum ReadReq {
     Wait(Done<()>),
 }
 
-trait RecvOp {
+trait RecvOp: MaybeSend {
     fn target(&mut self) -> RecvTarget<'_>;
     fn finish(self: Box<Self>, r: RecvOutcome);
 }
@@ -65,7 +66,7 @@ trait RecvOp {
 /// and the sender.
 pub type Datagram<B> = (B, usize, Option<SocketAddr>);
 
-type RecvDone<B> = Box<dyn FnOnce(Result<Datagram<B>, IoError>)>;
+type RecvDone<B> = Done<Datagram<B>>;
 
 struct Recv<B: RecvBuf> {
     buf: B,
@@ -157,8 +158,8 @@ impl Udp {
     fn io_set(&mut self, want: Interest) {
         let id = self.id;
         self.watcher.set(self.fd.as_ref(), want, || {
-            Rc::new(move |r: Ready| {
-                on_socket(id, |s: &RefCell<Udp>| {
+            mode::watch_cb(move |r: Ready| {
+                on_socket(id, |s: &Cell<Udp>| {
                     let ev = Loop::events(s, r);
                     Loop::on_io(s, ev);
                 })
@@ -203,7 +204,7 @@ impl Udp {
                 None,
             )
             .map_err(uv_err)?;
-            self.fd = Some(Rc::new(fd));
+            self.fd = Some(Shared::new(fd));
         }
         let fd = self.fd.clone().expect("made above");
         if reuse {
@@ -314,6 +315,9 @@ impl UdpSocket {
     /// A `uv__io_feed` now, with nothing pending: the state a write that
     /// finished on the loop leaves behind (the unit tests').
     pub(crate) fn feed_for_tests(&self) {
+        // the loop's lock in threads mode; no loop run first (the
+        // single-thread mode's `loop_lock` would let the loop run)
+        let _l = mode::finalizer_lock();
         self.0.borrow_mut().feed();
     }
 }
@@ -322,10 +326,10 @@ impl UdpSocket {
     /// `Socket.new` (`lean_uv_udp_new`, `uv_udp_init`): a socket with no
     /// descriptor yet.
     pub fn new() -> Result<UdpSocket, IoError> {
-        crate::sched::ensure_started();
+        mode::ensure_started();
         crate::io::effect_point();
-        super::loop_lock();
-        Ok(UdpSocket(Rc::new(Handle::new(|id| {
+        let _l = super::loop_lock();
+        Ok(UdpSocket(Shared::new(Handle::new(|id| {
             let mut t = Udp::default();
             t.id = id;
             t
@@ -337,13 +341,13 @@ impl UdpSocket {
 // The loop's side (`uv__udp_io`)
 
 /// A socket's state as a loop callback sees it ([`super::on_socket`]).
-struct Loop<'a>(&'a RefCell<Udp>);
+struct Loop<'a>(&'a Cell<Udp>);
 
 impl Loop<'_> {
     /// The events libuv hands `uv__udp_io` ([`Ev::libuv_merge`]). The
     /// loop's `Ready` folds an error or a hang-up into both directions, so
     /// then the raw `POLLIN` and `POLLOUT` are asked again with `poll(2)`.
-    fn events(s: &RefCell<Udp>, r: Ready) -> Ev {
+    fn events(s: &Cell<Udp>, r: Ready) -> Ev {
         let u = s.borrow();
         let want = u.watcher.want();
         if !r.error && !r.hangup {
@@ -373,7 +377,7 @@ impl Loop<'_> {
     }
 
     /// The watch callback and `uv__io_feed`'s call: `uv__udp_io`.
-    fn on_io(s: &RefCell<Udp>, ev: Ev) {
+    fn on_io(s: &Cell<Udp>, ev: Ev) {
         let u = Loop(s);
         if ev.read {
             u.recvmsg();
@@ -477,14 +481,17 @@ impl UdpSocket {
     /// `Socket.bind` (`lean_uv_udp_bind`, `uv_udp_bind(..., UV_UDP_REUSEADDR)`).
     pub fn bind(&self, addr: SocketAddr) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
-        self.0.borrow_mut().bind(&addr, true).map_err(uv_error)
+        let _l = super::loop_lock();
+        // bound first: a tail expression's temporary guard would outlive
+        // `_l`, and the state lock is held only under the loop lock
+        let r = self.0.borrow_mut().bind(&addr, true);
+        r.map_err(uv_error)
     }
 
     /// `Socket.connect` (`lean_uv_udp_connect`, `uv_udp_connect`).
     pub fn connect(&self, addr: SocketAddr) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut u = self.0.borrow_mut();
         if u.connected {
             return Err(uv_error(UV_EISCONN));
@@ -510,14 +517,14 @@ impl UdpSocket {
         &self,
         data: D,
         addr: Option<SocketAddr>,
-        done: impl FnOnce(Result<(), IoError>) + 'static,
+        done: impl FnOnce(Result<(), IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
         crate::io::effect_point();
         if data.count() == 0 {
             done(Ok(()));
             return Ok(());
         }
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut u = self.0.borrow_mut();
         // `uv__udp_check_before_send`
         if addr.is_some() && u.connected {
@@ -557,9 +564,9 @@ impl UdpSocket {
     pub fn recv<B: RecvBuf>(
         &self,
         alloc: impl FnOnce() -> B,
-        done: impl FnOnce(Result<Datagram<B>, IoError>) + 'static,
+        done: impl FnOnce(Result<Datagram<B>, IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         if self.0.borrow().read.is_some() {
             return Err(uv_error(UV_EALREADY));
         }
@@ -585,9 +592,9 @@ impl UdpSocket {
     /// once a datagram is there (not read).
     pub fn wait_readable(
         &self,
-        done: impl FnOnce(Result<(), IoError>) + 'static,
+        done: impl FnOnce(Result<(), IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut u = self.0.borrow_mut();
         if u.read.is_some() {
             return Err(uv_error(UV_EALREADY));
@@ -612,7 +619,7 @@ impl UdpSocket {
     /// socket (LEAN-BUG LB-24: native keeps the socket's reference, so the
     /// socket and its descriptor are never freed).
     pub fn cancel_recv(&self) {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let r = {
             let mut u = self.0.borrow_mut();
             if u.read.is_none() {
@@ -638,19 +645,19 @@ impl UdpSocket {
 
     /// `Socket.getPeerName` (`lean_uv_udp_getpeername`).
     pub fn peer_name(&self) -> Result<SocketAddr, IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         self.name(true)
     }
 
     /// `Socket.getSockName` (`lean_uv_udp_getsockname`).
     pub fn sock_name(&self) -> Result<SocketAddr, IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         self.name(false)
     }
 
     /// `Socket.setBroadcast` (`uv_udp_set_broadcast`).
     pub fn set_broadcast(&self, on: bool) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let u = self.0.borrow();
         sockopt::set_socket_broadcast(u.fd()?, on).map_err(|e| uv_error(uv_err(e)))
     }
@@ -658,7 +665,7 @@ impl UdpSocket {
     /// `Socket.setTTL` (`uv_udp_set_ttl`): 1 to 255 (Lean's `UInt32` as a C
     /// `int`), `IP_TTL`, or `IPV6_UNICAST_HOPS` on a socket bound to IPv6.
     pub fn set_ttl(&self, ttl: u32) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         if (ttl as i32) < 1 || ttl > 255 {
             return Err(uv_error(UV_EINVAL));
         }
@@ -674,7 +681,7 @@ impl UdpSocket {
 
     /// `Socket.setMulticastTTL` (`uv_udp_set_multicast_ttl`): 0 to 255.
     pub fn set_multicast_ttl(&self, ttl: u32) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         char_range(ttl)?;
         let u = self.0.borrow();
         let fd = u.fd()?;
@@ -688,7 +695,7 @@ impl UdpSocket {
 
     /// `Socket.setMulticastLoop` (`uv_udp_set_multicast_loop`).
     pub fn set_multicast_loop(&self, on: bool) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let u = self.0.borrow();
         let fd = u.fd()?;
         let r = if u.ipv6 {
@@ -714,7 +721,7 @@ impl UdpSocket {
         membership: u8,
     ) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         // LEAN-BUG LB-22: native writes each address's text into a 16-byte
         // buffer (`INET_ADDRSTRLEN`, also for IPv6) and aborts
         // (`lean_always_assert`) when an IPv6 text is 16 bytes or longer;
@@ -757,7 +764,7 @@ impl UdpSocket {
     /// address, `IPV6_MULTICAST_IF` with the address's scope (0) for an IPv6
     /// one.
     pub fn set_multicast_interface(&self, interface: IpAddr) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         // LEAN-BUG LB-22: as `set_membership`, no abort on a long IPv6
         // text.
         let u = self.0.borrow();

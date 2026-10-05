@@ -1,18 +1,26 @@
 //! Unit tests of `net`'s pure parts, of the calls that need no event loop,
-//! and of a socket's lifetime on the loop (AR-12). The program cases
-//! (`tests/cases/net`, through `tests/sched-driver`) cover the rest with
-//! native Lean's outcomes.
+//! and of a socket's lifetime on the single-thread scheduler's loop
+//! (AR-12); `tests_mt.rs` has threads mode's (docs/threads.md, 0.7). The
+//! program cases (`tests/cases/net`, through `tests/sched-driver` and
+//! `tests/sched-driver-mt`) cover the rest with native Lean's outcomes.
 
 use super::dns::{
     answer, idna_ok, safe_ascii, translate_eai, Answer, Fail, Job, Pool, Query, Raw, EAI_FAIL,
     EAI_OVERFLOW, EAI_SYSTEM,
 };
 use super::iface::{from_entries, Entry};
-use super::tcp::{advance, TcpSocket};
+use super::tcp::advance;
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+use super::tcp::TcpSocket;
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 use super::udp::UdpSocket;
 use super::*;
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+use crate::sched;
 use rustix::fd::AsFd;
 use std::net::{Ipv4Addr, Ipv6Addr};
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+use std::rc::Rc;
 
 /// libuv's `uv__getaddrinfo_translate_error` over glibc's codes, and how
 /// Lean shows the results (`otherError`, libuv's message).
@@ -67,6 +75,9 @@ fn dns_checks() {
 /// The checks that fail before a lookup starts, with Lean's errors.
 #[test]
 fn dns_sync_errors() {
+    // threads mode: it takes the loop lock, which `tests_mt`'s tests count
+    #[cfg(all(feature = "threads", not(feature = "sched")))]
+    let _s = crate::sched::mt::test_serial();
     let not_ascii = |m: &str| IoError::InvalidArgument(None, 22, m.into());
     let r = dns::get_addr_info("a b", "", 0, |_| unreachable!());
     assert_eq!(r, Err(not_ascii("name is not ASCII")));
@@ -245,9 +256,14 @@ fn recv_into_targets() {
 
 /// Calls on sockets that need no event loop: libuv's errors before a
 /// descriptor exists, and after `bind` (native outcomes in cases
-/// `tcp_errors`, `keepalive_zero_delay` and `udp_basic`).
+/// `tcp_errors`, `keepalive_zero_delay` and `udp_basic`). In threads mode
+/// each takes the loop lock (the loop thread is made at the first).
 #[test]
 fn sockets_without_a_loop() {
+    use super::tcp::TcpSocket;
+    use super::udp::UdpSocket;
+    #[cfg(all(feature = "threads", not(feature = "sched")))]
+    let _s = crate::sched::mt::test_serial();
     let lo = |p| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), p);
     let ebadf = IoError::InvalidArgument(None, 9, "bad file descriptor".into());
     let enotconn = IoError::InvalidArgument(None, 107, "socket is not connected".into());
@@ -454,19 +470,23 @@ fn exit_runs_the_due_lookups_of_fresh_helpers() {
 
 /// A scheduler for a test's thread whose contexts never suspend, as in
 /// `sched`'s own unit tests: the loop context's callbacks run to their end.
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 struct NoSuspend;
 
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 impl sched::Glue for NoSuspend {
     fn suspend(&self, _: sched::Suspend<'_>) {
         panic!("net's unit tests never suspend a context");
     }
 }
 
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 fn start_loop() {
     sched::start_with(Rc::new(NoSuspend), 2, 1 << 20);
 }
 
 /// How many loop callbacks of this thread found their socket.
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 fn callbacks_run() -> u32 {
     CALLBACKS_RUN.with(|n| n.get())
 }
@@ -480,7 +500,9 @@ fn callbacks_run() -> u32 {
 /// 20000 up to 30000 where the range allows it, are tried from an offset of
 /// the process and the call, until `make` succeeds (another process may hold
 /// one).
-fn bound_outside_ephemeral<T>(mut make: impl FnMut(SocketAddr) -> Option<T>) -> (T, SocketAddr) {
+pub(super) fn bound_outside_ephemeral<T>(
+    mut make: impl FnMut(SocketAddr) -> Option<T>,
+) -> (T, SocketAddr) {
     static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let range_start = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
         .ok()
@@ -504,7 +526,7 @@ fn bound_outside_ephemeral<T>(mut make: impl FnMut(SocketAddr) -> Option<T>) -> 
 
 /// The inode of the socket bound to loopback `port` in `/proc/net/<table>`
 /// (`tcp`, `udp`), as the kernel lists it.
-fn socket_inode(table: &str, port: u16) -> Option<u64> {
+pub(super) fn socket_inode(table: &str, port: u16) -> Option<u64> {
     let local = format!("0100007F:{port:04X}");
     std::fs::read_to_string(format!("/proc/net/{table}"))
         .ok()?
@@ -517,7 +539,7 @@ fn socket_inode(table: &str, port: u16) -> Option<u64> {
 
 /// Whether a descriptor of this process refers to the socket with this
 /// inode (`/proc/self/fd`).
-fn fd_open_to(inode: u64) -> bool {
+pub(super) fn fd_open_to(inode: u64) -> bool {
     let target = format!("socket:[{inode}]");
     std::fs::read_dir("/proc/self/fd")
         .unwrap()
@@ -531,7 +553,7 @@ fn fd_open_to(inode: u64) -> bool {
 /// another test thread is spawning holds a copy of the descriptor table
 /// until it execs (`posix_spawn`'s clone), which keeps the socket bound for
 /// a moment, as it would natively.
-fn bind_again<T>(bind: impl Fn() -> std::io::Result<T>) -> T {
+pub(super) fn bind_again<T>(bind: impl Fn() -> std::io::Result<T>) -> T {
     let t0 = std::time::Instant::now();
     loop {
         match bind() {
@@ -549,6 +571,7 @@ fn bind_again<T>(bind: impl Fn() -> std::io::Result<T>) -> T {
 /// once, as Lean's finalizer does: the watch ends with it, the port can be
 /// bound again at once, and no callback of the socket runs.
 #[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 #[cfg_attr(miri, ignore)]
 fn a_socket_dropped_while_watched_closes_at_once() {
     start_loop();
@@ -580,6 +603,7 @@ fn a_socket_dropped_while_watched_closes_at_once() {
 /// descriptor at once; the feed then comes due, finds no socket and runs
 /// nothing.
 #[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
 #[cfg_attr(miri, ignore)]
 fn a_socket_dropped_with_a_feed_due_closes_at_once() {
     use std::io::Read;

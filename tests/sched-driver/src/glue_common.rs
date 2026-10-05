@@ -55,9 +55,7 @@ static UNCAUGHT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None)
 /// (`IO.Error.toString`); it returns status 1. The driver's `run` reports
 /// it after `sched::finish` ([`end`]), as Lean's generated `main` calls
 /// `lean_io_result_show_error` after `lean_finalize_task_manager` (review
-/// RSH3-04). Only the net ports call it, which the threads-mode driver
-/// does not compile yet.
-#[allow(dead_code)]
+/// RSH3-04). The net ports call it, in both drivers.
 pub fn uncaught_after_main(text: &[u8]) {
     *UNCAUGHT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.to_vec());
 }

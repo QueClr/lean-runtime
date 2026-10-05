@@ -2,7 +2,8 @@
 //! the single-thread driver's names (`tests/sched-driver/src/lean.rs`), so
 //! that the shared ports compile against either: tasks (the value in a slot
 //! the task's job fills, the handle's last reference releasing the task),
-//! promises, and `IO.Ref`.
+//! promises (also as `Std.Internal.UV`'s externs return them, `UvPromise`),
+//! and `IO.Ref`.
 //!
 //! What threads mode asks of them (docs/threads.md, 2.4): a job is `Send`
 //! (a worker thread runs and drops it), so every value a task captures
@@ -305,6 +306,39 @@ impl<T: Val> Drop for Promise<T> {
         } else {
             resolve();
         }
+    }
+}
+
+/// `IO.Promise α` as the `Std.Internal.UV` externs return it and the loop
+/// keeps it (`lnet.rs`): a counted reference to one promise, as the
+/// single-thread driver's; the loop thread resolves it and may drop it.
+pub struct UvPromise<T: Val>(Arc<Promise<T>>);
+
+impl<T: Val> Clone for UvPromise<T> {
+    fn clone(&self) -> Self {
+        UvPromise(self.0.clone())
+    }
+}
+
+impl<T: Val> UvPromise<T> {
+    /// `lean_io_promise_new`.
+    pub fn new() -> UvPromise<T> {
+        UvPromise(Arc::new(Promise::new()))
+    }
+
+    /// `IO.Promise.result?`.
+    pub fn result_opt(&self) -> Task<Option<T>> {
+        self.0.result_opt()
+    }
+
+    /// `IO.Promise.result!`.
+    pub fn result_bang(&self) -> Task<T> {
+        self.0.result_bang()
+    }
+
+    /// `IO.Promise.resolve`.
+    pub fn resolve(&self, v: T) {
+        self.0.resolve(v)
     }
 }
 

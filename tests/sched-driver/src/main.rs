@@ -2,9 +2,10 @@
 //! `scripts/cases.py check --exe-dir`): the Rust port of
 //! `tests/cases/{tasks,sync,refs,taskio,uvloop,net}/ID.lean` (and of the io
 //! and process cases with tasks), run through `lean_runtime::sched` with the
-//! glue a translator writes. `cases.rs` holds the ports the threads-mode
-//! driver (`tests/sched-driver-mt`) shares; `cases_st.rs` and `netcases.rs`
-//! the ones of the single-thread scheduler only.
+//! glue a translator writes. `cases.rs` and `netcases.rs` (with its glue,
+//! `lnet.rs`) hold the ports the threads-mode driver
+//! (`tests/sched-driver-mt`) shares; `cases_st.rs` the ones of the
+//! single-thread scheduler only.
 
 mod cases;
 mod cases_st;

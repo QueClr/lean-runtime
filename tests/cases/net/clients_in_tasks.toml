@@ -1,0 +1,7 @@
+id = "clients_in_tasks"
+area = "net"
+lean_version = "4.34.0"
+source = "net-threads (docs/threads.md 0.7): the network used from several tasks at once, as threads mode runs it (each task on a thread of its own, the loop thread resolving the promises)"
+streams = "separate"
+deviations = { leanrs = "DV2" }
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

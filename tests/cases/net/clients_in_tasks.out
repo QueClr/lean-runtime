@@ -1,0 +1,5 @@
+ann: echo ann, then the end of the stream
+bob: echo bob, then the end of the stream
+cyd: echo cyd, then the end of the stream
+dee: echo dee, then the end of the stream
+server done

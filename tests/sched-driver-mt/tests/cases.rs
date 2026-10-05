@@ -1,5 +1,5 @@
 //! Runs the Rust port (`sched-cases-mt ID`) of every case of
-//! `tests/cases/{tasks,sync,refs,taskio}` in threads mode, 5 times each, as
+//! `tests/cases/{tasks,sync,refs,taskio,net}` in threads mode, 5 times each, as
 //! `scripts/cases.py check` runs a translator's executable (the
 //! single-thread driver's `runner`), and requires every run to give the
 //! case's expected outcome (native's, or the correct one where native has a
@@ -37,7 +37,7 @@ use std::sync::Mutex;
 const EXE: &str = env!("CARGO_BIN_EXE_sched-cases-mt");
 
 /// The areas whose cases run in threads mode.
-const AREAS: &[&str] = &["tasks", "sync", "refs", "taskio"];
+const AREAS: &[&str] = &["tasks", "sync", "refs", "taskio", "net"];
 
 /// No case of another area runs here.
 const WITH_TASKS: &[(&str, &str)] = &[];

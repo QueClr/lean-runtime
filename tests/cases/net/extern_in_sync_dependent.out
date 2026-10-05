@@ -1,0 +1,6 @@
+the dependent got ping and replied
+the peer reads pong
+the datagrams: #[d1, d2, d3, d4]
+lookup: #[127.0.0.1, 127.0.0.1, 127.0.0.1]
+lookup: #[127.0.0.1, 127.0.0.1, 127.0.0.1]
+lookup: #[127.0.0.1, 127.0.0.1, 127.0.0.1]

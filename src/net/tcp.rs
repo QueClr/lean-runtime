@@ -1,6 +1,6 @@
 //! `Std.Internal.UV.TCP.Socket` (Lean 4.34.0 `src/runtime/uv/tcp.cpp`) over
 //! libuv 1.48's stream model (`src/unix/tcp.c`, `stream.c`), on the
-//! scheduler's event loop.
+//! scheduler's event loop (in threads mode `sched::uv`'s loop thread).
 //!
 //! A [`TcpSocket`] is Lean's `lean_uv_tcp_socket_object` and its `uv_tcp_t`
 //! in one: libuv's flags (readable, writable, bound, shut, ...), its delayed
@@ -9,7 +9,8 @@
 //! `m_promise_accept`, `m_promise_shutdown`). The system calls are libuv's,
 //! in its order; libuv's loop-thread work (`uv__stream_io`,
 //! `uv__server_io`, the write callbacks) runs on the scheduler's loop
-//! context.
+//! context, or in threads mode on the loop thread with the loop lock held;
+//! every extern holds the loop lock in threads mode (`super::loop_lock`).
 //!
 //! What a Lean program sees, in short (cases `tests/cases/net/tcp_*`):
 //! - a new socket has no descriptor until `bind`, `connect` or `listen`
@@ -27,9 +28,10 @@
 //!   side once the queued writes are done; the peer then reads end of file
 //!   (`recv?` gives `none`, `waitReadable` `true`).
 
+use super::mode::{Cell, Shared, SocketId};
 use super::{
     close_fd, feed, sockaddr, socket_address, uv_err, uv_error, watch_cb, with_code, Done, Ev, Fd,
-    Handle, IoWatcher, RecvBuf, RecvTarget, SendData, SocketId, IOV_MAX, UV_EADDRINUSE,
+    Handle, IoWatcher, MaybeSend, RecvBuf, RecvTarget, SendData, IOV_MAX, UV_EADDRINUSE,
     UV_EAFNOSUPPORT, UV_EAGAIN, UV_EALREADY, UV_EBADF, UV_ECANCELED, UV_ECONNREFUSED,
     UV_EINPROGRESS, UV_EINVAL, UV_ENOBUFS, UV_ENOTCONN, UV_EPIPE,
 };
@@ -38,19 +40,18 @@ use crate::sched::Interest;
 use rustix::fd::{AsFd, OwnedFd};
 use rustix::io::Errno;
 use rustix::net::{sockopt, AddressFamily, SocketFlags, SocketType};
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::IoSlice;
 use std::net::SocketAddr;
-use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::Duration;
 
 /// `Std.Internal.UV.TCP.Socket`: a translator keeps one in its external
 /// object (clones name the same socket). The socket closes when the last
-/// clone goes and no operation is pending (Lean's finalizer; `Handle`).
+/// clone goes and no operation is pending (Lean's finalizer; `Handle`). In
+/// threads mode it is `Send + Sync`.
 #[derive(Clone)]
-pub struct TcpSocket(Rc<Handle<Tcp>>);
+pub struct TcpSocket(Shared<Handle<Tcp>>);
 
 /// A receive in progress: Lean's `m_promise_read` (and `m_byte_array`), with
 /// libuv's read callback.
@@ -101,12 +102,12 @@ enum ReadOutcome {
 }
 
 /// A `recv?` of some translator's buffer type, boxed.
-trait RecvOp {
+trait RecvOp: MaybeSend {
     fn target(&mut self) -> RecvTarget<'_>;
     fn finish(self: Box<Self>, r: ReadOutcome);
 }
 
-type RecvDone<B> = Box<dyn FnOnce(Result<Option<(B, usize)>, IoError>)>;
+type RecvDone<B> = Done<Option<(B, usize)>>;
 
 struct Recv<B: RecvBuf> {
     buf: B,
@@ -366,7 +367,7 @@ impl Tcp {
         if self.keepalive {
             tcp_keepalive(&fd, true, 60)?;
         }
-        self.fd = Some(Rc::new(fd));
+        self.fd = Some(Shared::new(fd));
         Ok(())
     }
 
@@ -495,7 +496,18 @@ impl TcpSocket {
     /// A `uv__io_feed` now, with nothing pending: the state a write that
     /// finished on the loop leaves behind (the unit tests').
     pub(crate) fn feed_for_tests(&self) {
+        // the loop's lock in threads mode; no loop run first (the
+        // single-thread mode's `loop_lock` would let the loop run)
+        let _l = super::mode::finalizer_lock();
         self.0.borrow_mut().feed();
+    }
+
+    /// Whether a receive is pending (the unit tests').
+    #[cfg(all(feature = "threads", not(feature = "sched")))]
+    pub(crate) fn reading_for_tests(&self) -> bool {
+        let _l = super::loop_lock();
+        let r = self.0.borrow().read.is_some();
+        r
     }
 }
 
@@ -504,15 +516,15 @@ impl TcpSocket {
     /// descriptor yet. The first stream also takes libuv's spare descriptor
     /// (`/dev/null`, kept open), as natively.
     pub fn new() -> Result<TcpSocket, IoError> {
-        crate::sched::ensure_started();
+        super::mode::ensure_started();
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         Ok(TcpSocket::make())
     }
 
     fn make() -> TcpSocket {
         reserve_emfile_fd();
-        TcpSocket(Rc::new(Handle::new(|id| {
+        TcpSocket(Shared::new(Handle::new(|id| {
             let mut t = Tcp::default();
             t.id = id;
             t
@@ -524,11 +536,11 @@ impl TcpSocket {
 // The loop's side (`uv__stream_io`, `uv__server_io`)
 
 /// A socket's state as a loop callback sees it ([`super::on_socket`]).
-struct Loop<'a>(&'a RefCell<Tcp>);
+struct Loop<'a>(&'a Cell<Tcp>);
 
 impl Loop<'_> {
     /// The watch callback and `uv__io_feed`'s call.
-    fn on_io(s: &RefCell<Tcp>, ev: Ev) {
+    fn on_io(s: &Cell<Tcp>, ev: Ev) {
         let t = Loop(s);
         if s.borrow().listening {
             t.server_io();
@@ -803,10 +815,10 @@ impl TcpSocket {
     pub fn connect(
         &self,
         addr: SocketAddr,
-        done: impl FnOnce(Result<(), IoError>) + 'static,
+        done: impl FnOnce(Result<(), IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.connect.is_some() {
             return Err(uv_error(UV_EALREADY));
@@ -857,14 +869,14 @@ impl TcpSocket {
     pub fn send<D: SendData>(
         &self,
         data: D,
-        done: impl FnOnce(Result<(), IoError>) + 'static,
+        done: impl FnOnce(Result<(), IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
         crate::io::effect_point();
         if data.count() == 0 {
             done(Ok(()));
             return Ok(());
         }
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         // `uv__check_before_write`
         if t.fd.is_none() {
@@ -904,9 +916,9 @@ impl TcpSocket {
     pub fn recv<B: RecvBuf>(
         &self,
         alloc: impl FnOnce() -> B,
-        done: impl FnOnce(Result<Option<(B, usize)>, IoError>) + 'static,
+        done: impl FnOnce(Result<Option<(B, usize)>, IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         if self.0.borrow().read.is_some() {
             return Err(uv_error(UV_EALREADY));
         }
@@ -937,9 +949,9 @@ impl TcpSocket {
     /// end of file is never read here).
     pub fn wait_readable(
         &self,
-        done: impl FnOnce(Result<bool, IoError>) + 'static,
+        done: impl FnOnce(Result<bool, IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.read.is_some() {
             return Err(uv_error(UV_EALREADY));
@@ -966,7 +978,7 @@ impl TcpSocket {
     /// `Socket.cancelRecv` (`lean_uv_tcp_cancel_recv`): stop a pending
     /// receive and let go of its promise without resolving it.
     pub fn cancel_recv(&self) {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let r = {
             let mut t = self.0.borrow_mut();
             if t.read.is_none() {
@@ -983,7 +995,7 @@ impl TcpSocket {
     /// `Socket.bind` (`lean_uv_tcp_bind`, `uv_tcp_bind(handle, addr, 0)`).
     pub fn bind(&self, addr: SocketAddr) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         t.maybe_new_socket(family_of(&addr), false, false)
             .map_err(uv_error)?;
@@ -1010,7 +1022,7 @@ impl TcpSocket {
     /// an IPv4 one (the kernel binds it to a free port).
     pub fn listen(&self, backlog: u32) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.delayed_error != 0 {
             return Err(uv_error(t.delayed_error));
@@ -1032,10 +1044,10 @@ impl TcpSocket {
     /// loop. A second `accept` while one is pending fails with `EALREADY`.
     pub fn accept(
         &self,
-        done: impl FnOnce(Result<TcpSocket, IoError>) + 'static,
+        done: impl FnOnce(Result<TcpSocket, IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
-        super::loop_lock();
         let r = {
+            let _l = super::loop_lock();
             let mut t = self.0.borrow_mut();
             if t.accept.is_some() {
                 // LEAN-BUG LB-21: native returns this error with the event
@@ -1054,6 +1066,7 @@ impl TcpSocket {
                 r => r.map_err(uv_error),
             }
         };
+        // after the loop's lock, as native's `lean_uv_tcp_accept` resolves
         done(r);
         Ok(())
     }
@@ -1061,7 +1074,7 @@ impl TcpSocket {
     /// `Socket.tryAccept` (`lean_uv_tcp_try_accept`): the connection the loop
     /// accepted, if any.
     pub fn try_accept(&self) -> Result<Option<TcpSocket>, IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.accept.is_some() {
             return Err(parallel_accept());
@@ -1076,7 +1089,7 @@ impl TcpSocket {
     /// `Socket.cancelAccept` (`lean_uv_tcp_cancel_accept`): let go of a
     /// pending accept's promise without resolving it.
     pub fn cancel_accept(&self) {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let r = self.0.borrow_mut().accept.take();
         drop(r);
     }
@@ -1086,10 +1099,10 @@ impl TcpSocket {
     /// done, and `done` gets the outcome then, on the loop.
     pub fn shutdown(
         &self,
-        done: impl FnOnce(Result<(), IoError>) + 'static,
+        done: impl FnOnce(Result<(), IoError>) + MaybeSend + 'static,
     ) -> Result<(), IoError> {
         crate::io::effect_point();
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         if t.shutdown.is_some() {
             return Err(IoError::decode_uv_error(
@@ -1132,20 +1145,20 @@ impl TcpSocket {
 
     /// `Socket.getPeerName` (`lean_uv_tcp_getpeername`).
     pub fn peer_name(&self) -> Result<SocketAddr, IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         self.name(true)
     }
 
     /// `Socket.getSockName` (`lean_uv_tcp_getsockname`).
     pub fn sock_name(&self) -> Result<SocketAddr, IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         self.name(false)
     }
 
     /// `Socket.noDelay` (`lean_uv_tcp_nodelay`, `uv_tcp_nodelay(handle, 1)`):
     /// `TCP_NODELAY` now, or on the descriptor the socket gets later.
     pub fn no_delay(&self) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         if let Some(fd) = t.fd() {
             sockopt::set_tcp_nodelay(fd, true).map_err(|e| uv_error(uv_err(e)))?;
@@ -1161,7 +1174,7 @@ impl TcpSocket {
     /// a 1 s interval and 10 probes. Without one, the setting waits for the
     /// descriptor, with an idle time of 60 s (libuv's).
     pub fn keep_alive(&self, enable: i32, delay: u32) -> Result<(), IoError> {
-        super::loop_lock();
+        let _l = super::loop_lock();
         let mut t = self.0.borrow_mut();
         let on = enable != 0;
         if let Some(fd) = t.fd() {

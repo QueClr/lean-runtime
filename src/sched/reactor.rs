@@ -32,40 +32,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-/// What a wait or a watch waits for on a descriptor.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub struct Interest {
-    /// Readable (`POLLIN`; end of file and errors count).
-    pub read: bool,
-    /// Writable (`POLLOUT`; errors and a hang-up count).
-    pub write: bool,
-}
+pub use super::common::{Interest, Ready};
 
+// The single-thread loop's own conversions (the definitions are shared with
+// threads mode's `sched::uv`, `super::common`).
 impl Interest {
-    pub const READ: Interest = Interest {
-        read: true,
-        write: false,
-    };
-    pub const WRITE: Interest = Interest {
-        read: false,
-        write: true,
-    };
-    pub const BOTH: Interest = Interest {
-        read: true,
-        write: true,
-    };
-
-    fn epoll_flags(self) -> epoll::EventFlags {
-        let mut f = epoll::EventFlags::empty();
-        if self.read {
-            f |= epoll::EventFlags::IN;
-        }
-        if self.write {
-            f |= epoll::EventFlags::OUT;
-        }
-        f
-    }
-
     fn poll_flags(self) -> PollFlags {
         let mut f = PollFlags::empty();
         if self.read {
@@ -89,32 +60,7 @@ impl Interest {
     }
 }
 
-/// What the loop saw on a descriptor.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub struct Ready {
-    /// A read would not block (data, end of file, or an error).
-    pub read: bool,
-    /// A write would not block (room, or an error).
-    pub write: bool,
-    /// `POLLHUP`: the other end is closed.
-    pub hangup: bool,
-    /// `POLLERR`.
-    pub error: bool,
-}
-
 impl Ready {
-    fn from_epoll(f: epoll::EventFlags) -> Ready {
-        use epoll::EventFlags as E;
-        let error = f.contains(E::ERR);
-        let hangup = f.contains(E::HUP);
-        Ready {
-            read: f.intersects(E::IN | E::PRI | E::RDHUP) || error || hangup,
-            write: f.contains(E::OUT) || error || hangup,
-            hangup,
-            error,
-        }
-    }
-
     fn from_poll(f: PollFlags) -> Ready {
         let error = f.contains(PollFlags::ERR);
         let hangup = f.contains(PollFlags::HUP);
@@ -129,11 +75,6 @@ impl Ready {
             hangup,
             error: error || nval,
         }
-    }
-
-    /// Whether this answers `i`.
-    pub fn meets(self, i: Interest) -> bool {
-        (i.read && self.read) || (i.write && self.write)
     }
 }
 

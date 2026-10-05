@@ -1169,6 +1169,10 @@ cases!(
     shutdown_during_connect,
     shutdown_after_queued_write,
     shutdown_after_connect,
+    // tests/cases/net (net-threads)
+    clients_in_tasks,
+    socket_across_tasks,
+    extern_in_sync_dependent,
     exit_while_reading,
     exit_while_writing,
     exit_while_writing_stalled,

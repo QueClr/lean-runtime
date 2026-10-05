@@ -5,37 +5,43 @@
 //! the translator's `ByteArray` as Lean does (`lean_alloc_sarray`, with its
 //! internal panics). And `Std.Async`'s `Async` monad, as its Lean code builds
 //! tasks, for the cases written against `Std.Async.TCP` and `UDP`.
+//!
+//! Both drivers compile it (`tests/sched-driver-mt` by `#[path]`, with
+//! `netcases.rs`), with their own `lean.rs`: `Val` is what a value needs
+//! (`Clone`, and in threads mode `Send + Sync`), and `MaybeSend` the crate's
+//! bound on what the loop keeps (nothing, or `Send`), so this file has no
+//! `cfg`.
 
-use crate::lean::{as_task, bind_task, has_finished, map_task, Task, UvPromise, PRIO_DEFAULT};
+use crate::lean::{as_task, bind_task, has_finished, map_task, Task, UvPromise, Val, PRIO_DEFAULT};
 use crate::lio::R;
 use lean_runtime::io::IoError;
 use lean_runtime::net::tcp::TcpSocket;
 use lean_runtime::net::udp::UdpSocket;
-use lean_runtime::net::{dns, IpAddr, SocketAddr};
+use lean_runtime::net::{dns, IpAddr, MaybeSend, SocketAddr};
 use lean_runtime::semantics::panic::InternalPanic;
 
 /// `IO.Promise (Except IO.Error α)`, as the externs return it.
 pub type P<T> = UvPromise<R<T>>;
 
 /// A new promise, and the loop's reference to it as a resolving closure.
-fn promise<T: Clone + 'static>() -> (P<T>, impl FnOnce(R<T>) + 'static) {
+fn promise<T: Val>() -> (P<T>, impl FnOnce(R<T>) + MaybeSend + 'static) {
     let p: P<T> = UvPromise::new();
     let q = p.clone();
     (p, move |r| q.resolve(r))
 }
 
 /// `IO.wait p.result?`.
-pub fn wait<T: Clone + 'static>(p: &P<T>) -> Option<R<T>> {
+pub fn wait<T: Val>(p: &P<T>) -> Option<R<T>> {
     p.result_opt().get()
 }
 
 /// `IO.wait p.result!`.
-pub fn wait_bang<T: Clone + 'static>(p: &P<T>) -> R<T> {
+pub fn wait_bang<T: Val>(p: &P<T>) -> R<T> {
     p.result_bang().get()
 }
 
 /// `IO.Promise.isResolved` (`IO.hasFinished p.result?`).
-pub fn is_resolved<T: Clone + 'static>(p: &P<T>) -> bool {
+pub fn is_resolved<T: Val>(p: &P<T>) -> bool {
     has_finished(&p.result_opt())
 }
 
@@ -202,12 +208,12 @@ fn add_paren_heuristic(s: &str) -> String {
 // task between two steps.
 
 #[derive(Clone)]
-pub enum Maybe<T: Clone + 'static> {
+pub enum Maybe<T: Val> {
     Pure(R<T>),
     Task(Task<R<T>>),
 }
 
-impl<T: Clone + 'static> Maybe<T> {
+impl<T: Val> Maybe<T> {
     pub fn into_task(self) -> Task<R<T>> {
         match self {
             Maybe::Pure(r) => Task::pure(r),
@@ -216,10 +222,22 @@ impl<T: Clone + 'static> Maybe<T> {
     }
 }
 
-pub struct Async<T: Clone + 'static>(Box<dyn FnOnce() -> Maybe<T>>);
+/// An `Async`'s action, boxed: `MaybeSend` as a supertrait makes the box
+/// `Send` in threads mode, where a task runs it.
+trait Action<T: Val>: MaybeSend {
+    fn run(self: Box<Self>) -> Maybe<T>;
+}
 
-impl<T: Clone + 'static> Async<T> {
-    pub fn new(f: impl FnOnce() -> Maybe<T> + 'static) -> Async<T> {
+impl<T: Val, F: FnOnce() -> Maybe<T> + MaybeSend> Action<T> for F {
+    fn run(self: Box<Self>) -> Maybe<T> {
+        (*self)()
+    }
+}
+
+pub struct Async<T: Val>(Box<dyn Action<T>>);
+
+impl<T: Val> Async<T> {
+    pub fn new(f: impl FnOnce() -> Maybe<T> + MaybeSend + 'static) -> Async<T> {
         Async(Box::new(f))
     }
 
@@ -229,7 +247,7 @@ impl<T: Clone + 'static> Async<T> {
 
     /// `Async.ofPromise`: the extern runs when the `Async` does; its error is
     /// the `Async`'s.
-    pub fn of_promise(io: impl FnOnce() -> R<P<T>> + 'static) -> Async<T> {
+    pub fn of_promise(io: impl FnOnce() -> R<P<T>> + MaybeSend + 'static) -> Async<T> {
         Async::new(move || match io() {
             Err(e) => Maybe::Pure(Err(e)),
             Ok(p) => Maybe::Task(map_task(
@@ -249,14 +267,14 @@ impl<T: Clone + 'static> Async<T> {
     }
 
     /// `EAsync.bind`.
-    pub fn bind<U: Clone + 'static>(self, f: impl FnOnce(T) -> Async<U> + 'static) -> Async<U> {
-        Async::new(move || match (self.0)() {
-            Maybe::Pure(Ok(a)) => (f(a).0)(),
+    pub fn bind<U: Val>(self, f: impl FnOnce(T) -> Async<U> + MaybeSend + 'static) -> Async<U> {
+        Async::new(move || match self.0.run() {
+            Maybe::Pure(Ok(a)) => f(a).0.run(),
             Maybe::Pure(Err(e)) => Maybe::Pure(Err(e)),
             Maybe::Task(t) => Maybe::Task(bind_task(
                 t,
                 move |r| match r {
-                    Ok(a) => (f(a).0)().into_task(),
+                    Ok(a) => f(a).0.run().into_task(),
                     Err(e) => Task::pure(Err(e)),
                 },
                 PRIO_DEFAULT,
@@ -268,12 +286,12 @@ impl<T: Clone + 'static> Async<T> {
 
     /// `Async.toIO` / `EAsync.toBaseIO`: run it here, the task of its result.
     pub fn start(self) -> Task<R<T>> {
-        (self.0)().into_task()
+        self.0.run().into_task()
     }
 
     /// `Async.block`: run it in a new task (`asTask`), wait, rethrow.
     pub fn block(self) -> R<T> {
-        let t = as_task(move || (self.0)(), PRIO_DEFAULT);
+        let t = as_task(move || self.0.run(), PRIO_DEFAULT);
         t.get().into_task().get()
     }
 }

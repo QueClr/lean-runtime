@@ -133,9 +133,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
     Its task manager uses std's threads and locks only.
     Its loop thread for <code>Std.Internal.UV</code> uses rustix and signal-hook, as <code>sched</code> does.
     It has no <code>unsafe</code> code.
-    It excludes <code>sched</code> and <code>net</code>: a build has one scheduler.
+    It excludes <code>sched</code>: a build has one scheduler.
     The design and its status are in <a href="../docs/threads.md">docs/threads.md</a>.</li>
-  <li><strong><code>net</code>.</strong> Turns on <code>io</code> and <code>sched</code>.
+  <li><strong><code>net</code>.</strong> Turns on <code>io</code>, and needs <code>sched</code> or <code>threads</code>.
+    In threads mode it runs on the loop thread.
     Its sockets use the net features of rustix and nix.
     Its name lookups call glibc through dns-lookup, pinned at 2.1.1.
     <a href="../UNSAFE.md">UNSAFE.md</a> records the audit of that crate's <code>unsafe</code> code.</li>

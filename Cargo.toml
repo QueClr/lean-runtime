@@ -65,8 +65,9 @@ sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
 # threads (a pool of `LEAN_NUM_THREADS` workers, a thread per dedicated
 # task), promises, Std.Sync and the 4.35 ref rule, with `Send` jobs and a
 # `Send + Sync` glue; `sched::` re-exports it, with the single-thread
-# scheduler's names. It excludes `sched` (and so `net`, which turns `sched`
-# on): a build has one scheduler, and both on is a compile error. With `io`
+# scheduler's names. It excludes `sched`: a build has one scheduler, and
+# both on is a compile error. With `net` (allowed, N), the sockets and
+# lookups run on `sched::uv`'s loop thread, as natively. With `io`
 # (allowed), the io layer takes its plain blocking path, as without `sched`:
 # a blocking call blocks its own thread, as natively. Where
 # `unshare(CLONE_FS)` is refused (Docker's default seccomp profile), a spawn
@@ -79,7 +80,10 @@ sched = ["dep:corosensei", "dep:rustix", "dep:signal-hook"]
 threads = ["dep:rustix", "dep:signal-hook"]
 # Networking (Std.Internal.UV.TCP/UDP/DNS, Std.Net.interfaceAddresses) on the
 # scheduler's event loop: an optional module a translator admits per program.
-net = ["io", "sched", "dep:dns-lookup", "rustix/net", "nix/net"]
+# It needs a scheduler and turns none on: with `sched`, the single-thread
+# scheduler's loop; with `threads`, `sched::uv`'s loop thread (docs/threads.md,
+# 0.7). Alone it is a compile error, as `stack-overflow`.
+net = ["io", "dep:dns-lookup", "rustix/net", "nix/net"]
 # The process title in the arguments' memory (`io::argv_title`, a native
 # quirk written with `unsafe`: UNSAFE.md, docs/native-quirks.md): the
 # crate's ELF constructor keeps the arguments' memory, and `setProcessTitle`
@@ -177,8 +181,8 @@ required-features = ["threads", "stack-overflow"]
 
 # tests/sched-driver: the program cases with tasks as Rust programs over
 # `sched`, with the glue a translator provides (`cargo test -p
-# sched-driver`); tests/sched-driver-mt: the task cases' ports, shared with
-# it, in threads mode (`cargo test -p sched-driver-mt`, a cargo invocation
+# sched-driver`); tests/sched-driver-mt: the task and net cases' ports,
+# shared with it, in threads mode (`cargo test -p sched-driver-mt`, a cargo invocation
 # of its own: `threads` and `sched` exclude each other in one build, so
 # `--workspace` does not compile; name a package with `-p`). The
 # benchmarks are packages of their own.

@@ -685,7 +685,8 @@ now.)
 - **I2. Never closed.** The descriptors live in that `static` for the rest of
   the process (their `OwnedFd`s and rings are never dropped), and the
   crate's users get them only borrowed (`claim_signal_pipe`, the epoll
-  descriptor for one scheduler).
+  descriptor for one loop: the single-thread scheduler's, or in threads
+  mode with `net` the io watchers of `sched::uv`'s loop thread).
 - **I3. Nothing is closed.** Neither the constructor nor
   `ensure_native_descriptors` closes a descriptor it did not open: they
   only open, through I1 (an io_uring ring the kernel gives without libuv's
@@ -1181,7 +1182,7 @@ address exposed with `expose_provenance` and taken back with
   134) through its twin in `tests/sched-driver`, which builds the crate
   with `stack-overflow` and whose glue only calls
   `sched::install_stack_overflow_handler()`. `scripts/check.sh` builds and
-  tests `io,sched` and `net` without the feature (the root forbids
+  tests `io,sched` and `sched,net` without the feature (the root forbids
   `unsafe` there), and the configuration with every feature but `net`
   with it.
 - The driver's tests `so_main_overflow` (`main`'s own stack, after a task

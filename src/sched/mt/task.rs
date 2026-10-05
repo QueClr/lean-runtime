@@ -245,6 +245,12 @@ impl Shared {
     pub(crate) fn started(&self) -> bool {
         self.started.load(Ordering::Relaxed)
     }
+
+    /// `finish` has returned: the shutdown began and the manager stopped
+    /// (`started` is cleared last, once every thread has been joined).
+    pub(crate) fn finished(&self) -> bool {
+        self.shutting_down.load(Ordering::Relaxed) && !self.started.load(Ordering::Relaxed)
+    }
 }
 
 fn wait_on<'a>(cv: &Condvar, g: Guard<'a>) -> Guard<'a> {

@@ -92,7 +92,8 @@ once.
   says so when a crate is missing). Nothing is vendored. `threads` (threads
   mode) depends on rustix and signal-hook for its `sched::uv` loop thread
   (T2), as `sched` does, so it is built with cargo too; it excludes `sched`
-  and `net` (a compile error when both are on).
+  (a compile error when both are on). `net` needs one of the two schedulers
+  and turns neither on (alone, a compile error).
 - **Dependencies.** Requirements are carets compatible with leanrs's
   offline registry, which leanrs resolves in its own workspace (it ignores
   `Cargo.lock`), with only the features the crate uses. Before adding a
@@ -134,8 +135,9 @@ once.
 - **The two scheduler drivers.** `cargo test --offline --locked -p
   sched-driver` runs the program cases with tasks over the single-thread
   scheduler, once each. `cargo test --offline --locked -p sched-driver-mt`
-  runs the `tasks/`, `sync/`, `refs/` and `taskio/` cases in threads mode
-  (`docs/threads.md`, 0.6), 5 runs each, 6 cases at a time; set
+  runs the `tasks/`, `sync/`, `refs/`, `taskio/` and `net/` cases in
+  threads mode (`docs/threads.md`, 0.6 and 0.7), 5 runs each, 6 cases at a
+  time; set
   `SCHED_MT_JOBS=N` for another number, `SCHED_MT_CASES=ID,ID` to run only
   those cases, and pass `-- --nocapture` for a line per case. Run each
   package in a cargo invocation of its own: `threads` and `sched` exclude

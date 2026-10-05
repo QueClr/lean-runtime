@@ -1,7 +1,10 @@
 # Networking (`net`)
 
-`net` (feature `net`, which turns on `io` and `sched`) is Lean 4.34.0's
-networking externs, for a translator that admits the module:
+`net` (feature `net`, which turns on `io` and needs a scheduler, `sched` or
+`threads`: alone it is a compile error) is Lean 4.34.0's networking
+externs, for a translator that admits the module, on the single-thread
+scheduler's event loop or, in threads mode, on `sched::uv`'s loop thread
+("Threads mode" below):
 
 | Lean | Extern (`src/runtime/uv/`) | Here |
 |---|---|---|
@@ -18,13 +21,15 @@ compiles them. The text forms of addresses (`IPv4Addr.ofString`,
 
 | File | What |
 |---|---|
-| `src/net/mod.rs` | The model, the glue's types (`Done`, `SendData`, `RecvBuf`, `RecvTarget`), the registry of open sockets (`Handle`), libuv's io watcher and `uv__io_feed` over the scheduler's loop |
+| `src/net/mod.rs` | The model, the glue's types (`Done`, `MaybeSend`, `SendData`, `RecvBuf`, `RecvTarget`), the socket's handle (`Handle`), libuv's io watcher and `uv__io_feed` over the mode layer |
+| `src/net/mode_st.rs`, `src/net/mode_mt.rs` | the mode layer, one per scheduler: the socket's cell and counted reference, the registry of open sockets, the io watcher's and `uv__io_feed`'s backend, the loop's lock, the DNS answers' way back to the loop |
 | `src/net/tcp.rs` | libuv 1.48's stream and TCP code (`stream.c`, `tcp.c`) and Lean's `tcp.cpp` |
 | `src/net/udp.rs` | libuv's `udp.c` and Lean's `udp.cpp` |
 | `src/net/dns.rs` | the lookups, on two helper threads |
 | `src/net/iface.rs` | `uv_interface_addresses` over `getifaddrs` |
-| `src/net/tests.rs` | unit tests of the pure parts, and of a socket's lifetime on the loop |
-| `tests/cases/net/` | the program cases, recorded natively; twins in `tests/sched-driver/src/netcases.rs` |
+| `src/net/tests.rs` | unit tests of the pure parts, and of a socket's lifetime on the single-thread loop |
+| `src/net/tests_mt.rs` | unit tests of threads mode: the drop and cancel paths that cross threads |
+| `tests/cases/net/` | the program cases, recorded natively; twins in `tests/sched-driver/src/netcases.rs`, run by both drivers (`tests/sched-driver`, and in threads mode `tests/sched-driver-mt`, 5 runs each) |
 
 Dependencies: rustix's and nix's `net` features (sockets, socket options,
 `getifaddrs`), and `dns-lookup` 2.1.1 for glibc's `getaddrinfo` and
@@ -66,6 +71,46 @@ promise. Here:
 - **Callbacks run on the loop context** (`docs/sched.md`, "The event
   loop"), as natively on the loop thread: they resolve the promises, so
   their waiters wake and their `sync` dependents run there.
+
+### Threads mode
+
+With `threads` (docs/threads.md, 0.7) the same code runs on `sched::uv`'s
+loop thread, as natively on libuv's: the mode layer (`mode_mt.rs`) gives
+the socket a lock in an `Arc` (a `TcpSocket` and a `UdpSocket` are `Send +
+Sync`), the watches are the loop thread's epoll instance, a `uv__io_feed`
+is its pending queue, and the loop's lock is `sched::uv`'s:
+- **Every extern holds the loop lock** from its start to its end, as
+  natively (`event_loop_lock` ... `event_loop_unlock`); when the loop
+  thread holds it, the extern interrupts its iteration and waits for its
+  end, so what became ready meanwhile is handled first. A socket's state
+  lock is taken only under it, and never across translator code.
+- **Callbacks run on the loop thread** with the loop lock held: a promise
+  resolves there, its `sync` dependents run there, its waiters on other
+  threads wake. An extern that resolves at once does so after it lets go
+  of the loop lock, as native's (`accept` of a connection the loop already
+  took); an empty `send` takes no lock.
+- **Lean's finalizer** of a socket, the drop of its last handle, takes the
+  loop lock on whatever thread drops it, then closes the socket at once. A
+  pending operation holds the socket, so a socket dropped on a worker
+  while the loop thread has a receive pending stays open until the receive
+  completes there.
+- **What the loop keeps is `Send`**: a `done` closure, `SendData` and
+  `RecvBuf` have the bound `MaybeSend`, which is `Send` in threads mode and
+  nothing in the single-thread mode.
+- **DNS**: a helper hands its answer to the loop thread through the loop's
+  async queue and eventfd, never through the loop lock; the loop thread
+  runs the promise's `done`.
+- **The order within an iteration** is libuv's: the io callbacks (the
+  sockets', then the async queue's), the signal watchers last, then the
+  pending callbacks and the timers.
+- **After `finish`** the loop thread runs no callback, so no promise
+  resolves then (LB-27), as the single-thread scheduler's loop does not
+  run after `finish`.
+
+The program cases give native's outcomes in threads mode too (5 runs
+each), the two that use the network from several tasks included
+(`clients_in_tasks`, `socket_across_tasks`); unit tests cover the drop and
+cancel paths across threads (`src/net/tests_mt.rs`).
 
 Example (`tcp_echo`): a client `send`s 16 MiB to a server task that sleeps
 before it reads.
@@ -124,8 +169,9 @@ queued; Lean's finalizer closes the handle (`uv_close`), and with it the
 descriptor, when the last reference goes. Here (AR-12):
 
 - **The handle owns the socket.** `TcpSocket` and `UdpSocket` are an `Rc`
-  of one `net::Handle`, which owns the socket's state and its entry in the
-  thread's registry of open sockets (a number given once, never reused).
+  (in threads mode an `Arc`) of one `net::Handle`, which owns the socket's
+  state and its entry in the registry of open sockets (the thread's; in
+  threads mode the process's; a number given once, never reused).
   The program's clones hold the handle, and so does each pending operation
   (a connect, a receive, a queued write or datagram, a shutdown, an
   accept), as native's `lean_inc(socket)`, until its promise is resolved
@@ -168,7 +214,8 @@ Example (the state the unit test
 ## What a program sees
 
 TCP (cases `tcp_echo`, `tcp_errors`, `tcp_v6`, `keepalive_zero_delay`,
-`recv_zero_*`, `accept_parallel*`, `shutdown_*`):
+`recv_zero_*`, `accept_parallel*`, `shutdown_*`; from several tasks,
+`clients_in_tasks` and `socket_across_tasks`):
 - A new socket has no descriptor until `bind`, `connect` or `listen`: then
   `getPeerName`, `getSockName` and `send` fail with `EBADF`, `recv?`,
   `waitReadable` and `shutdown` with `ENOTCONN`; `noDelay` and `keepAlive`
@@ -236,7 +283,9 @@ data (addresses, names, or libuv's code), then wake the loop through the
 loop's eventfd (native's async descriptor when the glue opened native's
 startup descriptors, `io::startup`; else one of the crate's own). A watch of
 that eventfd, registered while a lookup is pending, resolves the promises
-on the loop context. No Lean value crosses threads. The threads are not
+on the loop context; in threads mode the answer goes through `sched::uv`'s
+async queue to the loop thread, which resolves the promise. No Lean value
+crosses threads. The threads are not
 Lean-visible parallelism: they only wait inside the C library, and the
 program's own code runs on the scheduler's one thread as before. At exit
 the process waits for the lookups in progress, as natively: libuv's
@@ -290,7 +339,8 @@ the unit test gives `net::dns` dns-lookup's answers through a test double
 at the resolver boundary (`dns::Resolver`).
 
 Other differences, none visible in the cases:
-- **When the loop looks.** Native's loop thread runs as soon as a socket is
+- **When the loop looks** (the single-thread mode; in threads mode the loop
+  thread runs as natively). Native's loop thread runs as soon as a socket is
   ready. Here the loop's callbacks run when the program blocks (a wait for
   a promise, a sleep, a blocking read), at polling and effect points (at
   most once a millisecond), or on a context of their own while other
@@ -321,4 +371,12 @@ thread's registry (a hash map); each loop callback looks its socket up
 there once; each wait for readiness is an `epoll_ctl` through the
 scheduler's watch (added, changed, removed where libuv does), and each
 completion one due timer. A `send` copies nothing: the translator's buffers
-are written from where they are.
+are written from where they are. In threads mode a socket costs two `Arc`s
+and a lock instead, and its entry is in the process's registry (under a
+lock). The loop thread holds the loop lock through its whole iteration,
+its wait in `poll(2)` included, so nearly every extern finds it held: it
+writes the eventfd, the loop thread wakes and ends its iteration, and the
+lock is handed over (as natively, where `event_loop_lock` interrupts
+`uv_run` the same way); only an extern made between two iterations, or on
+the loop thread itself, takes it at once. A completion is one entry of the
+loop's pending queue.
