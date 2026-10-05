@@ -1703,6 +1703,16 @@ a `const` count for `done_keyed`'s inline test. An entry lives from a
 keyed claim or a first wait to the value's store, so the table usually
 holds no entry, or one or two during a constant's initialization.
 
+**Before the task manager runs** the running context is `main`'s, found
+without building the scheduler's state, as the frame of 3.2 is: there is
+one context, since a task runs at once on the context that creates it
+(also with `LEAN_NUM_THREADS=0`). A claim (`step_keyed`, `Gate::step`)
+and a store that no context waits for (`done_keyed`, `Gate::finish`,
+`put`, a keyed closing store) touch only the core's own table and cell. So
+a program that creates no tasks builds no scheduler state at its
+constants and thunks (lean2rr claims each constant through `step_keyed`,
+before `main`); a wait or a hang builds it.
+
 ```rust
 // leanrs's thunk (the cell holds `gate: Gate`; key: the cell's address)
 loop {

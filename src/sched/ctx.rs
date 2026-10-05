@@ -376,8 +376,18 @@ const POOLED_STACKS: usize = 8;
 const ENOMEM: i32 = 12;
 const EAGAIN: i32 = 11;
 
+#[cfg(test)]
+thread_local! {
+    /// Whether this thread built the scheduler's state: `Contexts::new` runs
+    /// only in `SCHED`'s initializer (unit tests: a program with no tasks
+    /// builds none, `wait::tests::sched_built`).
+    pub(crate) static BUILT: Cell<bool> = const { Cell::new(false) };
+}
+
 impl Contexts {
     pub(crate) fn new() -> Contexts {
+        #[cfg(test)]
+        BUILT.with(|b| b.set(true));
         let mut main = Ctx::new(0);
         main.status = Status::Running;
         main.tid = Some(0);

@@ -74,18 +74,32 @@ pub(crate) fn before_block() {
 }
 
 /// The running context, or `None` once the scheduler's thread-local is
-/// gone (W6).
+/// gone (W6). Before the task manager runs it is `main`'s, found without
+/// building the scheduler's state, as `refs::frame` finds its frame: a
+/// program that creates no tasks pays nothing for the scheduler at its
+/// constants and thunks (lean2rr claims each constant through `step_keyed`
+/// before `main`). There is one context then, since a task runs at once on
+/// the context that creates it (`spawn`); also with `LEAN_NUM_THREADS=0`,
+/// where the manager never runs. `manager_running` reads a const
+/// thread-local with no destructor, which stays readable while the thread's
+/// locals are destructed, so W6's answer is unchanged.
 fn me() -> Option<CtxId> {
+    if !super::manager_running() {
+        return Some(MAIN);
+    }
     alive().then(current_context)
 }
 
 /// Contexts woken in order (W1); nothing once the scheduler's state is gone
-/// (W6). `wake` never switches.
-fn wake_in_order(ws: Vec<CtxId>) {
-    if alive() {
-        for c in ws {
-            wake(c);
-        }
+/// (W6). `wake` never switches. With no waiter it touches nothing: a store
+/// that no context waits for builds no scheduler state, which matters
+/// before the task manager runs (a context that waits has built it).
+pub(crate) fn wake_in_order(ws: Vec<CtxId>) {
+    if ws.is_empty() || !alive() {
+        return;
+    }
+    for c in ws {
+        wake(c);
     }
 }
 
@@ -191,10 +205,12 @@ impl Gate {
     ///   `finish` (a blocking yield point; it keeps its worker), then
     ///   `Step::Again`.
     ///
-    /// A hang or a wait inside a no-suspend scope is a Rust panic (W3). At
-    /// thread teardown (W6) the thread counts as `main`'s context: it
-    /// claims a gate with no runner, and a recorded runner makes it hang,
-    /// as `step_keyed` does.
+    /// A hang or a wait inside a no-suspend scope is a Rust panic (W3).
+    /// Before the task manager runs, the running context is `main`'s, and
+    /// a step with no runner builds no scheduler state (`me`). At thread
+    /// teardown (W6) the thread counts as `main`'s context: it claims a
+    /// gate with no runner, and a recorded runner makes it hang, as
+    /// `step_keyed` does.
     ///
     /// Example (a thunk): `loop { if let Some(v) = cell.value.get() {
     /// return v } match cell.gate.step(key) { Step::Again => continue,
@@ -205,9 +221,10 @@ impl Gate {
             key & 1 == 0,
             "lean-runtime: a Gate's key is an address (even)"
         );
-        // at thread teardown (W6) the thread is `main`'s context: it claims a
-        // gate with no runner, and a recorded runner makes it hang
-        // (`before_block`), as `step_keyed` does
+        // before the task manager runs, and at thread teardown (W6), the
+        // thread is `main`'s context (`me`): it claims a gate with no
+        // runner, and a recorded runner makes it hang (`before_block`), as
+        // `step_keyed` does
         let me = me().unwrap_or(MAIN);
         match self.runner.get() {
             NO_RUNNER => {
@@ -312,9 +329,11 @@ fn keyed_wait(key: usize, me: CtxId) {
 /// run ended; look at the value again. Never returns when the running
 /// context is the runner (`hang()`, LB-08). A hang or a wait inside a
 /// no-suspend scope is a Rust panic (W3), which aborts here: the function
-/// is `extern "C"` (it cannot unwind; W4). At thread teardown (W6) a
-/// recorded runner makes the thread hang, and with the table gone (no
-/// runner known) it claims: `true`; `Gate::step` makes the same choices.
+/// is `extern "C"` (it cannot unwind; W4). Before the task manager runs,
+/// a claim and its `done_keyed` build no scheduler state (`me`,
+/// `wake_in_order`). At thread teardown (W6) a recorded runner makes the
+/// thread hang, and with the table gone (no runner known) it claims:
+/// `true`; `Gate::step` makes the same choices.
 ///
 /// Example (lean2rr's constant accessor, its cold path): `loop { if
 /// has(slot) { return true } if step_keyed(key(slot)) { return false } }`.
@@ -326,9 +345,10 @@ pub extern "C" fn step_keyed(key: usize) -> bool {
         Hang,
         Wait,
     }
-    // at thread teardown (W6) the thread is `main`'s context, as in
-    // `Gate::step`: a recorded runner makes it hang (`before_block`); with
-    // the table gone no runner is known, and it claims
+    // before the task manager runs, and at thread teardown (W6), the
+    // thread is `main`'s context (`me`), as in `Gate::step`: a recorded
+    // runner makes it hang (`before_block`); with the table gone no runner
+    // is known, and it claims
     let me = me().unwrap_or(MAIN);
     let s = KEYED.try_with(|t| {
         let mut t = t.borrow_mut();
@@ -437,6 +457,12 @@ extern "C" fn done_keyed_slow(key: usize) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// Whether this thread built the scheduler's state (`SCHED`), asked
+    /// without building it.
+    pub(crate) fn sched_built() -> bool {
+        super::super::ctx::BUILT.with(Cell::get)
+    }
 
     /// The number of entries of the keyed table.
     pub(crate) fn keyed_len() -> u32 {

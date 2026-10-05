@@ -9,7 +9,7 @@
 
 use super::drain::tests as drain_bodies;
 use super::refs::{frame, ref_keyed};
-use super::wait::tests::{keyed_entry, keyed_len, set_keyed_runner, set_runner};
+use super::wait::tests::{keyed_entry, keyed_len, sched_built, set_keyed_runner, set_runner};
 use super::*;
 use std::cell::{Cell, RefCell};
 
@@ -129,6 +129,40 @@ fn keyed_claims_with_odd_keys() {
     assert!(step_keyed(key(5)));
     done_keyed(key(5));
     assert_eq!(keyed_len(), 0);
+}
+
+/// Before the task manager runs, the claims and stores of constants and
+/// thunks, a reference's take and closing store, and a wake with no waiter
+/// build no scheduler state: a program that creates no tasks pays nothing
+/// for the scheduler (lean2rr calls `step_keyed` at the first read of each
+/// constant, before `main`). The first scheduler call that needs the state
+/// builds it.
+#[test]
+fn claims_before_the_task_manager_build_no_scheduler_state() {
+    let key = (7 << 1) | 1;
+    assert!(step_keyed(key));
+    assert_eq!(keyed_entry(key), Some((Some(MAIN.index()), vec![])));
+    done_keyed(key);
+    assert_eq!(keyed_len(), 0);
+    assert!(!sched_built(), "step_keyed, done_keyed");
+    let g = Gate::new();
+    let gk = std::ptr::addr_of!(g) as usize;
+    assert_eq!(g.step(gk), Step::Run);
+    g.finish(gk, || ());
+    assert!(!g.running());
+    assert!(!sched_built(), "Gate::step, Gate::finish");
+    ref_keyed::take(64);
+    assert!(ref_keyed::write_point());
+    ref_keyed::store(64);
+    ref_keyed::take(64);
+    ref_keyed::put(64);
+    assert!(!ref_keyed::is_taken(64));
+    let r = Ref::new(1);
+    r.modify(|v| v + 1);
+    WaitList::new().wake_all();
+    assert!(!sched_built(), "ref_keyed, Ref, WaitList::wake_all");
+    assert_eq!(current_context(), MAIN);
+    assert!(sched_built());
 }
 
 /// `main` waits for a gate whose runner is another context (here a

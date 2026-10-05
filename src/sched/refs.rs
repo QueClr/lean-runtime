@@ -42,7 +42,7 @@
 //! closing store still runs. A Rust panic leaves the reference empty; the
 //! glue ends the process rather than going on.
 
-use super::wait::{before_block, WaitList};
+use super::wait::{before_block, wake_in_order, WaitList};
 use super::{alive, before_publish, block_sync, current_context, ref_read, with, CtxId, MAIN};
 use std::cell::RefCell;
 
@@ -338,8 +338,9 @@ pub mod ref_keyed {
         }
     }
 
-    /// `key`'s take is closed: its entry goes, its waiters wake in order.
-    /// Never switches.
+    /// `key`'s take is closed: its entry goes, its waiters wake in order
+    /// (none: no scheduler state is touched, `wake_in_order`). Never
+    /// switches.
     fn untake(key: usize) -> bool {
         let ws = TAKEN
             .try_with(|t| {
@@ -352,10 +353,8 @@ pub mod ref_keyed {
             .ok()
             .flatten();
         let closed = ws.is_some();
-        if let (Some(ws), true) = (ws, alive()) {
-            for c in ws {
-                super::super::wake(c);
-            }
+        if let Some(ws) = ws {
+            wake_in_order(ws);
         }
         closed
     }
