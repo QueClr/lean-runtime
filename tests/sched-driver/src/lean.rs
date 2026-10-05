@@ -1,8 +1,10 @@
 //! A translator's values over `lean_runtime::sched`, as small as the cases
 //! need: tasks (the value in a slot the task's job fills, the handle's last
-//! reference releasing the task), promises, and `IO.Ref`.
+//! reference releasing the task), promises (resolved after the free when
+//! dropped inside one: `sched::defer`), `IO.Ref` (the crate's
+//! `sched::Ref`), and `Array`, whose free is a drain (`sched::DrainScope`).
 
-use lean_runtime::sched::{self, CtxId, Job, Outcome, TaskId, TaskState};
+use lean_runtime::sched::{self, Deferred, DrainScope, Job, Outcome, TaskId, TaskState};
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
@@ -326,43 +328,45 @@ impl lean_runtime::sched::uv::LoopPromise for UvPromise<i64> {
 
 impl<T: Clone + 'static> Drop for Promise<T> {
     fn drop(&mut self) {
-        // Lean's `deactivate_promise`: resolved with `none`.
-        let slot = self.result.0.slot.clone();
-        sched::resolve(self.result.0.live(), move || {
+        // Lean's `deactivate_promise`: resolved with `none`. Inside a free
+        // (a drain, `Arr`'s drop), lean2rr's way: the slot's store now, in
+        // the free's order, and the resolution, which walks the `sync`
+        // dependents (Lean code that may block), once the drain is over
+        // (`sched::defer`; docs/sched.md, "The wait cores", R3).
+        let t = &self.result.0;
+        if DrainScope::active() {
+            if t.slot.get().is_none() {
+                let _ = t.slot.set(None);
+                sched::defer(Deferred::Resolve(t.id));
+            }
+            return;
+        }
+        let slot = t.slot.clone();
+        sched::resolve(t.live(), move || {
             let _ = slot.set(None);
         });
     }
 }
 
-/// `IO.Ref α`: reads are polling points in programs with tasks
-/// (`sched::ref_read`).
-///
-/// The semantics are Lean 4.35's (LB-01, LB-18 in docs/lean-bugs.md):
-/// - `modify` is `take`, then a store into the emptied cell (`put`,
-///   `ST.Prim.Ref.modifyUnsafe`), so the cell is empty while `modify`'s
-///   function runs. That function may block (`Task.get`), and other contexts
-///   then run.
-/// - Only `modify`'s own store fills the empty cell. Until then `get`,
-///   `take`, `set` and `swap` wait: each blocks the context (a yield point)
-///   until the store wakes it. `set` is `swap` with the result dropped.
-/// - So `modify` and `swap` are atomic. The cost, as in 4.35: a `modify`
-///   whose function waits for a task that uses the same reference deadlocks.
+/// `IO.Ref α`: the crate's `sched::Ref` (Lean 4.35's rule, LB-01, LB-18 in
+/// docs/lean-bugs.md; docs/sched.md, "The wait cores", core 3.2) in a
+/// counted handle, as `tests/sched-driver-mt` wraps threads mode's:
+/// - `modify` is `take`, then `put` (`ST.Prim.Ref.modifyUnsafe`), so the
+///   reference is empty while `modify`'s function runs, and that function
+///   may block (`Task.get`), letting other contexts run;
+/// - until `modify`'s store, `get`, `take`, `set` and `swap` wait (a
+///   blocking yield point), the taker's own included; `set` is `swap` with
+///   the result dropped;
+/// - reads are polling points in programs with tasks (`sched::ref_read`),
+///   writes writers points (`sched::before_publish`).
 ///
 /// Native 4.34.0 differs where its reference is shared with a task
 /// (multi-threaded): `get` and `take` spin while the slot is empty, as here
 /// (io.cpp 1459-1500, case `refs/get_during_modify`), but `set` stores into
 /// the empty slot, and `modify`'s store then overwrites it (LB-01,
 /// `refs/set_during_modify`), and `swap` returns its own argument (LB-18,
-/// `refs/swap_during_modify`) (docs/sched.md, The glue, item 7;
-/// docs/threads.md, 3.1).
-pub struct Ref<T>(Rc<RefObj<T>>);
-
-struct RefObj<T> {
-    /// `None` while `modify` holds it.
-    val: RefCell<Option<T>>,
-    /// The contexts waiting for `modify`'s store.
-    waiters: RefCell<Vec<CtxId>>,
-}
+/// `refs/swap_during_modify`).
+pub struct Ref<T>(Rc<sched::Ref<T>>);
 
 impl<T> Clone for Ref<T> {
     fn clone(&self) -> Self {
@@ -373,81 +377,58 @@ impl<T> Clone for Ref<T> {
 impl<T: Clone> Ref<T> {
     /// `IO.mkRef`.
     pub fn new(v: T) -> Ref<T> {
-        Ref(Rc::new(RefObj {
-            val: RefCell::new(Some(v)),
-            waiters: RefCell::new(Vec::new()),
-        }))
-    }
-
-    /// `f` on the cell once it holds a value: while it is empty, the context
-    /// blocks until `modify`'s store wakes it.
-    fn when_full<R>(&self, mut f: impl FnMut(&mut Option<T>) -> Option<R>) -> R {
-        loop {
-            if let Some(r) = f(&mut self.0.val.borrow_mut()) {
-                return r;
-            }
-            self.0.waiters.borrow_mut().push(sched::current_context());
-            sched::block_sync();
-        }
+        Ref(Rc::new(sched::Ref::new(v)))
     }
 
     /// `ST.Ref.get`.
     pub fn get(&self) -> T {
-        sched::ref_read();
-        self.when_full(|c| c.clone())
+        self.0.get()
     }
 
-    /// `ST.Ref.take`: the value, leaving the cell empty until `put`.
-    fn take(&self) -> T {
-        sched::ref_read();
-        self.when_full(Option::take)
-    }
-
-    /// `ST.Ref.put`: fills the cell `take` emptied, and wakes the contexts
-    /// waiting for it.
-    fn put(&self, v: T) {
-        let old = self.0.val.borrow_mut().replace(v);
-        debug_assert!(old.is_none(), "put into a full reference");
-        let ws = std::mem::take(&mut *self.0.waiters.borrow_mut());
-        for c in ws {
-            sched::wake(c);
-        }
-    }
-
-    /// The exchange of `swap` and `set`, once the cell holds a value.
-    fn exchange(&self, v: T) -> T {
-        let mut new = Some(v);
-        self.when_full(|c| {
-            if c.is_some() {
-                std::mem::replace(c, new.take())
-            } else {
-                None
-            }
-        })
-    }
-
-    /// `ST.Ref.set`: `swap` with the result dropped (Lean 4.35), so it waits
-    /// while `modify` holds the cell (LB-01). The old value is dropped after
-    /// the cell's borrow.
+    /// `ST.Ref.set`.
     pub fn set(&self, v: T) {
-        // a write another context can see: the context's handed-off streams
-        // end first (docs/sched.md, item 7 of "The glue")
-        sched::before_publish();
-        drop(self.exchange(v));
+        self.0.set(v)
     }
 
-    /// `ST.Ref.swap`: waits while `modify` holds the cell (LB-18).
+    /// `ST.Ref.swap`.
     pub fn swap(&self, v: T) -> T {
-        sched::before_publish();
-        sched::ref_read();
-        self.exchange(v)
+        self.0.swap(v)
     }
 
     /// `ST.Ref.modify`: `take`, then `put` (`Ref.modifyUnsafe`).
     pub fn modify(&self, f: impl FnOnce(T) -> T) {
-        sched::before_publish();
-        let v = self.take();
-        self.put(f(v));
+        self.0.modify(f)
+    }
+}
+
+/// `Array α` as a counted object: its free (the last reference's drop)
+/// is a drain (`sched::DrainScope`, the no-suspend scope), and releases the
+/// elements from the last one, as native's `lean_del_core` reaches them
+/// (the judge's nested-free verdict). A promise dropped there is resolved
+/// after the drain (`Promise`'s drop).
+pub struct Arr<T>(Obj<ArrObj<T>>);
+
+pub struct ArrObj<T>(Vec<T>);
+
+impl<T> Clone for Arr<T> {
+    fn clone(&self) -> Self {
+        Arr(self.0.clone())
+    }
+}
+
+impl<T> Arr<T> {
+    /// `#[a, b, ...]`.
+    pub fn new(v: Vec<T>) -> Arr<T> {
+        Arr(Obj::new(ArrObj(v)))
+    }
+}
+
+impl<T> Drop for ArrObj<T> {
+    fn drop(&mut self) {
+        let _drain = DrainScope::enter();
+        while let Some(x) = self.0.pop() {
+            drop(x);
+        }
     }
 }
 

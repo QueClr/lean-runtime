@@ -15,6 +15,7 @@ mod lio;
 mod lnet;
 mod netcases;
 mod review;
+mod wait1;
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();

@@ -113,6 +113,26 @@ pub(crate) fn thread_create_failed_line(err: &std::io::Error) -> String {
 mod tests {
     use super::*;
 
+    /// `sched::Ref` has one API in both modes (the single-thread type of
+    /// wait-1's core 3.2, threads mode's `mt::Ref`): this compiles in each,
+    /// and on a full reference no operation waits.
+    #[test]
+    fn the_ref_api_is_the_same_in_both_modes() {
+        use super::super::Ref;
+        let r: Ref<String> = Ref::new("a".to_string());
+        assert_eq!(r.get(), "a");
+        r.set("b".to_string());
+        assert_eq!(r.swap("c".to_string()), "b");
+        let v = r.take();
+        r.put(v + "d");
+        r.modify(|v| v + "e");
+        let n = r.modify_get(|v| (v.len(), v));
+        assert_eq!((n, r.get()), (3, "cde".to_string()));
+        let e: Ref<u8> = Ref::empty();
+        e.put(1);
+        assert_eq!(e.get(), 1);
+    }
+
     /// glibc's `strerror(EAGAIN)`, the text the single-thread scheduler
     /// wrote before (`sched/ctx.rs`).
     #[test]

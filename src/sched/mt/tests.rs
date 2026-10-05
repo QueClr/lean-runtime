@@ -1538,6 +1538,48 @@ fn a_completed_set_is_seen_by_every_later_get() {
     finish();
 }
 
+/// `empty()`: a placeholder that well-typed code never reads; a `put`
+/// fills it, as the single-thread `sched::Ref`'s.
+#[test]
+fn an_empty_reference_is_filled_by_put() {
+    let r: Ref<u32> = Ref::empty();
+    r.put(3);
+    assert_eq!(r.get(), 3);
+    r.set(4);
+    assert_eq!(r.swap(5), 4);
+    assert_eq!(r.take(), 5);
+}
+
+// ---------------------------------------------------------------------------
+// The deferred resolutions of a translator's drains (wait-1, core 3.3): the
+// bodies of `sched/drain.rs`, also run by the single-thread scheduler's
+// tests. A `sync` dependent runs on the resolving thread, the test's.
+
+macro_rules! drain_tests {
+    ($($name:ident),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let _s = serial();
+                start_test(1);
+                crate::sched::drain::tests::$name();
+                finish();
+            }
+        )*
+    };
+}
+
+drain_tests!(
+    resolutions_run_after_the_drain_in_drop_order,
+    a_nested_drain_resolves_its_own_promises_first,
+    entries_moved_out_still_count_as_pending,
+    a_panic_through_a_drain_leaves_the_entries_queued,
+    a_panic_out_of_an_entry_requeues_the_rest,
+    run_deferred_inside_a_scope,
+    resolve_inside_a_scope,
+    scopes_nest,
+);
+
 // ---------------------------------------------------------------------------
 // The stack-overflow report on the manager's threads (leanrs's point 4)
 

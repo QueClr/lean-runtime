@@ -243,6 +243,11 @@ pub const CASES: &[(&str, Case)] = &[
     ("set_during_modify", (no_init, set_during_modify)),
     ("get_during_modify", (no_init, get_during_modify)),
     ("swap_during_modify", (no_init, swap_during_modify)),
+    ("own_get_during_modify", (no_init, own_get_during_modify)),
+    (
+        "promise_nested_free_order",
+        (no_init, promise_nested_free_order),
+    ),
     ("worker_keeps_streams", (no_init, worker_keeps_streams)),
     ("worker_keeps_errno", (no_init, worker_keeps_errno)),
     // tests/cases/taskio: blocking IO in programs with tasks (sched-io)
@@ -4376,5 +4381,155 @@ fn late_tasks_while_enqueuing(args: &[String]) -> u32 {
         PRIO_DEDICATED,
     );
     println("main returns");
+    0
+}
+
+// tests/cases/refs/own_get_during_modify.lean (review RS4-01, wait-1's core
+// 3.2: the taker's own `get` waits)
+// def main (args : List String) : IO Unit := do
+//   let n := args[0]!.toNat!
+//   let p ← IO.Promise.new (α := Nat)
+//   let reached ← IO.Promise.new (α := Unit)
+//   let r ← IO.mkRef (n, some p)
+//   let _d ← IO.mapTask (t := p.result?) (sync := true) fun v => do
+//     reached.resolve ()
+//     let (k, _) ← r.get
+//     IO.eprintln s!"dependent: promise {v}, reference holds {k}"
+//   let _t ← IO.asTask (prio := .dedicated) do
+//     IO.eprintln "modify"
+//     r.modify fun (k, _) => (k + 1, none)
+//     IO.eprintln s!"after modify: {(← r.get).1}"
+//   let _ ← IO.wait reached.result?
+//   IO.eprintln "main: the dependent waits for the reference"
+//   IO.Process.exit 0
+fn own_get_during_modify(args: &[String]) -> u32 {
+    type Pair = (u64, Option<Obj<Promise<u64>>>);
+    let n = to_nat(&args[0]);
+    let p: Obj<Promise<u64>> = Obj::new(Promise::new());
+    let reached: Obj<Promise<()>> = Obj::new(Promise::new());
+    let r: Ref<Pair> = Ref::new((n, Some(p.clone())));
+    let (r2, reached2) = (r.clone(), reached.clone());
+    let _d = map_task(
+        move |v: Option<u64>| {
+            reached2.resolve(());
+            let (k, _) = r2.get();
+            eprintln(&format!("dependent: promise {v:?}, reference holds {k}"));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    // the pair holds the last reference to `p`
+    drop(p);
+    let r3 = r.clone();
+    let _t = as_task(
+        move || {
+            eprintln("modify");
+            r3.modify(|(k, _)| (k + 1, None));
+            eprintln(&format!("after modify: {}", r3.get().0));
+        },
+        PRIO_DEDICATED,
+    );
+    let _ = reached.result_opt().get();
+    eprintln("main: the dependent waits for the reference");
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/tasks/promise_nested_free_order.lean (the judge's nested-free
+// verdict; wait-1's core 3.3, R5). An `Arr`'s free is a drain: the promises
+// it drops are resolved after it (`Promise`'s drop, `sched::defer`), and a
+// drain inside a resolution resolves its own first. Each dependent checks
+// that it runs outside the drain and the no-suspend scope (a dependent is
+// Lean code, which may reach a wait core: W3 is unreachable from Lean code).
+//
+// def setup (inner : IO.Ref (Array (IO.Promise Unit))) (pA : IO.Promise Unit) : IO Unit := do
+//   let pC ← IO.Promise.new (α := Unit)
+//   let _ ← IO.mapTask (sync := true) (t := pC.result?) fun _ => IO.println "  C"
+//   inner.set #[pC]
+//   let _ ← IO.mapTask (sync := true) (t := pA.result?) fun _ => do
+//     inner.set #[]
+//     IO.println "  A"
+fn nested_free_setup(inner: &Ref<Arr<Promise<()>>>, pa: &Promise<()>) {
+    let pc: Promise<()> = Promise::new();
+    let _ = map_task(
+        |_| {
+            outside_free();
+            println("  C")
+        },
+        pc.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    inner.set(Arr::new(vec![pc]));
+    let inner2 = inner.clone();
+    let _ = map_task(
+        move |_| {
+            outside_free();
+            inner2.set(Arr::new(vec![]));
+            println("  A")
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+/// A promise's dependent runs outside every drain and no-suspend scope
+/// (R2, R3): the wait cores it may reach never meet W3.
+fn outside_free() {
+    assert!(
+        !lean_runtime::sched::DrainScope::active() && !lean_runtime::sched::in_no_suspend(),
+        "a dependent ran inside a free"
+    );
+}
+
+// def part1 : IO Unit := do
+//   IO.println "part 1 (one array: pA)"
+//   let inner ← IO.mkRef #[]
+//   let pA ← IO.Promise.new (α := Unit)
+//   setup inner pA
+//   let outer ← IO.mkRef #[pA]
+//   outer.set #[]
+//   IO.println "  after the free"
+//
+// def part2 : IO Unit := do
+//   IO.println "part 2 (one array: pB, pA)"
+//   let inner ← IO.mkRef #[]
+//   let pA ← IO.Promise.new (α := Unit)
+//   let pB ← IO.Promise.new (α := Unit)
+//   setup inner pA
+//   let _ ← IO.mapTask (sync := true) (t := pB.result?) fun _ => IO.println "  B"
+//   let outer ← IO.mkRef #[pB, pA]
+//   outer.set #[]
+//   IO.println "  after the free"
+fn promise_nested_free_order(_: &[String]) -> u32 {
+    println("part 1 (one array: pA)");
+    let inner = Ref::new(Arr::new(vec![]));
+    let pa: Promise<()> = Promise::new();
+    nested_free_setup(&inner, &pa);
+    let outer = Ref::new(Arr::new(vec![pa]));
+    outer.set(Arr::new(vec![]));
+    println("  after the free");
+    println("part 2 (one array: pB, pA)");
+    let inner = Ref::new(Arr::new(vec![]));
+    let pa: Promise<()> = Promise::new();
+    let pb: Promise<()> = Promise::new();
+    nested_free_setup(&inner, &pa);
+    let _ = map_task(
+        |_| {
+            outside_free();
+            println("  B")
+        },
+        pb.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let outer = Ref::new(Arr::new(vec![pb, pa]));
+    outer.set(Arr::new(vec![]));
+    println("  after the free");
     0
 }

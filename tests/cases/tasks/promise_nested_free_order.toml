@@ -1,0 +1,5 @@
+id = "promise_nested_free_order"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean2rr's judge of the wait cores' design, question L4 (nested-free order of dropped promises, 2026-10-05; review-step4 RS4-10): a step-4 regression of lean2rr, fixed by core 3.3's R5"
+streams = "separate"

@@ -1,0 +1,5 @@
+id = "own_get_during_modify"
+area = "refs"
+lean_version = "4.34.0"
+source = "lean2rr's review of its runtime switch step 4 (RS4-01, review-step4 rs4-01/Rs401ModifyDropsPromise.lean) in the watchdog shape of the wait cores' design (L9: the signal reaches the wait first, then IO.Process.exit 0; no sleep)"
+streams = "separate"

@@ -57,7 +57,7 @@ use crate::sched::{self, CtxId, Interest, PollItem};
 use rustix::fd::{AsFd, BorrowedFd};
 use rustix::fs::FlockOperation;
 use rustix::io::Errno;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
@@ -152,6 +152,35 @@ thread_local! {
     static OWNED: RefCell<Vec<Owned>> = const { RefCell::new(Vec::new()) };
     /// Contexts waiting in `flock`.
     static FLOCK_WAITERS: RefCell<Vec<CtxId>> = const { RefCell::new(Vec::new()) };
+    /// The waiters an unlock in this process found able to run (woken from
+    /// their nap, or already runnable): their wait ended with the release
+    /// (`flock_last_wake`).
+    static FLOCK_HANDED: RefCell<Vec<CtxId>> = const { RefCell::new(Vec::new()) };
+    /// How this thread's last cooperative `flock` ended (`flock_last_wake`).
+    static FLOCK_LAST: Cell<FlockWake> = const { Cell::new(FlockWake::AtOnce) };
+}
+
+/// How a cooperative `flock` that got its lock ended its last wait: a test
+/// hook (`flock_last_wake`), so that a regression of the handoff (the
+/// waiter left napping after an unlock in this process, up to `FLOCK_MAX`;
+/// review NEW-1 of wait-1) shows without a clock.
+#[doc(hidden)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FlockWake {
+    /// It got the lock without a wait.
+    AtOnce,
+    /// Its last wait ended with an unlock in this process, which found it
+    /// able to run (`flock_released`).
+    Unlock,
+    /// Its last wait ended when its nap ran out.
+    NapEnd,
+}
+
+/// How this thread's last cooperative `flock` that got its lock ended its
+/// last wait (a test hook of the crate's drivers).
+#[doc(hidden)]
+pub fn flock_last_wake() -> FlockWake {
+    FLOCK_LAST.with(Cell::get)
 }
 
 fn key_of(m: &Mutex<CFile>) -> usize {
@@ -695,7 +724,8 @@ pub(crate) fn before_read_any(fds: &[BorrowedFd<'_>]) {
 /// How long a context waiting in `flock` waits before it tries again (the
 /// lock may be released by another process, which nothing here sees);
 /// doubled from `FLOCK_FIRST` up to `FLOCK_MAX`. An unlock in this process
-/// wakes it at once.
+/// wakes it at once (`flock_released`, through `sched::wake_napping`: the
+/// nap is a `Wait::Sleep`, which `sched::wake` leaves alone).
 const FLOCK_FIRST: Duration = Duration::from_millis(1);
 const FLOCK_MAX: Duration = Duration::from_millis(16);
 
@@ -713,14 +743,28 @@ pub(crate) fn flock(fd: &Fd, op: FlockOperation) -> Option<Result<(), i32>> {
     }
     let b = fd.borrow()?;
     let mut nap = FLOCK_FIRST;
+    let mut last = FlockWake::AtOnce;
     loop {
         match rustix::fs::flock(b, nb) {
-            Ok(()) => return Some(Ok(())),
+            Ok(()) => {
+                FLOCK_LAST.with(|l| l.set(last));
+                return Some(Ok(()));
+            }
             Err(Errno::WOULDBLOCK) => {
                 let me = sched::current_context();
                 FLOCK_WAITERS.with(|w| w.borrow_mut().push(me));
                 sched::block_until(Instant::now() + nap);
                 FLOCK_WAITERS.with(|w| w.borrow_mut().retain(|&c| c != me));
+                let handed = FLOCK_HANDED.with(|h| {
+                    let mut h = h.borrow_mut();
+                    let k = h.iter().position(|&c| c == me);
+                    k.map(|k| h.swap_remove(k)).is_some()
+                });
+                last = if handed {
+                    FlockWake::Unlock
+                } else {
+                    FlockWake::NapEnd
+                };
                 nap = (nap * 2).min(FLOCK_MAX);
             }
             Err(e) => {
@@ -733,14 +777,21 @@ pub(crate) fn flock(fd: &Fd, op: FlockOperation) -> Option<Result<(), i32>> {
 }
 
 /// A `flock` lock of this process was released (an unlock, a closed file):
-/// the contexts waiting in `flock` try again.
+/// the contexts waiting in `flock` try again at once. They nap in
+/// `block_until` (`Wait::Sleep`), so the wake is `sched::wake_napping`:
+/// `sched::wake` wakes only `block_sync`'s waiters (review RW1-08), and with
+/// it the handoff waited for the end of the nap, up to `FLOCK_MAX` (review
+/// NEW-1 of wait-1).
 pub(crate) fn flock_released() {
     let w = FLOCK_WAITERS
         .try_with(|w| std::mem::take(&mut *w.borrow_mut()))
         .unwrap_or_default();
     if !w.is_empty() && crate::sched::alive() {
         for c in w {
-            sched::wake(c);
+            sched::wake_napping(c);
+            if sched::can_run(c) {
+                let _ = FLOCK_HANDED.try_with(|h| h.borrow_mut().push(c));
+            }
         }
     }
 }
@@ -903,6 +954,52 @@ mod tests {
         let mut t = [0u8; 8];
         assert_eq!(rustix::io::read(&r, &mut t).unwrap(), 4);
         assert_eq!(&t[..4], b"tail");
+    }
+
+    /// Review NEW-1 of wait-1: `main` waits in a cooperative `flock` while
+    /// a task's handle holds the lock; the task's unlock makes `main` able
+    /// to run at once, not at the end of its nap (up to `FLOCK_MAX`). `main`
+    /// naps whenever the task runs (the task runs only while `main` is
+    /// blocked), so the check does not depend on timing.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn an_unlock_wakes_a_flock_waiter_at_once() {
+        use crate::io::{FsMode, Handle};
+        use std::cell::Cell;
+        use std::rc::Rc;
+        struct NoSuspend;
+        impl sched::Glue for NoSuspend {
+            fn suspend(&self, _: sched::Suspend<'_>) {
+                panic!("the crate's unit tests never suspend a context");
+            }
+        }
+        sched::start_with(Rc::new(NoSuspend), 1, 1 << 20);
+        sched::reactor_coop_on_for_tests();
+        let path = std::env::temp_dir().join(format!(
+            "lean-runtime-flock-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let p = path.to_str().unwrap().as_bytes().to_vec();
+        let a = Handle::open(&p, FsMode::Write).unwrap();
+        let b = Handle::open(&p, FsMode::Write).unwrap();
+        a.lock(true).unwrap();
+        let woken = Rc::new(Cell::new(None));
+        let w2 = woken.clone();
+        let _t = sched::spawn(
+            Box::new(move || {
+                a.unlock().unwrap();
+                w2.set(Some(sched::main_runnable_for_tests()));
+                sched::Outcome::Done
+            }),
+            0,
+            true,
+        );
+        b.lock(true).unwrap();
+        b.unlock().unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(woken.get(), Some(true), "the unlock woke main at once");
+        sched::finish();
     }
 
     #[test]

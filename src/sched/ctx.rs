@@ -54,6 +54,14 @@ pub struct CtxId(u32);
 /// `main`'s context (also the one of the initializers before it).
 pub const MAIN: CtxId = CtxId(0);
 
+impl CtxId {
+    /// The context's number, for the wait cores' 4-byte records
+    /// (`sched::Gate`, `src/sched/wait.rs`). `u32::MAX` is never a context.
+    pub(crate) fn index(self) -> u32 {
+        self.0
+    }
+}
+
 impl std::ops::Index<CtxId> for Vec<Ctx> {
     type Output = Ctx;
     fn index(&self, c: CtxId) -> &Ctx {
@@ -441,6 +449,36 @@ impl Sched {
         }
     }
 
+    /// Wake context `c` if it waits in `block_sync` (`Wait::Sync`): the
+    /// wake of the glue's own waiter lists and of the wait cores, so that a
+    /// stale entry (a context that went on, after a panic, to another kind
+    /// of wait) never cuts that other wait short (review RW1-08).
+    pub(crate) fn wake_sync(&mut self, c: CtxId) {
+        let x = &self.cx.ctxs[c];
+        if x.status == Status::Blocked && x.wait == Wait::Sync {
+            self.wake(c);
+        }
+    }
+
+    /// Wake context `c` if it naps in `block_until` (`Wait::Sleep`): an io
+    /// wait that looks again every few milliseconds (a contended `flock`),
+    /// cut short by the event it waits for (an unlock in this process). Its
+    /// stale sleeper entry is dropped by `promote_sleepers` (review NEW-1
+    /// of wait-1: `sched::wake` wakes `Wait::Sync` only).
+    #[cfg(feature = "io")]
+    pub(crate) fn wake_napping(&mut self, c: CtxId) {
+        let x = &self.cx.ctxs[c];
+        if x.status == Status::Blocked && matches!(x.wait, Wait::Sleep(_)) {
+            self.wake(c);
+        }
+    }
+
+    /// Whether context `c` is able to run (runnable or running).
+    #[cfg(feature = "io")]
+    pub(crate) fn can_run(&self, c: CtxId) -> bool {
+        matches!(self.cx.ctxs[c].status, Status::Runnable | Status::Running)
+    }
+
     /// Wake the contexts blocked in `wait` on the task or promise (entry,
     /// generation), which has its value (part of a notification,
     /// `notify_all`).
@@ -586,6 +624,10 @@ impl Sched {
             let p: *const Yielder = y;
             with(|s| s.cx.ctxs[id].yielder = p);
             entry();
+            // R6 when a context ends: the deferred resolutions it left (a
+            // drain whose end was not reported) run here, on it; debug
+            // builds report them (review RW1-01)
+            super::drain::context_ends();
             with(|s| s.die());
         });
         let tb = NEXT_THREAD.fetch_add(1, Ordering::Relaxed) << 32;
@@ -869,6 +911,15 @@ pub(crate) fn yield_now() {
 /// Let the hub run other contexts: on `main`'s context, run it; on another
 /// one, suspend through the glue with that context's own yielder `y` (S3).
 fn switch_away(cur: CtxId, y: *const Yielder) {
+    // R6 of the deferred resolutions (`drain`): none is queued at a switch,
+    // since every drain ends with `run_deferred` before its context can
+    // block, and a walk moves its entries out first. A test that catches a
+    // panic out of a drain and then switches makes this fire (accepted);
+    // so does a drain whose end the glue did not report (review RW1-01).
+    debug_assert!(
+        super::drain::queue_empty(),
+        "lean-runtime: deferred promise resolutions queued at a context switch (R6)"
+    );
     // The io layer's stream locks the context holds are recorded as held by
     // a suspended context while others run, whatever the reason of the
     // switch, so that another context that wants one waits for it (review
@@ -877,8 +928,10 @@ fn switch_away(cur: CtxId, y: *const Yielder) {
     #[cfg(feature = "io")]
     let _held = crate::io::coop::park(cur);
     // So is its no-suspend depth: a context that waits inside a scope does
-    // not put the others in it (review RSIO-10).
+    // not put the others in it (review RSIO-10); and its drain depth, which
+    // goes with that scope (`DrainScope`, review RW1-02).
     let _depth = super::reactor::park_no_suspend();
+    let _drain = super::drain::park_depth();
     if cur == MAIN {
         hub();
     } else {

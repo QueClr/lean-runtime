@@ -20,6 +20,9 @@
 //! `stack_overflow` (Lean's report, a native quirk with `unsafe`; UNSAFE.md).
 
 mod common;
+// The deferred promise resolutions of a translator's drains (wait-1, core
+// 3.3), as in the single-thread scheduler.
+mod drain;
 mod env;
 pub mod mt;
 // The process-wide part of `uv`'s signal delivery (`mt::uv`, re-exported as
@@ -40,6 +43,9 @@ mod ctx {
 }
 
 pub use common::{await_task, thread_create_failed};
+pub use drain::{
+    defer, deferred_pending, run_deferred, Deferred, DrainScope, RESOLVE_IN_NO_SUSPEND,
+};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
 pub use mt::*;
 #[cfg(feature = "stack-overflow")]

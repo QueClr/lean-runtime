@@ -108,6 +108,19 @@ pub fn lookup(id: &str) -> Option<Case> {
         "rv3_chain_wait" => (no_init, crate::review::rv3_chain_wait),
         "so_rust_thread_overflow" => (no_init, crate::review::so_rust_thread_overflow),
         "so_second_scheduler_thread" => (no_init, crate::review::so_second_scheduler_thread),
+        // Not Lean programs: the wait cores where several contexts wait
+        // (batch wait-1).
+        "w1_gate_forcers" => (no_init, crate::wait1::w1_gate_forcers),
+        "w1_gate_self_force" => (no_init, crate::wait1::w1_gate_self_force),
+        "w1_static_two_readers" => (no_init, crate::wait1::w1_static_two_readers),
+        "w1_keyed_constant" => (no_init, crate::wait1::w1_keyed_constant),
+        "w1_busy_thunk" => (crate::wait1::w1_busy_init, crate::wait1::w1_busy_thunk),
+        "w1_w3_keyed" => (no_init, crate::wait1::w1_w3_keyed),
+        "w1_ref_keyed" => (no_init, crate::wait1::w1_ref_keyed),
+        "w1_dependent_waits" => (no_init, crate::wait1::w1_dependent_waits),
+        "w1_drain_hang" => (no_init, crate::wait1::w1_drain_hang),
+        "w1_ref_schedules" => (no_init, crate::wait1::w1_ref_schedules),
+        "w1_flock_handoff" => (no_init, crate::wait1::w1_flock_handoff),
         // Not a Lean program: a Rust panic (a translator's or the runtime's
         // bug) in a task on a context of its own.
         "rust_panic_in_task" => (no_init, rust_panic_in_task),

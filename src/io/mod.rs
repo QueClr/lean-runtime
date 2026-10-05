@@ -121,6 +121,11 @@ pub mod argv_title;
 pub mod cfile;
 #[cfg(feature = "sched")]
 pub(crate) mod coop;
+/// Test hook of the crate's drivers: how the last cooperative `flock` of
+/// the thread ended its wait (review NEW-1 of wait-1).
+#[cfg(feature = "sched")]
+#[doc(hidden)]
+pub use coop::{flock_last_wake, FlockWake};
 pub mod debug;
 pub mod env;
 pub mod environ;

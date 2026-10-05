@@ -26,7 +26,7 @@
 <main>
 <h1>Status</h1>
 <p class="lead">State of 2026-10-04.
-The table of merged batches is at main 88ef877, with <code>threads-3</code> and <code>shared-1</code>; the adoption and coverage sections are at main 0882b54.
+The table of merged batches is at main 88ef877, with <code>threads-3</code>, <code>shared-1</code> and <code>wait-1</code>; the adoption and coverage sections are at main 0882b54.
 main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, <a href="threads.html">threads mode</a>, and two native quirks, each behind a feature of its own.
 Every Lean symbol that needs shared code has a crate item on main.</p>
 
@@ -97,6 +97,11 @@ Four new cases with real contention, recorded natively.</td></tr>
 <code>IoError</code> is generic over the string type, with accessors and the index of its builder.
 The crate gets the stopping sink of <code>IO.Process.output</code>, Lean's lossy UTF-8 decoding and <code>Task.get</code>'s rule (<code>await_task</code>).
 It also gets <code>IO.getTID</code>, a child object made from a pid, and a hook for the runtime's stderr lines in tests.</td></tr>
+<tr><td><code>wait-1</code></td><td>Three wait protocols move into <code>sched</code> (<a href="sched.html#wait">the wait cores</a>).
+A context waits for a thunk or a constant that another context computes.
+The single-thread <code>ST.Ref</code> follows Lean 4.35's rule.
+Promises dropped in a free are resolved after it.
+A free inside a resolution resolves its own promises first, as natively.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>

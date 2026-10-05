@@ -16,6 +16,9 @@ This file covers:
 - the model;
 - blocking IO and the event loop (sched-io);
 - what a translator's glue writes;
+- the wait cores (wait-1): waiting for a computation another context runs,
+  the single-thread `ST.Ref`, and the deferred resolution of promises
+  dropped in a free;
 - why the glue's one `unsafe` step is sound, and the checklist for glue
   authors;
 - the pure-task rule and its native evidence;
@@ -40,6 +43,10 @@ This file covers:
 | `src/sched/common.rs` | The plain items both modes share: `TaskState`, the messages, the priorities, `await_task` (`Task.get`'s rule) and `thread_create_failed` (native's abort when a thread cannot be made) |
 | `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt`, with `sched::mt::uv`, `Std.Internal.UV` on a loop thread of its own (T2) |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
+| `src/sched/wait.rs` | The wait cores, core 3.1: `WaitList`, `Gate`, the keyed claims ("The wait cores") |
+| `src/sched/refs.rs` | Core 3.2: the single-thread `ST.Ref` under Lean 4.35's rule, `Ref<T>` and `ref_keyed` |
+| `src/sched/drain.rs` | Core 3.3, in both modes: `DrainScope` and the deferred promise resolutions |
+| `src/sched/wait_tests.rs` | The cores' unit tests (single-thread) |
 | `src/io/coop.rs` | sched-io in the io layer (features `io` and `sched`): the cooperative reads, writes, `flock` and `waitpid`, and the stream locks |
 | `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included). The ports of the `tasks`, `sync`, `refs` and `taskio` cases (`src/cases.rs`) are shared with threads mode's driver |
 | `tests/sched-driver-mt/` | Threads mode's driver (`docs/threads.md`, 0.6): the same ports of the `tasks`, `sync`, `refs` and `taskio` cases over `sched::mt`, 5 runs each, with `Arc` values and a glue whose hooks check their contract; built in a cargo invocation of its own |
@@ -1209,13 +1216,21 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    `SharedMutex` in the translator's handle for `BaseMutex` & co.
    `Std.Channel`, `Barrier`, `Semaphore` and the rest of `Std.Sync` are Lean
    code over these and promises. They need nothing more.
-7. **Waits of the glue's own objects.** A thunk being forced on another
-   context: put `current_context()` in the thunk's waiter list, call
-   `block_sync()`, and `wake(c)` each waiter when the value is stored. A
-   thunk forced inside its own computation: `hang()` (lean-bugs LB-08:
-   natively it spins forever; the other contexts go on).
+7. **Waits of the glue's own objects.** The crate's wait cores do them
+   ("The wait cores", core 3.1): a thunk or a static with room for 4 bytes
+   holds a `Gate` (`step`, then `finish`, which makes the writers point
+   before the store); a cell with no room uses the keyed functions
+   (`step_keyed` for a constant, `wait_running_keyed` for a cell that says
+   "running" without its runner, then `done_keyed` after the store and its
+   `before_publish()`). A thunk being forced on another context waits for
+   its store; a thunk forced inside its own computation hangs (lean-bugs
+   LB-08: natively it spins forever; the other contexts go on). A glue
+   object of another kind waits with a `WaitList` (`wait`, `wake_all`), or
+   with `current_context()`, `block_sync()` and `wake(c)` directly.
 
-   **A reference taken by `modify`** waits the same way. The semantics are
+   **A reference taken by `modify`** waits the same way: the crate's
+   `sched::Ref<T>` in the glue's counted handle, or `sched::ref_keyed`
+   around the glue's record (core 3.2). The semantics are
    Lean 4.35's (LB-01 and LB-18 in `docs/lean-bugs.md`):
    - `ST.Ref.modify` is `take`, then a store into the emptied reference
      (`ST.Prim.Ref.modifyUnsafe`), so the reference is empty while its
@@ -1223,9 +1238,9 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - That function can block (a `Task.get` in it), and other contexts then
      run.
    - Only `modify`'s own store fills the empty reference. Until then `get`,
-     `take`, `set` and `swap` wait: each is a blocking yield point. Register
-     the context, `block_sync()`, and look again when woken. `set` is
-     `swap` with the result dropped.
+     `take`, `set` and `swap` wait, the taker's own included (review
+     RS4-01): each is a blocking yield point. `set` is `swap` with the
+     result dropped.
    - `modify`'s store fills the reference and wakes the waiters.
    - Without this, a reader sees the empty cell, a placeholder, at once.
    - A write (`set`, `swap`, `take`, `modify`) first calls
@@ -1245,9 +1260,10 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    argument, one object with two owners (LB-18).
 
    Cases: `refs/get_during_modify` (the read waits for `modify`'s store, as
-   natively), `refs/set_during_modify` (LB-01) and `refs/swap_during_modify`
-   (LB-18). The driver's `Ref` (`tests/sched-driver/src/lean.rs`) is an
-   example.
+   natively), `refs/own_get_during_modify` (the taker's own read waits
+   forever, as natively), `refs/set_during_modify` (LB-01) and
+   `refs/swap_during_modify` (LB-18). The driver's `Ref`
+   (`tests/sched-driver/src/lean.rs`) wraps `sched::Ref` in an `Rc`.
 8. **Stack overflow.** Lean's report (`src/runtime/stack_overflow.cpp`) is
    the crate's (AR-11), behind the feature `stack-overflow` (with `sched`,
    or with `threads`, where every thread the task manager makes installs it
@@ -1472,9 +1488,12 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
     **Promise walks and `sync` dependents run outside the scope.** Dropping
     the last reference to an unresolved promise resolves it
     (`deactivate_promise`), and the walk runs its `sync` dependents, user
-    code that may do IO and wait. A translator resolves dropped promises
-    (`sched::resolve`) after its drop walk has left the scope, so that this
-    code runs with the cooperative IO it would have anywhere else.
+    code that may do IO and wait. A translator defers the resolution of a
+    promise dropped in its free (`sched::defer`) and runs the deferred list
+    after the free has left the scope (`sched::run_deferred`, or the drop
+    of the outermost `sched::DrainScope`), so that this code runs with the
+    cooperative IO it would have anywhere else ("The wait cores", core 3.3:
+    R1-R6; `resolve` inside the scope is a debug assertion).
 
 ### `Promise.result!` on a dropped promise
 
@@ -1522,6 +1541,395 @@ the driver:
 | `tasks/result_bang_dep_order` | dependents of `result?` made before and after `result!`, then the drop | the walk, newest first, queues the later one, then hangs in `result!`: the earlier one never runs |
 | `tasks/dropped_promise_waiter_wakes` | a task blocked in `IO.wait p.result?` when the drop's walk hangs in `result!` | natively the waiter never wakes; here it wakes with `none` (LB-32) |
 | `tasks/dropped_promise_waiter_unrelated_finish` | the same, with an unrelated task that finishes 1 s in | natively that finish wakes the waiter, 800 ms late; here it wakes at the drop (LB-32) |
+
+## The wait cores (wait-1)
+
+Three protocols that both translators used to write themselves are cores
+of the crate since batch wait-1 (the owner's rule of 2026-10-05: each
+translator keeps its own memory layout, and runtime logic lives in the
+crate once). Each core comes as an object, for a translator whose values
+have room for it, and as keyed functions, for one whose values do not
+(lean2rr's Reussir records).
+
+| Core | Items | Used by | Modes |
+|---|---|---|---|
+| 3.1 Wait for a computation that another context runs (`src/sched/wait.rs`) | `WaitList`; `Gate` and `Step`; `step_keyed`, `wait_running_keyed`, `done_keyed` | `Gate`: a translator's thunk cell or static (leanrs's `ThunkCell` and `LocalLazy`). Keyed: lean2rr's constant slots (`step_keyed`, `done_keyed`) and its `busy` thunks (`wait_running_keyed`, `done_keyed`) | single-thread only |
+| 3.2 `ST.Ref` under Lean 4.35's rule (`src/sched/refs.rs`) | `Ref<T>` (also `Ref::empty`); `ref_keyed::{read_point, write_point, swap_point, take, wait, put, store}` | `Ref<T>` in a counted handle (leanrs's `Rc`; the drivers); `ref_keyed` around a record (lean2rr) | `Ref<T>` in both (threads mode's is `mt::Ref`, same API); `ref_keyed` single-thread only |
+| 3.3 Deferred promise resolution (`src/sched/drain.rs`) | `DrainScope`, `Deferred`, `defer`, `deferred_pending`, `run_deferred` | `DrainScope` and `Deferred::Call` (leanrs's drains); `defer(Deferred::Resolve(id))` in a Reussir drain and `run_deferred()` at each drain's end (lean2rr) | both |
+
+### Rules for all three
+
+- **W1. Order.** Waiters wake in the order they began to wait (FIFO). A
+  wake never switches: the storing context goes on until its next switch,
+  as `sync::Mutex` and `Condvar` work. Natively the order is the OS's
+  (spinning threads, futex wake-ups); FIFO is the deterministic choice. A
+  wake (`sched::wake`, which the cores use) wakes only a context blocked in
+  `block_sync` (`Wait::Sync`): a stale entry naming a context that went on
+  to another kind of wait (after a panic, in a test) cannot cut that wait
+  short (review RW1-08). The io layer's contended `flock`, which naps in
+  `block_until` (`Wait::Sleep`) and looks again, is woken at an unlock in
+  this process by an internal wake that accepts the nap
+  (`wake_napping`; review NEW-1). The driver program `w1_flock_handoff`
+  checks that the unlock itself ends the waiter's wait (two contexts
+  contend for one lock; `io::flock_last_wake`, a hidden test hook, records
+  whether the unlock found the waiter able to run, so no clock is read).
+- **W2. No borrow across a wait or translator code.** No borrow of the
+  crate is held across a wait, a drop of a translator value, or translator
+  code. The one exception is `T::clone` inside `Ref::get`'s borrow.
+- **W3. No block inside a no-suspend scope.** A core that must block (a
+  wait or a hang) inside the scope reports a Rust `panic!` with the
+  reason, `sched::WAIT_IN_NO_SUSPEND` ("lean-runtime: a wait inside a
+  no-suspend scope (a free)"), as the io layer does for a stream a
+  suspended context holds (`io/coop.rs`). The `extern "C"` keyed
+  functions cannot unwind, so there the panic aborts (status 134, with the
+  reason and "panic in a function that cannot unwind"); both translators
+  build with `panic = "abort"` anyway. The fast paths, the claims and the
+  wakes never block, so they are allowed in the scope. It is unreachable
+  from Lean code ("W3 is unreachable from Lean code" below).
+- **W4. Fast checks inline, slow paths out of line.** A fast check is one
+  `const` thread-local load (`done_keyed`, the `ref_keyed` points,
+  `deferred_pending`). The slow functions lean2rr's prelude calls are
+  `extern "C"`, so they cannot unwind and the inline points need no
+  cleanup path.
+- **W5. Keys are plain data.** A key is a `usize` the crate never
+  dereferences. It names a live object while it has an entry, because the
+  runner and every waiter hold a reference to the object. An object's key
+  is its address, which is even, and debug builds check it (`Gate::step`,
+  `wait_running_keyed`, and `ref_keyed`'s `take`, `wait`, `store` and
+  `put`). A translator that keys an index
+  (lean2rr's constant slot) passes `(index << 1) | 1`, so the two spaces
+  never meet. One object uses either a `Gate` or the keyed functions,
+  never both.
+- **W6. Safe at thread teardown.** The cores use `try_with`. Once the
+  thread's locals are gone (a translator's thread-local destructed at
+  exit), a wake does nothing and a wait hangs the thread. W6 comes before
+  W3: their test of the scope is `in_no_suspend_scope()` (false once the
+  locals are gone), not `in_no_suspend()` (true then, for the io layer). At teardown the thread counts as
+  `main`'s context: `Gate::step` and `step_keyed` claim a computation with
+  no runner known (`step_keyed` also when its table is gone), and a
+  recorded runner makes the thread hang (review RW1-09). Core 3.3's list
+  has no destructor, so a drain at teardown still defers (below).
+
+Every wait of the cores is `block_sync` (`Wait::Sync`) and every hang is
+`hang()` (`Wait::Forever`): the context keeps its worker, as a native
+thread that spins on a thunk, on an empty ref or on a constant's lock
+keeps its own. Without a task manager, a wait or a hang with no other
+context blocks the thread for good.
+
+### 3.1 Wait for a computation that another context runs
+
+Native: `lean_thunk_get_core` (`object.cpp` 540-565) lets the first forcer
+run the closure; every other forcer spins until the value appears, the
+forcer itself included if its own closure forces the thunk (LB-08: the
+program hangs, the other threads go on). `lean_obj_once_cold` (2896-2904)
+takes a lock around a constant's initializer: a second thread waits for
+it, and re-entering on the same thread deadlocks.
+
+A computation has a value, or it does not. Without one it may have a
+runner, the context that claimed it and runs it (a task run on the stack
+of the context that waits for it counts as that context):
+
+| Situation | What happens |
+|---|---|
+| The value is stored | The caller reads it: its own fast path, no core function |
+| No value, no runner | The running context becomes the runner (`Step::Run`, `step_keyed` true). It computes the value, then finishes: `Gate::finish(key, store)`, or its own writers point (`before_publish()`), store and `done_keyed(key)`. That clears the runner and wakes the waiters (W1) |
+| No value; the runner is the running context | `hang()` (LB-08). Before the task manager runs, the thread hangs |
+| No value; another context is the runner | The context registers under the key and waits (`block_sync`), then looks again (`Step::Again`, `step_keyed` false) |
+| No value; the cell says "running" but records no runner (lean2rr's `busy`; `wait_running_keyed`) | If the keyed table records a runner, the two rows above apply. Otherwise, before the task manager runs or with no other live context, the running context must be the runner: `hang()`. Otherwise it waits; if it is in fact its own runner it waits forever, which keeps its worker as the hang does and cannot be told apart from it (the judge's verdict on audit divergence 2) |
+| Any wait or hang above inside a no-suspend scope | A Rust panic (W3) |
+
+**A Rust panic out of the computation** leaves the runner recorded:
+nothing clears it while the panic unwinds, so a later step on the same
+context hangs, and on another context waits forever (as leanrs's
+`thunk.rs` did). Both translators end the process on a Rust panic, so this
+is not a case (leanrs's review, text fix 1).
+
+**The writers point.** `Gate::finish` calls `before_publish()` before the
+store, so a waiter never sees the value before the streams the
+computation's drops handed off are delivered (natively its `fclose`s
+returned first). For a static (leanrs's `LocalLazy`, and its `Lazy`,
+which stays its own) this point is new, observable and native-matching
+(leanrs's proof review, F1). With the keyed functions the writers point is
+the caller's, before its store (lean2rr's `l2r_lcell_set` makes it).
+
+**`Gate`'s contract**, which leanrs's `unsafe impl Sync for LocalLazy`
+relies on (proof review F5): `Gate::new` is a `const fn`; `Gate` is
+`Send` (automatically), not `Sync`, and has no `Drop`; its methods touch
+only the gate's own cell and the calling thread's thread-locals (the keyed
+table, the scheduler's state), never dereference the key, and hold no
+borrow while `finish`'s `store` runs or while the context waits. It is 4
+bytes (`Cell<u32>`, `u32::MAX` for no runner): leanrs's thunk cell for a
+`u64` stays 40 bytes.
+
+**The keyed table** is per thread: `{ key, runner, waiters }` entries, and
+a `const` count for `done_keyed`'s inline test. An entry lives from a
+keyed claim or a first wait to the value's store, so the table usually
+holds no entry, or one or two during a constant's initialization.
+
+```rust
+// leanrs's thunk (the cell holds `gate: Gate`; key: the cell's address)
+loop {
+    if let Some(v) = c.value.get() { return v }
+    match c.gate.step(key) {
+        Step::Again => continue,
+        Step::Run => {
+            let Some(f) = c.f.take() else { sched::hang() };
+            let v = f();
+            c.gate.finish(key, || { let _ = c.value.set(v); });
+        }
+    }
+}
+// lean2rr's constant accessor, its cold path (key: (slot << 1) | 1)
+loop { if has(slot) { return true } if sched::step_keyed(key) { return false } }
+// ... the caller computes, then: before_publish(), the store, done_keyed(key)
+```
+
+### 3.2 `ST.Ref` under Lean 4.35's rule
+
+The rule is `docs/threads.md` 3.1 (LB-01, LB-18), in both modes:
+
+| Operation | Full | Empty (taken) |
+|---|---|---|
+| `get` | a clone, made inside the borrow | wait for the closing store, then the same |
+| `take` | the value moves out, the reference is empty | wait, then the same |
+| `set` | `swap`, the old value dropped after the borrow | wait |
+| `swap` | the old value out, the new one in | wait |
+| `put` (`modify`'s closing store) | a glue error: a debug assertion, then a replace | fill, then wake every waiter (W1) |
+| keyed `store` (a `set` or `swap` whose role is decided at run time) | not taken: the plain store follows | taken in the running frame: the closing store. Taken elsewhere: wait |
+
+- The taker's own `get` and `take` during its `modify` wait too: forever,
+  as natively the taker's own `get` spins forever on its multi-threaded
+  ref (review RS4-01, accepted by lean2rr as L1; case
+  `refs/own_get_during_modify`). Natively the program hangs there; a value
+  read from the empty cell would be one the program never stored.
+- A store from code nested inside `modify`'s function (a `sync` dependent
+  of a promise the function drops, a task run on the taker's stack) waits,
+  as in Lean 4.35, where natively 4.34 loses it (LB-01).
+- `get`, `take` and `swap` call `ref_read()`; `set`, `swap`, `take` and
+  `put` call `before_publish()`; both come before any borrow.
+- `Ref<T>` is leanrs's `st.rs` cell moved as it is: every borrow begins and
+  ends inside one method, a wait registers with no borrow of the content
+  held (`WaitList::wait`), a replaced value is dropped or returned after
+  the borrow, and `put` takes the waiters in a borrow of their own. Its API
+  is `mt::Ref`'s: `new`, `empty`, `get` (`T: Clone`), `take`, `put`,
+  `swap`, `set`, `modify`, `modify_get`.
+
+**The keyed form** keeps the taken references in a thread-local table,
+under the record's address. The translator keeps the value in its record,
+and makes its own cell operation right after the call:
+
+| Operation | Calls, then the cell's operation |
+|---|---|
+| `get` | `if read_point() { wait(key) }` |
+| `set` | `if write_point() { store(key) }` |
+| `swap` | `if swap_point() { store(key) }` |
+| `take` | `take(key)` (both points included); the cell holds a placeholder until the closing store |
+| `modify`'s closing store | `if write_point() { store(key) }` (the frame decides: lean2rr's option B, chosen in L2), or `write_point(); put(key)` where the translator knows the store statically (`put` makes no writers point of its own) |
+
+The points are one `const` thread-local load past `ref_read` and
+`before_publish` (W4); the slow functions are `extern "C"`.
+
+**The frame** decides which store closes a take: the running context, the
+number of tasks running on it, and the innermost one's entry and
+generation. `modify`'s take and its closing store run in one frame.
+Everything the scheduler runs nested inside `modify`'s function (a task run
+on the waiting context's stack, a `sync` dependent of a promise resolved or
+dropped there) passes through `run_task`, which begins it at a deeper
+frame; thunks and constants forced there are pure code and reach a
+reference only through such tasks. So `store` picks exactly `modify`'s
+own closing store in safe code. In `unsafe` code a second store in the
+taker's own frame closes the take early, where a static analysis would
+mark the same store. Before the task manager runs the frame is `main`'s
+outside any task, found without building the scheduler's state (review
+RS4-02); it is the same frame after the start, so a `modify` across a lazy
+start (lean2rr's) still closes.
+
+### 3.3 Deferred promise resolution
+
+Native: when the last reference to an unresolved promise goes inside a
+free, `lean_del_core` resolves it with `none` right there
+(`deactivate_promise`, `object.cpp` 1353-1357), and its `sync` dependents
+run inside the free, on the freeing thread, before the free reaches the
+next object. A free inside a dependent is a new `lean_dec_ref_cold`, so
+the promises it frees are resolved inside that dependent.
+
+A translator's free must not suspend (lean2rr's Reussir drain is the
+thread's, review RS4-04; leanrs's drain must not switch, Lem-Deep (6)),
+but a `sync` dependent is Lean code that may block. The rules:
+- **R1.** Every step that runs inside a drain runs in the no-suspend scope
+  (`DrainScope::enter` enters it at the outermost drain).
+- **R2.** Nothing in the scope suspends: the writers points do not wait
+  there, a dropped stream's close hands its bytes off (item 11), the wait
+  cores panic instead of blocking (W3), and `resolve` asserts in debug
+  builds that it is not called there (`sched::RESOLVE_IN_NO_SUSPEND`).
+- **R3.** A promise resolution reached inside a drain is deferred
+  (`defer`), never run there. The slot's store may happen in the drain,
+  in the drain's order (lean2rr: `Deferred::Resolve(id)` after its store);
+  or with the resolution (leanrs: `Deferred::Call`, its closure stores and
+  calls `resolve`). The two differ once an earlier entry's dependent
+  blocks: other contexts then run, and with the store made in the drain
+  they see a later promise's `none` (in its slot; `IO.getTaskState` says
+  `finished`) before its dependents have run, where natively that promise
+  is not resolved yet; with the store made with the resolution they see it
+  unresolved, as natively (review RW1-05). Each translator decides at its
+  adoption: lean2rr keeps its shape with a note in its plan §10, or moves
+  the store into the resolution.
+- **R4.** The deferred list runs only after the drain has ended and the
+  scope has been left, through `run_deferred()`: `DrainScope`'s outermost
+  drop calls it; a translator with drains of its own calls it at each
+  drain's end (lean2rr: its `drained` hook, Reussir patch 0040).
+  `leave_no_suspend` never runs it (AR-8 stands). While a panic unwinds,
+  nothing runs and the entries stay queued for the next `run_deferred()`.
+- **R5.** The list is per thread; each entry is tagged with the context
+  that deferred it, and `run_deferred()` moves out the running context's
+  entries only before it walks them. Entries run in push order (the order
+  of the last drops), on the dropping context. After each entry, the
+  running context's entries queued meanwhile run before the walk's next
+  entry (lean2rr's step-4 `run_later` shape, review RW1-01). So a drain
+  inside a deferred resolution resolves its own promises before the outer
+  walk's next entry, at its own end or, if the translator did not report
+  that end, right after the dependent: native's order. The guarantee,
+  whatever order a translator's free drops values in: `pC` (dropped by
+  `pA`'s dependent) is resolved before `pB` if and only if `pA` is (the
+  judge's nested-free verdict; case `tasks/promise_nested_free_order`,
+  recorded natively: `C, A` and `C, A, B`). If a dependent never returns
+  (`Promise.result!` of a dropped promise), the rest of the moved entries
+  never runs, as natively the free never resumes; the thread's list is
+  clean for the other contexts.
+- **R6.** The list is empty at every context switch and when a context
+  ends; debug builds check both (`switch_away`, and the end of a context's
+  function). It holds for drains that never switch (leanrs) and for a
+  translator that runs the list at every drain's end before its context
+  can block or end.
+
+**A drain whose end is not reported** breaks R6: lean2rr's Reussir drains
+without its patch 0040, where its fallback runs the list at the next
+effect point. Debug builds report it at the next switch, or when the
+context ends. In release builds the entries stay queued, tagged with their
+context: they run at that context's next `run_deferred()` (a drain's end,
+a settle point), never on another context; if the context ends first,
+they run there, at its end (and a later context that reuses its number
+never sees them). Until they run, their promises look unresolved and their
+dependents have not run, where natively they ran inside the free; `main`'s
+run at `finish` at the latest (its end as a context, which debug builds
+also check), and never if the program exits first (`IO.Process.exit`). **lean2rr must make patch
+0040 required (its L5) before it adopts this core** (review RW1-01).
+
+**The drain depth at a switch.** A `DrainScope` held across a switch (a
+glue bug: the scheduler's own waits, a sleep or a promise, still suspend
+in the scope; B1) is set aside with the no-suspend depth (review RSIO-10),
+so the other contexts are neither in the drain nor in the scope, and the
+context is in both again when it goes on (review RW1-02).
+
+**At thread teardown** the list stays: it has no destructor
+(`ManuallyDrop`), so a drain in a thread-local's destructor still defers,
+and its scope's end runs the entry after the drain, outside the scope
+(review RW1-03). Entries still queued when the thread ends are neither run
+nor dropped, as native Lean frees nothing at exit.
+
+**The in-flight count.** `deferred_pending()` counts the entries queued
+and the ones a walk has moved out but not finished (one whose dependent
+blocked, and the rest of that walk behind it; one that never returns stays
+counted). So a "has every task settled?" test (lean2rr's `settled`) sees a
+promise moved out but not yet resolved (the judge's caveat on the
+nested-free fix); after a walk whose dependent never returns, it stays
+true for good (those promises are never resolved: only the cost of a
+skipped shortcut). `DrainScope`'s drop tests a count of the queued entries
+instead, so a walk that hung does not make every later drain call
+`run_deferred()`, which is out of line (review RW1-06).
+
+**A panic.** A Rust panic unwinding through a `DrainScope` runs nothing
+and leaves the entries queued; a panic out of an entry of a walk puts the
+entries not yet run back on the thread's list, after the ones queued
+meanwhile (those came from inside the entry). The next `run_deferred()`
+runs them. leanrs's drain used to run them while unwinding; its binaries
+abort on a panic, so only tests see the difference, and a test that
+catches such a panic and then switches makes R6's check fire (accepted:
+leanrs's proof review, F2).
+
+```rust
+// leanrs: a promise's last handle, inside a drain
+if DrainScope::active() { sched::defer(Deferred::Call(Box::new(resolve))) } else { resolve() }
+// lean2rr: inside a Reussir drain, after the slot's store
+sched::defer(Deferred::Resolve(id));
+// ... and at each drain's end (its `drained` hook), outside the drain
+sched::run_deferred();
+```
+
+In threads mode the depth and the list are the thread's; the resolutions
+run on the dropping thread after its drain, through threads mode's
+`resolve`. `Deferred::Call` needs no `Send`: it runs on the thread that
+pushed it.
+
+### W3 is unreachable from Lean code
+
+lean2rr accepted W3's panic only if no correct program reaches it (L6).
+The argument:
+1. Both translators enter the no-suspend scope only for frees (lean2rr:
+   its stream close and the deferred step of a promise's drop inside a
+   Reussir drain; leanrs: its drains, through `DrainScope`).
+2. A free runs no Lean code: the drop glue releases values. The one way
+   Lean code runs inside a free natively is a promise's deactivation,
+   whose `sync` dependents run there. R3 defers that resolution past the
+   drain, and R2's debug check in `resolve` reports any resolution left
+   inside the scope.
+3. Every wait core is reached only from Lean code: a thunk's force, a
+   constant's read, a reference operation. So none is reached inside the
+   scope.
+
+The checks: the debug assertion in `resolve` (R2); the case
+`tasks/promise_nested_free_order`, whose driver ports (both modes) free
+containers of promises with `sync` dependents (a reference write, an
+output) and assert in each dependent that it runs outside every drain and
+scope; the driver program `w1_dependent_waits`, where such a dependent
+reaches a wait core (a reference another task's `modify` holds) and waits
+after the drain, not in it; and W3's own tests (unit tests through
+`WaitList`, `Gate` and `Ref`; `w1_w3_keyed` through the `extern "C"`
+functions).
+
+### How the cores are tested
+
+- Unit tests (`src/sched/wait_tests.rs`, single-thread; Miri runs the ones
+  that start no context, but for the model test below, which leaks by
+  design and runs under Miri with `-Zmiri-ignore-leaks`): a gate's claim
+  and finish; W3 through `Gate`,
+  `WaitList` and `Ref`; keyed claims with odd keys; `main` waiting for
+  another context's run, and woken by `finish` or `done_keyed`; `Ref`'s
+  operations, every value dropped once, `modify` in place, the debug check
+  of a put into a full reference; the keyed take and its closing store; a
+  task run inside `modify` at a deeper frame; leanrs's model test of its
+  drain (`beh_drain_defers_promise.rs`, 2000 random value graphs) against
+  the real `DrainScope`, `defer`, `run_deferred` and `resolve`. The drain
+  tests' bodies (`src/sched/drain.rs`) run in both modes: drop order, a
+  nested drain first, the in-flight count, a panic through a drain, a
+  panic out of an entry, `run_deferred` and `resolve` inside a scope,
+  nested scopes; and, single-thread, R6's check. `common.rs` checks that
+  `sched::Ref` has one API in both modes. The review's repros, as
+  regression tests (`rw1_*`): a drain depth held across a switch is not
+  seen by the other contexts (RW1-02); a drain at thread teardown defers
+  and runs its entry outside the scope (RW1-03); an entry an unreported
+  drain left runs on its own context, at its end, and debug builds report
+  it there (RW1-01); an unreported inner drain's entries run right after
+  their walk entry (RW1-01).
+- Driver programs (`tests/sched-driver/src/wait1.rs`, where several
+  contexts wait): a thunk on three contexts with FIFO wakes and D8's probe;
+  a self-forced thunk (and the exit that waits for it); a static read on
+  two contexts; lean2rr's constants and `busy` thunks (alone, and before
+  the task manager); W3 through the keyed functions; the keyed reference's
+  frame rule (its own store closes; a dependent's store, a stack task's
+  store, a nested take and the taker's own `get` wait); a dependent that
+  waits after the drain; a deferred resolution that hangs; `main` waiting
+  inside its own no-suspend scope while a reader reads cooperatively
+  (`rsio_ns_leak scope_wait`, review RW1-04); a contended `flock` handed
+  off at the unlock, not at the waiter's nap's end (`w1_flock_handoff`,
+  review NEW-1); and leanrs's
+  evidence `beh_ref_empty_cell.rs` on the real types: 3000 random schedules
+  of reference operations on contexts of their own, against Lean 4.35's
+  store model, for `Ref<T>` and for `ref_keyed`.
+- Cases, in both drivers: `refs/*` through the crate's `Ref` (the
+  single-thread driver's own copy is gone), `refs/own_get_during_modify`,
+  and `tasks/promise_nested_free_order` (the drivers' `Arr` frees in a
+  drain, and their promises defer).
 
 ## Why `Glue::suspend` is sound
 
@@ -1754,8 +2162,12 @@ Each invariant names the code that establishes it.
    `TaskId::FINISHED`. This is not about soundness, but about naming the
    right task after 2^32 tasks.
 7. `get`, `take`, `set` and `swap` of a reference that `modify` has taken
-   block until `modify`'s own store (item 7 of "The glue"; LB-01, LB-18).
-   This is not about soundness either, but about Lean's semantics.
+   block until `modify`'s own store (item 7 of "The glue"; LB-01, LB-18;
+   `sched::Ref` or `sched::ref_keyed` do it). This is not about soundness
+   either, but about Lean's semantics.
+8. A promise dropped in a free is resolved after it (`sched::defer`, then
+   `run_deferred` or `DrainScope`'s drop): nothing waits inside a
+   no-suspend scope ("The wait cores", W3 and R1-R6).
 
 ### How it is checked
 
@@ -1841,7 +2253,7 @@ fine, but need to be documented well".
 | Hand-written stack switch, any context to any other | corosensei; every switch goes through `main`'s stack | O2: no hand-written assembly |
 | Stacks reserved with `MAP_NORESERVE`, released with `madvise` when pooled | corosensei's `mmap(PROT_NONE)` and `mprotect`; up to 8 pooled stacks keep their touched pages | No `unsafe` in the crate (see the checklist) |
 | `checkCanceled`, clock and ref reads do not yield | They are polling points; ref reads only with `set_ref_read_yields` | Decisions Q5 refinement B |
-| Walks of promises dropped inside a Reussir free (`later`) | None: a translator resolves promises where its values are dropped | Reussir's free stack |
+| Walks of promises dropped inside a Reussir free (`later`) | The deferred resolutions (`defer`, `run_deferred`, core 3.3): the list moved out before its walk, so a free inside a dependent resolves its own promises first | Native's order (the judge's nested-free verdict) |
 | The event loop (`net`) | The scheduler's own (`src/sched/reactor.rs`, sched-io): epoll, timers and watches; blocking IO cooperates | The glue has no hook; the network builds on it |
 | `persist` (the walk of `lean_mark_persistent`) | Not yet | Batch scope |
 

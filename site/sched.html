@@ -40,6 +40,7 @@ Batch <a href="#sched-io">sched-io</a> adds cooperative blocking IO and the even
   <li><a href="#pure">The pure-task rule</a></li>
   <li><a href="#yield">Yield points</a></li>
   <li><a href="#sync">Promises and Std.Sync</a></li>
+  <li><a href="#wait">The wait cores</a></li>
   <li><a href="#exit">Exit</a></li>
   <li><a href="#sched-io">Blocking IO and the event loop</a></li>
   <li><a href="#suspend">The unsafe step in the glue</a></li>
@@ -292,6 +293,40 @@ So <code>while !(← IO.hasFinished t) do pure ()</code> ends, as it does native
   <li><code>Std.Channel</code>, <code>Barrier</code>, <code>Semaphore</code> and the rest of <code>Std.Sync</code> are Lean code over these and promises.
     They need nothing more.</li>
 </ul>
+
+<h2 id="wait">The wait cores</h2>
+<p>Batch <code>wait-1</code> moves three wait protocols into the crate.
+Before, each translator had its own copy.
+Each translator keeps its own memory layout and calls the crate.</p>
+<table>
+<thead><tr><th>Core</th><th>What it does</th><th>The forms</th></tr></thead>
+<tbody>
+<tr><td>Wait for a computation</td><td>A context waits for a thunk, a static or a constant that another context computes.
+The value is computed once.</td><td>A 4-byte <code>Gate</code> in the translator's cell, or keyed functions with no room in the cell.</td></tr>
+<tr><td>The reference rule</td><td><code>ST.Ref</code> follows Lean 4.35: while <code>modify</code> holds a reference, every other operation on it waits.</td><td>The type <code>sched::Ref</code>, or keyed functions around the translator's record.</td></tr>
+<tr><td>Deferred resolution</td><td>A promise dropped inside a free is resolved after the free.</td><td><code>DrainScope</code>, <code>defer</code> and <code>run_deferred</code>, in both modes.</td></tr>
+</tbody></table>
+<p>The rules for all three:</p>
+<ul>
+  <li>Waiters wake in the order they began to wait.</li>
+  <li>A wait keeps the worker, as a spinning native thread keeps its own.</li>
+  <li>A computation that needs itself waits forever, and the other contexts go on (<a href="lean-bugs.html#lb-08">LB-08</a>).</li>
+  <li>A wait inside a free is a Rust panic with the reason.
+    No Lean program reaches it, because a free runs no Lean code.</li>
+</ul>
+<p><strong>References.</strong> The thread that holds a reference in <code>modify</code> also waits when it reads it.
+Natively that read spins forever.
+A store from code nested in <code>modify</code>'s function waits too, as in Lean 4.35.
+In the keyed form, the closing store is the store made in the same frame as the take.</p>
+<p><strong>Promises dropped in a free.</strong> Natively a <code>sync</code> dependent runs inside the free, when the free reaches its promise.
+The translators must not suspend inside a free, so the crate keeps the resolution in a list.
+The list runs when the free ends.
+It is moved out first, so a free inside a dependent resolves its own promises first, as natively.
+The case <code>tasks/promise_nested_free_order</code> checks this order.
+Inside one free, the order follows the translator's drops, which can differ from native's.</p>
+<p>Each entry belongs to the context that dropped the promise, and only that context runs it.
+A translator must report the end of every free.
+Otherwise the entries wait for that context's next free or settle point, and debug builds report the missing call.</p>
 
 <h2 id="exit">Exit</h2>
 <ol>

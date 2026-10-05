@@ -572,6 +572,18 @@ impl Sched {
         }
     }
 
+    /// The running frame (`refs::Frame`): the running context, the number
+    /// of tasks running on it, and the innermost one's entry and
+    /// generation. Everything the scheduler runs nested in the running code
+    /// (a task run on this context's stack, a `sync` dependent) begins at a
+    /// deeper frame (`begin`), and the frame is the same again when it
+    /// ends.
+    pub(crate) fn frame(&self) -> (CtxId, u32, Option<(u32, u32)>) {
+        let running = &self.st_ref().running;
+        let top = running.last().map(|&i| (i, self.ent(i).gen));
+        (self.cx.cur, running.len() as u32, top)
+    }
+
     /// The thread of the innermost running task (0: `main`).
     pub(crate) fn cur_thread(&self) -> u64 {
         let base = self.cx.ctxs[self.cx.cur].thread_base;
@@ -2764,6 +2776,7 @@ pub fn promise_new() -> Result<TaskId, &'static str> {
 /// Only the first resolution counts: false (and `store` not called) if it
 /// was resolved already.
 pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool {
+    super::drain::check_resolve_outside_scope();
     super::writers_point();
     if !super::alive() {
         return false;
@@ -2861,6 +2874,9 @@ pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str))
 /// (`io::exit::after_main`: `IO.Process.output`'s standard-output readers),
 /// also in a program that started no task.
 pub fn finish() {
+    // `main`'s own deferred resolutions, if a drain's end was not reported
+    // (R6 when a context ends: debug builds report them)
+    super::drain::context_ends();
     // `main`'s own hand-offs: natively its `fclose`s ended before it returned
     super::writers_point();
     finish_tasks();

@@ -146,6 +146,25 @@ of 2026-10-05):
 - one `sched::thread_create_failed`, and a hook that lets a test harness
   take the runtime's own standard-error lines.
 
+Batch `wait-1` moves three wait protocols into `sched`, each as an object
+and as keyed functions for a translator whose values have no room for it
+(`docs/sched.md`, "The wait cores"):
+- waiting for a computation that another context runs (a thunk, a static,
+  a constant): `sched::Gate` (4 bytes) and `WaitList`, and
+  `step_keyed`, `wait_running_keyed` and `done_keyed`; the waiters wake in
+  order, and a computation that needs itself hangs (LB-08);
+- the single-thread `sched::Ref<T>` under Lean 4.35's rule, with threads
+  mode's API (and `Ref::empty` in both modes), and `sched::ref_keyed`,
+  whose closing store is the one made in the frame that took the
+  reference; the taker's own read waits, as natively (review RS4-01);
+- the deferred resolution of promises dropped in a free, in both modes:
+  `DrainScope`, `defer` and `run_deferred`; the list is moved out before
+  it is walked, so a free inside a dependent resolves its own promises
+  first, as natively (case `tasks/promise_nested_free_order`).
+
+A wait inside a no-suspend scope (a free) is a Rust panic with the reason;
+no Lean program reaches it.
+
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
 that order. See `docs/development.md`, the rules for implementors.

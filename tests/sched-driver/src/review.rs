@@ -194,13 +194,18 @@ pub fn rsio_ns_drop_deadlock(args: &[String]) -> u32 {
     0
 }
 
-/// RSIO-10: the no-suspend depth is per thread, and the
-/// scheduler's own waits still switch inside a scope. Main drops a promise
-/// in a no-suspend scope (a translator's drop path); its sync dependent (an
-/// `IO.mapTask (sync := true)`) runs there, sleeps 200 ms, then writes a
-/// line to `cat`. A task that starts reading `cat`'s output during that
-/// sleep must not inherit the scope: its read waits cooperatively, and
-/// `cat` gets the line.
+/// RSIO-10: the no-suspend depth is per thread. Main drops a promise in a
+/// drain (a translator's drop path: `sched::DrainScope`, which enters the
+/// no-suspend scope); its sync dependent (an `IO.mapTask (sync := true)`)
+/// sleeps 200 ms, then writes a line to `cat`. A task that starts reading
+/// `cat`'s output during that sleep must not inherit the scope: its read
+/// waits cooperatively, and `cat` gets the line. Since wait-1 the dependent
+/// runs after the drain, outside the scope (core 3.3, R2 and R3: `resolve`
+/// inside the scope is a debug assertion), so the sleep is outside it too.
+/// Arg `scope_wait` (review RW1-04): `main` itself waits inside its own
+/// no-suspend scope (no promise): it enters the scope, sleeps 200 ms, then
+/// writes the line, and the reader started meanwhile is not in the scope
+/// (`rsio_ns_leak_panic` has a task that waits inside its scope).
 pub fn rsio_ns_leak(args: &[String]) -> u32 {
     let child = lio::spawn(
         "cat",
@@ -225,6 +230,19 @@ pub fn rsio_ns_leak(args: &[String]) -> u32 {
         PRIO_DEDICATED,
     );
     let stdin = child.stdin.clone().expect("piped");
+    if args.first().map(String::as_str) == Some("scope_wait") {
+        {
+            let _scope = sched::no_suspend();
+            sleep(200);
+            let _ = stdin.put_str(b"hi\n");
+            let _ = stdin.flush();
+        }
+        match reader.get() {
+            Ok(l) => println(&format!("reader got {}", lio::quote(&l))),
+            Err(e) => println(&format!("err {e:?}")),
+        }
+        return 0;
+    }
     let p: Promise<u32> = Promise::new();
     let dep = map_task(
         move |_| {
@@ -241,7 +259,7 @@ pub fn rsio_ns_leak(args: &[String]) -> u32 {
     if args.first().map(String::as_str) == Some("plain") {
         drop(p);
     } else {
-        let _scope = sched::no_suspend();
+        let _drain = sched::DrainScope::enter();
         drop(p);
     }
     let _ = dep.get();

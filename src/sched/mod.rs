@@ -21,18 +21,31 @@
 //! - keeps each task's value in its own object, filled by the task's `Job`,
 //!   and calls `release` when its last reference to a task goes;
 //! - calls the yield points (`effect`, `poll`, `ref_read`, `sleep_ms`) from
-//!   its externs.
+//!   its externs;
+//! - waits for its own objects through the wait cores (docs/sched.md, "The
+//!   wait cores"): `Gate` or the keyed claims for a thunk, a static or a
+//!   constant another context computes (`wait.rs`), `Ref` or `ref_keyed`
+//!   for `ST.Ref` (`refs.rs`), and `defer` and `run_deferred` (or
+//!   `DrainScope`) for a promise dropped in its free (`drain.rs`).
 
 mod common;
 mod ctx;
+// The deferred promise resolutions of a translator's drains (wait-1, core
+// 3.3; both modes).
+mod drain;
 mod env;
 mod reactor;
+// The single-thread `ST.Ref` under Lean 4.35's rule, as an object and as
+// keyed functions (wait-1, core 3.2).
+mod refs;
 #[cfg(feature = "stack-overflow")]
 mod stack_overflow;
 pub mod sync;
 mod task;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wait_tests;
 // Each context's and each emulated worker's standard streams and `errno`
 // (review AR-24).
 #[cfg(feature = "io")]
@@ -40,22 +53,32 @@ mod slots;
 pub mod uv;
 // The process-wide part of `uv`'s signal delivery, shared with threads mode.
 mod uv_signals;
+// Waiting for a computation another context runs (wait-1, core 3.1).
+mod wait;
 
 pub use common::{await_task, thread_create_failed};
 pub use ctx::{running_stack, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN};
+pub use drain::{
+    defer, deferred_pending, run_deferred, Deferred, DrainScope, RESOLVE_IN_NO_SUSPEND,
+};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
 #[cfg(feature = "io")]
 pub(crate) use reactor::block_until;
 /// `net`'s externs take the loop's lock natively, as `sched::uv`'s do.
 #[cfg(feature = "net")]
 pub(crate) use reactor::catch_up;
+pub(crate) use reactor::in_no_suspend_scope;
 pub use reactor::{
     coop_possible, enter_no_suspend, in_no_suspend, io_cooperative, leave_no_suspend, no_suspend,
     poll_fds, timer_start, timer_stop, unwatch, wait_fd, watch, watch_modify, Interest,
     NoSuspendGuard, PollItem, Ready, TimerId, WatchId,
 };
+pub use refs::{ref_keyed, Ref};
 #[cfg(feature = "stack-overflow")]
 pub use stack_overflow::install_stack_overflow_handler;
+pub use wait::{
+    done_keyed, step_keyed, wait_running_keyed, Gate, Step, WaitList, WAIT_IN_NO_SUSPEND,
+};
 
 /// Turn on the cooperative paths as the first task does (the io layer's
 /// unit tests).
@@ -259,9 +282,32 @@ pub fn block_sync() {
 }
 
 /// Make context `c`, blocked by `block_sync`, able to go on. Does not
-/// switch.
+/// switch. A context blocked in any other way (a task, a sleep, a hang)
+/// is left alone, so a stale entry in a waiter list cannot cut that wait
+/// short (review RW1-08); one waiting in another `block_sync` looks again
+/// at its own object, as every waiter does.
 pub fn wake(c: CtxId) {
-    with(|s| s.wake(c));
+    with(|s| s.wake_sync(c));
+}
+
+/// Make context `c`, napping in `block_until` (an io wait that looks again,
+/// such as a contended `flock`), able to go on at once. Does not switch.
+#[cfg(feature = "io")]
+pub(crate) fn wake_napping(c: CtxId) {
+    with(|s| s.wake_napping(c));
+}
+
+/// Whether context `c` is able to run (runnable or running): the io
+/// layer's record of a `flock` handoff (`io::flock_last_wake`).
+#[cfg(feature = "io")]
+pub(crate) fn can_run(c: CtxId) -> bool {
+    with(|s| s.can_run(c))
+}
+
+/// Whether `main`'s context is able to run (unit tests of the io layer).
+#[cfg(all(test, feature = "io"))]
+pub(crate) fn main_runnable_for_tests() -> bool {
+    with(|s| s.cx.ctxs[MAIN].status == ctx::Status::Runnable)
 }
 
 /// Wait forever on the running context, while the others go on: a thunk

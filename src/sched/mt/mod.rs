@@ -414,6 +414,7 @@ pub fn promise_new() -> Result<TaskId, &'static str> {
 /// Only the first resolution counts: false (and `store` not called) if it
 /// was resolved already, or once another thread's resolution has stored.
 pub fn resolve(id: TaskId, store: impl FnOnce()) -> bool {
+    super::drain::check_resolve_outside_scope();
     if id == TaskId::FINISHED {
         return false;
     }
@@ -561,6 +562,17 @@ impl Drop for NoSuspendGuard {
 #[inline]
 pub fn in_no_suspend() -> bool {
     NO_SUSPEND.try_with(|n| n.get() > 0).unwrap_or(true)
+}
+
+/// Whether this thread is in a no-suspend scope, false once the thread's
+/// locals are gone: the wait cores' test (W3 of `docs/sched.md`, "The wait
+/// cores"), where a wait at thread teardown hangs the thread (W6) instead
+/// of panicking, and the debug checks of `resolve` and `run_deferred` (R2).
+/// [`in_no_suspend`] answers true there instead, so that the io layer takes
+/// its plain path.
+#[inline]
+pub(crate) fn in_no_suspend_scope() -> bool {
+    NO_SUSPEND.try_with(|n| n.get() > 0).unwrap_or(false)
 }
 
 /// Whether a blocking call must let other contexts run: never in threads

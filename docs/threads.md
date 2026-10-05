@@ -1073,7 +1073,11 @@ pub fn sleep_ms(ms: u32);
 pub fn enter_no_suspend();  pub fn leave_no_suspend();     // a depth per thread
 pub fn no_suspend() -> NoSuspendGuard;  pub fn in_no_suspend() -> bool;
 pub fn io_cooperative() -> bool;  pub fn coop_possible() -> bool;  // false
-pub struct Ref<T>;  // the 4.35 rule (3.1)
+pub struct Ref<T>;  // the 4.35 rule (3.1); Ref::empty(), a placeholder (wait-1)
+// wait-1, core 3.3 (docs/sched.md, "The wait cores"), as in the single-thread
+// scheduler: per thread, resolutions run on the dropping thread
+pub struct DrainScope;  pub enum Deferred { Resolve(TaskId), Call(Box<dyn FnOnce()>) }
+pub fn defer(d: Deferred);  pub fn deferred_pending() -> bool;  pub fn run_deferred();
 pub mod sync { /* Mutex, Condvar, RecursiveMutex, SharedMutex: Send + Sync */ }
 pub mod uv {        // T2: Std.Internal.UV on the loop thread (0.5)
     pub trait LoopPromise: Clone + Send + 'static {
@@ -1197,15 +1201,23 @@ agrees (6). The crate gives:
   `Condvar`, which a translator's ref may wrap or copy. It holds the
   translator's value as `Std.Sync`'s objects sit in its handles; it clones
   under its own lock and drops a replaced value after the unlock. Its unit
-  tests are the `refs/` cases on real threads.
+  tests are the `refs/` cases on real threads. `Ref::empty()` (wait-1) is
+  a reference with no value, which well-typed code never reads (a
+  placeholder), as in the single-thread scheduler; threads mode's users
+  are the crate's own driver and tests (leanrs has no threads build).
 
 **The rule holds in single-thread mode too.** `modify`'s function can block
 (a `Task.get` in it), and another context then runs. A reader that found
 the reference empty would see the placeholder at once. So `get`, `take`,
 `set` and `swap` of an empty reference are blocking yield points until
-`modify`'s store: a glue duty (`docs/sched.md`, The glue, item 7). The driver's `Ref`
-(`tests/sched-driver/src/lean.rs`) follows the rule. Each translator checks
-its own refs (6).
+`modify`'s store, the taker's own included (review RS4-01). Since wait-1
+the single-thread scheduler has the rule as a type too, `sched::Ref<T>`
+(`src/sched/refs.rs`, leanrs's cell moved into the crate), with threads
+mode's API, and as keyed functions, `sched::ref_keyed`, for a translator
+whose reference is a record (lean2rr; `docs/sched.md`, "The wait cores",
+core 3.2). Both drivers wrap the crate's type (`tests/sched-driver`'s
+`Ref` holds an `Rc<sched::Ref<T>>`), so the `refs/` cases test it in both
+modes.
 
 ### 3.2 Table
 

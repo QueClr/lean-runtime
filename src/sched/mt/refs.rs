@@ -50,6 +50,16 @@ impl<T> Ref<T> {
         }
     }
 
+    /// A reference with no value, which well-typed code never reads (a
+    /// translator's placeholder; the single-thread `sched::Ref` has the same
+    /// function). An operation on it other than `put` blocks forever.
+    pub fn empty() -> Ref<T> {
+        Ref {
+            cell: Mutex::new(None),
+            filled: Condvar::new(),
+        }
+    }
+
     /// The lock, once the reference holds a value.
     fn full(&self) -> MutexGuard<'_, Option<T>> {
         let mut c = self.cell.lock().unwrap_or_else(PoisonError::into_inner);

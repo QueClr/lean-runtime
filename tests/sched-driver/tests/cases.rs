@@ -279,11 +279,17 @@ fn rsio_ns_cat() {
     }
 }
 
-/// RSIO-10 (round 2): a sync dependent run by a drop in a no-suspend scope
-/// sleeps there; the other contexts do not inherit the scope.
+/// RSIO-10 (round 2): a sync dependent of a promise dropped in a drain
+/// (run after it, since wait-1) sleeps; `scope_wait`: `main` sleeps inside
+/// its own no-suspend scope (review RW1-04); the other contexts do not
+/// inherit the scope.
 #[test]
 fn rsio_ns_leak() {
-    for a in [&[][..], &["plain".to_string()][..]] {
+    for a in [
+        &[][..],
+        &["plain".to_string()][..],
+        &["scope_wait".to_string()][..],
+    ] {
         let got = run_with("rsio_ns_leak", a, &[], Some(10), false);
         assert_eq!(got.code, "0", "{a:?}: stderr {:?}", err_of(&got));
         assert_eq!(err_of(&got), "reader: io_cooperative = true\n", "{a:?}");
@@ -717,6 +723,190 @@ fn sync_walk_keeps_worker_w20() {
     assert!(got.out.is_empty());
 }
 
+// The wait cores (batch wait-1; docs/sched.md, "The wait cores"): the
+// programs of `src/wait1.rs`, where several contexts wait.
+
+fn w1(id: &str, args: &[&str], env: &[(&str, &str)], hang: Option<u64>) -> Outcome {
+    let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+    let env: Vec<(String, String)> = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    run_with(id, &args, &env, hang, false)
+}
+
+/// A program whose output is all on stderr, with status 0.
+fn w1_ok(id: &str, args: &[&str], err: &str) {
+    let got = w1(id, args, &[], Some(20));
+    assert_eq!(got.code, "0", "{id} {args:?}: stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), err, "{id} {args:?}");
+    assert!(got.out.is_empty(), "{id} {args:?}");
+}
+
+/// Core 3.1: a thunk over a `Gate` forced on three contexts runs its
+/// closure once, and its waiters wake in the order they began to wait;
+/// D8's probe (leanrs's `thunk_forced_on_two_contexts`).
+#[test]
+fn w1_gate_forcers() {
+    w1_ok(
+        "w1_gate_forcers",
+        &[],
+        "main got 5\nwaiter 1 got 5\nwaiter 2 got 5\nclosure runs: 1\nprobe: 5 6\n",
+    );
+}
+
+/// Core 3.1: a thunk forced inside its own closure hangs while the others
+/// go on (LB-08), and the process waits for it at exit, as `hang()`'s.
+#[test]
+fn w1_gate_self_force() {
+    w1_ok(
+        "w1_gate_self_force",
+        &[],
+        "main: the task hangs in its own force\n",
+    );
+    let got = w1("w1_gate_self_force", &["exit"], &[], Some(2));
+    assert_eq!(got.code, "timeout", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "main: the task hangs in its own force\n");
+}
+
+/// Core 3.1: a static over a `Gate` read on two contexts while its
+/// initializer waits (leanrs's `local_lazy_read_while_init_suspended`).
+#[test]
+fn w1_static_two_readers() {
+    w1_ok(
+        "w1_static_two_readers",
+        &[],
+        "main 9, reader 9, initializer runs 1\n",
+    );
+}
+
+/// Core 3.1, the keyed claims of lean2rr's constants (odd keys): two
+/// readers, one run; the initializer's own read hangs.
+#[test]
+fn w1_keyed_constant() {
+    w1_ok(
+        "w1_keyed_constant",
+        &[],
+        "main 11, reader 11, initializer runs 1\n",
+    );
+    w1_ok(
+        "w1_keyed_constant",
+        &["self"],
+        "main: the initializer hangs in its own read\n",
+    );
+}
+
+/// Core 3.1, lean2rr's `busy` thunk (`wait_running_keyed`): another context
+/// waits for its store; forced by its own closure with no other live
+/// context, or before the task manager runs, it hangs at once.
+#[test]
+fn w1_busy_thunk() {
+    w1_ok("w1_busy_thunk", &[], "main 13, reader 13\n");
+    let got = w1("w1_busy_thunk", &["alone"], &[], Some(2));
+    assert_eq!(got.code, "timeout", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "the closure forces its own thunk, alone\n");
+    let got = w1("w1_busy_thunk", &[], &[("W1_BEFORE", "1")], Some(2));
+    assert_eq!(got.code, "timeout", "stderr {:?}", err_of(&got));
+    assert_eq!(
+        err_of(&got),
+        "before the task manager: the closure forces its thunk\n"
+    );
+}
+
+/// W3 through the `extern "C"` keyed functions: a wait inside a no-suspend
+/// scope is a Rust panic with the reason, which aborts there (status 134).
+#[test]
+fn w1_w3_keyed() {
+    for a in ["busy", "step", "ref"] {
+        let got = w1("w1_w3_keyed", &[a], &[], Some(10));
+        let err = err_of(&got);
+        assert_eq!(got.code, "134", "{a}: stderr {err:?}");
+        assert!(
+            err.contains("lean-runtime: a wait inside a no-suspend scope (a free)"),
+            "{a}: stderr {err:?}"
+        );
+        assert!(!err.contains("not reached"), "{a}");
+    }
+}
+
+/// Core 3.2, the keyed form's frame rule: modify's own store closes the
+/// take and wakes the waiters in order; a store from a `sync` dependent
+/// nested in modify's function, or from a task run on the taker's stack,
+/// a nested take, and the taker's own `get` (RS4-01) wait (forever, here).
+#[test]
+fn w1_ref_keyed() {
+    w1_ok(
+        "w1_ref_keyed",
+        &["close"],
+        "reader got 42\nmain got 42\nafter modify: 42\n",
+    );
+    for a in ["dep_store", "stack_task", "nested_take", "own_get"] {
+        w1_ok("w1_ref_keyed", &[a], &format!("main: {a} waits\n"));
+    }
+}
+
+/// Core 3.3 and W3 (lean2rr's L6): a promise dropped in a free, whose
+/// `sync` dependent reaches a wait core (a reference a task's `modify`
+/// holds), is resolved after the drain: the dependent waits there, outside
+/// the no-suspend scope, and gets the stored value.
+#[test]
+fn w1_dependent_waits() {
+    w1_ok(
+        "w1_dependent_waits",
+        &[],
+        "dependent got 2\nmain: after the free\nafter modify: 2\n",
+    );
+}
+
+/// Core 3.3: a deferred resolution whose dependent hangs leaves the rest of
+/// its walk pending (R5, the in-flight count), and a later drain on another
+/// context resolves in full; no entry is queued at a switch (R6).
+#[test]
+fn w1_drain_hang() {
+    w1_ok(
+        "w1_drain_hang",
+        &[],
+        "main: pending true\nZ\nmain: pending true\n",
+    );
+}
+
+/// Review NEW-1 of wait-1: a contended cooperative `flock` hands off at
+/// the unlock itself: the waiter's last wait ended with `main`'s unlock,
+/// not with its nap running out (which made every handoff up to 16 ms
+/// late). The waiter records how its wait ended, so no clock is read.
+#[test]
+fn w1_flock_handoff() {
+    w1_ok(
+        "w1_flock_handoff",
+        &[],
+        "the waiter's flock ended with: Unlock\n",
+    );
+}
+
+/// Core 3.2: 3000 random schedules of `ST.Ref` operations on contexts of
+/// their own, against Lean 4.35's store model (leanrs's evidence
+/// `beh_ref_empty_cell.rs`, on the real types), for the object form and
+/// the keyed form.
+#[test]
+fn w1_ref_schedules() {
+    for form in ["object", "keyed"] {
+        let got = w1(
+            "w1_ref_schedules",
+            &[form],
+            &[("LEAN_STACK_SIZE_KB", "256")],
+            Some(120),
+        );
+        let err = err_of(&got);
+        assert_eq!(got.code, "0", "{form}: stderr {err:?}");
+        assert!(
+            err.starts_with(&format!(
+                "{form} form: 3000 schedules agree with Lean 4.35's store model\n"
+            )),
+            "{form}: stderr {err:?}"
+        );
+    }
+}
+
 /// The ported cases, in one list: each becomes a test, and
 /// `every_case_is_ported` checks the list against the cases' directories
 /// (review RS1S-06 of sched-1).
@@ -831,6 +1021,8 @@ cases!(
     lost_update,
     set_during_modify,
     get_during_modify,
+    own_get_during_modify,
+    promise_nested_free_order,
     swap_during_modify,
     output_big_stdout,
     output_both_overflow,

@@ -70,6 +70,12 @@ When native's outcome is a Lean bug, the case expects the correct outcome and ke
 A row for a lifted limit does the same with the definition's result.
 leanrs names its deviations DV<i>n</i>; lean2rr lists them in section 10 of its translation plan.</dd>
 
+<dt id="g-drain">Drain (free)</dt>
+<dd>A translator's release of a value and of everything it holds, one object after the other.
+No context may suspend during a drain.
+A promise dropped there is resolved after the drain.
+See <a href="sched.html#wait">the wait cores</a>.</dd>
+
 <dt id="g-dns-helper">DNS helper threads</dt>
 <dd>The two threads that <code>net</code> starts at the first name lookup.
 They only call glibc's lookup functions and pass plain data back to the event loop (<a href="net.html#dns">net</a>).</dd>
@@ -104,6 +110,11 @@ Native Lean uses it for every handle.
 <dd>Parts of a <code>FILE</code> buffer.
 The get area holds bytes read from the descriptor; the bytes that Lean has not read yet are the read-ahead.
 The put area holds pending output that has not reached the descriptor yet.</dd>
+
+<dt id="g-gate">Gate</dt>
+<dd>A 4-byte record in a translator's cell: the context that computes the cell's value, if any.
+Other contexts wait for that computation.
+See <a href="sched.html#wait">the wait cores</a>.</dd>
 
 <dt id="g-glibc">glibc</dt>
 <dd>The GNU C library.

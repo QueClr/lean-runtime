@@ -11,7 +11,7 @@
 //! and `sched::Ref` for `IO.Ref`: Lean 4.35's rule (3.1) as a lock and a
 //! condition variable.
 
-use lean_runtime::sched::{self, Job, Outcome, TaskId, TaskState};
+use lean_runtime::sched::{self, Deferred, DrainScope, Job, Outcome, TaskId, TaskState};
 use std::sync::{Arc, MutexGuard, OnceLock, PoisonError};
 
 /// A value that may cross threads: what a task returns, a promise holds or
@@ -289,11 +289,22 @@ impl<T: Val> Promise<T> {
 
 impl<T: Val> Drop for Promise<T> {
     fn drop(&mut self) {
-        // Lean's `deactivate_promise`: resolved with `none`.
-        let slot = self.result.0.slot.clone();
-        sched::resolve(self.result.0.live(), move || {
-            let _ = slot.set(None);
-        });
+        // Lean's `deactivate_promise`: resolved with `none`. Inside a free
+        // (a drain, `Arr`'s drop), leanrs's way: the whole resolution, its
+        // store included, once the drain is over (`sched::defer`, which
+        // threads mode has too; docs/sched.md, "The wait cores", R3).
+        let result = self.result.clone();
+        let resolve = move || {
+            let slot = result.0.slot.clone();
+            sched::resolve(result.0.live(), move || {
+                let _ = slot.set(None);
+            });
+        };
+        if DrainScope::active() {
+            sched::defer(Deferred::Call(Box::new(resolve)));
+        } else {
+            resolve();
+        }
     }
 }
 
@@ -335,6 +346,36 @@ impl<T: Clone> Ref<T> {
     /// `ST.Ref.modify`.
     pub fn modify(&self, f: impl FnOnce(T) -> T) {
         self.0.modify(f)
+    }
+}
+
+/// `Array α` as a counted object: its free (the last reference's drop, on
+/// any thread) is a drain (`sched::DrainScope`), and releases the elements
+/// from the last one, as native's `lean_del_core` reaches them. A promise
+/// dropped there is resolved after the drain (`Promise`'s drop).
+pub struct Arr<T>(Obj<ArrObj<T>>);
+
+pub struct ArrObj<T>(Vec<T>);
+
+impl<T> Clone for Arr<T> {
+    fn clone(&self) -> Self {
+        Arr(self.0.clone())
+    }
+}
+
+impl<T> Arr<T> {
+    /// `#[a, b, ...]`.
+    pub fn new(v: Vec<T>) -> Arr<T> {
+        Arr(Obj::new(ArrObj(v)))
+    }
+}
+
+impl<T> Drop for ArrObj<T> {
+    fn drop(&mut self) {
+        let _drain = DrainScope::enter();
+        while let Some(x) = self.0.pop() {
+            drop(x);
+        }
     }
 }
 
