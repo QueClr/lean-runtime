@@ -1,0 +1,5 @@
+id = "wait_chain_beyond_pool"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime threads mode, batch T3 (docs/threads.md, section 4: more tasks than LEAN_NUM_THREADS waiting on each other)"
+streams = "separate"

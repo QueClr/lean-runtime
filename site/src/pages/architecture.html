@@ -40,8 +40,10 @@ leanrs's shared-runtime coordinator accepted io-uring, under the owner's delegat
   <li><strong><code>sched</code>.</strong> Switches stacks through corosensei.
     Its event loop uses rustix's epoll, and its signal watchers signal-hook's safe self-pipe.
     One <code>unsafe</code> step stays in each translator's glue: one dereference in <a href="sched.html#suspend">Glue::suspend</a>.</li>
-  <li><strong><code>threads</code>.</strong> Threads mode, in place of <code>sched</code>: Lean's task manager on real threads (<code>sched::mt</code>).
-    It has no dependency and no <code>unsafe</code> code.
+  <li><strong><code>threads</code>.</strong> <a href="threads.html">Threads mode</a>, in place of <code>sched</code>: Lean's task manager on real threads (<code>sched::mt</code>).
+    Its task manager uses std's threads and locks only.
+    Its loop thread for <code>Std.Internal.UV</code> uses rustix and signal-hook, as <code>sched</code> does.
+    It has no <code>unsafe</code> code.
     It excludes <code>sched</code> and <code>net</code>: a build has one scheduler.
     The design and its status are in <a href="repo:docs/threads.md">docs/threads.md</a>.</li>
   <li><strong><code>net</code>.</strong> Turns on <code>io</code> and <code>sched</code>.

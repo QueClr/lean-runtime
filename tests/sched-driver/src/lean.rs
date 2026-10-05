@@ -44,6 +44,16 @@ impl<T> Clone for Task<T> {
     }
 }
 
+/// A counted object that a task may share with `main` or another task (a
+/// `BaseMutex`, a promise held twice, a stream's buffer): `Rc` here, `Arc`
+/// in threads mode (`tests/sched-driver-mt`), so that the shared ports
+/// (`cases.rs`) compile in both drivers.
+pub type Obj<T> = Rc<T>;
+
+/// A mutable cell that a task may write (a stream's buffer): `RefCell`
+/// here, a lock in threads mode, both with `borrow` and `borrow_mut`.
+pub type Var<T> = RefCell<T>;
+
 /// `Task.Priority.default`, `Task.Priority.dedicated`.
 pub const PRIO_DEFAULT: u64 = 0;
 pub const PRIO_DEDICATED: u64 = 9;

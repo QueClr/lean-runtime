@@ -1,0 +1,5 @@
+id = "wait_any_faster"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime threads mode, batch T3 (docs/threads.md, section 4: IO.waitAny returning the faster of two tasks)"
+streams = "separate"

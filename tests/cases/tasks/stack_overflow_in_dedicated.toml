@@ -1,0 +1,7 @@
+id = "stack_overflow_in_dedicated"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime threads mode, batch T3 (docs/threads.md, section 4: a stack overflow in a dedicated task); after stack_overflow_in_task"
+streams = "separate"
+deviations = { leanrs = "DV6" }
+# leanrs DV6 (stack depth), as in stack_overflow_in_task: leanrs turns `deep` into a loop through tail calls, so it never overflows

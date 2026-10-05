@@ -202,6 +202,11 @@ plumbing only:
   - its stack-overflow report is the crate's
     (`sched::install_stack_overflow_handler`), with no `unsafe` in the
     glue;
+- `tests/sched-driver/src/glue_common.rs`, the glue's part that both
+  scheduler drivers compile (`tests/sched-driver-mt` by a path include),
+  registers the same ELF constructor for native Lean's startup descriptors;
+  the threads-mode driver's own glue (`tests/sched-driver-mt/src/glue.rs`)
+  has no `unsafe`;
 - `tests/sched-driver/src/review.rs`'s `so_segv_in_task` and
   `so_prev_resethand` write to an unmapped address, to make a fault that is
   no stack overflow, and `install_prev_resethand` installs a one-shot

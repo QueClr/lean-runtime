@@ -381,7 +381,7 @@ fn repr_int(o: &Option<i64>) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// The twins (tests/sched-driver/src/cases.rs, "tests/cases/uvloop")
+// The twins (tests/sched-driver/src/cases_st.rs, "tests/cases/uvloop")
 
 type UTimer = Timer<UvPromise<()>>;
 type USignal = Signal<UvPromise<i64>>;

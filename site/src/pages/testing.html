@@ -72,6 +72,9 @@ It adds only what a translator's glue adds.</p>
     The twins of the cases that set the process title run only with <code>proc-title</code>.
     <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code>, <code>sync/</code>, <code>refs/</code>, <code>taskio/</code> and <code>uvloop/</code> case, and for the io cases with tasks.
     Its twins run over <code>sched</code> and <code>io</code>, with a complete example of the glue.</li>
+  <li><a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a> runs the same twins of the <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code> cases in <a href="threads.html#tests">threads mode</a>.
+    Each case runs 5 times, and every run must give a recorded outcome.
+    In a threads build, the io twins and the <code>uvloop/</code> twins also run inside tasks.</li>
   <li>A few cases have no twin, because they test what a translator generates, for example whether its compiler folds a libm call.
     Their <code>.toml</code> says why.</li>
   <li>So the crate is checked against native output before either translator adopts it.</li>
@@ -98,6 +101,7 @@ It adds only what a translator's glue adds.</p>
 <ul>
   <li>the site check: the pages are up to date, with no broken link (<code>site/build.py --check</code>);</li>
   <li>build, tests and clippy on the Rust toolchains of both translators, in every feature configuration (two of them with <code>proc-title</code>);</li>
+  <li>both scheduler drivers, in debug and release builds: the single-thread driver and the threads-mode driver;</li>
   <li>formatting;</li>
   <li>the plain-rustc builds that one translator uses, with its driver's cfg flags;</li>
   <li>the libm folding test in a release build;</li>

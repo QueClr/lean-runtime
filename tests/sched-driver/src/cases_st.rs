@@ -1,0 +1,1519 @@
+//! The Rust ports that run over the single-thread scheduler only
+//! (`sched-cases`): the cases of `tests/cases/uvloop` (threads mode runs
+//! them in the crate's `tests/threads_twins.rs`), the io and process cases
+//! with tasks (sched-io's cooperative IO and the stream hand-offs), and
+//! programs that are not Lean programs (Rust panics in a context, leanrs's
+//! adversarial checks of `Glue::suspend`). `cases.rs` has the ports both
+//! drivers share.
+
+use crate::cases::{ok, Case};
+use crate::glue::{eprintln, println};
+use crate::lean::*;
+use crate::lio::{self, quote, R};
+use lean_runtime::io::process::{Stdio, StdioConfig};
+use lean_runtime::io::{FsMode, Handle};
+use std::rc::Rc;
+
+/// The single-thread driver's own programs, by id; then the `net` cases.
+pub fn lookup(id: &str) -> Option<Case> {
+    fn no_init() {}
+    Some(match id {
+        // tests/cases/uvloop: Std.Internal.UV's loop, timers and signals
+        "loop_configure" => (no_init, loop_configure),
+        "timer_oneshot" => (no_init, timer_oneshot),
+        "timer_repeating" => (no_init, timer_repeating),
+        "timer_cancel_reset" => (no_init, timer_cancel_reset),
+        "signal_usr1" => (no_init, signal_usr1),
+        "signal_stale" => (no_init, signal_stale),
+        "signal_oneshot_twice" => (no_init, signal_oneshot_twice),
+        "signal_failed_next" => (no_init, signal_failed_next),
+        "signal_stale_deferred" => (no_init, signal_stale_deferred),
+        "timer_due_stop" => (no_init, timer_due_stop),
+        "signal_cancel_restart" => (no_init, signal_cancel_restart),
+        "signal_order" => (no_init, signal_order),
+        "signal_fds" => (no_init, signal_fds),
+        "exit_listening" => (no_init, exit_listening),
+        "signal_sigio_default" => (no_init, signal_sigio_default),
+        "timer_stop_in_sync_dependent" => (no_init, lb20_probe),
+        "timer_cancel_in_sync_dependent" => (no_init, lb20_probe),
+        "signal_stop_in_sync_dependent" => (no_init, lb20_probe),
+        "signal_cancel_in_sync_dependent" => (no_init, lb20_probe),
+        "timer_catchup_bound" => (no_init, timer_catchup_bound),
+        "timer_oneshot_stop_resubscribe" => (no_init, timer_oneshot_stop_resubscribe),
+        "timer_stop_rearm_in_sync_dependent" => (no_init, timer_stop_rearm_in_sync_dependent),
+        "timer_cancel_rearm_in_sync_dependent" => (no_init, timer_cancel_rearm_in_sync_dependent),
+        "timer_oneshot_stop_keep_in_sync_dependent" => {
+            (no_init, timer_oneshot_keep_in_sync_dependent)
+        }
+        "timer_oneshot_cancel_keep_in_sync_dependent" => {
+            (no_init, timer_oneshot_keep_in_sync_dependent)
+        }
+        "timer_oneshot_cancel_resubscribe" => (no_init, timer_oneshot_cancel_resubscribe),
+        "timer_stop_rearm_async_dependent" => (no_init, timer_stop_rearm_async_dependent),
+        "signal_stop_rearm_in_sync_dependent" => (no_init, signal_stop_rearm_in_sync_dependent),
+        "signal_cancel_rearm_in_sync_dependent" => (no_init, signal_cancel_rearm_in_sync_dependent),
+        "signal_oneshot_stop_keep_in_sync_dependent" => {
+            (no_init, signal_oneshot_keep_in_sync_dependent)
+        }
+        "signal_oneshot_cancel_keep_in_sync_dependent" => {
+            (no_init, signal_oneshot_keep_in_sync_dependent)
+        }
+        "signal_stop_drops_promise" => (no_init, signal_stop_drops_promise),
+        "signal_rearm_in_sync_dependent" => (no_init, signal_rearm_in_dependent),
+        "signal_rearm_in_async_dependent" => (no_init, signal_rearm_in_dependent),
+        // tests/cases/io: the cases with tasks
+        "lock_blocked" => (no_init, lock_blocked),
+        "lock_exit" => (no_init, lock_exit),
+        "lock_during_read" => (no_init, lock_during_read),
+        // tests/cases/process: the cases with tasks
+        "exit_while_reading" => (no_init, exit_while_reading),
+        "exit_while_writing" => (no_init, exit_while_writing),
+        "exit_while_writing_stalled" => (no_init, exit_while_writing),
+        "handoff_then_resolve" => (no_init, handoff_then_resolve),
+        "handoff_then_write" => (no_init, handoff_then_write),
+        "handoff_then_kill" => (no_init, handoff_then_kill),
+        // Not Lean programs: the regression programs of sched-io's reviews.
+        "rsio_poll_fds_with_stream_lock" => {
+            (no_init, crate::review::rsio_poll_fds_with_stream_lock)
+        }
+        "rsio_watch_spin" => (no_init, crate::review::rsio_watch_spin),
+        "rsio_drop_no_suspend" => (no_init, crate::review::rsio_drop_no_suspend),
+        "rsio_ns_drop_deadlock" => (no_init, crate::review::rsio_ns_drop_deadlock),
+        "rsio_ns_cat" => (no_init, crate::review::rsio_ns_cat),
+        "rsio_ns_leak" => (no_init, crate::review::rsio_ns_leak),
+        "rsio_ns_leak_panic" => (no_init, crate::review::rsio_ns_leak_panic),
+        "rsio_ns_partial" => (no_init, crate::review::rsio_ns_partial),
+        "rsio_ns_unwind" => (no_init, crate::review::rsio_ns_unwind),
+        "rsio_ns_force_exit" => (no_init, crate::review::rsio_ns_force_exit),
+        "rfx1_shared_read" => (no_init, crate::review::rfx1_shared_read),
+        "rfx1_trywait" => (no_init, crate::review::rfx1_trywait),
+        "rsio_exit_join" => (no_init, crate::review::rsio_exit_join),
+        "rfx2_exit_handoff" => (no_init, crate::review::rfx2_exit_handoff),
+        "rfx2_exit_unrelated_handoff" => (no_init, crate::review::rfx2_exit_unrelated_handoff),
+        "rfx2_exit_writer_held" => (no_init, crate::review::rfx2_exit_writer_held),
+        "rfx2_causal_handoff" => (no_init, crate::review::rfx2_causal_handoff),
+        "rfx3_promise_handoff" => (no_init, crate::review::rfx3_promise_handoff),
+        "rfx3_exit_contexts" => (no_init, crate::review::rfx3_exit_contexts),
+        "rfx4_fs_signal" => (no_init, crate::review::rfx4_fs_signal),
+        "rfx4_fd_after" => (no_init, crate::review::rfx4_fd_after),
+        // AR-11: Lean's stack-overflow report, owned by the crate.
+        "so_main_overflow" => (no_init, crate::review::so_main_overflow),
+        "so_task_overflow_after_switches" => {
+            (no_init, crate::review::so_task_overflow_after_switches)
+        }
+        "so_segv_in_task" => (no_init, crate::review::so_segv_in_task),
+        "so_prev_resethand" => (no_init, crate::review::so_prev_resethand),
+        // Probes of our review of sched-3 (RS3).
+        "rv3_dedicated_waiter" => (no_init, crate::review::rv3_dedicated_waiter),
+        "rv3_chain_wait" => (no_init, crate::review::rv3_chain_wait),
+        "so_rust_thread_overflow" => (no_init, crate::review::so_rust_thread_overflow),
+        "so_second_scheduler_thread" => (no_init, crate::review::so_second_scheduler_thread),
+        // Not a Lean program: a Rust panic (a translator's or the runtime's
+        // bug) in a task on a context of its own.
+        "rust_panic_in_task" => (no_init, rust_panic_in_task),
+        "rust_panic_through_effect" => (no_init, rust_panic_through_effect),
+        "effect_points_in_a_started_task" => (no_init, effect_points_in_a_started_task),
+        // Not Lean programs either: leanrs's adversarial checks of
+        // docs/sched.md's "Why Glue::suspend is sound" (S5, S6).
+        "adv_block_in_drop_during_unwind" => (no_init, adv_block_in_drop_during_unwind),
+        "adv_panic_in_sync_dep_of_drop" => (no_init, adv_panic_in_sync_dep_of_drop),
+        "adv_exit_from_task" => (no_init, adv_exit_from_task),
+        // tests/cases/net: networking (net-1)
+        _ => return crate::netcases::lookup(id),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Not Lean programs: a Rust panic (a translator's or the runtime's bug) in a
+// task on a context of its own (docs/sched.md, "Rust panics").
+
+fn rust_panic_in_task(_: &[String]) -> u32 {
+    println("main starts");
+    let _ = as_task(|| -> () { panic!("a Rust panic in a task") }, PRIO_DEFAULT);
+    sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+/// As `rust_panic_in_task`, but `main` is in an effect point when the task
+/// panics: the panic resumes in the effect point's cold path, which cannot
+/// unwind (review AR-28), so the process aborts there.
+fn rust_panic_through_effect(_: &[String]) -> u32 {
+    println("main starts");
+    let _ = as_task(|| -> () { panic!("a Rust panic in a task") }, PRIO_DEFAULT);
+    // no yield point: at the output, the task has been queued for 10 ms
+    // (`STALE` is 5), so the effect point lets it go first
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    eprintln("not reached");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// leanrs's adversarial checks of docs/sched.md's "Why Glue::suspend is
+// sound" (their proof check of sched-1 at 15b62ed, 2026-10-03), ported as
+// regression tests. Not Lean programs: Rust panics and `process::exit` from
+// a context.
+
+/// A promise held by a value that a panic unwinds (its drop resolves the
+/// promise with `none`).
+struct Holder(#[allow(dead_code)] Promise<u32>);
+
+/// A task on its own context panics while holding the last reference to a
+/// promise. Dropping it resolves the promise with `none`, which runs its
+/// `sync` dependent there and then; the dependent waits for a sleeping task,
+/// so the context suspends from inside a cleanup while a panic is in flight
+/// (S6). The panic then goes on in `main`: status 101.
+fn adv_block_in_drop_during_unwind(_: &[String]) -> u32 {
+    println("main starts");
+    let p: Promise<u32> = Promise::new();
+    let slow = as_task(
+        || {
+            sleep(200);
+            7u32
+        },
+        PRIO_DEFAULT,
+    );
+    let slow2 = slow.clone();
+    let _dep = map_task(
+        move |v: Option<u32>| {
+            eprintln("sync dep runs in drop during unwind");
+            let w = slow2.get();
+            eprintln(&format!("sync dep got {w} after block, v = {v:?}"));
+            w
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let _ = as_task::<()>(
+        move || {
+            let _h = Holder(p);
+            panic!("boom in task")
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+/// As above, but the `sync` dependent run from the destructor panics itself:
+/// a panic in a destructor during unwinding, which aborts, as in plain Rust.
+fn adv_panic_in_sync_dep_of_drop(_: &[String]) -> u32 {
+    println("main starts");
+    let p: Promise<u32> = Promise::new();
+    let _dep = map_task(
+        move |_v: Option<u32>| -> u32 { panic!("second panic in sync dep") },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let _ = as_task::<()>(
+        move || {
+            let _h = Holder(p);
+            panic!("boom in task")
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+/// `IO.Process.exit` inside a task running on a context: glibc's `exit` runs
+/// the thread's TLS destructors (the scheduler's) on the coroutine's stack;
+/// they only forget suspended contexts and pending jobs (S5). Status 3, the
+/// buffered stdout lost as the glue does not flush it here.
+fn adv_exit_from_task(_: &[String]) -> u32 {
+    println("main starts");
+    let keep: Task<u32> = as_task(
+        || {
+            sleep(5000);
+            1
+        },
+        PRIO_DEFAULT,
+    );
+    let _ = as_task::<()>(
+        move || {
+            let _k = keep.clone();
+            eprintln("task exits");
+            lean_runtime::sched::effect();
+            std::process::exit(3)
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(1000);
+    eprintln("not reached");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// The io and process cases with tasks: blocking IO on one thread (sched-io),
+// and the writer hand-offs of dropped streams.
+
+// tests/cases/io/lock_blocked.lean
+fn lock_blocked(args: &[String]) -> u32 {
+    let f = args[0].clone();
+    ok(lio::write_file(&f, ""));
+    let a = ok(Handle::open(f.as_bytes(), FsMode::ReadWrite));
+    let b = ok(Handle::open(f.as_bytes(), FsMode::ReadWrite));
+    ok(a.lock(true));
+    let tb = b.clone();
+    let t = as_task(
+        move || -> R<()> {
+            tb.lock(true)?;
+            println("task: b locked");
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(to_nat(&args[1]) as u32);
+    ok(b.put_str(b"x"));
+    ok(b.flush());
+    println("main: wrote through b while the task waits in b.lock");
+    ok(a.unlock());
+    let _ = t.get();
+    println(&format!("done; file {}", quote(&ok(lio::read_file(&f)))));
+    0
+}
+
+// tests/cases/io/lock_exit.lean
+fn lock_exit(args: &[String]) -> u32 {
+    let f = args[0].clone();
+    ok(lio::write_file(&f, ""));
+    let a = ok(Handle::open(f.as_bytes(), FsMode::ReadWrite));
+    let b = ok(Handle::open(f.as_bytes(), FsMode::ReadWrite));
+    ok(a.lock(true));
+    let tb = b.clone();
+    let _t = as_task(
+        move || -> R<()> {
+            tb.lock(true)?;
+            println("task: b locked");
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(to_nat(&args[1]) as u32);
+    ok(b.put_str(b"y"));
+    println("main: exiting with the task still in b.lock");
+    let _held = (&a, &b);
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/process/exit_while_reading.lean (LB-29: the exit does not wait
+// for the task's read)
+fn exit_while_reading(args: &[String]) -> u32 {
+    let secs = args.first().cloned().unwrap_or_else(|| "10".to_owned());
+    let _t = as_task(
+        move || -> R<()> {
+            let child = lio::spawn(
+                "sleep",
+                &[&secs],
+                StdioConfig {
+                    stdin: Stdio::Null,
+                    stdout: Stdio::Piped,
+                    stderr: Stdio::Null,
+                },
+            )?;
+            let s = lio::read_to_end(child.stdout.as_ref().expect("piped"))?;
+            println(&format!("read {}", s.chars().count()));
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(300);
+    println("exiting with 3");
+    lean_runtime::sched::effect();
+    ok(Handle::stdout().flush());
+    crate::glue::process_exit(3)
+}
+
+// tests/cases/process/exit_while_writing{,_stalled}.lean (LB-29's scope: the
+// exit waits for a writer, here cooperatively)
+fn exit_while_writing(args: &[String]) -> u32 {
+    let (mode, size, out) = (args[0].clone(), to_nat(&args[1]) as usize, args[2].clone());
+    let script = format!(
+        "import sys, time\nn = 0\nwhile True:\n    b = sys.stdin.buffer.read1(65536)\n    if not b: break\n    n += len(b)\n    time.sleep(0.05)\nopen('{out}', 'w').write(str(n))\n"
+    );
+    let (cmd, cargs): (&str, Vec<&str>) = if mode == "slow" {
+        ("python3", vec!["-c", &script])
+    } else {
+        ("sleep", vec!["30"])
+    };
+    let child = ok(lio::spawn(
+        cmd,
+        &cargs,
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    let _t = as_task(
+        move || -> R<()> {
+            stdin.write(&vec![120u8; size])?;
+            stdin.flush()
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(300);
+    println(&format!("exiting with 3 ({size} bytes being written)"));
+    lean_runtime::sched::effect();
+    ok(Handle::stdout().flush());
+    crate::glue::process_exit(3)
+}
+
+// tests/cases/process/handoff_then_resolve.lean (AR-8: the task's resolution
+// waits for its handed-off stream's writer, as natively its `fclose`)
+fn handoff_then_resolve(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]) as usize;
+    let p: Rc<Promise<()>> = Rc::new(Promise::new());
+    let p2 = p.clone();
+    let _a = as_task(
+        move || -> R<()> {
+            let child = lio::spawn(
+                "sh",
+                &["-c", "sleep 1; cat > out; echo done > marker"],
+                StdioConfig {
+                    stdin: Stdio::Piped,
+                    stdout: Stdio::Inherit,
+                    stderr: Stdio::Inherit,
+                },
+            )?;
+            let stdin = child.stdin.expect("piped");
+            stdin.put_str(&vec![b'a'; n])?;
+            {
+                // the translator's free path
+                let _scope = lean_runtime::sched::no_suspend();
+                drop(stdin);
+            }
+            p2.resolve(());
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    let _ = p.result_opt().get();
+    println("main: resolved, exiting");
+    lean_runtime::sched::effect();
+    ok(Handle::stdout().flush());
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/process/handoff_then_write.lean (AR-8: the second handle's
+// lock waits for the first handle's writer, as natively its `fclose`)
+fn handoff_then_write(args: &[String]) -> u32 {
+    let (f, n) = (args[0].clone(), to_nat(&args[1]) as usize);
+    let mk = ok(lio::spawn("mkfifo", &[&f], lio::INHERIT));
+    let _ = mk.process.wait();
+    // a program with tasks
+    let _t = as_task(|| (), PRIO_DEFAULT);
+    let script = format!("exec 3<{f}; sleep 1; cat <&3 > out; echo done > marker");
+    let _child = ok(lio::spawn("sh", &["-c", &script], lio::INHERIT));
+    let h1 = ok(Handle::open(f.as_bytes(), FsMode::Write));
+    let h2 = ok(Handle::open(f.as_bytes(), FsMode::Write));
+    ok(h1.put_str(&vec![b'X'; n]));
+    {
+        // the translator's free path
+        let _scope = lean_runtime::sched::no_suspend();
+        drop(h1);
+    }
+    ok(h2.put_str(b"Y"));
+    ok(h2.flush());
+    println("written");
+    0
+}
+
+// tests/cases/process/handoff_then_kill.lean (AR-8: `kill` waits for the
+// handed-off stream's writer, as natively the drop's `fclose` returned first)
+fn handoff_then_kill(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]) as usize;
+    // a program with tasks
+    let _t = as_task(|| (), PRIO_DEFAULT);
+    let child = ok(lio::spawn(
+        "sh",
+        &["-c", "sleep 1; cat > out; exec sleep 30"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Null,
+            stderr: Stdio::Null,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    ok(stdin.put_str(&vec![b'a'; n]));
+    {
+        // the translator's free path
+        let _scope = lean_runtime::sched::no_suspend();
+        drop(stdin);
+    }
+    ok(child.process.kill());
+    let code = ok(child.process.wait());
+    println(&format!("killed, exit {code}"));
+    0
+}
+
+// tests/cases/io/lock_during_read.lean
+fn lock_during_read(args: &[String]) -> u32 {
+    let h = ok(Handle::open(args[0].as_bytes(), FsMode::Read));
+    let th = h.clone();
+    let t = as_task(
+        move || -> R<()> {
+            let l = lio::get_line(&th)?;
+            println(&format!("task: got {}", quote(&l)));
+            Ok(())
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(to_nat(&args[1]) as u32);
+    ok(h.lock(true));
+    println("main: locked while the task reads");
+    let _ = t.get();
+    ok(h.unlock());
+    println("done");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// tests/cases/uvloop: Std.Internal.UV's loop, timers and signals over the
+// scheduler's event loop. A promise the program holds alone is released
+// right after its last use, as compiled Lean releases it (the last release
+// resolves it with `none`).
+
+use crate::lio::{repr_int, repr_unit};
+use lean_runtime::sched::uv::{self, Signal, Timer};
+
+type UTimer = Timer<UvPromise<()>>;
+
+/// A libuv error code as Lean's error (`lean_decode_uv_error`); the twins
+/// expect none.
+fn uv_ok<T>(r: Result<T, i32>) -> T {
+    ok(r.map_err(|e| lean_runtime::io::IoError::decode_uv_error(e, None)))
+}
+type USignal = Signal<UvPromise<i64>>;
+
+fn finished<T: Clone + 'static>(p: &UvPromise<T>) -> bool {
+    has_finished(&p.result_opt())
+}
+
+// tests/cases/uvloop/loop_configure.lean
+fn loop_configure(args: &[String]) -> u32 {
+    println(&format!("alive: {}", uv::loop_alive()));
+    uv_ok(uv::loop_configure(args[0] == "1", args[1] == "1"));
+    println(&format!("configured, alive: {}", uv::loop_alive()));
+    uv_ok(uv::loop_configure(false, false));
+    println(&format!("alive: {}", uv::loop_alive()));
+    0
+}
+
+// tests/cases/uvloop/timer_oneshot.lean
+fn timer_oneshot(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]);
+    let t: UTimer = Timer::new(ms, false);
+    let t0 = mono_ms_now();
+    let p = t.next(UvPromise::new);
+    println(&format!("pending after next: {}", !finished(&p)));
+    let r = p.result_opt().get();
+    drop(p);
+    let dt = mono_ms_now() - t0;
+    println(&format!(
+        "resolved {}, after at least {ms} ms: {}",
+        repr_unit(&r),
+        dt >= ms
+    ));
+    let p2 = t.next(UvPromise::new);
+    println(&format!("second next resolved at once: {}", finished(&p2)));
+    drop(p2);
+    t.reset();
+    t.cancel();
+    let p3 = t.next(UvPromise::new);
+    println(&format!(
+        "after reset and cancel, next resolved: {}",
+        finished(&p3)
+    ));
+    drop(p3);
+    t.stop();
+    let p4 = t.next(UvPromise::new);
+    sleep((2 * ms) as u32);
+    println(&format!("after stop, next resolved: {}", finished(&p4)));
+    p4.resolve(());
+    0
+}
+
+// tests/cases/uvloop/timer_repeating.lean
+fn timer_repeating(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]);
+    let n = to_nat(&args[1]);
+    let t: UTimer = Timer::new(ms, true);
+    let t0 = mono_ms_now();
+    let p = t.next(UvPromise::new);
+    let r = p.result_opt().get();
+    drop(p);
+    println(&format!("first tick {}", repr_unit(&r)));
+    for i in 0..n {
+        let a = t.next(UvPromise::new);
+        let b = t.next(UvPromise::new);
+        let fa = finished(&a);
+        let _ = b.result_opt().get();
+        drop(b);
+        println(&format!(
+            "tick {}: pending before {}, same promise resolved: {}",
+            i + 1,
+            !fa,
+            finished(&a)
+        ));
+    }
+    let dt = mono_ms_now() - t0;
+    println(&format!(
+        "{n} periods took at least {} ms: {}",
+        n * ms,
+        dt >= n * ms
+    ));
+    t.stop();
+    let q = t.next(UvPromise::new);
+    sleep((2 * ms) as u32);
+    println(&format!("after stop, next resolved: {}", finished(&q)));
+    q.resolve(());
+    drop(q);
+    let z: UTimer = Timer::new(0, true);
+    let z0 = z.next(UvPromise::new);
+    let _ = z0.result_opt().get();
+    drop(z0);
+    let z1 = z.next(UvPromise::new);
+    sleep((3 * ms) as u32);
+    println(&format!(
+        "timeout 0: first resolved, second resolved: {}",
+        finished(&z1)
+    ));
+    drop(z1);
+    z.stop();
+    0
+}
+
+// tests/cases/uvloop/timer_cancel_reset.lean
+fn timer_cancel_reset(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]);
+    let t: UTimer = Timer::new(ms, false);
+    let p = t.next(UvPromise::new);
+    t.cancel();
+    sleep((2 * ms) as u32);
+    println(&format!(
+        "one-shot: cancelled promise resolved: {}",
+        finished(&p)
+    ));
+    p.resolve(());
+    drop(p);
+    let p2 = t.next(UvPromise::new);
+    let r = p2.result_opt().get();
+    drop(p2);
+    println(&format!(
+        "one-shot: next after cancel resolves {}",
+        repr_unit(&r)
+    ));
+    let u: UTimer = Timer::new(ms, true);
+    let u0 = u.next(UvPromise::new);
+    let _ = u0.result_opt().get();
+    drop(u0);
+    let u1 = u.next(UvPromise::new);
+    u.cancel();
+    sleep((2 * ms) as u32);
+    println(&format!(
+        "repeating: cancelled promise resolved: {}",
+        finished(&u1)
+    ));
+    u1.resolve(());
+    drop(u1);
+    let u2 = u.next(UvPromise::new);
+    let r = u2.result_opt().get();
+    drop(u2);
+    println(&format!(
+        "repeating: next after cancel resolves {}",
+        repr_unit(&r)
+    ));
+    u.stop();
+    let v: UTimer = Timer::new(2 * ms, false);
+    let t0 = mono_ms_now();
+    let q = v.next(UvPromise::new);
+    sleep(ms as u32);
+    v.reset();
+    sleep(ms as u32);
+    println(&format!(
+        "reset: resolved before the moved deadline: {}",
+        finished(&q)
+    ));
+    let r = q.result_opt().get();
+    drop(q);
+    let dt = mono_ms_now() - t0;
+    println(&format!(
+        "reset: resolves {} after at least {} ms: {}",
+        repr_unit(&r),
+        3 * ms,
+        dt >= 3 * ms
+    ));
+    0
+}
+
+/// `kill (sig : String)`: `IO.Process.output` of `kill -SIG <pid>`.
+fn kill_self(sig: &str) {
+    let pid = lio::get_pid().to_string();
+    let _ = ok(lio::output("kill", &[&format!("-{sig}"), &pid]));
+}
+
+// tests/cases/uvloop/signal_usr1.lean
+fn signal_usr1(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let s: USignal = Signal::new(num as i32, false);
+    let p = uv_ok(s.next(UvPromise::new));
+    println(&format!("one-shot pending: {}", !finished(&p)));
+    kill_self("USR1");
+    let r = p.result_opt().get();
+    drop(p);
+    println(&format!("one-shot got {}", repr_int(&r)));
+    let p2 = uv_ok(s.next(UvPromise::new));
+    println(&format!("one-shot second next resolved: {}", finished(&p2)));
+    drop(p2);
+    let m: USignal = Signal::new(num as i32, true);
+    for i in 0..2 {
+        let q = uv_ok(m.next(UvPromise::new));
+        kill_self("USR1");
+        let r = q.result_opt().get();
+        drop(q);
+        println(&format!("repeating {i}: got {}", repr_int(&r)));
+    }
+    let q = uv_ok(m.next(UvPromise::new));
+    m.cancel();
+    kill_self("USR1");
+    sleep(100);
+    println(&format!(
+        "repeating: cancelled promise resolved: {}",
+        finished(&q)
+    ));
+    q.resolve(0);
+    drop(q);
+    let q2 = uv_ok(m.next(UvPromise::new));
+    kill_self("USR1");
+    let r = q2.result_opt().get();
+    drop(q2);
+    println(&format!("repeating: after cancel got {}", repr_int(&r)));
+    match USignal::new(99, false).next(UvPromise::new) {
+        Ok(_) => println("signal 99: next succeeded"),
+        Err(e) => println(&format!(
+            "signal 99: {}",
+            lio::error_text(&lean_runtime::io::IoError::decode_uv_error(e, None))
+        )),
+    }
+    uv_ok(m.stop());
+    uv_ok(s.stop());
+    println("stopped; the next SIGUSR1 ends the program");
+    let _ = Handle::stdout().flush();
+    kill_self("USR1");
+    sleep(1000);
+    println("not reached");
+    0
+}
+
+/// `run cmd`: `IO.Process.output { cmd }`.
+fn run_cmd(cmd: &str) {
+    let _ = ok(lio::output(cmd, &[]));
+}
+
+// tests/cases/uvloop/signal_stale.lean
+fn signal_stale(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let w: USignal = Signal::new(num as i32, true);
+    let p = uv_ok(w.next(UvPromise::new));
+    run_cmd("true");
+    let r = p.result_opt().get();
+    drop(p);
+    println(&format!("first watcher got {}", repr_int(&r)));
+    uv_ok(w.stop());
+    run_cmd("true");
+    println("a child exited with no watcher");
+    let w2: USignal = Signal::new(num as i32, false);
+    let q = uv_ok(w2.next(UvPromise::new));
+    sleep(200);
+    println(&format!(
+        "the new watcher saw the earlier signal: {}",
+        finished(&q)
+    ));
+    run_cmd("true");
+    let r = q.result_opt().get();
+    drop(q);
+    println(&format!("the new watcher got {}", repr_int(&r)));
+    0
+}
+
+// tests/cases/uvloop/signal_oneshot_twice.lean
+fn signal_oneshot_twice(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let s: USignal = Signal::new(num as i32, false);
+    let p = uv_ok(s.next(UvPromise::new));
+    let pid = lio::get_pid();
+    // a process spawn is an effect point
+    lean_runtime::sched::effect();
+    let _child = ok(lio::spawn(
+        "sh",
+        &[
+            "-c",
+            &format!("kill -USR1 {pid}; sleep 0.05; kill -USR1 {pid}"),
+        ],
+        lio::INHERIT,
+    ));
+    println("before");
+    let _ = Handle::stdout().flush();
+    // `spin`: seconds of pure computation, never a yield point
+    let n = to_nat(&args[1]);
+    let mut x = (pid as u64) | 1;
+    for _ in 0..n {
+        x = std::hint::black_box(
+            x.wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407),
+        );
+    }
+    println(&format!("not reached {x} {}", finished(&p)));
+    0
+}
+
+// tests/cases/uvloop/signal_failed_next.lean (LB-19: the correct outcome)
+fn signal_failed_next(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let s: USignal = Signal::new(num as i32, false);
+    let text = |e: i32| lio::error_text(&lean_runtime::io::IoError::decode_uv_error(e, None));
+    match s.next(UvPromise::new) {
+        Ok(_) => println("first next: ok"),
+        Err(e) => println(&format!("first next: {}", text(e))),
+    }
+    s.cancel();
+    println("cancelled");
+    match s.next(UvPromise::new) {
+        Ok(_) => println("second next: ok"),
+        Err(e) => println(&format!("second next: {}", text(e))),
+    }
+    uv_ok(s.stop());
+    println("done");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// The cases of the sched-io Part B review (RSIOB) and LB-20.
+
+/// A pure computation of `ms` milliseconds, with no scheduler call: the
+/// twin's stand-in for the native case's busy loop (whose length, the case's
+/// first argument, is about the same duration natively).
+fn spin_ms(ms: u64) {
+    let t = std::time::Instant::now();
+    let mut acc = 0u64;
+    while t.elapsed() < std::time::Duration::from_millis(ms) {
+        acc = std::hint::black_box(acc.wrapping_mul(31).wrapping_add(7));
+    }
+    std::hint::black_box(acc);
+}
+
+/// `let _ ← IO.Process.spawn { cmd := "sh", args := #["-c", script] }`.
+fn spawn_sh(script: &str) {
+    lean_runtime::sched::effect();
+    let c = ok(lio::spawn("sh", &["-c", script], lio::INHERIT));
+    drop(c);
+}
+
+// tests/cases/uvloop/signal_stale_deferred.lean
+fn signal_stale_deferred(_: &[String]) -> u32 {
+    let w: USignal = Signal::new(17, true);
+    let p = uv_ok(w.next(UvPromise::new));
+    run_cmd("true");
+    let r = p.result_opt().get();
+    drop(p);
+    println(&format!("first watcher got {}", repr_int(&r)));
+    uv_ok(w.stop());
+    run_cmd("true");
+    println("a child exited with no SIGCHLD watcher");
+    let u: USignal = Signal::new(10, false);
+    let pu = uv_ok(u.next(UvPromise::new));
+    let w2: USignal = Signal::new(17, false);
+    let q = uv_ok(w2.next(UvPromise::new));
+    sleep(200);
+    println(&format!(
+        "the new SIGCHLD watcher saw the earlier signal: {}",
+        finished(&q)
+    ));
+    q.resolve(0);
+    pu.resolve(0);
+    uv_ok(u.stop());
+    uv_ok(w2.stop());
+    0
+}
+
+// tests/cases/uvloop/timer_due_stop.lean (the twin spins args[1] ms)
+fn timer_due_stop(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let t: UTimer = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    spin_ms(ms);
+    t.stop();
+    let task = p.result_opt();
+    drop(p);
+    let r = task.get();
+    println(&format!("due timer, then stop: {}", repr_unit(&r)));
+    0
+}
+
+// tests/cases/uvloop/signal_cancel_restart.lean (the twin spins args[1] ms)
+fn signal_cancel_restart(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let s: USignal = Signal::new(10, false);
+    drop(uv_ok(s.next(UvPromise::new)));
+    let pid = lio::get_pid();
+    spawn_sh(&format!("sleep 0.3; kill -USR1 {pid}"));
+    spin_ms(ms);
+    s.cancel();
+    let p2 = uv_ok(s.next(UvPromise::new));
+    sleep(100);
+    println(&format!(
+        "after cancel and next, resolved: {}",
+        finished(&p2)
+    ));
+    p2.resolve(0);
+    uv_ok(s.stop());
+    0
+}
+
+// tests/cases/uvloop/signal_order.lean
+fn signal_order(_: &[String]) -> u32 {
+    let a: USignal = Signal::new(10, false);
+    let b: USignal = Signal::new(10, true);
+    let pa = uv_ok(a.next(UvPromise::new));
+    let pb = uv_ok(b.next(UvPromise::new));
+    let ta = map_task(
+        |_: Option<i64>| println("one-shot (started first)"),
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    let tb = map_task(
+        |_: Option<i64>| println("repeating (started second)"),
+        pb.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(pa);
+    drop(pb);
+    kill_self("USR1");
+    ta.get();
+    tb.get();
+    uv_ok(b.stop());
+    0
+}
+
+/// `(← System.FilePath.readDir "/proc/self/fd").size`.
+fn fd_count() -> u64 {
+    let mut n = 0;
+    ok(lean_runtime::io::fs::read_dir(b"/proc/self/fd", |_| n += 1));
+    n
+}
+
+// tests/cases/uvloop/signal_fds.lean
+fn signal_fds(_: &[String]) -> u32 {
+    let before = fd_count();
+    let s: USignal = Signal::new(10, true);
+    let p = uv_ok(s.next(UvPromise::new));
+    let after = fd_count();
+    println(&format!(
+        "descriptors added by the first watcher: {}",
+        after - before
+    ));
+    p.resolve(0);
+    drop(p);
+    uv_ok(s.stop());
+    println(&format!("after stop: {}", fd_count() - before));
+    0
+}
+
+// tests/cases/uvloop/exit_listening.lean
+fn exit_listening(_: &[String]) -> u32 {
+    let s: USignal = Signal::new(10, true);
+    let p = uv_ok(s.next(UvPromise::new));
+    let _a = map_task(
+        |r: Option<i64>| eprintln(&format!("signal dependent ran: {}", repr_int(&r))),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(s);
+    let t: UTimer = Timer::new(100000, true);
+    let q = t.next(UvPromise::new);
+    let _ = q.result_opt().get();
+    drop(q);
+    let q2 = t.next(UvPromise::new);
+    let _b = map_task(
+        |r: Option<()>| eprintln(&format!("timer dependent ran: {}", repr_unit(&r))),
+        q2.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(q2);
+    drop(t);
+    println("main returns");
+    0
+}
+
+// tests/cases/uvloop/signal_sigio_default.lean
+fn signal_sigio_default(_: &[String]) -> u32 {
+    let s: USignal = Signal::new(29, true);
+    drop(uv_ok(s.next(UvPromise::new)));
+    uv_ok(s.stop());
+    kill_self("IO");
+    sleep(200);
+    println("survived SIGIO");
+    0
+}
+
+// tests/cases/uvloop/{timer,signal}_{stop,cancel}_in_sync_dependent.lean
+// (the judge's LB20_Probe.lean; args: KIND OP MODE AFTER)
+fn lb20_probe(args: &[String]) -> u32 {
+    let say = |s: &str| {
+        println(s);
+        let _ = Handle::stdout().flush();
+    };
+    let (kind, stop) = (args[0].as_str(), args[1] == "stop");
+    let sync = args[2] == "sync";
+    let after = args[3].as_str();
+    if kind == "timer" {
+        let t: UTimer = Timer::new(10, false);
+        let p = t.next(UvPromise::new);
+        let t2 = t.clone();
+        let tk = map_task(
+            move |_: Option<()>| {
+                if stop {
+                    t2.stop()
+                } else {
+                    t2.cancel()
+                }
+            },
+            p.result_opt(),
+            PRIO_DEFAULT,
+            sync,
+            true,
+        );
+        tk.get();
+        say("dependent ran: ok");
+        say(&format!("first promise resolved: {}", finished(&p)));
+        drop(p);
+        match after {
+            "next" => {
+                for _ in 0..3 {
+                    let q = t.next(UvPromise::new);
+                    let task = q.result_opt();
+                    drop(q);
+                    say(&format!("next: {}", has_finished(&task)));
+                }
+            }
+            "reset" => {
+                t.reset();
+                say("reset: ok");
+            }
+            _ => {}
+        }
+    } else {
+        let s: USignal = Signal::new(10, false);
+        let p = uv_ok(s.next(UvPromise::new));
+        let s2 = s.clone();
+        let tk = map_task(
+            move |_: Option<i64>| {
+                if stop {
+                    let _ = s2.stop();
+                } else {
+                    s2.cancel();
+                }
+            },
+            p.result_opt(),
+            PRIO_DEFAULT,
+            sync,
+            true,
+        );
+        kill_self("USR1");
+        tk.get();
+        say("dependent ran: ok");
+        say(&format!("first promise resolved: {}", finished(&p)));
+        drop(p);
+        if after == "next" {
+            for _ in 0..3 {
+                let q = uv_ok(s.next(UvPromise::new));
+                let task = q.result_opt();
+                drop(q);
+                say(&format!("next: {}", has_finished(&task)));
+            }
+        }
+    }
+    say("done");
+    0
+}
+
+// tests/cases/uvloop/timer_catchup_bound.lean: `arm` re-subscribes from a
+// `sync` dependent of each tick, on `some` only (LB-33: at `t.stop` the
+// dependent reads `none` once and returns).
+fn catchup_arm(t: UTimer, n: Ref<u64>, work_ms: u64) {
+    let p = t.next(UvPromise::new);
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<()>| {
+            spin_ms(work_ms);
+            n.modify(|k| k + 1);
+            if v.is_some() {
+                catchup_arm(t, n, work_ms);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+fn timer_catchup_bound(args: &[String]) -> u32 {
+    let work_ms = to_nat(&args[1]);
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(1, true);
+    catchup_arm(t.clone(), n.clone(), work_ms);
+    sleep(100);
+    let t0 = std::time::Instant::now();
+    let u: UTimer = Timer::new(1000, false);
+    let dt = t0.elapsed().as_millis();
+    let k = n.get();
+    println(&format!(
+        "Timer.mk under 2 s: {}; under 500 ticks so far: {}",
+        dt < 2000,
+        k < 500
+    ));
+    t.stop();
+    drop(u);
+    0
+}
+
+// The cases of LB-33 and LB-34 (tests/cases/uvloop/*_rearm_*, *_keep_*,
+// *_resubscribe, signal_stop_drops_promise): `say` is `IO.println` and a
+// flush.
+fn say(s: &str) {
+    println(s);
+    let _ = Handle::stdout().flush();
+}
+
+fn some_none<T>(v: &Option<T>) -> &'static str {
+    if v.is_some() {
+        "some"
+    } else {
+        "none"
+    }
+}
+
+/// `showV` of the signal cases.
+fn show_v(v: &Option<i64>) -> String {
+    match v {
+        Some(s) => format!("some {s}"),
+        None => "none".into(),
+    }
+}
+
+/// Lean's `toString` of an `Array String`.
+fn show_array(a: &[String]) -> String {
+    format!("#[{}]", a.join(", "))
+}
+
+/// `arm` of the timer cases: a `sync` dependent that prints its value and
+/// subscribes again on any value, at most `cap` times.
+fn timer_arm_capped(t: UTimer, n: Ref<u64>, cap: u64) {
+    let p = t.next(UvPromise::new);
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<()>| {
+            n.modify(|k| k + 1);
+            let k = n.get();
+            say(&format!("dependent {k}: value {}", some_none(&v)));
+            if k < cap {
+                timer_arm_capped(t, n, cap);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+/// `arm` of the timer cases that record values: a dependent (`sync` or not)
+/// that records its value and subscribes again while it has fewer than
+/// `cap` values, then resolves `done`.
+fn timer_arm_record(
+    t: UTimer,
+    values: Ref<Vec<String>>,
+    cap: usize,
+    done: UvPromise<()>,
+    sync: bool,
+) {
+    let p = t.next(UvPromise::new);
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<()>| {
+            values.modify(|mut a| {
+                a.push(some_none(&v).into());
+                a
+            });
+            if values.get().len() < cap {
+                timer_arm_record(t, values, cap, done, sync);
+            } else {
+                done.resolve(());
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        sync,
+        true,
+    );
+}
+
+// tests/cases/uvloop/timer_stop_rearm_in_sync_dependent.lean (LB-33)
+fn timer_stop_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let (period, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(period, true);
+    let p0 = t.next(UvPromise::new);
+    let r = p0.result_opt().get();
+    drop(p0);
+    say(&format!("0th tick: {}", some_none(&r)));
+    timer_arm_capped(t.clone(), n.clone(), cap);
+    say("stop: begin");
+    t.stop();
+    say("stop: end");
+    sleep(100);
+    say(&format!("dependent runs: {}", n.get()));
+    say("main: end");
+    0
+}
+
+// tests/cases/uvloop/timer_cancel_rearm_in_sync_dependent.lean (LB-33):
+// the dependent subscribes again in its first run only, and its second
+// run resolves `done`.
+fn timer_cancel_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let period = to_nat(&args[0]);
+    let values = Ref::new(Vec::<String>::new());
+    let done: UvPromise<()> = UvPromise::new();
+    let t: UTimer = Timer::new(period, true);
+    let p0 = t.next(UvPromise::new);
+    let r = p0.result_opt().get();
+    drop(p0);
+    say(&format!("0th tick: {}", some_none(&r)));
+    timer_arm_record(t.clone(), values.clone(), 2, done.clone(), true);
+    say("cancel: begin");
+    t.cancel();
+    say("cancel: end");
+    let _ = done.result_opt().get();
+    say(&format!("dependent values: {}", show_array(&values.get())));
+    t.stop();
+    say("stop: end");
+    0
+}
+
+// tests/cases/uvloop/timer_oneshot_{stop,cancel}_keep_in_sync_dependent.lean
+// (LB-33)
+fn timer_oneshot_keep_in_sync_dependent(args: &[String]) -> u32 {
+    let op = args[0].clone();
+    let (ms, count) = (to_nat(&args[1]), to_nat(&args[2]));
+    let kept: Ref<Option<UvPromise<()>>> = Ref::new(None);
+    let t: UTimer = Timer::new(ms, false);
+    let p = t.next(UvPromise::new);
+    let (t2, kept2) = (t.clone(), kept.clone());
+    let _ = map_task(
+        move |v: Option<()>| {
+            let q = t2.next(UvPromise::new);
+            say(&format!("dependent: value {}", some_none(&v)));
+            kept2.set(Some(q));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    say(&format!("{op}: begin"));
+    if op == "cancel" {
+        t.cancel()
+    } else {
+        t.stop()
+    }
+    say(&format!("{op}: end"));
+    let fresh: Vec<UvPromise<()>> = (0..count).map(|_| UvPromise::new()).collect();
+    let Some(q) = kept.get() else {
+        say("nothing kept");
+        crate::glue::process_exit(0)
+    };
+    let a = q.addr();
+    say(&format!("aliased: {}", fresh.iter().any(|f| f.addr() == a)));
+    say(&format!("kept resolved: {}", finished(&q)));
+    for f in &fresh {
+        f.resolve(());
+    }
+    say(&format!(
+        "kept resolved after resolving the fresh promises: {}",
+        finished(&q)
+    ));
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/uvloop/timer_oneshot_cancel_resubscribe.lean (LB-33)
+fn timer_oneshot_cancel_resubscribe(args: &[String]) -> u32 {
+    let (ms, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(ms, false);
+    timer_arm_capped(t.clone(), n.clone(), cap);
+    say("cancel: begin");
+    t.cancel();
+    say("cancel: end");
+    sleep(100);
+    say(&format!("dependent runs: {}", n.get()));
+    say("stop: begin");
+    t.stop();
+    say("stop: end");
+    0
+}
+
+// tests/cases/uvloop/timer_oneshot_stop_resubscribe.lean (a control of
+// LB-33; review RF2-L-01)
+fn timer_oneshot_stop_resubscribe(args: &[String]) -> u32 {
+    let (ms, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let n = Ref::new(0u64);
+    let t: UTimer = Timer::new(ms, false);
+    timer_arm_capped(t.clone(), n.clone(), cap);
+    say("stop: begin");
+    t.stop();
+    say("stop: end");
+    sleep(100);
+    say(&format!("dependent runs: {}", n.get()));
+    0
+}
+
+// tests/cases/uvloop/timer_stop_rearm_async_dependent.lean (a control of
+// LB-33)
+fn timer_stop_rearm_async_dependent(args: &[String]) -> u32 {
+    let (period, cap) = (to_nat(&args[0]), to_nat(&args[1]));
+    let values = Ref::new(Vec::<String>::new());
+    let done: UvPromise<()> = UvPromise::new();
+    let t: UTimer = Timer::new(period, true);
+    let p0 = t.next(UvPromise::new);
+    let r = p0.result_opt().get();
+    drop(p0);
+    say(&format!("0th tick: {}", some_none(&r)));
+    timer_arm_record(t.clone(), values.clone(), cap as usize, done.clone(), false);
+    t.stop();
+    say("stop: end");
+    let _ = done.result_opt().get();
+    say(&format!("dependent values: {}", show_array(&values.get())));
+    0
+}
+
+/// `arm` of the signal cases: as `timer_arm_capped`.
+fn signal_arm_capped(s: USignal, n: Ref<u64>, cap: u64) {
+    let p = uv_ok(s.next(UvPromise::new));
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<i64>| {
+            n.modify(|k| k + 1);
+            let k = n.get();
+            say(&format!("dependent {k}: value {}", some_none(&v)));
+            if k < cap {
+                signal_arm_capped(s, n, cap);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+// tests/cases/uvloop/signal_stop_rearm_in_sync_dependent.lean (LB-34)
+fn signal_stop_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let cap = to_nat(&args[1]);
+    let n = Ref::new(0u64);
+    let s: USignal = Signal::new(num as i32, true);
+    signal_arm_capped(s.clone(), n.clone(), cap);
+    say("stop: begin");
+    uv_ok(s.stop());
+    say("stop: end");
+    say(&format!("dependent runs: {}", n.get()));
+    0
+}
+
+/// `arm` of `signal_cancel_rearm_in_sync_dependent`: records each value,
+/// subscribes again in the first run only.
+fn signal_arm_record(s: USignal, values: Ref<Vec<String>>) {
+    let p = uv_ok(s.next(UvPromise::new));
+    let task = p.result_opt();
+    drop(p);
+    let _ = map_task(
+        move |v: Option<i64>| {
+            values.modify(|mut a| {
+                a.push(show_v(&v));
+                a
+            });
+            if values.get().len() == 1 {
+                signal_arm_record(s, values);
+            }
+        },
+        task,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+}
+
+// tests/cases/uvloop/signal_cancel_rearm_in_sync_dependent.lean (LB-34)
+fn signal_cancel_rearm_in_sync_dependent(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let values = Ref::new(Vec::<String>::new());
+    let s: USignal = Signal::new(num as i32, true);
+    signal_arm_record(s.clone(), values.clone());
+    say("cancel: begin");
+    s.cancel();
+    say("cancel: end");
+    let q = uv_ok(s.next(UvPromise::new));
+    kill_self("USR1");
+    let r = q.result_opt().get();
+    drop(q);
+    say(&format!("main's next after cancel: {}", show_v(&r)));
+    say(&format!("dependent values: {}", show_array(&values.get())));
+    uv_ok(s.stop());
+    say("stop: end");
+    0
+}
+
+// tests/cases/uvloop/signal_oneshot_{stop,cancel}_keep_in_sync_dependent.lean
+// (LB-34)
+fn signal_oneshot_keep_in_sync_dependent(args: &[String]) -> u32 {
+    let op = args[0].clone();
+    let num: i64 = args[1].parse().expect("an Int");
+    let count = to_nat(&args[2]);
+    let kept: Ref<Option<UvPromise<i64>>> = Ref::new(None);
+    let s: USignal = Signal::new(num as i32, false);
+    let p = uv_ok(s.next(UvPromise::new));
+    let (s2, kept2) = (s.clone(), kept.clone());
+    let _ = map_task(
+        move |v: Option<i64>| {
+            let q = uv_ok(s2.next(UvPromise::new));
+            say(&format!("dependent: value {}", some_none(&v)));
+            kept2.set(Some(q));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    say(&format!("{op}: begin"));
+    if op == "cancel" {
+        s.cancel()
+    } else {
+        uv_ok(s.stop())
+    }
+    say(&format!("{op}: end"));
+    let fresh: Vec<UvPromise<i64>> = (0..count).map(|_| UvPromise::new()).collect();
+    let Some(q) = kept.get() else {
+        say("nothing kept");
+        crate::glue::process_exit(0)
+    };
+    let a = q.addr();
+    say(&format!("aliased: {}", fresh.iter().any(|f| f.addr() == a)));
+    say(&format!("kept resolved: {}", finished(&q)));
+    for f in &fresh {
+        f.resolve(7);
+    }
+    say(&format!(
+        "kept resolved after resolving the fresh promises: {}",
+        finished(&q)
+    ));
+    crate::glue::process_exit(0)
+}
+
+// tests/cases/uvloop/signal_stop_drops_promise.lean (a control of LB-34)
+fn signal_stop_drops_promise(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let n = Ref::new(0u64);
+    let s: USignal = Signal::new(num as i32, true);
+    let p = uv_ok(s.next(UvPromise::new));
+    let n2 = n.clone();
+    let _ = map_task(
+        move |v: Option<i64>| {
+            n2.modify(|k| k + 1);
+            say(&format!("dependent {}: value {}", n2.get(), some_none(&v)));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    say("stop: begin");
+    uv_ok(s.stop());
+    say("stop: end");
+    say(&format!("dependent runs: {}", n.get()));
+    0
+}
+
+// tests/cases/uvloop/signal_rearm_in_{sync,async}_dependent.lean
+fn signal_rearm_in_dependent(args: &[String]) -> u32 {
+    let sync = args[0] == "sync";
+    let a: USignal = Signal::new(10, false);
+    let pa = uv_ok(a.next(UvPromise::new));
+    let tb = map_task(
+        move |_: Option<i64>| {
+            let b: USignal = Signal::new(10, false);
+            let pb = uv_ok(b.next(UvPromise::new));
+            (b, pb)
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        sync,
+        true,
+    );
+    drop(pa);
+    kill_self("USR1");
+    let (_b, pb) = tb.get();
+    println("B listening");
+    let _ = Handle::stdout().flush();
+    kill_self("USR1");
+    let t = pb.result_opt();
+    drop(pb);
+    println(&format!("B got {}", repr_int(&t.get())));
+    0
+}
+
+/// Not a Lean program: as `picked_task_reaches_yield_points`, but `p`
+/// reaches effect points (`sched::effect`, as an output would) instead of
+/// reference reads (review LF3-01, the effect points' half). Two workers.
+fn effect_points_in_a_started_task(_: &[String]) -> u32 {
+    let p = Task::spawn(
+        || loop {
+            lean_runtime::sched::effect();
+            std::hint::spin_loop();
+        },
+        PRIO_DEFAULT,
+    );
+    let _: bool = has_finished(&p);
+    let q = Task::spawn(|| (0..1000u64).sum::<u64>(), PRIO_DEFAULT);
+    let _ = has_finished(&q);
+    let t = Task::spawn(|| 1001u64, PRIO_DEFAULT);
+    eprintln(&format!("t = {}", t.get()));
+    drop(t);
+    let (fp, fq) = (has_finished(&p), has_finished(&q));
+    eprintln(&format!("p finished: {fp}, q finished: {fq}"));
+    0
+}

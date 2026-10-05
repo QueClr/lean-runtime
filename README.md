@@ -111,9 +111,12 @@ RT1-04, RT2-03), and `sched::uv`, `Std.Internal.UV`'s loop on a thread of
 its own as natively, with the single-thread module's names. In both modes
 a pool worker keeps its standard streams and `errno` from one task to the
 next, as natively (review AR-24). The io and uvloop cases' twins run inside
-tasks in a threads build. Next is T3 (a second driver for
-the task cases, newly recorded native cases); `net` in threads mode comes
-later. See `docs/threads.md`.
+tasks in a threads build. The third batch, T3, runs the task, sync, refs
+and taskio cases in threads mode through a second driver
+(`tests/sched-driver-mt`), 5 runs each, with the single-thread driver's
+ports of the same cases, and adds four cases that need real contention,
+recorded natively. `net` in threads mode, and the translators' threads
+modes, come later. See `docs/threads.md`.
 
 `net` (feature `net`; it turns on `io` and `sched`) has Lean's networking
 externs: `Std.Internal.UV.TCP` and `UDP` (libuv 1.48's stream and UDP code

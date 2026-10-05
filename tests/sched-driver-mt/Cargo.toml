@@ -1,0 +1,16 @@
+[package]
+name = "sched-driver-mt"
+version = "0.1.0"
+edition = "2021"
+description = "The Rust ports of tests/cases/{tasks,sync,refs,taskio}, shared with tests/sched-driver, run in threads mode (lean-runtime's sched::mt) with a translator-like glue"
+publish = false
+
+# Threads mode excludes the single-thread scheduler (`sched`) in one build,
+# so this package is built in a cargo invocation of its own
+# (`cargo test -p sched-driver-mt`), never together with `sched-driver`.
+[dependencies]
+lean-runtime = { path = "../..", features = ["threads", "io", "stack-overflow"] }
+
+[[bin]]
+name = "sched-cases-mt"
+path = "src/main.rs"

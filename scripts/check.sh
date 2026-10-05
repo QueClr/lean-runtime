@@ -3,7 +3,10 @@
 # (site/build.py --check); build, test and clippy on the Rust toolchains both
 # translators use, in every feature configuration; the Rust ports of the
 # task, sync, refs, taskio, uvloop and net cases and of the io cases with
-# tasks, over `sched`, `io` and `net` (tests/sched-driver); fmt; the
+# tasks, over `sched`, `io` and `net` (tests/sched-driver), and the ports of
+# the task, sync, refs and taskio cases, shared with it, in threads mode, 5
+# runs each (tests/sched-driver-mt), both drivers in debug and release
+# builds; fmt; the
 # plain-rustc build of the dependency-free configuration, which one
 # translator builds without cargo; the optional modules' offline build from
 # Cargo.lock; that every file allowing `unsafe` has its UNSAFE.md entry; and,
@@ -26,7 +29,8 @@
 # configurations (below), which leave `stack-overflow` out: Miri cannot
 # model signal delivery. tests/sched-driver builds the crate with
 # `stack-overflow` (the twin of `tasks/stack_overflow_in_task`, the `so_*`
-# tests).
+# tests); tests/sched-driver-mt with `threads,io,stack-overflow`, in a cargo
+# invocation of its own (`threads` and `sched` exclude each other).
 #
 # The host is shared: the heavy steps (cargo test, Miri) run inside a memory
 # cap, `systemd-run --user --scope -p MemoryMax=$LEAN_RUNTIME_MEM` (default
@@ -117,14 +121,23 @@ for tc in "${TOOLCHAINS[@]}"; do
   echo "== $tc cargo build --offline --locked --features io,sched,net"
   capped cargo +"$tc" build --offline --locked --quiet --features io,sched,net
   # The cases of tests/cases/{tasks,sync,refs,taskio,uvloop,net} and the io
-  # cases with tasks as Rust programs over `sched` and `io`, with a
-  # translator's glue, compared with the cases' outcomes.
+  # and process cases with tasks as Rust programs over `sched` and `io`, with
+  # a translator's glue, compared with the cases' outcomes.
   echo "== $tc test sched-driver"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --offline --locked --quiet -p sched-driver
   echo "== $tc release test sched-driver"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --release --offline --locked --quiet -p sched-driver
   echo "== $tc clippy sched-driver"
   cargo +"$tc" clippy --offline --locked --quiet -p sched-driver --all-targets -- -D warnings
+  # The same ports of the task, sync, refs and taskio cases in threads mode
+  # (`sched::mt`), each case 5 times, a few cases at a time
+  # (`SCHED_MT_JOBS`, default 6).
+  echo "== $tc test sched-driver-mt"
+  capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --offline --locked --quiet -p sched-driver-mt
+  echo "== $tc release test sched-driver-mt"
+  capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --release --offline --locked --quiet -p sched-driver-mt
+  echo "== $tc clippy sched-driver-mt"
+  cargo +"$tc" clippy --offline --locked --quiet -p sched-driver-mt --all-targets -- -D warnings
 done
 
 last="${TOOLCHAINS[${#TOOLCHAINS[@]}-1]}"

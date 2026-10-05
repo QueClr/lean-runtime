@@ -282,23 +282,19 @@ The proof covers the alternate stacks, the handler's async-signal safety, the mo
     Its glue avoids the latter by waiting first, with <code>poll_fds</code>.</li>
   <li>Another process's <code>flock</code> release is seen within 16 ms, not at once.</li>
 </ul>
+<p><a href="threads.html">Threads mode</a> has none of these limits: each task has a real thread.</p>
 
 <h2 id="plans">Plans</h2>
 <h3 id="threads">Toward real threads</h3>
 <p>Decision (2026-10-03): "parallelism will be supported, not the focus now".
-The model stays single-threaded, but avoids choices that block real threads.</p>
+Since 2026-10-04, <a href="threads.html">threads mode</a> (feature <code>threads</code>) is Lean's task manager on real threads, beside this scheduler.
+A build has one of the two.
+This scheduler stays the default.</p>
 <ul>
-  <li><strong>Already per thread:</strong> the scheduler's state, the published stack bounds, and the soundness argument.
-    Worker thread numbers are unique across the process.</li>
-  <li><strong>What a worker pool needs:</strong>
-    <ul>
-      <li>one task table and queue, shared by the workers;</li>
-      <li>jobs that are <code>Send</code>, so atomic reference counts in both translators;</li>
-      <li>real locks for <code>Std.Sync</code>.</li>
-    </ul></li>
-  <li><strong>What stays:</strong> Lean's task-manager rules (exit order, deletion of dropped pure tasks, the walk of dependents).
-    The yield points then become unnecessary, and are harmless if kept.
-    A started pure task can simply run.</li>
+  <li><strong>Shared:</strong> the task-manager rules, such as the exit order and the walk of dependents.
+    The names of the functions, and the program cases with their Rust ports, are also shared.</li>
+  <li><strong>Only here:</strong> the coroutines, the hub, the yield points, the pure-task rule and sched-io's cooperative IO.
+    Threads mode needs none of them, because a blocked task blocks only its own thread.</li>
 </ul>
 <h3>Costs to measure (O12)</h3>
 <p>Nothing in <code>sched</code> is timed yet.

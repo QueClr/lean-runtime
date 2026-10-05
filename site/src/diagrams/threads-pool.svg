@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 420" role="img" aria-labelledby="th1-t th1-d">
+  <title id="th1-t">Threads mode: the worker pool</title>
+  <desc id="th1-d">Main's thread spawns tasks into the task table and its queues, which one lock protects. The standard workers, at most LEAN_NUM_THREADS of them, take the head of the queue. Worker 1 runs a task. Worker 2 runs a task that waits in Task.get, so the limit rises by one and the manager makes worker 3, which takes the next task. A dedicated task gets a thread of its own. The loop thread runs the timers and signals of Std.Internal.UV and resolves their promises. Every thread the manager makes installs Lean's stack-overflow report.</desc>
+  <defs>
+    <marker id="th1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#50555b"/></marker>
+  </defs>
+  <rect class="k-tr" x="20" y="40" width="170" height="60" rx="6"/>
+  <text class="tb" x="105" y="65" text-anchor="middle">main's thread</text>
+  <text class="ts" x="105" y="84" text-anchor="middle">runs main, then finish</text>
+
+  <rect class="k-rt" x="300" y="30" width="240" height="80" rx="6"/>
+  <text class="tb" x="420" y="58" text-anchor="middle">task table and queues</text>
+  <text class="ts" x="420" y="78" text-anchor="middle">one lock, as native's task manager</text>
+  <text class="ts" x="420" y="94" text-anchor="middle">queues by priority 0 to 8</text>
+  <line class="ar" x1="190" y1="70" x2="296" y2="70" marker-end="url(#th1-a)"/>
+  <text class="ts" x="243" y="62" text-anchor="middle">spawn, map,</text>
+  <text class="ts" x="243" y="88" text-anchor="middle">bind</text>
+
+  <rect class="k-rt" x="660" y="30" width="180" height="60" rx="6"/>
+  <text class="tb" x="750" y="55" text-anchor="middle">loop thread</text>
+  <text class="ts" x="750" y="75" text-anchor="middle">UV timers and signals</text>
+  <line class="ar" x1="660" y1="60" x2="544" y2="60" marker-end="url(#th1-a)"/>
+  <text class="ts" x="602" y="52" text-anchor="middle">resolves</text>
+  <text class="ts" x="602" y="76" text-anchor="middle">promises</text>
+
+  <line class="ar" x1="390" y1="110" x2="305" y2="201" marker-end="url(#th1-a)"/>
+  <line class="ar" x1="420" y1="110" x2="430" y2="201" marker-end="url(#th1-a)"/>
+  <line class="ar" x1="450" y1="110" x2="555" y2="201" marker-end="url(#th1-a)"/>
+  <text class="ts" x="340" y="150" text-anchor="end">take the head of the queue</text>
+
+  <rect class="grp" x="230" y="180" width="400" height="162" rx="8"/>
+  <rect class="k-rt" x="250" y="205" width="110" height="56" rx="6"/>
+  <text class="tb" x="305" y="228" text-anchor="middle">worker 1</text>
+  <text class="ts" x="305" y="248" text-anchor="middle">runs a task</text>
+  <rect class="k-rt" x="375" y="205" width="110" height="56" rx="6"/>
+  <text class="tb" x="430" y="228" text-anchor="middle">worker 2</text>
+  <text class="ts" x="430" y="248" text-anchor="middle">waits in Task.get</text>
+  <rect class="k-rt plan" x="500" y="205" width="110" height="56" rx="6"/>
+  <text class="tb" x="555" y="228" text-anchor="middle">worker 3</text>
+  <text class="ts" x="555" y="248" text-anchor="middle">made for the wait</text>
+  <line class="ard" x1="485" y1="233" x2="496" y2="233" marker-end="url(#th1-a)"/>
+  <text class="ts" x="430" y="286" text-anchor="middle">A wait in a pool task raises the limit by one.</text>
+  <text class="ts" x="430" y="304" text-anchor="middle">IO.waitAny keeps its worker, as natively.</text>
+  <text class="ts" x="430" y="332" text-anchor="middle">the pool: up to LEAN_NUM_THREADS standard workers</text>
+
+  <rect class="k-rt" x="660" y="206" width="180" height="60" rx="6"/>
+  <text class="tb" x="750" y="231" text-anchor="middle">dedicated thread</text>
+  <text class="ts" x="750" y="251" text-anchor="middle">one per dedicated task</text>
+  <line class="ar" x1="540" y1="100" x2="745" y2="202" marker-end="url(#th1-a)"/>
+  <text class="ts" x="668" y="140">priority above max:</text>
+  <text class="ts" x="668" y="155">a thread of its own</text>
+
+  <text class="ts" x="20" y="395">Every thread the manager makes installs Lean's stack-overflow report at its entry.</text>
+</svg>

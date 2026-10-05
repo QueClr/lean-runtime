@@ -262,6 +262,11 @@ An error flag otherwise stays set, so a later call still reports its <code>errno
 <dd>A dependent task (from <code>map</code> or <code>bind</code>) made with <code>sync := true</code>, or at priority <code>LEAN_SYNC_PRIO</code>.
 It runs at once on the context that finishes its source, without the queue.</dd>
 
+<dt id="g-threads-mode">Threads mode</dt>
+<dd>lean-runtime's second scheduler, <code>sched::mt</code>, behind the feature <code>threads</code>: Lean's task manager on real OS threads.
+A build has either threads mode or the single-thread <code>sched</code>.
+See <a href="threads.html">Threads mode</a>.</dd>
+
 <dt id="g-translator">Translator</dt>
 <dd>A compiler that takes compiled Lean code and emits code in another language.
 lean2rr and leanrs are translators.</dd>
@@ -287,7 +292,8 @@ A word helper (<code>*_small</code>) is a rule on words only, for a translator's
 <dt id="g-worker">Worker, pool task</dt>
 <dd>Native Lean runs tasks on a pool of worker threads.
 A pool task runs on one of them, not on a dedicated thread.
-<code>sched</code> keeps the number of workers (<code>LEAN_NUM_THREADS</code>, or the number of processors) as a limit on running contexts.</dd>
+<code>sched</code> keeps the number of workers (<code>LEAN_NUM_THREADS</code>, or the number of processors) as a limit on running contexts.
+<a href="#g-threads-mode">Threads mode</a> has real worker threads, as natively.</dd>
 
 <dt id="g-yield-point">Yield point</dt>
 <dd>A call where the running context lets other contexts go first.

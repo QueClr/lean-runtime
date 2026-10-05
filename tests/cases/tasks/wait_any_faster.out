@@ -1,0 +1,3 @@
+waitAny: fast
+slow finished then: false
+then slow

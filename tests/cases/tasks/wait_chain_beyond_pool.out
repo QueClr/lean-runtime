@@ -1,0 +1,7 @@
+task 5 resolves task 4's promise
+task 4 got 1
+task 3 got 2
+task 2 got 3
+task 1 got 4
+task 0 got 5
+main got 6

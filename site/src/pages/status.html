@@ -1,6 +1,7 @@
 <h1>Status</h1>
-<p class="lead">State of 2026-10-04, main at 0882b54.
-main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, and two native quirks, each behind a feature of its own.
+<p class="lead">State of 2026-10-04.
+The table of merged batches is at main 88ef877, with <code>threads-3</code>; the adoption and coverage sections are at main 0882b54.
+main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, <a href="threads.html">threads mode</a>, and two native quirks, each behind a feature of its own.
 Every Lean symbol that needs shared code has a crate item on main.</p>
 
 <h2 id="merged">Merged on main</h2>
@@ -53,6 +54,19 @@ A task that waits for <code>main</code> no longer hangs the program when <code>m
 Lean's stack-overflow report for tasks, behind the feature <a href="glossary.html#g-stack-overflow"><code>stack-overflow</code></a> (AR-11): the second native quirk.
 lean2rr turns it on.</td></tr>
 <tr><td><code>net-2</code></td><td>The <a href="net.html">net</a> module without <code>Weak</code> references (AR-12). The event loop's callbacks keep only a socket's number. They find the socket in a registry of open sockets. A dropped socket still closes at once.</td></tr>
+<tr><td><code>sched-4</code></td><td>A pool task that waits forever on itself frees its worker (AR-15).
+A pool task's worker stays busy while its <code>sync</code> dependents run (AR-16).
+The first known difference of the deferred model, LSCHED-01.</td></tr>
+<tr><td><code>io-small</code></td><td>Small io fixes for the translators (AR-17 to AR-20), such as the startup signal pipe without <code>sched</code>.</td></tr>
+<tr><td><code>threads-1</code></td><td><a href="threads.html">Threads mode</a> (T1): <code>sched::mt</code>, Lean's task manager on real threads, behind the feature <code>threads</code>.</td></tr>
+<tr><td><code>fixes-2</code></td><td>The stop of a timer or a signal watcher as Lean's master branch does it (LB-33, LB-34), and API requests AR-22 and AR-23.</td></tr>
+<tr><td><code>threads-2</code></td><td><code>io</code> and <code>Std.Internal.UV</code> in threads mode (T2).
+In both modes, a pool worker keeps its streams and <code>errno</code> from one task to the next (AR-24).</td></tr>
+<tr><td><code>fixes-3</code></td><td>A started pure task keeps its worker until it runs (AR-25), with the known differences LSCHED-02 and LSCHED-03.
+API requests AR-27 to AR-33.</td></tr>
+<tr><td><code>threads-3</code></td><td>The second test driver (T3) runs every <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code> case in threads mode, 5 times.
+It shares its Rust ports with the single-thread driver.
+Four new cases with real contention, recorded natively.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>

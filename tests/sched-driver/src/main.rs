@@ -1,10 +1,15 @@
 //! `sched-cases ID [ARGS...]`, or a link named `ID` to it (for
 //! `scripts/cases.py check --exe-dir`): the Rust port of
-//! `tests/cases/{tasks,sync,refs}/ID.lean`, run through `lean_runtime::sched`
-//! with the glue a translator writes.
+//! `tests/cases/{tasks,sync,refs,taskio,uvloop,net}/ID.lean` (and of the io
+//! and process cases with tasks), run through `lean_runtime::sched` with the
+//! glue a translator writes. `cases.rs` holds the ports the threads-mode
+//! driver (`tests/sched-driver-mt`) shares; `cases_st.rs` and `netcases.rs`
+//! the ones of the single-thread scheduler only.
 
 mod cases;
+mod cases_st;
 mod glue;
+mod glue_common;
 mod lean;
 mod lio;
 mod lnet;
@@ -18,7 +23,8 @@ fn main() {
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
-    let (id, args) = match cases::lookup(&name) {
+    let lookup = |id: &str| cases::lookup(id).or_else(|| cases_st::lookup(id));
+    let (id, args) = match lookup(&name) {
         Some(_) => (name, &argv[1..]),
         None if argv.len() > 1 => (argv[1].clone(), &argv[2..]),
         None => {
@@ -26,7 +32,7 @@ fn main() {
             std::process::exit(2)
         }
     };
-    let Some((init, main)) = cases::lookup(&id) else {
+    let Some((init, main)) = lookup(&id) else {
         eprintln!("sched-cases: no case {id}");
         std::process::exit(2)
     };

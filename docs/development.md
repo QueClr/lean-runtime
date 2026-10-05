@@ -116,14 +116,34 @@ once.
   on the crate: its Rust twin makes the same calls through the crate, with
   what a translator's glue adds. `tests/io_cases.rs` and
   `tests/io2_cases.rs` run their twins through `scripts/cases.py check`;
-  `tests/sched-driver` (the `tasks/`, `sync/` and `refs/` cases) runs its
-  own the same way, and refuses a case with a field it does not implement.
+  `tests/sched-driver` (the cases with tasks) and `tests/sched-driver-mt`
+  (the task cases in threads mode) run their own the same way, and refuse
+  a case with a field they do not implement.
   A case has no twin only when it tests what a translator generates or
   Lean code a translator compiles, or when a Rust twin cannot start as the
   case requires; its `.toml` then says why, in a comment starting
   `# No twin:` (now the `folding/` cases, `cse/panic_once_across_types`,
   `io/borrow_with_ref_struct`, `time/time_format` and
   `process/closed_stdout`).
+- **The two scheduler drivers.** `cargo test --offline --locked -p
+  sched-driver` runs the program cases with tasks over the single-thread
+  scheduler, once each. `cargo test --offline --locked -p sched-driver-mt`
+  runs the `tasks/`, `sync/`, `refs/` and `taskio/` cases in threads mode
+  (`docs/threads.md`, 0.6), 5 runs each, 6 cases at a time; set
+  `SCHED_MT_JOBS=N` for another number, `SCHED_MT_CASES=ID,ID` to run only
+  those cases, and pass `-- --nocapture` for a line per case. Run each
+  package in a cargo invocation of its own: `threads` and `sched` exclude
+  each other in one build. So `cargo build --workspace` (or `test`,
+  `clippy` with `--workspace`) does not compile: cargo unifies the two
+  drivers' features of the crate into `sched` with `threads`, a compile
+  error. Name a package with `-p` instead; at the root, cargo builds the
+  crate alone (`default-members`). The threads-mode binary prints what it runs
+  (`sched-cases-mt --list`) and what it leaves to the single-thread driver,
+  with the reason (`--single-thread-only`). A new case in one of these four
+  areas needs one port, in `tests/sched-driver/src/cases.rs` (its `CASES`
+  table), which both drivers compile, and its id in the single-thread
+  driver's `cases!` list (`tests/sched-driver/tests/cases.rs`); the
+  threads-mode driver finds it by itself.
 - Unit tests next to the code use values from the same cases.
 - Run `scripts/check.sh` before every commit. On the shared host, run
   targeted tests while working (the cases touched, their twins' test

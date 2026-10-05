@@ -41,7 +41,8 @@ This file covers:
 | `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt`, with `sched::mt::uv`, `Std.Internal.UV` on a loop thread of its own (T2) |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
 | `src/io/coop.rs` | sched-io in the io layer (features `io` and `sched`): the cooperative reads, writes, `flock` and `waitpid`, and the stream locks |
-| `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included) |
+| `tests/sched-driver/` | Every case of `tests/cases/tasks`, `sync`, `refs`, `taskio` and `uvloop`, and the io cases with tasks, as a Rust program over `sched` and `io`, with the glue a translator writes (native's startup descriptors included). The ports of the `tasks`, `sync`, `refs` and `taskio` cases (`src/cases.rs`) are shared with threads mode's driver |
+| `tests/sched-driver-mt/` | Threads mode's driver (`docs/threads.md`, 0.6): the same ports of the `tasks`, `sync`, `refs` and `taskio` cases over `sched::mt`, 5 runs each, with `Arc` values and a glue whose hooks check their contract; built in a cargo invocation of its own |
 
 `sched` depends on corosensei 0.3.4, rustix 1.1 (the event loop's epoll
 and poll), signal-hook 0.3.18 (the signal watchers' delivery; its safe
@@ -977,7 +978,11 @@ or a watcher; that is the glue's error.
 ## The glue
 
 A translator writes this glue around the crate. `tests/sched-driver/src/`
-(`glue.rs`, `lean.rs`) is a complete example.
+(`glue.rs` with `glue_common.rs`, and `lean.rs`) is a complete example. In
+threads mode the glue is smaller (no `suspend`, no yield points; a thunk or
+a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
+(`glue.rs`, `lean.rs`) is the example there, with the same case ports
+(`docs/threads.md`, 2.4 and 0.6).
 
 1. **`Glue`.** Implement `Glue::suspend`, which is the one `unsafe` step:
    ```rust
@@ -1760,7 +1765,7 @@ argument is checked by:
   - corosensei refuses to resume a completed coroutine.
 - **The driver's integration tests** (`tests/sched-driver`), on real
   hardware: the program cases of `tasks/`, `sync/`, `refs/`, `taskio/`
-  and `uvloop/` and the io cases with tasks, the review regression
+  and `uvloop/` and the io and process cases with tasks, the review regression
   programs (`rsio_*`), a panic test,
   and leanrs's three adversarial checks (`adv_*`: blocking during
   unwinding, a second panic there, `process::exit` from a context), in

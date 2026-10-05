@@ -1,11 +1,15 @@
 # Real threads for `sched` (threads mode)
 
-Status (2026-10-04): T1 and T2 are implemented. T1 is `sched::mt`, behind
+Status (2026-10-04): T1, T2 and T3 are done. T1 is `sched::mt`, behind
 the cargo feature `threads` (`src/sched/threads.rs`, `src/sched/mt/`). T2 is
-io and `Std.Internal.UV` in threads mode (0.5). T3 (the second driver, the
-recorded cases, the site's pages) and `net` in threads mode are open
-(section 5). The design below was written at main 1c36a58; section 0 says
-where main e95ca47, T1 and T2 changed it. The owner's direction
+io and `Std.Internal.UV` in threads mode (0.5). T3 is the second driver,
+`tests/sched-driver-mt`, which runs the task, sync, refs and taskio cases in
+threads mode, 5 times each, with the single-thread driver's ports; the new
+cases recorded natively; and the site's page for threads mode (0.6). Later
+items (section 5): `net` in threads mode (N), the translators' threads modes
+(leanrs's L2, lean2rr's E2), and the measurement step P, which needs the
+owner's permission. The design below was written at main 1c36a58; section 0
+says where main e95ca47, T1, T2 and T3 changed it. The owner's direction
 (2026-10-03): "parallelism will be supported, not the focus now".
 
 The owner's decisions (2026-10-04):
@@ -24,8 +28,8 @@ are folded in (section 6). Its seven constraints for T1 (2026-10-04, from
 what its adoption of `sched` uses) are answered point by point in 0.3.
 
 This file is the implementors' reference. It covers:
-0. what changed since the design, T1's and T2's choices, and leanrs's
-   constraints;
+0. what changed since the design, T1's, T2's and T3's choices, and
+   leanrs's constraints;
 1. the model, and how each rule of `sched` carries over;
 2. the contract a translator meets so that values can cross threads;
 3. the crate's shared state that needs locks or atomics;
@@ -44,7 +48,7 @@ section 0 at e95ca47, T1 (main 2df0ab5) and T2. libuv: 1.48.0, the version
 Lean 4.34.0 links (`src/unix/core.c` `uv_run`, `src/timer.c`
 `uv__run_timers`).
 
-## 0. Since the design: main e95ca47, T1 and T2
+## 0. Since the design: main e95ca47, T1, T2 and T3
 
 ### 0.1 What main gained, and what it means for the pool
 
@@ -90,12 +94,12 @@ LSCHED-01), net-1, net-2, fixes-1 and the io batches (AR-1 to AR-20).
   `IO.getTaskState` gives native's answer at once.
 - sched-4's `holds_worker` bookkeeping, and LSCHED-01 with the pure-task
   rule: a runaway pure task takes its worker, as natively, so
-  `tasks/runaway_pure_task_before_io` should give native's outcome, not its
-  `alt1` (T3's driver runs it). The same holds for fixes-3's started pure
-  tasks that keep their workers (AR-25), LSCHED-02
-  (`tasks/runaway_pure_before_awaited`) and LSCHED-03
-  (`tasks/picked_task_sleeping_worker`, where real workers race as
-  natively).
+  `tasks/runaway_pure_task_before_io` gives native's outcome, not its
+  `alt1`. The same holds for fixes-3's started pure tasks that keep their
+  workers (AR-25), LSCHED-02 (`tasks/runaway_pure_before_awaited`) and
+  LSCHED-03 (`tasks/picked_task_sleeping_worker`, where real workers race
+  as natively). T3's driver checks it: it accepts no alternative of an
+  LSCHED case, and all four give native's outcome in 5 of 5 runs (0.6).
 - The yield points (`effect`, `poll`, `ref_read`, `set_ref_read_yields`),
   `STALE`, `LATENCY_*`, `POLL_QUERIES` and `EARLY`: no-ops, or nothing.
 - The no-suspend scope stays callable (leanrs's point 1): a depth per
@@ -566,15 +570,99 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   40 to 100 ms, `timer_oneshot`'s 60 to 150 ms, `timer_cancel_reset`'s 200
   to 300 ms.
 
-**Left for T3 or later** (section 5):
-- T3: the second driver `tests/sched-driver-mt` (the `tasks/`, `sync/`,
-  `refs/` and `taskio/` cases over `sched::mt`), the new cases recorded
-  natively (4), the site's pages for threads mode;
-- later: `net` in threads mode (networking is not a target now, owner);
-  the real fix of the working directory's fallback,
+**Left for later** (section 5; T3 is done, 0.6):
+- `net` in threads mode (networking is not a target now, owner); the real
+  fix of the working directory's fallback,
   `posix_spawn_file_actions_addchdir_np`, which needs `unsafe`;
 - `sched::uv`'s loop thread made at startup, as natively, only if a case
   ever needs it (none does).
+
+### 0.6 T3: the task cases in both modes
+
+T3 (branch threads-3, 2026-10-04) runs the program cases with tasks in
+threads mode through a second driver, recorded the cases that need real
+contention, and added the site's page for threads mode (`site/threads.html`).
+
+**The second driver**, `tests/sched-driver-mt` (binary `sched-cases-mt`), is
+a workspace package of its own. `threads` and the coroutine `sched` exclude
+each other in one build (2.5), so cargo builds it in an invocation of its
+own: `cargo test -p sched-driver-mt` (`docs/development.md`, "Tests").
+- **Shared ports, no fork.** The ports of the `tasks/`, `sync/`, `refs/`
+  and `taskio/` cases are one file, `tests/sched-driver/src/cases.rs`, which
+  both drivers compile (this one by `#[path]`), with Lean's IO definitions
+  (`lio.rs`) and the glue's scheduler-independent part (`glue_common.rs`:
+  output, Lean's panics, `IO.Process.exit`, native's startup descriptors).
+  A port names only what both drivers' `lean.rs` define: `Task`, `Promise`,
+  `Ref`, the task functions, `Obj` (a counted object a task shares: `Rc`,
+  or `Arc` here) and `Var` (a cell a task writes: `RefCell`, or a lock). The
+  single-thread driver's other ports (`uvloop/`, the io and process cases
+  with tasks, its own programs) moved to `cases_st.rs`.
+- **The values** (`tests/sched-driver-mt/src/lean.rs`): a task is an `Arc`
+  with a `OnceLock` slot, its last drop calls `release` from any thread;
+  `Promise` the same; `IO.Ref` is `sched::Ref`, the rule of 3.1; every job
+  and closure is `Send`, every value `Clone + Send + Sync`.
+- **The glue** (`glue.rs`): `install_stack_overflow_handler` on `main`'s
+  thread (the manager's threads install it themselves), the initializers,
+  `sched::start(Arc<dyn Glue>)`, `main`, `finish`, the flush. No `unsafe`.
+  The five hooks check the crate's side of their contract in every case
+  (2.4): `thread_start` and `thread_end` pair up on each thread the manager
+  makes, and all have ended once `finish` returns; `task_begin` and
+  `task_end` nest on each thread, with the same `own_thread`, and none is
+  open at `thread_end` or after `finish`; a task with a thread of its own
+  begins only on a thread the manager made that runs no other task (review
+  RT3-03); `workers_end` (fixes-4, AR-34) comes once, from `finish` on
+  `main`'s thread with no task open, after every standard worker made
+  before `finish` has ended. A broken rule aborts the run, so the case
+  fails.
+- **What it accepts.** Every case of the four areas runs 5 times, one run
+  after the other, 6 cases at a time (`SCHED_MT_JOBS`; `SCHED_MT_CASES`
+  picks cases). Each run must give the expected outcome or a recorded
+  alternative, as `scripts/cases.py check` compares it (the single-thread
+  driver's runner, `tests/sched-driver/tests/runner/`), with one exception:
+  a case whose `deviations` give `lean_runtime` a known difference
+  `LSCHED-xx` accepts no alternative, since its alternative is the deferred
+  model's outcome and threads mode is native's model. A Lean-bug case's
+  expected files are the correct outcome, so a run with native's fails.
+  Alternatives come from native runs only (section 4).
+- **Single-thread-only cases.** `cases::SINGLE_THREAD_ONLY` lists, with the
+  reason, a case of the four areas whose port depends on what only the
+  single-thread scheduler has (its yield points, the deferred model of an
+  LSCHED difference); the driver refuses to run it, and its test checks
+  that every case of the four areas either runs or is listed, and that each
+  case's TOML is in a form its LSCHED check reads (review RT3-02). At T3 the
+  list is empty: the yield points are no-ops in threads mode and no port
+  needs them, and the LSCHED cases give native's outcome.
+- **`uvloop/`** is not this driver's: `tests/threads_twins.rs` runs all 34
+  of its cases in threads mode, each inside a task (0.5, item 4).
+- **Results at T3**: 101 cases of 101 (with fixes-4's
+  `tasks/worker_streams_before_dedicated`), 5 runs each, in a debug and a
+  release build; no case needed a new alternative. The single-thread
+  driver passes the same 101.
+
+**The new cases** (`tests/cases/tasks/`, recorded natively with
+`scripts/cases.py expect`, 5 runs each, identical; both drivers run them):
+- `wait_chain_beyond_pool` (`LEAN_NUM_THREADS=2`): six pool tasks, each
+  waiting for a promise the next one resolves; each wait raises the pool by
+  one (`wait_for`), so the chain unwinds from the last task to the first;
+- `wait_any_faster` (`LEAN_NUM_THREADS=2`): `IO.waitAny [slow, fast]`
+  returns the fast task's value while the slow task still sleeps;
+- `stack_overflow_in_dedicated` (`LEAN_STACK_SIZE_KB=1024`): Lean's
+  message and status 134 from a dedicated task's own thread;
+- `late_tasks_while_enqueuing` (LB-13, `LEAN_NUM_THREADS=1`): after `main`
+  returned, a dedicated task enqueues a pool task every 200 ms while the
+  only worker runs a busy task for 500 ms. Natively the worker runs the
+  two tasks queued meanwhile, then exits, and the three enqueued later
+  never run (`native`); the expected outcome runs all five.
+
+Already present, and now run in threads mode too: LB-01's `refs/lost_update`
+(a task sets a reference while `main` reads it), a stack overflow in a pool
+task (`tasks/stack_overflow_in_task`), LB-13's `late_*` cases (one late
+enqueue each), and a mutex handed between real threads
+(`sync/mutex_handoff`: `main` to a dedicated task; `sync/condvar_turns`:
+two dedicated tasks).
+
+**`scripts/check.sh`** runs both drivers, in a debug and a release build,
+on both toolchains, and clippy on both packages.
 
 ## Summary
 
@@ -1098,7 +1186,9 @@ agrees (6). The crate gives:
 - the semantics (this section);
 - the program cases of `refs/`: `lost_update` and `set_during_modify`
   (LB-01), `swap_during_modify` (LB-18), `get_during_modify`;
-- a reference implementation in the drivers (`tests/sched-driver`);
+- a reference implementation in the drivers (`tests/sched-driver`'s `Ref`
+  for the single-thread scheduler; `tests/sched-driver-mt`'s wraps
+  `sched::Ref`);
 - in threads mode, the rule as a generic type, `sched::Ref<T>` (T1,
   `src/sched/mt/refs.rs`; leanrs's point 3): a `Mutex<Option<T>>` and a
   `Condvar`, which a translator's ref may wrap or copy. It holds the
@@ -1228,21 +1318,31 @@ becomes a hand-written `alt1`.
   twin inside a task, and `tests/threads_twins.rs` runs the uvloop cases
   over threads mode's `sched::uv`, and the task cases of review AR-24, once
   each.
-- **A second driver**, `tests/sched-driver-mt`, a package of its own:
-  `threads` and the coroutine `sched` exclude each other in one build (2.5),
-  so cargo builds it in a separate invocation. Its glue is over
-  `sched::mt`, its values use `Arc`, a `OnceLock` slot and the `IO.Ref` of
-  3.1, and it shares the case ports (`cases.rs`). It runs the cases of
-  `tasks/`, `sync/` and `refs/` 5 times each, and accepts the recorded
-  outcome or a recorded alternative; a case with a `native` field (LB-13's)
-  must give the corrected outcome every time.
+- **Two drivers, one set of ports** (T3, 0.6). `tests/sched-driver` runs
+  the program cases with tasks over the single-thread scheduler, once each;
+  `tests/sched-driver-mt`, a package of its own (`threads` and the
+  coroutine `sched` exclude each other in one build, 2.5, so cargo builds
+  it in a separate invocation), runs the ports of the `tasks/`, `sync/`,
+  `refs/` and `taskio/` cases, the same file, over `sched::mt`, with `Arc`
+  values, a `OnceLock` slot, `sched::Ref` for `IO.Ref` (3.1) and a glue
+  whose hooks check their contract. It runs every case 5 times and accepts
+  the recorded outcome or a recorded alternative, but no alternative of an
+  `LSCHED-xx` case (the deferred model's); a Lean-bug case (`native`) must
+  give the corrected outcome every time. A case whose port needs the
+  single-thread scheduler would be listed in `cases::SINGLE_THREAD_ONLY`,
+  with the reason; none is (T3). The `uvloop/` cases run in threads mode
+  in `tests/threads_twins.rs`.
 - **`scripts/check.sh`** runs both drivers, in debug and release builds.
   ThreadSanitizer is run by hand (nightly), as AddressSanitizer is today.
-- **New cases, recorded natively,** that need contention: LB-01 (a task
-  sets a ref while `main` reads it); more tasks than `LEAN_NUM_THREADS`
-  waiting on each other; `IO.waitAny` returning the faster of two tasks; a
-  stack overflow in a pool and in a dedicated task; an exit while tasks
-  still enqueue (LB-13); a mutex handed between real threads.
+- **Cases that need contention, recorded natively** (T3, 0.6): LB-01, a
+  task setting a ref while `main` reads it (`refs/lost_update`); more tasks
+  than `LEAN_NUM_THREADS` waiting on each other
+  (`tasks/wait_chain_beyond_pool`); `IO.waitAny` returning the faster of
+  two tasks (`tasks/wait_any_faster`); a stack overflow in a pool and in a
+  dedicated task (`tasks/stack_overflow_in_task`,
+  `stack_overflow_in_dedicated`); an exit while tasks still enqueue, LB-13
+  (`tasks/late_tasks_while_enqueuing`, and the `late_*` cases); a mutex
+  handed between real threads (`sync/mutex_handoff`, `condvar_turns`).
 - **The translators** run their program cases (`cases.py check --exe-dir`)
   against a single-thread build and a threads build of each case.
 
@@ -1269,7 +1369,7 @@ needs brute force.
 | T1 | Done (2026-10-04, branch threads-1). `sched::mt`: the task manager (spawn, depend, wait, waitAny, state, cancel, release, promises, exit without LB-13), `mt::sync`, `mt::Glue`, `sched::Ref`, worker and dedicated threads with Lean's stack size, the stack-overflow report on them | T0: the IO switch, and the order the owner set | About 1,300 lines and 900 of unit tests | Yes, with Miri |
 | T2 | Done (2026-10-04, branch threads-2; 0.5). io in threads mode: the blocking path (since T1, io's plain path by `cfg`); the `CWD_LOCK` rule of 3.2, `with_path_lookup` around every system call that looks up a path, in threads builds where `unshare(CLONE_FS)` is refused (review RT1-04); a worker's streams and `errno` kept from task to task, in both modes (reviews RT2-L-01, AR-24); `sched::uv` on threads (a loop thread for timers and signals, `LoopPromise` with `Send` bounds, the routing of signals of 3.2, the placeholders); the io and uvloop twins inside tasks, and the task cases of AR-24; the review round RT2 | T1 | About 2,000 lines, comments included (250 of them moved out of `sched/uv.rs`), and 2,500 of tests | Yes |
 | N | Later: `net` in threads mode (the network on the loop thread; `threads` with `net` stays a compile error until then). Networking is not a target now (owner, 2026-10-04), and leanrs's threads mode comes later | T2 | Medium | Yes |
-| T3 | The second driver (`tests/sched-driver-mt`: `tasks/`, `sync/`, `refs/`, `taskio/`), `check.sh`, the new cases recorded natively, the site's pages for threads mode | T1, T2 | About 700 lines, and the cases | Yes |
+| T3 | Done (2026-10-04, branch threads-3; 0.6). The second driver (`tests/sched-driver-mt`: the `tasks/`, `sync/`, `refs/` and `taskio/` cases, 5 runs each, with the single-thread driver's ports, shared), `check.sh`, the new cases recorded natively, the site's page for threads mode | T1, T2 | About 700 lines of driver and test, the shared ports moved, and 4 cases | Yes |
 | L1 | leanrs adopts the single-thread `sched` (already planned) | sched-io | leanrs's | No |
 | L2 | leanrs threads mode, behind a feature of leanrs's own: an `Arc` alias; twins of `Nat` (Lem-NT), `Shared` (Lem-SC), `Task`, `Thunk` and `IO.Ref`; `Lazy` for constants; the glue over `sched::mt` | T3, L1 | Medium to large | No |
 | R1 | Not now (owner, 2026-10-04: "reussir no change yet"). Later: a whole-program atomic mode, or `Arc` for arrays and closures plus an atomic flag on opaque types (2.3) | — | Large (Reussir's §7 items 1, 3, 4) | No |

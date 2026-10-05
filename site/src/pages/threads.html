@@ -1,0 +1,171 @@
+<h1>Threads mode</h1>
+<p class="lead">Threads mode (feature <code>threads</code>) is Lean 4.34.0's task manager on real OS threads.
+It is the module <code>sched::mt</code>, which a <code>threads</code> build uses in place of the single-thread scheduler.</p>
+
+<div class="note"><p>Threads mode came in three batches on 2026-10-04.
+T1 is the task manager, T2 is <code>io</code> and <code>Std.Internal.UV</code> on threads, and T3 is the second test driver.
+The owner chose native's worker pool, and atomic values in every threads-mode program (2026-10-04).
+No translator uses threads mode yet.
+leanrs plans it; lean2rr stays single-threaded for now.</p></div>
+
+<div class="toc"><ul>
+  <li><a href="#what">What the mode is</a></li>
+  <li><a href="#pool">The worker pool</a></li>
+  <li><a href="#per-thread">What each thread has</a></li>
+  <li><a href="#values">Values that cross threads</a></li>
+  <li><a href="#differences">Known differences</a></li>
+  <li><a href="#tests">How it is tested</a></li>
+  <li><a href="#later">Later</a></li>
+</ul></div>
+
+<h2 id="what">What the mode is</h2>
+<ul>
+  <li><strong>One scheduler per build.</strong> A translator chooses the mode when it builds a program.
+    The feature <code>threads</code> excludes <code>sched</code> and <code>net</code>: a build with both is a compile error.</li>
+  <li><strong>The same names.</strong> A <code>threads</code> build re-exports <code>sched::mt</code> as <code>sched</code>.
+    So the glue calls <code>sched::spawn</code>, <code>sched::wait</code> and the other functions by the same names in both modes.</li>
+  <li><strong>What changes for the glue:</strong>
+    <ul>
+      <li>a job is <code>Send</code>, because a worker thread runs it and drops it;</li>
+      <li>the glue is an <code>Arc&lt;dyn Glue&gt;</code>, with <code>Send</code> and <code>Sync</code>;</li>
+      <li>the glue has five optional hooks: <code>thread_start</code>, <code>thread_end</code>, <code>task_begin</code>, <code>task_end</code> and <code>workers_end</code>;</li>
+      <li>there are no coroutines, so there is no <code>Glue::suspend</code> and no <code>unsafe</code> step in the glue.</li>
+    </ul></li>
+  <li><strong>Blocking calls.</strong> With <code>io</code>, a blocking call blocks only its own thread, as natively.
+    The cooperative IO of <a href="sched.html#sched-io">sched-io</a> belongs to the single-thread scheduler only.</li>
+  <li><strong>Yield points</strong> are calls that do nothing in this mode.</li>
+  <li><strong>No cost elsewhere.</strong> A build without <code>threads</code> does not change: it has no <code>Arc</code> and no new lock.</li>
+</ul>
+
+<h2 id="pool">The worker pool</h2>
+<figure class="fig">
+{{svg:threads-pool}}
+<figcaption>Figure 1. The worker pool.
+Worker 2 waits for a task, so the manager may make one more worker.
+The loop thread exists only after the program's first use of <code>Std.Internal.UV</code>.</figcaption>
+</figure>
+<ul>
+  <li><strong>Workers.</strong> The pool has up to <code>LEAN_NUM_THREADS</code> standard workers, or one per online processor.
+    The manager makes them when tasks need them.</li>
+  <li><strong>Stacks.</strong> Every thread that the manager makes, and the loop thread, has Lean's stack size: 1 GiB, or <code>LEAN_STACK_SIZE_KB</code> plus 128 KiB.
+    The io layer's own helper threads keep std's default size.</li>
+  <li><strong>Dedicated tasks.</strong> A task with a priority above <code>Task.Priority.max</code> gets a thread of its own.</li>
+  <li><strong>One lock</strong> protects the task table and the queues, as in native's task manager.</li>
+  <li><strong>Waits.</strong> A pool task that waits in <code>Task.get</code> or <code>IO.wait</code> raises the pool's limit by one while it waits.
+    So waiting tasks cannot take every worker and starve the pool.
+    <code>IO.waitAny</code> keeps its worker, as natively.</li>
+  <li><strong>Dependents.</strong> A <a href="glossary.html#g-sync-dependent">sync dependent</a> runs on the thread that finishes its source.
+    The other dependents go to the queue.
+    The waiters of a task wake when the walk of its dependents ends, as natively.</li>
+  <li><strong>The loop thread.</strong> <code>Std.Internal.UV</code>'s timers and signals run on a thread of their own, as natively (T2).
+    That thread resolves their promises.</li>
+  <li><strong>Exit.</strong> After <code>main</code>, <code>finish</code> sets Lean's shutdown flag, and works in this order, as native's task manager does:
+    <ol>
+      <li>It waits until the queue is empty and joins the standard workers.
+        Their thread-locals, such as the streams a task left set, end there.</li>
+      <li>It calls the glue's <code>workers_end</code> (AR-34).</li>
+      <li>It waits for the dedicated tasks and joins their threads.</li>
+    </ol>
+    Then the glue flushes the streams and exits.</li>
+  <li><strong>Late tasks.</strong> A pool task enqueued during the shutdown gets a worker and runs.
+    Natively it is lost once no worker is left (<a href="lean-bugs.html#lb-13">LB-13</a>).</li>
+</ul>
+
+<h2 id="per-thread">What each thread has</h2>
+<div class="tblwrap"><table>
+<thead><tr><th>State</th><th>In threads mode</th></tr></thead>
+<tbody>
+<tr><td>Current standard streams (<code>IO.setStdout</code> and the others)</td><td>Per thread, as natively.
+A pool worker keeps them from one task to the next.
+A new worker, a dedicated task's thread and <code>main</code> start with the process's streams.</td></tr>
+<tr><td><a href="glossary.html#g-errno">errno</a></td><td>Per thread, as C's <code>errno</code>.
+A pool worker keeps it from one task to the next.</td></tr>
+<tr><td>The tasks that run on the thread</td><td>Per thread: <code>IO.checkCanceled</code> and the <code>sync</code> check of <code>Task.get</code> read them.</td></tr>
+<tr><td>Lean's stack-overflow report</td><td>Each thread that the manager makes installs it at its entry (feature <code>stack-overflow</code>).</td></tr>
+<tr><td>Task table and queues</td><td>One for the process, under one lock.</td></tr>
+<tr><td>The <code>FILE</code>s of the standard streams, the open handles</td><td>One for the process, with a lock each, as glibc's.</td></tr>
+<tr><td>The working directory</td><td>One for the process, as natively.
+Where the kernel refuses <code>unshare(CLONE_FS)</code>, path lookups hold a lock while a spawn changes the directory.</td></tr>
+<tr><td><code>Std.Internal.UV</code>'s loop</td><td>One for the process: one loop thread and one loop lock.</td></tr>
+</tbody></table></div>
+
+<h2 id="values">Values that cross threads</h2>
+<ul>
+  <li><strong>Atomic values.</strong> In a threads-mode program, every counted object is atomic (decision of 2026-10-04).
+    Native Lean marks objects as multi-threaded only when they cross threads.
+    Neither translator can do that, so both would make every count atomic.</li>
+  <li><strong>Tasks.</strong> The glue's task object is an <code>Arc</code> with a <code>OnceLock</code> slot.
+    The job fills the slot.
+    The last drop of an unfinished task calls <code>release</code>, on any thread.</li>
+  <li><strong>References.</strong> <code>IO.Ref</code> follows Lean 4.35's rule, as <code>sched::Ref</code>: a lock and a condition variable.
+    While a <code>modify</code> function runs, <code>get</code>, <code>take</code>, <code>set</code> and <code>swap</code> wait for its store.
+    So a <code>set</code> is never lost (<a href="lean-bugs.html#lb-01">LB-01</a>).
+    A <code>swap</code> never returns its own argument (<a href="lean-bugs.html#lb-18">LB-18</a>).</li>
+  <li><strong>Thunks and lazy constants</strong> block their thread with std's <code>OnceLock</code>, as native's <code>lean_obj_once</code> does.</li>
+  <li><strong>Rust panics.</strong> A Rust panic in a job or in a hook ends the process with an abort, on any thread.</li>
+</ul>
+
+<h2 id="differences">Known differences</h2>
+<ul>
+  <li><strong>Native bugs are not copied.</strong> LB-01, LB-13, LB-18 and LB-32 stay fixed, as in the single-thread scheduler.
+    So do the loop's LB-19, LB-20, LB-33 and LB-34 (<a href="lean-bugs.html">Lean bugs</a>).</li>
+  <li><strong>After the exit's wait</strong> there is no task manager, as natively.
+    A few native calls then use a null manager.
+    Here they give safe answers: a promise resolved then runs its dependents at once.</li>
+  <li><strong>A native data race is avoided.</strong> Native Lean stores a bind task's next step without the lock.
+    Here the store holds the lock.</li>
+  <li><strong>A refused spawn.</strong> Where <code>unshare(CLONE_FS)</code> once worked, a later refusal makes the spawn fail with <code>EAGAIN</code>.
+    Natively the forked child enters its directory itself.</li>
+  <li><strong>The loop thread</strong> starts at the first use of <code>Std.Internal.UV</code>, not at the program's start.</li>
+  <li><strong>Schedules.</strong> The order of racy output lines varies from run to run, as natively.
+    Thread ids and the resident memory are not native's.</li>
+  <li><strong>No LSCHED differences.</strong> The <a href="sched.html#pure">pure-task rule</a> and its known differences (LSCHED-01 to LSCHED-03) are the single-thread scheduler's.
+    In threads mode those cases give native's outcome.</li>
+</ul>
+
+<h2 id="tests">How it is tested</h2>
+<figure class="fig">
+{{svg:threads-drivers}}
+<figcaption>Figure 2. Two drivers, one set of ports.
+Both compile the same Rust port of each case; only the glue and the values differ.</figcaption>
+</figure>
+<ul>
+  <li><strong>Unit tests</strong> of <code>sched::mt</code>, also under <a href="glossary.html#g-miri">Miri</a> (opt-in), which finds data races.</li>
+  <li><strong>The io and uvloop twins</strong> run inside tasks in a threads build (T2).</li>
+  <li><strong>The second driver</strong> (T3), <a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a>, runs every case of <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code>.
+    It runs the same Rust ports as the single-thread driver.
+    Cargo builds it alone, because one build cannot have both schedulers.</li>
+  <li><strong>Five runs.</strong> The driver runs each case 5 times.
+    Each run must give the recorded outcome or a recorded alternative.
+    A new alternative is recorded only from native runs, never from the crate's own runs.</li>
+  <li><strong>LSCHED cases.</strong> A case with a known difference of the single-thread scheduler accepts only native's outcome here.</li>
+  <li><strong>Lean bugs.</strong> A case for a <a href="lean-bugs.html">Lean bug</a> must give the correct outcome in every run.</li>
+  <li><strong>The hooks.</strong> The driver's glue checks the hooks' contract in every run.
+    For example, a worker never begins a task inside another task.</li>
+  <li><strong>Single-thread-only cases.</strong> A case whose port needs the single-thread scheduler would go in one list, with the reason.
+    The list is empty: every case passes in both modes.</li>
+  <li><strong>Cases with real contention</strong> (T3, recorded natively):
+    <ul>
+      <li><code>wait_chain_beyond_pool</code>: six pool tasks on two workers wait on each other;</li>
+      <li><code>wait_any_faster</code>: <code>IO.waitAny</code> returns the faster of two running tasks;</li>
+      <li><code>stack_overflow_in_dedicated</code>: Lean's report on a dedicated task's thread;</li>
+      <li><code>late_tasks_while_enqueuing</code>: the exit while a task still enqueues tasks (LB-13).</li>
+    </ul></li>
+  <li><strong>The check.</strong> <code>scripts/check.sh</code> runs both drivers, in debug and release builds, on both toolchains.</li>
+</ul>
+
+<h2 id="later">Later</h2>
+<ul>
+  <li><code>net</code> in threads mode.
+    Networking is not a target now (owner, 2026-10-04).</li>
+  <li>leanrs's threads mode: <code>Arc</code> values and its glue over <code>sched::mt</code>.</li>
+  <li>lean2rr's threads mode.
+    It needs atomic counts in Reussir first.
+    Not now (owner, 2026-10-04).</li>
+  <li>The measurement of both modes' time and memory, then the choice of defaults.
+    This needs the owner's permission.</li>
+</ul>
+
+<p class="more">Detail: <a href="repo:docs/threads.md">docs/threads.md</a> (the design, T1 to T3), and <a href="repo:src/sched/mt/mod.rs">src/sched/mt/</a>:
+<a href="repo:src/sched/mt/task.rs">task.rs</a>, <a href="repo:src/sched/mt/refs.rs">refs.rs</a>, <a href="repo:src/sched/mt/sync.rs">sync.rs</a> and <a href="repo:src/sched/mt/uv.rs">uv.rs</a>.
+The drivers are <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> and <a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a>.</p>

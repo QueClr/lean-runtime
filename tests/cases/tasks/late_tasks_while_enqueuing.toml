@@ -1,0 +1,12 @@
+id = "late_tasks_while_enqueuing"
+area = "tasks"
+lean_version = "4.34.0"
+source = "LB-13 (docs/lean-bugs.md) with tasks still enqueuing at the exit; lean-runtime threads mode, batch T3 (docs/threads.md, section 4)"
+streams = "separate"
+deviations = { lean2rr = "LB-13", leanrs = "LB-13" }
+native = { stdout = "main returns\ndedicated enqueues task 0\ndedicated enqueues task 1\nbusy task done\nlate task 0 ran\nlate task 1 ran\ndedicated enqueues task 2\ndedicated enqueues task 3\ndedicated enqueues task 4\n", stderr = "", code = "0" }
+# `expected` (the .out, .err and .code files) is the correct outcome,
+# which lean-runtime's schedulers give (written by hand); native Lean
+# 4.34.0's outcome, recorded over 5 runs (identical), is `native`: the busy
+# task's worker runs the two tasks enqueued while it was busy, then exits,
+# and the three enqueued after that never run (LB-13).

@@ -52,6 +52,7 @@ PAGES = [
     ("semantics", "semantics"),
     ("io", "io"),
     ("sched", "sched"),
+    ("threads", "Threads mode"),
     ("net", "net"),
     ("testing", "Testing"),
     ("lean-bugs", "Lean bugs"),
