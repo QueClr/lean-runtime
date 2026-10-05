@@ -5,12 +5,14 @@ source = "LB-34 (docs/lean-bugs.md; lean2rr-side judge 2026-10-04, leanrs cross-
 streams = "separate"
 expect = { hang = 5 }
 deviations = { lean2rr = "LB-34", leanrs = "LB-34" }
-native = { stdout = "cancel: begin\ncancel: end\nmain's next after cancel: some 10\ndependent values: #[none]\nstop: end\n", stderr = "", code = "timeout" }
+native = { stdout = "cancel: begin\ncancel: end\nmain's next after cancel: some 10\n", stderr = "", code = "timeout" }
 # `expected` is the correct outcome: the repeating watcher keeps listening
 # without a promise during the release (lean-runtime's own order for
 # `cancel`: Lean master's `cancel` is unchanged, so this is our correction),
 # so the dependent's re-subscription is kept, `main`'s `next` gives it, and
-# the signal resolves it; its second run is in the walk of `sync`
-# dependents, before `main` wakes. Native Lean 4.34.0's outcome, recorded
-# over 5 runs, is `native`: the re-subscription is lost, and the double free
-# leaves the process hanging at exit.
+# the signal resolves it; `main` then waits for `done`, which the
+# dependent's second run resolves after it records the value (a wait for
+# the promise alone can return before its `sync` dependents have run,
+# natively too: review AR-41). Native Lean 4.34.0's outcome, recorded over
+# 5 runs, is `native`: the re-subscription is lost, so `done` never
+# resolves and `main` waits forever.

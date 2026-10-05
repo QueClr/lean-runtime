@@ -1235,8 +1235,9 @@ fn signal_stop_rearm_in_sync_dependent(args: &[String]) -> u32 {
 }
 
 /// `arm` of `signal_cancel_rearm_in_sync_dependent`: records each value,
-/// subscribes again in the first run only.
-fn signal_arm_record(s: USignal, values: SharedRef<Vec<String>>) {
+/// subscribes again in the first run only, and resolves `done` in the
+/// second.
+fn signal_arm_record(s: USignal, values: SharedRef<Vec<String>>, done: UvPromise<()>) {
     let p = uv_ok(s.next(UvPromise::new));
     let task = p.result_opt();
     drop(p);
@@ -1247,7 +1248,9 @@ fn signal_arm_record(s: USignal, values: SharedRef<Vec<String>>) {
                 a
             });
             if values.get().len() == 1 {
-                signal_arm_record(s, values);
+                signal_arm_record(s, values, done);
+            } else {
+                done.resolve(());
             }
         },
         task,
@@ -1259,8 +1262,9 @@ fn signal_arm_record(s: USignal, values: SharedRef<Vec<String>>) {
 fn signal_cancel_rearm_in_sync_dependent(args: &[String]) -> u32 {
     let num: i64 = args[0].parse().expect("an Int");
     let values = new_ref(Vec::<String>::new());
+    let done: UvPromise<()> = UvPromise::new();
     let s: USignal = Signal::new(num as i32, true);
-    signal_arm_record(s.clone(), values.clone());
+    signal_arm_record(s.clone(), values.clone(), done.clone());
     say("cancel: begin");
     s.cancel();
     say("cancel: end");
@@ -1269,6 +1273,7 @@ fn signal_cancel_rearm_in_sync_dependent(args: &[String]) -> u32 {
     let r = q.result_opt().get();
     drop(q);
     say(&format!("main's next after cancel: {}", show_v(&r)));
+    let _ = done.result_opt().get();
     say(&format!("dependent values: {}", show_array(&values.get())));
     uv_ok(s.stop());
     say("stop: end");

@@ -2023,10 +2023,32 @@ fn a_pool_task_run_by_a_pool_waiter_takes_the_next_id() {
     // `a` waits for `c`, which runs on `a`'s stack: `a` still holds its
     // worker id (natively its thread waits in `Task.get`), so `c` takes the
     // next one; after both, the lowest is free again.
+    //
+    // `a` is spawned before `c` (review AR-38). The lone worker, woken by the
+    // first enqueue, starts the head of the highest non-empty queue once
+    // `LATENCY_COLD` (90 µs) has passed (`settle_worker`). With `c` spawned
+    // first, a stall of 90 µs before `a`'s spawn let the worker start `c`
+    // first, as a native worker would: then `c` ran before `a`, on the
+    // worker's id. With `a` first, `a` is the head of the highest queue from
+    // its spawn on (priority 8, and queued first), so `a` runs first whether
+    // the worker starts it at `c`'s spawn or at `main`'s wait. No task runs
+    // before `main`'s wait, so `c`'s id is set when `a` reads it.
     start_test(1);
     let seen: Seen = Rc::default();
     let s1 = seen.clone();
     let s2 = seen.clone();
+    let cid: Rc<Cell<Option<TaskId>>> = Rc::new(Cell::new(None));
+    let cid2 = cid.clone();
+    let a = spawn(
+        Box::new(move || {
+            s1.borrow_mut().push(("a before", running_worker()));
+            wait(cid2.get().expect("c is spawned before any task runs"));
+            s1.borrow_mut().push(("a after", running_worker()));
+            Outcome::Done
+        }),
+        8,
+        true,
+    );
     let c = spawn(
         Box::new(move || {
             s2.borrow_mut().push(("c", running_worker()));
@@ -2035,16 +2057,7 @@ fn a_pool_task_run_by_a_pool_waiter_takes_the_next_id() {
         0,
         true,
     );
-    let a = spawn(
-        Box::new(move || {
-            s1.borrow_mut().push(("a before", running_worker()));
-            wait(c);
-            s1.borrow_mut().push(("a after", running_worker()));
-            Outcome::Done
-        }),
-        8,
-        true,
-    );
+    cid.set(Some(c));
     wait(a);
     let s3 = seen.clone();
     let e = spawn(
