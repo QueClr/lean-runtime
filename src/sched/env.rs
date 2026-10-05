@@ -46,7 +46,7 @@ pub(crate) fn atoi_unsigned(s: &[u8]) -> u32 {
 /// glibc counts them from `/sys/devices/system/cpu/online` (a list of ranges
 /// such as `0-3,8-11`), and falls back to `/proc/stat`.
 pub fn hardware_concurrency() -> u32 {
-    if let Ok(s) = std::fs::read_to_string("/sys/devices/system/cpu/online") {
+    if let Some(s) = first_line("/sys/devices/system/cpu/online") {
         if let Some(n) = count_cpu_list(s.trim()) {
             return n;
         }
@@ -61,6 +61,33 @@ pub fn hardware_concurrency() -> u32 {
         }
     }
     0
+}
+
+/// The first line of the file at `path`, read as glibc's `get_nprocs`
+/// reads `/sys/devices/system/cpu/online` (review AR-31): `openat` with
+/// `O_RDONLY | O_CLOEXEC`, `read`s of 1024 bytes until a newline or the end
+/// (one, for a CPU list), then `close`. No `statx`: std's `read_to_string`
+/// makes one for its size hint, which native's startup does not.
+fn first_line(path: &str) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut line = Vec::new();
+    let mut buf = [0u8; 1024];
+    loop {
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                if let Some(k) = buf[..n].iter().position(|&b| b == b'\n') {
+                    line.extend_from_slice(&buf[..k]);
+                    break;
+                }
+                line.extend_from_slice(&buf[..n]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return None,
+        }
+    }
+    String::from_utf8(line).ok()
 }
 
 /// The number of processors in a kernel CPU list (`0-3,8,10-11`).
@@ -162,6 +189,23 @@ mod tests {
         // 2^32 + 3 keeps its low 32 bits.
         assert_eq!(atoi_unsigned(b"4294967299"), 3);
         assert_eq!(atoi_unsigned(b"\t-2"), u32::MAX - 1);
+    }
+
+    #[test]
+    fn first_lines() {
+        let dir = std::env::temp_dir().join(format!("lean-runtime-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("online");
+        std::fs::write(&f, "0-19\n").unwrap();
+        assert_eq!(first_line(f.to_str().unwrap()).as_deref(), Some("0-19"));
+        // longer than one read, and no newline at the end
+        let long: String = (0..400).map(|k| format!("{},", 2 * k)).collect();
+        std::fs::write(&f, long.as_bytes()).unwrap();
+        assert_eq!(first_line(f.to_str().unwrap()), Some(long.clone()));
+        std::fs::write(&f, format!("{long}\nsecond\n")).unwrap();
+        assert_eq!(first_line(f.to_str().unwrap()), Some(long));
+        assert_eq!(first_line(dir.join("absent").to_str().unwrap()), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -1,0 +1,5 @@
+id = "worker_streams_before_dedicated"
+area = "tasks"
+lean_version = "4.34.0"
+source = "leanrs's review of lean-runtime's AR-33 (AR-34: the workers' streams end before the dedicated tasks are waited for), batch fixes-4"
+streams = "separate"

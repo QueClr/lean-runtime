@@ -86,6 +86,7 @@ pub fn lookup(id: &str) -> Option<Case> {
         "runaway_pure_passed_over" => (no_init, runaway_pure_passed_over),
         "worker_streams_closed_at_exit" => (no_init, worker_streams_closed_at_exit),
         "worker_streams_at_process_exit" => (no_init, worker_streams_at_process_exit),
+        "worker_streams_before_dedicated" => (no_init, worker_streams_before_dedicated),
         "picked_task_short_sleeper_long" => (no_init, picked_task_short_sleeper_long),
         "picked_task_watchdog" => (no_init, picked_task_watchdog),
         "picked_task_sleep_zero" => (no_init, picked_task_sleep_zero),
@@ -5477,5 +5478,59 @@ fn picked_task_sleep_zero(args: &[String]) -> u32 {
     drop(t);
     let (fp, fq) = (has_finished(&p), has_finished(&q));
     eprintln(&format!("p finished: {fp}, q finished: {fq}"));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// Review AR-34 (fixes-4): the workers' streams end before the dedicated
+// tasks are waited for.
+
+/// `IO.println s` on the current stdout (`print_current`, with `\n`).
+fn println_current(s: &str) {
+    print_current(&format!("{s}\n"));
+}
+
+// def main (args : List String) : IO Unit := do
+//   let child ← IO.Process.spawn { cmd := "cat", stdin := .piped, stdout := .inherit }
+//   let (stdin, child) ← child.takeStdin
+//   let t ← IO.asTask (do
+//     discard <| IO.setStdout (IO.FS.Stream.ofHandle stdin)
+//     IO.println s!"via cat {args.length}")
+//   let _ ← IO.wait t
+//   let _d ← IO.asTask (prio := .dedicated) (do
+//     let c ← child.wait
+//     IO.eprintln s!"cat exited {c}")
+//   IO.eprintln "main done"
+fn worker_streams_before_dedicated(args: &[String]) -> u32 {
+    let n = args.len();
+    let child = ok(lio::spawn(
+        "cat",
+        &[],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    let process = child.process.take_stdin();
+    let t = as_task(
+        move || {
+            let _ = lean_runtime::io::streams::set_stdout(Some(stdin) as HandleOut, || None);
+            println_current(&format!("via cat {n}"));
+        },
+        PRIO_DEFAULT,
+    );
+    t.get();
+    drop(t);
+    // `_d` is unused: compiled Lean drops it at once (an IO task still runs)
+    drop(as_task(
+        move || match process.wait() {
+            Ok(c) => eprintln(&format!("cat exited {c}")),
+            Err(e) => eprintln(&format!("wait failed: {e:?}")),
+        },
+        PRIO_DEDICATED,
+    ));
+    eprintln("main done");
     0
 }

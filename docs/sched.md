@@ -316,33 +316,46 @@ natively they wake only when another referenced task finishes, or never.
 **Exit (decisions Q5 refinement A).** `finish` sets Lean's shutdown flag
 (`IO.checkCanceled` is true in tasks from then on). Then it runs the
 remaining tasks and waits, and only then returns; the glue then flushes the
-standard streams and exits. It waits until:
-- no task is queued or running, tasks enqueued meanwhile included;
-- every dedicated task has run to completion;
-- no context but `main`'s is left.
+standard streams and exits. In native's order (`~task_manager`,
+`object.cpp` 972-988: the standard workers leave their loops once the
+queue is empty and are joined, 981-982, and only then are the dedicated
+threads waited for, 984-985):
+1. it runs the queued and the started pool tasks and waits for the running
+   ones, until no pool task is queued, started or running;
+2. then the standard workers end (reviews AR-33, AR-34): with `io`, the
+   emulated workers' current standard streams and `errno` (`slots`) are
+   dropped, so a handle a task left set as its stdout is closed and
+   flushed; then the glue's `workers_end` (item 1 of "The glue"). Natively
+   each worker's thread finalizers (`lean_finalize_thread`, `thread.cpp`
+   58-61) drop the current streams of `MK_THREAD_LOCAL_GET` (`io.cpp`
+   115-117) when the worker ends;
+3. then it waits until every dedicated task has run to completion, tasks
+   enqueued meanwhile included (a pool task enqueued now, LB-13's corrected
+   run below, starts with a fresh set, dropped at its end), and no context
+   but `main`'s is left.
 
 It does not wait for a task whose dependency never finishes (an unresolved
 promise, a cycle), as natively.
 
-Then, with `io`, the emulated pool workers end (review AR-33): their
-current standard streams and `errno` (`slots`) are dropped, so a handle a
-task left set as its stdout is closed and flushed, before the glue flushes
-`main`'s streams. Natively `lean_finalize_task_manager` joins the standard
-workers (`~task_manager`, `object.cpp` 972-988), and each worker's thread
-finalizers (`lean_finalize_thread`, `thread.cpp` 58-61) drop the current
-streams of `MK_THREAD_LOCAL_GET` (`io.cpp` 115-117). Dedicated tasks drop
-theirs at their end, as their threads end then. What is never dropped, as
-natively: `main`'s streams (its thread is not finalized), the event loop
-context's (native's loop thread never ends), and every set at
-`IO.Process.exit`, which runs no thread finalizers natively either; glibc's
-exit then flushes `stdout` first and the other open streams after it, as
-`io::exit::exit_flush` does. Cases (recorded natively, `| cat`, also the
-same with 2 and 4 workers natively): `tasks/worker_streams_closed_at_exit`
-(a task makes a handle on `/dev/stdout` its stdout and prints `A0`; `main`
-prints `B`: `A0B`; before the fix `BA0`) and
-`tasks/worker_streams_at_process_exit` (the same, then `IO.Process.exit 0`:
-`BA0`), with twins in the driver and in threads mode, where the workers'
-thread-locals' destructors run when `finish` joins them.
+Dedicated tasks drop their streams at their end, as their threads end
+then. What is never dropped, as natively: `main`'s streams (its thread is
+not finalized), the event loop context's (native's loop thread never
+ends), and every set at `IO.Process.exit`, which runs no thread finalizers
+natively either; glibc's exit then flushes `stdout` first and the other
+open streams after it, as `io::exit::exit_flush` does. Cases (recorded
+natively, also the same with 2 and 4 workers natively), with twins in the
+driver and in threads mode (`tests/threads_twins.rs`), where the workers'
+thread-locals' destructors run when `finish` joins them before it waits
+for the dedicated threads:
+- `tasks/worker_streams_closed_at_exit` (`| cat`; a task makes a handle on
+  `/dev/stdout` its stdout and prints `A0`; `main` prints `B`: `A0B`;
+  before AR-33 `BA0`);
+- `tasks/worker_streams_at_process_exit` (the same, then
+  `IO.Process.exit 0`: `BA0`);
+- `tasks/worker_streams_before_dedicated` (a task makes `cat`'s input its
+  stdout and prints a line; a dedicated task waits for `cat`: `main done`,
+  `via cat 0`, `cat exited 0`; before AR-34 the workers' streams were
+  dropped only after the dedicated tasks, so `main done`, then a hang).
 
 Native Lean differs in one point, a Lean bug (LB-13 in
 `docs/lean-bugs.md`): once no standard worker is left after `main`, a pool
@@ -439,20 +452,22 @@ native ends. It would also run the runaway task of
 `tasks/runaway_pure_task_before_io` to free its worker, so `main` would
 print nothing (neither native's outcome nor `alt1`).
 
-The cases, recorded natively (5 runs each), with twins in the driver;
-"before" is the outcome before AR-25:
+The cases, recorded natively (5 runs each), with twins in the driver.
+"Now" is the crate's outcome today; "Before the fix" is the crate's
+outcome before the change the case checks, named in each cell (AR-25 at
+31c7bfa, or a fix of fixes-3's reviews):
 
-| Case | What the program does | Native | Before |
-|---|---|---|---|
-| `tasks/wait_pure_queue_order` | one worker; four pure tasks that print their number (`dbgTrace`); `main` waits for the last one first | `task 0` to `task 3` in order | `task 3` first, then 2, 1, 0 (`wait` started the three in front at once and ran the awaited one first) |
-| `tasks/drop_queued_behind_pure` | one worker, busy 50 ms with an IO task; `t0` (pure, about 100 ms) and `t1` (pure, never ends) queued behind it; `main` drops `t1` once the worker is free, then waits for `t0` | `t0 752938 false`, status 0 | hangs (the free worker started `t0` and `t1` at once, so `t1` could not be deleted) |
-| `tasks/runaway_pure_before_awaited` | LSCHED-02 below (two workers) | `t`'s line, then a hang | `t`'s line with `q` reported unfinished, then a hang (not native either) |
-| `tasks/picked_task_sleeping_worker` | LSCHED-03 below: two workers; IO task `a` sleeps 200 ms; `p` (pure, about 1 s, no yield point) started; `main` waits for pure `t` | `t` while `p` still runs (`p finished then: false`) | the same as now: `t` after `p` (`alt1`) |
-| `tasks/picked_task_reaches_yield_points` | two workers; `p` (pure, never ends) loops over an `ST.Ref`; `q` (pure, quick), then `t`; `main` waits for `t` (LF3-01) | `t = 1001`, `p` unfinished, `q` finished, then a hang | nothing, then a hang: `p` ran for the waiter, and its reference reads never let `q` run |
-| `tasks/picked_task_ticking_worker` | a control: two workers; an IO task sleeps 100 ms at a time until the exit; `p` (pure, about 100 ms) started; `main` waits for pure `t` (LF3-02) | `t = 2`, status 0 | passes; a waiter that waits for the ticker's wakes hangs |
-| `tasks/picked_task_short_sleeper_long` | a control: two workers; an IO task sleeps 1 s once; `p` (pure, a few ms) started; `main` waits for pure `t` (RF3-05) | `t` before 500 ms, then `tick` | passes; a waiter that waits for the sleeper's wake gets `t` after 1 s |
-| `tasks/picked_task_watchdog` | two workers; a watchdog IO task sleeps 3 s, then exits with status 1 unless shutting down; `p` (pure, about 100 ms) started; `main` waits for pure `t` (LF3-05) | `t = 2`, status 0 | passes; with RF3-02's wait (reverted), `timeout`, status 1 |
-| `tasks/picked_task_sleep_zero` | two workers; `p` (pure, never ends) calls `dbgSleep 0` at every step; `q` (pure, quick), then `t`; `main` waits for `t` (LF3-04) | `t = 1001`, `p` unfinished, `q` finished, then a hang | nothing, then a hang: `p`'s zero sleeps never let `q` run |
+| Case | What the program does | Native | Now | Before the fix |
+|---|---|---|---|---|
+| `tasks/wait_pure_queue_order` | one worker; four pure tasks that print their number (`dbgTrace`); `main` waits for the last one first | `task 0` to `task 3` in order | native's | before AR-25: `task 3` first, then 2, 1, 0 (`wait` started the three in front at once and ran the awaited one first) |
+| `tasks/drop_queued_behind_pure` | one worker, busy 50 ms with an IO task; `t0` (pure, about 100 ms) and `t1` (pure, never ends) queued behind it; `main` drops `t1` once the worker is free, then waits for `t0` | `t0 752938 false`, status 0 | native's | before AR-25: a hang (the free worker started `t0` and `t1` at once, so `t1` could not be deleted) |
+| `tasks/runaway_pure_before_awaited` | two workers; `p` (pure, never ends, no yield point), `q` (pure, quick), then `t`; `main` waits for `t` | `t`'s line, then a hang | nothing, then a hang (`alt1`, LSCHED-02 below) | before AR-25: `t`'s line with `q` reported unfinished, then a hang (not native either) |
+| `tasks/picked_task_sleeping_worker` | two workers; IO task `a` sleeps 200 ms; `p` (pure, about 1 s, no yield point) started; `main` waits for pure `t` | `t` while `p` still runs (`p finished then: false`) | `t` after `p` (`alt1`, LSCHED-03 below) | no fix: RF3-02's wait gave native's outcome, and was reverted after LF3-05 |
+| `tasks/picked_task_reaches_yield_points` | two workers; `p` (pure, never ends) loops over an `ST.Ref`; `q` (pure, quick), then `t`; `main` waits for `t` | `t = 1001`, `p` unfinished, `q` finished, then a hang | native's | before LF3-01: nothing, then a hang (`p` ran for the waiter, and its reference reads never let `q` run) |
+| `tasks/picked_task_ticking_worker` | a control: two workers; an IO task sleeps 100 ms at a time until the exit; `p` (pure, about 100 ms) started; `main` waits for pure `t` | `t = 2`, status 0 | native's | native's; a waiter that waited for every wake of the ticker (LF3-02's concern) would hang |
+| `tasks/picked_task_short_sleeper_long` | a control: two workers; an IO task sleeps 1 s once; `p` (pure, a few ms) started; `main` waits for pure `t` | `t` before 500 ms, then `tick` | native's | with RF3-02's wait (reverted): `t` after 1 s (RF3-05) |
+| `tasks/picked_task_watchdog` | two workers; a watchdog IO task sleeps 3 s, then exits with status 1 unless shutting down; `p` (pure, about 100 ms) started; `main` waits for pure `t` | `t = 2`, status 0 | native's | with RF3-02's wait (reverted after LF3-05): `timeout`, status 1 |
+| `tasks/picked_task_sleep_zero` | two workers; `p` (pure, never ends) calls `dbgSleep 0` at every step; `q` (pure, quick), then `t`; `main` waits for `t` | `t = 1001`, `p` unfinished, `q` finished, then a hang | native's | before LF3-04: nothing, then a hang (`p`'s zero sleeps never let `q` run) |
 
 Unit tests (`src/sched/tests.rs`): `an_awaited_pure_task_waits_for_the_pure_tasks_in_front`,
 `a_pure_task_behind_a_started_one_can_still_be_deleted`,
@@ -1010,6 +1025,20 @@ A translator writes this glue around the crate. `tests/sched-driver/src/`
    `a_pool_task_run_by_a_pool_waiter_takes_the_next_id`. In threads mode
    the same function gives the standard worker thread's index
    (`docs/threads.md`).
+
+   `Glue::workers_end` (review AR-34) is where the glue drops that
+   per-worker state: `finish` calls it once, after the last pool task, right
+   after it drops the io layer's per-worker sets, and before it waits for
+   the dedicated tasks ("Exit" above), as natively each standard worker's
+   thread finalizers run when `~task_manager` joins it. A pool task that
+   begins later (a dedicated task's dependent, LB-13's corrected run) gets a
+   fresh io set, dropped at its end; the glue does the same with its own
+   set: fresh at that task's `task_begin`, dropped at its `task_end`. Unit
+   tests `the_workers_end_once_before_the_dedicated_tasks_run` and
+   `a_late_pool_task_drops_its_streams_at_its_end`; in threads mode,
+   `the_workers_end_once_before_the_dedicated_threads_are_waited_for` (the
+   hook is there for symmetry: a glue's per-thread state is each thread's,
+   dropped at its `thread_end`).
 
    `switched` runs on `main`'s stack, inside the hub: it must not block or
    yield, and the scheduler panics if it tries. When nothing can run, the

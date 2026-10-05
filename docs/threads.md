@@ -351,10 +351,12 @@ modes, and the glue does nothing for it:
   (`io::streams`) and its modelled `errno` (`io::error`) are thread-locals,
   so a worker keeps them; `Glue::task_begin` and `task_end` have nothing to
   do for them (T2's `io::streams::task_begin` and `task_end` are gone).
-  A worker's thread-locals' destructors drop them when `finish` joins the
-  worker, before `main`'s flush, as native's thread finalizers do (review
-  AR-33; `tests/threads_twins.rs` runs `tasks/worker_streams_closed_at_exit`
-  and `worker_streams_at_process_exit`);
+  A worker's thread-locals' destructors drop them when it ends: `finish`
+  joins the standard workers once the queue is empty, then calls
+  `Glue::workers_end`, and only then waits for the dedicated threads, as
+  `~task_manager` does (`object.cpp` 981-985; reviews AR-33, AR-34;
+  `tests/threads_twins.rs` runs `tasks/worker_streams_closed_at_exit`,
+  `worker_streams_at_process_exit` and `worker_streams_before_dedicated`);
 - **the single-thread scheduler** (with `io`): `src/sched/slots.rs` keeps a
   `ThreadSlots` (the slots and the modelled `errno`) per context, swapped
   by the hub around each resume, and per emulated thread, swapped by
@@ -363,8 +365,9 @@ modes, and the glue does nothing for it:
   keeps what the task leaves; a dedicated task with a fresh set; the event
   loop's context keeps one set across loop contexts (native's one loop
   thread). The glue's `switched` must not swap `io::streams` too now.
-  `finish` drops the emulated workers' sets, as native's task-manager
-  finalization ends the workers (review AR-33).
+  `finish` drops the emulated workers' sets once no pool task is queued or
+  running, before it waits for the dedicated tasks, as native's task-manager
+  finalization ends the workers (reviews AR-33, AR-34).
   Which idle worker natively takes a task is the schedule's choice; the
   lowest free id is one of its outcomes, and the one the cases record.
 
@@ -811,7 +814,7 @@ items with `sched`:
 | Contexts | `Contexts`: coroutines, the hub, `cur`, `CtxId`, the stack pool (`ctx.rs`) | None. Each OS thread has a thread-local stack of its running tasks |
 | Waiters | `cell_waiters`, `progress_waiters`, listed by `CtxId` | Condition variables: a task finished (every waiter checks again), the queue, quiescence |
 | Jobs | `Box<dyn FnOnce() -> Outcome>` | `Box<dyn FnOnce() -> Outcome + Send>` |
-| Glue | `Rc<dyn Glue>`: `suspend`, `switched`, `task_begin`, `task_end` (sched-io removed `idle`: the hub waits in the scheduler's event loop) | `Arc<dyn mt::Glue>`, `Send + Sync`: `thread_start`, `thread_end`, `task_begin`, `task_end` |
+| Glue | `Rc<dyn Glue>`: `suspend`, `switched`, `task_begin`, `task_end`, `workers_end` (sched-io removed `idle`: the hub waits in the scheduler's event loop) | `Arc<dyn mt::Glue>`, `Send + Sync`: `thread_start`, `thread_end`, `task_begin`, `task_end`, `workers_end` |
 | `Std.Sync` | State in a `RefCell`, waiters by `CtxId` (`sync.rs`) | State in a `Mutex`, and a `Condvar` per object |
 | Streams, `errno` | io's thread-local slots and modelled `errno`, swapped per context and per emulated worker (`slots.rs`) | The same thread-locals, one set per real thread |
 | Stack bounds | `running_stack()` and the report's record, per context | Not needed; each thread's record holds its own guard |
@@ -948,6 +951,7 @@ pub trait Glue: Send + Sync {
     fn thread_end(&self) {}
     fn task_begin(&self, _own_thread: bool) {}  // the glue's own state
     fn task_end(&self, _own_thread: bool) {}
+    fn workers_end(&self) {}            // AR-34: the standard workers joined
 }
 pub fn start(glue: Arc<dyn Glue>);
 pub fn start_with(glue: Arc<dyn Glue>, workers: u32, stack_size: usize);

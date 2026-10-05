@@ -124,6 +124,19 @@ pub trait Glue: Send + Sync {
     /// has finished (its `sync` dependents have run), or waits for the task
     /// its bind function returned.
     fn task_end(&self, _own_thread: bool) {}
+
+    /// The task manager's finalization has ended its standard workers
+    /// (review AR-34): in `finish`, on its caller's thread, once the queue is
+    /// empty and every standard worker has left its loop and been joined
+    /// (so each one's `thread_end` and thread-locals' destructors have run),
+    /// before the dedicated threads are waited for, as natively
+    /// `~task_manager` joins the standard workers before it waits for the
+    /// dedicated threads. The single-thread scheduler calls it at the same
+    /// point, where it ends its emulated workers. Here a glue's own
+    /// per-thread state is the threads' own (`thread_end`), so the hook is
+    /// only for symmetry. Called once; a worker made later (a dedicated
+    /// task's dependent, LB-13's corrected run) ends with its thread.
+    fn workers_end(&self) {}
 }
 
 /// `lean_init_task_manager` (called by Lean's generated `main` after the

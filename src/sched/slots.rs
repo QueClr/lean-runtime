@@ -51,6 +51,9 @@ struct Store {
     /// `running_worker`): `None` while a task of that worker runs, or before
     /// its first task.
     workers: Vec<Option<ThreadSlots>>,
+    /// The workers have ended (`end_workers`): a pool task that runs later
+    /// (LB-13's corrected run) starts with a fresh set, dropped at its end.
+    ended: bool,
 }
 
 /// What it still forgets at thread exit (review AR-33): the sets of
@@ -73,17 +76,23 @@ thread_local! {
     static STORE: RefCell<Store> = RefCell::new(Store::default());
 }
 
-/// The task manager's finalization (`sched::finish`, review AR-33): the
-/// emulated pool workers end, and with them their sets, as natively
-/// `lean_finalize_task_manager` joins the standard workers, whose thread
-/// finalizers (`lean_finalize_thread`, `thread.cpp` 58-61) drop each
-/// worker's current streams (`MK_THREAD_LOCAL_GET`), closing a handle a
-/// task left set there, before `main`'s streams are flushed at the exit.
-/// In id order (natively the workers end in any order); outside the
-/// store's borrow, since a stream's drop is translator code.
+/// The task manager's finalization (`sched::finish`, reviews AR-33, AR-34):
+/// once no pool task is queued or running, the emulated pool workers end,
+/// and with them their sets, as natively `~task_manager` joins the standard
+/// workers first (`object.cpp` 981-982), whose thread finalizers
+/// (`lean_finalize_thread`, `thread.cpp` 58-61) drop each worker's current
+/// streams (`MK_THREAD_LOCAL_GET`), closing a handle a task left set there,
+/// and only then waits for the dedicated threads (984-985), before `main`'s
+/// streams are flushed at the exit. In id order (natively the workers end
+/// in any order); outside the store's borrow, since a stream's drop is
+/// translator code.
 pub(crate) fn end_workers() {
     let sets = STORE
-        .try_with(|s| std::mem::take(&mut s.borrow_mut().workers))
+        .try_with(|s| {
+            let mut s = s.borrow_mut();
+            s.ended = true;
+            std::mem::take(&mut s.workers)
+        })
         .unwrap_or_default();
     for set in sets {
         drop(set);
@@ -213,8 +222,9 @@ impl TaskSlots {
 impl Drop for TaskSlots {
     /// The task has ended (its `sync` dependents run), or waits for the task
     /// its bind function returned, or a panic unwinds it: the thread below
-    /// gets its set back; the worker keeps the task's, a dedicated task's
-    /// goes.
+    /// gets its set back; the worker keeps the task's, unless the workers
+    /// have ended (`end_workers`: a pool task of LB-13's corrected run); a
+    /// dedicated task's goes.
     fn drop(&mut self) {
         let Some(mut set) = self.held.take() else {
             return;
@@ -223,8 +233,11 @@ impl Drop for TaskSlots {
         let mut set = Some(set);
         if let Some(w) = self.worker {
             let _ = STORE.try_with(|s| {
-                if let Some(slot) = s.borrow_mut().workers.get_mut(w) {
-                    *slot = set.take();
+                let mut s = s.borrow_mut();
+                if !s.ended {
+                    if let Some(slot) = s.workers.get_mut(w) {
+                        *slot = set.take();
+                    }
                 }
             });
         }

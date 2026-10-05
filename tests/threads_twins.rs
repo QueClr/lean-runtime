@@ -9,9 +9,11 @@
 //!   `tests/in_task/mod.rs`, so every extern comes from a worker), those of
 //!   LB-33 and LB-34 included;
 //! - `tasks/worker_keeps_streams` and `worker_keeps_errno` (review AR-24),
-//!   and `worker_streams_closed_at_exit` and `worker_streams_at_process_exit`
-//!   (review AR-33: a worker's streams dropped when `finish` joins it, by
-//!   its thread-locals' destructors), on `main`, as their programs run.
+//!   and `worker_streams_closed_at_exit`, `worker_streams_at_process_exit`
+//!   and `worker_streams_before_dedicated` (reviews AR-33, AR-34: a
+//!   worker's streams dropped when `finish` joins it, by its thread-locals'
+//!   destructors, before the dedicated threads are waited for), on `main`,
+//!   as their programs run.
 //!
 //! The expected outcomes are the cases' own: native Lean 4.34.0's, or the
 //! correct one where native is wrong (LB-19, LB-20, LB-33, LB-34), or the
@@ -1453,6 +1455,41 @@ fn worker_streams_at_process_exit(args: &[String]) -> u32 {
     exit::exit(0)
 }
 
+// tests/cases/tasks/worker_streams_before_dedicated.lean (review AR-34):
+// the worker's stdout, `cat`'s input, is dropped when `finish` joins the
+// worker, before it waits for the dedicated task that waits for `cat`.
+fn worker_streams_before_dedicated(args: &[String]) -> u32 {
+    let n = args.len();
+    let child = ok(spawn(
+        "cat",
+        &[],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    let process = child.process.take_stdin();
+    let t = as_task(
+        move || {
+            let _ = lean_runtime::io::streams::set_stdout(Some(stdin) as HandleOut, || None);
+            print_current(&format!("via cat {n}\n"));
+        },
+        PRIO_DEFAULT,
+    );
+    t.get();
+    drop(as_task(
+        move || match process.wait() {
+            Ok(c) => eprintln(&format!("cat exited {c}")),
+            Err(e) => eprintln(&format!("wait failed: {}", error_text(&e))),
+        },
+        PRIO_DEDICATED,
+    ));
+    eprintln("main done");
+    0
+}
+
 /// `Handle.getLine`.
 fn get_line(h: &Handle) -> R<String> {
     let mut v = Vec::new();
@@ -1576,6 +1613,10 @@ const TWINS: &[(&str, Twin)] = &[
         "worker_streams_at_process_exit",
         worker_streams_at_process_exit,
     ),
+    (
+        "worker_streams_before_dedicated",
+        worker_streams_before_dedicated,
+    ),
 ];
 
 /// The twins that run on `main`, as their programs do, not inside a task:
@@ -1585,6 +1626,7 @@ const ON_MAIN: &[&str] = &[
     "worker_keeps_errno",
     "worker_streams_closed_at_exit",
     "worker_streams_at_process_exit",
+    "worker_streams_before_dedicated",
 ];
 
 /// The glue: nothing to do in threads mode.

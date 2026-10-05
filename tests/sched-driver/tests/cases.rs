@@ -201,6 +201,13 @@ fn run_full(
         cmd.stdout(w1).stderr(w2);
         (r1, Some(r2))
     };
+    // In a process group of its own, which a timeout kills whole (the
+    // twin behind a `.pipe` line, and its children), as `scripts/cases.py`
+    // does.
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let mut child = cmd.spawn().unwrap();
     // The write ends go with `cmd`, so that the reads end with the child.
     drop(cmd);
@@ -228,6 +235,10 @@ fn run_full(
             };
         }
         if start.elapsed() >= limit {
+            // the group, by its id (the child's pid), never by name
+            let _ = Command::new("/bin/kill")
+                .args(["-KILL", "--", &format!("-{}", child.id())])
+                .status();
             let _ = child.kill();
             let _ = child.wait();
             break "timeout".into();
@@ -1034,6 +1045,8 @@ cases!(
     // review AR-33
     worker_streams_closed_at_exit,
     worker_streams_at_process_exit,
+    // review AR-34
+    worker_streams_before_dedicated,
     // reviews RF3-05, LF3-04, LF3-05
     picked_task_short_sleeper_long,
     picked_task_watchdog,

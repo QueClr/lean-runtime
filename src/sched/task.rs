@@ -386,6 +386,8 @@ pub(crate) struct Tasks {
     /// look and after a notification, as native's `wait_any` (review RS2-09
     /// of sched-2).
     pub(crate) notify_seq: u64,
+    /// The final run has ended the standard workers (`Final::EndWorkers`).
+    workers_ended: bool,
 }
 
 /// How long a native worker takes to pick up a task after the enqueue that
@@ -427,6 +429,7 @@ impl Tasks {
             worker_seq: 0,
             open_walks: Vec::new(),
             notify_seq: 0,
+            workers_ended: false,
         }
     }
 }
@@ -492,6 +495,9 @@ enum Query {
 /// What the final run does next.
 enum Final {
     Run(u32),
+    /// No pool task is queued or running: the standard workers end
+    /// (`slots::end_workers`, `Glue::workers_end`; review AR-34).
+    EndWorkers,
     Wait,
     Done,
 }
@@ -2157,6 +2163,13 @@ impl Sched {
     /// done: Lean's workers stop when the queue is empty and leave such tasks
     /// behind.
     fn final_next(&mut self) -> Final {
+        // Natively `~task_manager` joins the standard workers once the queue
+        // is empty and their tasks have ended, and only then waits for the
+        // dedicated threads (object.cpp 981-985; review AR-34).
+        if !self.tk.workers_ended && self.pool_idle() {
+            self.tk.workers_ended = true;
+            return Final::EndWorkers;
+        }
         if let Some((i, _)) = self.last_resort() {
             self.tk.picked.pop_front();
             self.hand(i);
@@ -2170,6 +2183,16 @@ impl Sched {
             return Final::Done;
         }
         Final::Wait
+    }
+
+    /// No pool task is queued, started without running yet, or running (an
+    /// emulated worker id held: a task waiting in `Task.get` holds its own),
+    /// as natively every standard worker has left its loop.
+    fn pool_idle(&self) -> bool {
+        let t = &self.tk;
+        t.picked_pool == 0
+            && t.queued[..DEDICATED].iter().all(|&n| n == 0)
+            && t.worker_ids.iter().all(|&h| h == 0)
     }
 
     fn check_canceled_now(&mut self) -> bool {
@@ -2828,24 +2851,32 @@ pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str))
 /// (decisions Q5 refinement A): a runaway task keeps the process alive, and
 /// its buffered output is never flushed, as natively.
 ///
-/// With the feature `io`, the emulated pool workers then end: their current
-/// standard streams are dropped (a handle a task left set as its stdout is
-/// closed and flushed), as natively each worker's thread finalizers drop
-/// its streams when `~task_manager` joins it (review AR-33). Then it waits
-/// for the io layer's dedicated tasks (`io::exit::after_main`:
-/// `IO.Process.output`'s standard-output readers), as `~task_manager` waits
-/// for the dedicated workers, also in a program that started no task.
+/// Once no pool task is queued or running, the emulated pool workers end,
+/// before the dedicated tasks are waited for: with the feature `io` their
+/// current standard streams are dropped (a handle a task left set as its
+/// stdout is closed and flushed), then `Glue::workers_end`, as natively
+/// `~task_manager` joins the standard workers, whose thread finalizers drop
+/// their streams, before it waits for the dedicated threads (reviews AR-33,
+/// AR-34). Then, with `io`, it waits for the io layer's dedicated tasks
+/// (`io::exit::after_main`: `IO.Process.output`'s standard-output readers),
+/// also in a program that started no task.
 pub fn finish() {
     // `main`'s own hand-offs: natively its `fclose`s ended before it returned
     super::writers_point();
     finish_tasks();
-    // the standard workers end, and their thread finalizers drop their
-    // current streams, before the dedicated ones are waited for and before
-    // `main`'s flush (`~task_manager`, object.cpp 972-988; review AR-33)
-    #[cfg(feature = "io")]
-    super::slots::end_workers();
     #[cfg(feature = "io")]
     crate::io::exit::after_main();
+}
+
+/// The final run's end of the standard workers (`Final::EndWorkers`; reviews
+/// AR-33, AR-34): their current standard streams and `errno` are dropped,
+/// then the glue drops its own per-worker state (`Glue::workers_end`).
+fn end_workers() {
+    #[cfg(feature = "io")]
+    super::slots::end_workers();
+    if let Some(g) = glue_opt() {
+        g.workers_end();
+    }
 }
 
 /// [`finish`]'s run of the remaining tasks.
@@ -2857,6 +2888,7 @@ fn finish_tasks() {
     loop {
         match with(|s| s.final_next()) {
             Final::Run(i) => run_task(i),
+            Final::EndWorkers => end_workers(),
             Final::Wait => block(Wait::FinalRun),
             Final::Done => return,
         }

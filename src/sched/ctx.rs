@@ -114,6 +114,20 @@ pub trait Glue {
     /// returned, or a Rust panic unwinds its run. In the last case it runs
     /// during the unwinding, where a panic aborts the process.
     fn task_end(&self, _own_thread: bool) {}
+
+    /// The task manager's finalization ends its standard workers (review
+    /// AR-34): in `finish`, once no pool task is queued or running, before
+    /// the dedicated tasks are waited for and before `main`'s streams are
+    /// flushed, as natively `~task_manager` joins the standard workers, whose
+    /// thread finalizers drop their thread-local state, before it waits for
+    /// the dedicated threads. The scheduler drops the io layer's
+    /// per-worker sets (`slots`) right before; a glue with per-worker state
+    /// of its own (kept by `running_worker`, lean2rr's stream cells) drops
+    /// it here. Called once. A pool task that begins later (a dedicated
+    /// task's dependent, LB-13's corrected run) starts with a fresh set,
+    /// dropped at its end: the glue does the same with its own (fresh at
+    /// that task's `task_begin`, dropped at its `task_end`).
+    fn workers_end(&self) {}
 }
 
 /// The running context's yielder, handed to `Glue::suspend`. Only the

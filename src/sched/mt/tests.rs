@@ -1762,3 +1762,54 @@ fn running_worker_names_the_pool_worker_thread() {
     assert_eq!(running_worker(), None, "main again");
     finish();
 }
+
+/// Review AR-34: `finish` joins the standard workers, then calls
+/// `Glue::workers_end` once, before it waits for the dedicated threads: a
+/// dedicated task that waits for that hook goes on.
+#[test]
+fn the_workers_end_once_before_the_dedicated_threads_are_waited_for() {
+    struct EndGlue {
+        ends: AtomicU32,
+        gate: Gate,
+    }
+    impl Glue for EndGlue {
+        fn workers_end(&self) {
+            self.ends.fetch_add(1, Ordering::SeqCst);
+            self.gate.open();
+        }
+    }
+    let _s = serial();
+    let gate = Gate::default();
+    let glue = Arc::new(EndGlue {
+        ends: AtomicU32::new(0),
+        gate: Gate(gate.0.clone()),
+    });
+    let sh = bind_local();
+    configure(&sh, glue.clone(), 1, 256 << 10);
+    let pool = spawn(Box::new(|| Outcome::Done), 0, true);
+    wait(pool);
+    // the dedicated task waits (at most 10 s) for `workers_end`
+    let saw = Arc::new(AtomicBool::new(false));
+    let saw2 = saw.clone();
+    let g2 = Gate(gate.0.clone());
+    spawn(
+        Box::new(move || {
+            let (m, cv) = &*g2.0;
+            let r = cv
+                .wait_timeout_while(m.lock().unwrap(), std::time::Duration::from_secs(10), |o| {
+                    !*o
+                })
+                .unwrap();
+            saw2.store(*r.0, Ordering::SeqCst);
+            Outcome::Done
+        }),
+        9,
+        true,
+    );
+    finish();
+    assert!(
+        saw.load(Ordering::SeqCst),
+        "workers_end came before the dedicated thread ended"
+    );
+    assert_eq!(glue.ends.load(Ordering::SeqCst), 1);
+}

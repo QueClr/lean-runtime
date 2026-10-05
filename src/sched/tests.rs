@@ -1780,3 +1780,89 @@ fn a_sync_dependent_shares_its_threads_worker() {
     assert_eq!(*seen.borrow(), [("sync on main", None)]);
     finish();
 }
+
+// --- Review AR-34 (fixes-4): the standard workers end before the dedicated
+// tasks are waited for.
+
+thread_local! {
+    /// What `EndGlue` and the tasks of the tests below saw.
+    static END_LOG: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+}
+
+fn end_log(s: &'static str) {
+    END_LOG.with(|l| l.borrow_mut().push(s));
+}
+
+/// A glue that records `workers_end`.
+struct EndGlue;
+
+impl Glue for EndGlue {
+    fn suspend(&self, _: Suspend<'_>) {
+        panic!("the crate's unit tests never suspend a context");
+    }
+    fn workers_end(&self) {
+        end_log("workers_end");
+    }
+}
+
+fn logging(s: &'static str) -> Job {
+    Box::new(move || {
+        end_log(s);
+        Outcome::Done
+    })
+}
+
+#[test]
+fn the_workers_end_once_before_the_dedicated_tasks_run() {
+    start_with(Rc::new(EndGlue), 1, 1 << 20);
+    let pool = spawn(logging("pool"), 0, true);
+    wait(pool);
+    // a dedicated task still to run at `finish`, which makes a pool task
+    // (LB-13's corrected run: it runs after the workers ended)
+    spawn(
+        Box::new(|| {
+            end_log("dedicated");
+            spawn(logging("late pool"), 0, true);
+            Outcome::Done
+        }),
+        9,
+        true,
+    );
+    finish();
+    let log = END_LOG.with(|l| l.borrow().clone());
+    assert_eq!(log, ["pool", "workers_end", "dedicated", "late pool"]);
+}
+
+/// With `io`: a pool task that runs after the workers ended drops its
+/// streams at its end (natively, on a worker made after the others ended,
+/// its thread finalizers would drop them).
+#[cfg(feature = "io")]
+#[test]
+fn a_late_pool_task_drops_its_streams_at_its_end() {
+    use crate::io::streams;
+    start_with(Rc::new(EndGlue), 1, 1 << 20);
+    let flag = Rc::new(Cell::new(false));
+    let f2 = flag.clone();
+    spawn(
+        Box::new(move || {
+            let f3 = f2.clone();
+            spawn(
+                Box::new(move || {
+                    let s = Rc::new(DropFlag(f3));
+                    let _ = streams::set_stdout(s, || Rc::new(DropFlag(Rc::default())));
+                    Outcome::Done
+                }),
+                0,
+                true,
+            );
+            Outcome::Done
+        }),
+        9,
+        true,
+    );
+    finish();
+    assert!(
+        flag.get(),
+        "the late pool task's stdout was dropped at its end"
+    );
+}

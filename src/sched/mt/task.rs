@@ -1159,6 +1159,27 @@ pub(crate) fn finish(sh: &Arc<Shared>) {
     g.shutting_down = true;
     sh.shutting_down.store(true, Ordering::Relaxed);
     sh.queue_cv.notify_all();
+    // `~task_manager` (object.cpp 972-988): the standard workers leave
+    // their loops once the queue is empty, and are joined (their thread
+    // finalizers, here their thread-locals' destructors, drop their current
+    // streams), and only then are the dedicated threads waited for
+    // (review AR-34)
+    while !(g.queued == 0 && g.live == 0) {
+        g = wait_on(&sh.quiet_cv, g);
+    }
+    let workers = std::mem::take(&mut g.worker_handles);
+    let glue = g.glue.clone();
+    drop(g);
+    for h in workers {
+        let _ = h.join();
+    }
+    if let Some(gl) = glue {
+        hook(move || {
+            gl.workers_end();
+            drop(gl);
+        });
+    }
+    let mut g = sh.lock();
     while !(g.queued == 0 && g.live == 0 && g.dedicated == 0) {
         g = wait_on(&sh.quiet_cv, g);
     }
