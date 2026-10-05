@@ -41,6 +41,7 @@ pub mod uv;
 // The process-wide part of `uv`'s signal delivery, shared with threads mode.
 mod uv_signals;
 
+pub use common::{await_task, thread_create_failed};
 pub use ctx::{running_stack, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
 #[cfg(feature = "io")]

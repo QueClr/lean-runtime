@@ -314,6 +314,56 @@ fn in_task(f: impl FnOnce() + 'static) {
     );
 }
 
+/// `await_task` (`Task.get` once the glue's slot is empty): in a `sync`
+/// task it reports `GET_IN_SYNC_TASK`, then waits; elsewhere it only waits;
+/// for `TaskId::FINISHED` it does neither.
+#[test]
+fn await_task_reports_in_a_sync_task_then_waits() {
+    start_test(4);
+    let l = log();
+    let reports: Rc<RefCell<Vec<String>>> = Rc::default();
+    // pure tasks: deferred until awaited
+    let pending = spawn(job(&l, "pending"), 0, false);
+    let (r, l2) = (reports.clone(), l.clone());
+    in_task(move || {
+        await_task(TaskId::FINISHED, |m| r.borrow_mut().push(m.to_owned()));
+        await_task(pending, |m| r.borrow_mut().push(m.to_owned()));
+        l2.borrow_mut().push("sync".into());
+    });
+    assert_eq!(*reports.borrow(), [GET_IN_SYNC_TASK]);
+    assert_eq!(entries(&l), ["pending", "sync"]);
+    let other = spawn(job(&l, "other"), 0, false);
+    await_task(other, |m| panic!("no report outside a sync task: {m}"));
+    assert!(is_finished(other));
+    assert_eq!(entries(&l), ["pending", "sync", "other"]);
+}
+
+/// `IO.getTID` (`io::env::get_tid`): `gettid` plus the number of the thread
+/// a task natively runs on: `main`'s id in a `LEAN_SYNC_PRIO` task, which
+/// runs on the calling thread, and another one in a task a worker runs.
+#[cfg(feature = "io")]
+#[test]
+fn get_tid_tells_the_tasks_threads_apart() {
+    start_test(4);
+    let main = crate::io::env::get_tid();
+    assert_eq!(main, nix::unistd::gettid().as_raw() as u64);
+    let (a, b) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let a2 = a.clone();
+    in_task(move || a2.set(crate::io::env::get_tid()));
+    let b2 = b.clone();
+    let id = spawn(
+        Box::new(move || {
+            b2.set(crate::io::env::get_tid());
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    wait(id);
+    assert_eq!(a.get(), main);
+    assert_eq!(b.get(), main + 1);
+}
+
 #[test]
 fn dropping_a_dependent_releases_its_source() {
     start_test(4);

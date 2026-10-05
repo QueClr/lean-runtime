@@ -9,6 +9,7 @@
 use super::sync::{Condvar, Mutex, RecursiveMutex, SharedMutex};
 use super::task::{bind_local, configure, live_workers, table_len, wake_waiters, Shared};
 use super::*;
+use crate::sched::await_task;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex as StdMutex, OnceLock};
 
@@ -228,6 +229,53 @@ fn sync_priority_runs_at_once_on_the_calling_thread() {
     assert!(is_finished(id));
     assert_eq!(seen.get(), Some(&(me, true)));
     assert!(!in_sync_task());
+    finish();
+}
+
+/// `await_task` in threads mode, the same rule as in the single-thread
+/// scheduler: in a `sync` task a report of `GET_IN_SYNC_TASK`, then the
+/// wait; elsewhere only the wait; nothing for `TaskId::FINISHED`.
+#[test]
+fn await_task_reports_in_a_sync_task_then_waits() {
+    let _s = serial();
+    start_test(2);
+    let l = log();
+    let reports = log();
+    let pending = spawn(job(&l, "pending"), 0, false);
+    let (r, l2) = (reports.clone(), l.clone());
+    let id = spawn(
+        Box::new(move || {
+            await_task(TaskId::FINISHED, |m| push(&r, m));
+            await_task(pending, |m| push(&r, m));
+            push(&l2, "sync");
+            Outcome::Done
+        }),
+        u64::from(u32::MAX),
+        false,
+    );
+    assert!(is_finished(id));
+    assert_eq!(entries(&reports), [GET_IN_SYNC_TASK]);
+    assert_eq!(entries(&l), ["pending", "sync"]);
+    let other = spawn(job(&l, "other"), 0, false);
+    await_task(other, |m| panic!("no report outside a sync task: {m}"));
+    assert!(is_finished(other));
+    finish();
+}
+
+/// `IO.getTID` in threads mode is the thread's own `gettid`: a task on a
+/// worker gets the worker's id, as natively.
+#[cfg(feature = "io")]
+#[test]
+fn get_tid_is_the_threads_own() {
+    let _s = serial();
+    start_test(1);
+    let main = crate::io::env::get_tid();
+    assert_eq!(main, nix::unistd::gettid().as_raw() as u64);
+    let seen: Slot<u64> = Slot::default();
+    let id = spawn(filling(&seen, crate::io::env::get_tid), 0, false);
+    wait(id);
+    let t = *seen.get().unwrap();
+    assert_ne!(t, main);
     finish();
 }
 

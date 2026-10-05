@@ -132,10 +132,7 @@ impl<T: Val> Task<T> {
         if let Some(v) = self.0.slot.get() {
             return v.clone();
         }
-        if sched::in_sync_task() {
-            eprintln(sched::GET_IN_SYNC_TASK);
-        }
-        sched::wait(self.0.id);
+        sched::await_task(self.0.id, eprintln);
         self.0
             .slot
             .get()

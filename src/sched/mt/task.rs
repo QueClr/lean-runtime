@@ -392,28 +392,11 @@ pub(crate) fn guarded(what: &'static str, f: impl FnOnce()) {
     std::mem::forget(guard);
 }
 
-/// Making a thread failed: natively `lthread` throws
-/// `lean::exception("failed to create thread: <strerror>")` (`thread.cpp`
-/// 128-133), which nothing catches: libc++ reports it and aborts.
-fn thread_create_failed(e: &std::io::Error) -> ! {
-    use std::io::Write;
-    let text = e.to_string();
-    let text = match text.rfind(" (os error ") {
-        Some(k) => &text[..k],
-        None => &text,
-    };
-    let _ = writeln!(
-        std::io::stderr(),
-        "libc++abi: terminating due to uncaught exception of type lean::exception: failed to create thread: {text}"
-    );
-    std::process::abort()
-}
-
 /// A thread with Lean's stack size (`lthread`: `pthread_attr_setstacksize`).
 pub(crate) fn spawn_thread(stack_size: usize, f: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
     match std::thread::Builder::new().stack_size(stack_size).spawn(f) {
         Ok(h) => h,
-        Err(e) => thread_create_failed(&e),
+        Err(e) => crate::sched::thread_create_failed(&e),
     }
 }
 

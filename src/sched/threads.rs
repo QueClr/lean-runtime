@@ -39,6 +39,7 @@ mod ctx {
     pub(crate) use super::mt::{running_stack, StackBounds};
 }
 
+pub use common::{await_task, thread_create_failed};
 pub use env::{hardware_concurrency, lean_num_threads, thread_stack_size};
 pub use mt::*;
 #[cfg(feature = "stack-overflow")]

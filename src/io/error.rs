@@ -4,8 +4,11 @@
 //! [`IoError`] mirrors Lean's `IO.Error` (`Init/System/IOError.lean`): its 19
 //! constructors in Lean's order, with plain fields (file names and details as
 //! `String`, the OS code as `u32`). Each translator converts it to its own
-//! value, for example by calling the `lean_mk_io_error_*` constructor that
-//! [`IoError::ctor_index`] names.
+//! value, for example by calling the `lean_mk_io_error_*` builder that
+//! [`IoError::builder_index`] names, or keeps it with its own string type
+//! (`IoError<S>`, [`IoError::map_str`]). The accessors ([`IoError::os_code`],
+//! [`IoError::file_name`], [`IoError::details`], [`IoError::ctor_index`])
+//! read the fields without a `match` in the glue.
 //!
 //! Since Lean 4.34 both of io.cpp's decoders are one function,
 //! `decode_uv_error_impl`:
@@ -42,28 +45,84 @@ use std::cell::Cell;
 /// Lean's `IO.Error` (`Init/System/IOError.lean`): its 19 constructors in
 /// Lean's order, with Lean's positional fields (`filename`, `osCode`,
 /// `details`, or `msg` for `userError`).
+///
+/// `S` is the string type of the file names and details. The crate's
+/// functions return `IoError<String>` (the default, `IoError`). A glue may
+/// keep its own string type (leanrs's `Str`): `e.map_str(Str::from)`, or `?`
+/// through [`IoText`]; a type alias keeps the variant names in its code
+/// (`type IoError = lean_runtime::io::IoError<Str>;`).
+///
+/// Where the string type is not fixed by the context, a variant without a
+/// string needs it named: `IoError::<String>::UnexpectedEof.ctor_index()`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IoError {
-    AlreadyExists(Option<String>, u32, String),
-    OtherError(u32, String),
-    ResourceBusy(u32, String),
-    ResourceVanished(u32, String),
-    UnsupportedOperation(u32, String),
-    HardwareFault(u32, String),
-    UnsatisfiedConstraints(u32, String),
-    IllegalOperation(u32, String),
-    ProtocolError(u32, String),
-    TimeExpired(u32, String),
-    Interrupted(String, u32, String),
-    NoFileOrDirectory(String, u32, String),
-    InvalidArgument(Option<String>, u32, String),
-    PermissionDenied(Option<String>, u32, String),
-    ResourceExhausted(Option<String>, u32, String),
-    InappropriateType(Option<String>, u32, String),
-    NoSuchThing(Option<String>, u32, String),
+pub enum IoError<S = String> {
+    AlreadyExists(Option<S>, u32, S),
+    OtherError(u32, S),
+    ResourceBusy(u32, S),
+    ResourceVanished(u32, S),
+    UnsupportedOperation(u32, S),
+    HardwareFault(u32, S),
+    UnsatisfiedConstraints(u32, S),
+    IllegalOperation(u32, S),
+    ProtocolError(u32, S),
+    TimeExpired(u32, S),
+    Interrupted(S, u32, S),
+    NoFileOrDirectory(S, u32, S),
+    InvalidArgument(Option<S>, u32, S),
+    PermissionDenied(Option<S>, u32, S),
+    ResourceExhausted(Option<S>, u32, S),
+    InappropriateType(Option<S>, u32, S),
+    NoSuchThing(Option<S>, u32, S),
     UnexpectedEof,
-    UserError(String),
+    UserError(S),
 }
+
+/// A glue's string type for [`IoError<S>`]: made from the crate's `String`.
+/// With it, `?` converts the crate's `IoError` (`From<IoError<String>> for
+/// IoError<S>`, by [`IoError::map_str`]). `String` itself does not
+/// implement it: an `IoError<String>` needs no conversion.
+pub trait IoText: Sized {
+    /// The glue's string of a file name or a details text.
+    fn from_io_text(s: String) -> Self;
+}
+
+impl<S: IoText> From<IoError<String>> for IoError<S> {
+    fn from(e: IoError<String>) -> IoError<S> {
+        e.map_str(S::from_io_text)
+    }
+}
+
+/// The `lean_mk_io_error_*` builders io.cpp calls (and `lean_mk_io_user_error`
+/// for `userError`), each at its [`IoError::builder_index`]. Lean defines them
+/// in `Init/System/IOError.lean` (`@[export]`). The `_file` builders take the
+/// file name; the others drop it. `lean_mk_io_error_eof` (for
+/// `unexpectedEof`) is not here: no io function returns that error.
+pub const IO_ERROR_BUILDERS: [&str; 24] = [
+    "lean_mk_io_error_other_error",
+    "lean_mk_io_error_interrupted",
+    "lean_mk_io_error_invalid_argument",
+    "lean_mk_io_error_invalid_argument_file",
+    "lean_mk_io_error_no_file_or_directory",
+    "lean_mk_io_error_permission_denied",
+    "lean_mk_io_error_permission_denied_file",
+    "lean_mk_io_error_resource_exhausted",
+    "lean_mk_io_error_resource_exhausted_file",
+    "lean_mk_io_error_inappropriate_type",
+    "lean_mk_io_error_inappropriate_type_file",
+    "lean_mk_io_error_no_such_thing",
+    "lean_mk_io_error_no_such_thing_file",
+    "lean_mk_io_error_already_exists",
+    "lean_mk_io_error_already_exists_file",
+    "lean_mk_io_error_hardware_fault",
+    "lean_mk_io_error_unsatisfied_constraints",
+    "lean_mk_io_error_illegal_operation",
+    "lean_mk_io_error_resource_vanished",
+    "lean_mk_io_error_protocol_error",
+    "lean_mk_io_error_time_expired",
+    "lean_mk_io_error_resource_busy",
+    "lean_mk_io_error_unsupported_operation",
+    "lean_mk_io_user_error",
+];
 
 // Linux `errno` values (`asm-generic/errno-base.h`, `asm-generic/errno.h`),
 // the same on aarch64 and x86-64.
@@ -361,6 +420,144 @@ impl IoError {
     /// `io_result_mk_error(msg)` (io.cpp): `IO.userError msg`.
     pub fn user_error(msg: &str) -> IoError {
         IoError::UserError(msg.to_owned())
+    }
+}
+
+impl<S> IoError<S> {
+    /// The same error with each string (file name, details, `userError`'s
+    /// message) passed through `f`, in field order: a glue's own string type
+    /// (leanrs: `e.map_str(Str::from)`).
+    pub fn map_str<T>(self, mut f: impl FnMut(S) -> T) -> IoError<T> {
+        use IoError as E;
+        match self {
+            E::AlreadyExists(n, c, d) => E::AlreadyExists(n.map(&mut f), c, f(d)),
+            E::OtherError(c, d) => E::OtherError(c, f(d)),
+            E::ResourceBusy(c, d) => E::ResourceBusy(c, f(d)),
+            E::ResourceVanished(c, d) => E::ResourceVanished(c, f(d)),
+            E::UnsupportedOperation(c, d) => E::UnsupportedOperation(c, f(d)),
+            E::HardwareFault(c, d) => E::HardwareFault(c, f(d)),
+            E::UnsatisfiedConstraints(c, d) => E::UnsatisfiedConstraints(c, f(d)),
+            E::IllegalOperation(c, d) => E::IllegalOperation(c, f(d)),
+            E::ProtocolError(c, d) => E::ProtocolError(c, f(d)),
+            E::TimeExpired(c, d) => E::TimeExpired(c, f(d)),
+            E::Interrupted(n, c, d) => {
+                let n = f(n);
+                E::Interrupted(n, c, f(d))
+            }
+            E::NoFileOrDirectory(n, c, d) => {
+                let n = f(n);
+                E::NoFileOrDirectory(n, c, f(d))
+            }
+            E::InvalidArgument(n, c, d) => E::InvalidArgument(n.map(&mut f), c, f(d)),
+            E::PermissionDenied(n, c, d) => E::PermissionDenied(n.map(&mut f), c, f(d)),
+            E::ResourceExhausted(n, c, d) => E::ResourceExhausted(n.map(&mut f), c, f(d)),
+            E::InappropriateType(n, c, d) => E::InappropriateType(n.map(&mut f), c, f(d)),
+            E::NoSuchThing(n, c, d) => E::NoSuchThing(n.map(&mut f), c, f(d)),
+            E::UnexpectedEof => E::UnexpectedEof,
+            E::UserError(m) => E::UserError(f(m)),
+        }
+    }
+
+    /// The `osCode` field, or `None` for `unexpectedEof` and `userError`,
+    /// which have none.
+    pub fn os_code(&self) -> Option<u32> {
+        use IoError as E;
+        match self {
+            E::AlreadyExists(_, c, _)
+            | E::Interrupted(_, c, _)
+            | E::NoFileOrDirectory(_, c, _)
+            | E::InvalidArgument(_, c, _)
+            | E::PermissionDenied(_, c, _)
+            | E::ResourceExhausted(_, c, _)
+            | E::InappropriateType(_, c, _)
+            | E::NoSuchThing(_, c, _)
+            | E::OtherError(c, _)
+            | E::ResourceBusy(c, _)
+            | E::ResourceVanished(c, _)
+            | E::UnsupportedOperation(c, _)
+            | E::HardwareFault(c, _)
+            | E::UnsatisfiedConstraints(c, _)
+            | E::IllegalOperation(c, _)
+            | E::ProtocolError(c, _)
+            | E::TimeExpired(c, _) => Some(*c),
+            E::UnexpectedEof | E::UserError(_) => None,
+        }
+    }
+
+    /// The `filename` field: always there for `interrupted` and
+    /// `noFileOrDirectory`, optional for the seven classes with an
+    /// `Option String`, `None` for the others.
+    pub fn file_name(&self) -> Option<&S> {
+        use IoError as E;
+        match self {
+            E::Interrupted(n, _, _) | E::NoFileOrDirectory(n, _, _) => Some(n),
+            E::AlreadyExists(n, _, _)
+            | E::InvalidArgument(n, _, _)
+            | E::PermissionDenied(n, _, _)
+            | E::ResourceExhausted(n, _, _)
+            | E::InappropriateType(n, _, _)
+            | E::NoSuchThing(n, _, _) => n.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The `details` field (libuv's message, or Lean's own text), or
+    /// `userError`'s message; `None` for `unexpectedEof`.
+    pub fn details(&self) -> Option<&S> {
+        use IoError as E;
+        match self {
+            E::AlreadyExists(_, _, d)
+            | E::Interrupted(_, _, d)
+            | E::NoFileOrDirectory(_, _, d)
+            | E::InvalidArgument(_, _, d)
+            | E::PermissionDenied(_, _, d)
+            | E::ResourceExhausted(_, _, d)
+            | E::InappropriateType(_, _, d)
+            | E::NoSuchThing(_, _, d)
+            | E::OtherError(_, d)
+            | E::ResourceBusy(_, d)
+            | E::ResourceVanished(_, d)
+            | E::UnsupportedOperation(_, d)
+            | E::HardwareFault(_, d)
+            | E::UnsatisfiedConstraints(_, d)
+            | E::IllegalOperation(_, d)
+            | E::ProtocolError(_, d)
+            | E::TimeExpired(_, d)
+            | E::UserError(d) => Some(d),
+            E::UnexpectedEof => None,
+        }
+    }
+
+    /// The `lean_mk_io_error_*` builder that makes this error, as its index in
+    /// [`IO_ERROR_BUILDERS`] (lean2rr's numbering): the class, and for the
+    /// seven classes with an optional file name whether it has one (`_file`,
+    /// one more). `userError` is 23. `None` for `unexpectedEof`, which no io
+    /// function returns (Lean's builder for it, `lean_mk_io_error_eof`, has
+    /// no index here).
+    pub fn builder_index(&self) -> Option<u8> {
+        use IoError as E;
+        let file = |n: &Option<S>, i: u8| if n.is_some() { i + 1 } else { i };
+        Some(match self {
+            E::OtherError(..) => 0,
+            E::Interrupted(..) => 1,
+            E::InvalidArgument(n, ..) => file(n, 2),
+            E::NoFileOrDirectory(..) => 4,
+            E::PermissionDenied(n, ..) => file(n, 5),
+            E::ResourceExhausted(n, ..) => file(n, 7),
+            E::InappropriateType(n, ..) => file(n, 9),
+            E::NoSuchThing(n, ..) => file(n, 11),
+            E::AlreadyExists(n, ..) => file(n, 13),
+            E::HardwareFault(..) => 15,
+            E::UnsatisfiedConstraints(..) => 16,
+            E::IllegalOperation(..) => 17,
+            E::ResourceVanished(..) => 18,
+            E::ProtocolError(..) => 19,
+            E::TimeExpired(..) => 20,
+            E::ResourceBusy(..) => 21,
+            E::UnsupportedOperation(..) => 22,
+            E::UserError(..) => 23,
+            E::UnexpectedEof => return None,
+        })
     }
 
     /// The constructor's index in Lean's declaration order (`alreadyExists`

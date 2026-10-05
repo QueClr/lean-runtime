@@ -8,21 +8,21 @@
 //!
 //! | Module | What |
 //! |---|---|
-//! | [`error`] | `IO.Error` as neutral data ([`IoError`]), its construction from an `errno` or a libuv code (`decode_io_error`, `decode_uv_error`), the crate's model of C's `errno` |
+//! | [`error`] | `IO.Error` as neutral data ([`IoError`], generic over the glue's string type), its construction from an `errno` or a libuv code (`decode_io_error`, `decode_uv_error`), its accessors and its `lean_mk_io_error_*` builder, the crate's model of C's `errno` |
 //! | `sys` | the system calls the FILE model makes, over rustix, and glibc's `isatty` through nix (crate-internal) |
 //! | [`cfile`] | glibc's `FILE` ([`cfile::CFile`]): buffering, read-ahead, positions, the sticky indicators |
 //! | [`handle`] | `IO.FS.Handle` ([`Handle`]): open modes, the standard streams, the Lean handle primitives, the open-handle list |
 //! | [`exit`] | what a native Lean program's exit does with the streams (libc++'s `ios_base::Init`, then glibc's `_IO_cleanup`), `IO.Process.exit`, `forceExit`, the uncaught-error message |
 //! | [`fs`] | the file system: directories, metadata, `realPath`, removal, renaming, links, permissions, the working directory |
-//! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, random bytes, the monotonic clock, `IO.sleep` |
-//! | [`debug`] | the IO parts of `dbgTrace` and `dbgSleep`, and the runtime's own standard-error lines |
+//! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, `IO.getTID`, random bytes, the monotonic clock, `IO.sleep` |
+//! | [`debug`] | the IO parts of `dbgTrace`, `dbgTraceIfShared`, `dbgSleep` and `allocprof`, the runtime's own standard-error lines, and a test harness's hook for them |
 //! | [`startup`] | the descriptors native Lean has open before `main` (libuv's loop), for the translators' ELF constructors; its signal pipe for the one loop that watches signals (`sched::uv`'s, or a translator's own) |
 //! | [`environ`] | the process environment as C's `environ` holds it (every entry in order, changed as glibc's `setenv` and `unsetenv` change it): a child's `envp`, `osEnviron` |
-//! | [`process`] | child processes: `IO.Process.spawn` over `posix_spawn`, the `Child` operations, `IO.Process.output` |
+//! | [`process`] | child processes: `IO.Process.spawn` over `posix_spawn`, the `Child` operations (also on a child known by its pid), `IO.Process.output` |
 //! | [`uvsys`] | `Std.Internal.UV.System`'s queries (libuv 1.48 over std, nix, rustix, `/proc` and `/sys`) |
 //! | `argv_title` | feature `proc-title` only: the process title in the arguments' memory (`uv_setup_args`, with the crate's own ELF constructor, and `uv_set_process_title`'s write): an `unsafe` file for a native quirk (`UNSAFE.md`) |
 //! | [`temp`] | `IO.FS.createTempFile` and `createTempDir` |
-//! | [`time`] | `timeit`, `Std.Time.Timestamp.now`'s clock, the Windows time-zone externs |
+//! | [`time`] | `timeit`, `Std.Time.Timestamp.now`'s clock (also as one count of nanoseconds), the Windows time-zone externs |
 //! | [`streams`] | the calling thread's current standard streams (`IO.getStdout`, `IO.setStdout` & co.) and the route of the runtime's own standard-error lines |
 //!
 //! The second io batch added [`environ`], [`process`], [`uvsys`], [`temp`],
@@ -172,7 +172,7 @@ pub use handle::{FsMode, Handle, StreamGuard};
 /// A sink whose storage cannot grow, and that may not end the process where
 /// it is called (leanrs's fallible reservation), drops the bytes and says so
 /// through [`ByteSink::stopped`]; the glue ends the process once the crate's
-/// function has returned.
+/// function has returned. [`StoppingSink`] is that sink over a `Vec<u8>`.
 pub trait ByteSink {
     /// Append `bytes`.
     fn extend_from_slice(&mut self, bytes: &[u8]);
@@ -205,5 +205,77 @@ impl ByteSink for Vec<u8> {
     #[inline]
     fn extend_from_slice(&mut self, bytes: &[u8]) {
         Vec::extend_from_slice(self, bytes)
+    }
+}
+
+/// The crate's [`ByteSink`] that stops ([`ByteSink::stopped`]) instead of
+/// aborting: a `Vec<u8>` that grows by `try_reserve`. When a reservation
+/// fails, it frees its bytes, drops every later append and says it has
+/// stopped; the crate's function then returns at once. The glue calls
+/// [`StoppingSink::finish`] once that function has returned, and ends the
+/// process on `Err` as Lean ends it at that call:
+/// - [`process::output`]: Lean's `INTERNAL PANIC: out of memory`, status 1
+///   (AR-5; `OutOfMemory` converts to `semantics::panic::InternalPanic`);
+/// - [`Handle::get_line`]: natively an abort (`std::bad_alloc`; AR-19).
+///
+/// Example, `IO.Process.output`:
+/// ```text
+/// let (mut out, mut err) = (StoppingSink::default(), StoppingSink::default());
+/// let r = process::output(&args, input, &mut out, &mut err);
+/// let (out, err) = match (out.finish(), err.finish()) {
+///     (Ok(o), Ok(e)) => (o, e),
+///     _ => internal_panic(InternalPanic::OutOfMemory),  // the glue's own end
+/// };
+/// let code = r?;  // the sinks first: a stopped sink's call returns ENOMEM
+/// ```
+///
+/// Source: lean2rr's `Sink` (leanrt `src/fs.rs`) and leanrs's `Bytes`
+/// (leanrs_rt `src/io/process.rs`), the same sink.
+#[derive(Debug, Default)]
+pub struct StoppingSink {
+    bytes: Vec<u8>,
+    stopped: bool,
+}
+
+/// A [`StoppingSink`] whose storage could not grow: the glue ends the
+/// process with Lean's out of memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutOfMemory;
+
+impl From<OutOfMemory> for crate::semantics::panic::InternalPanic {
+    /// `INTERNAL PANIC: out of memory`.
+    fn from(_: OutOfMemory) -> Self {
+        crate::semantics::panic::InternalPanic::OutOfMemory
+    }
+}
+
+impl StoppingSink {
+    /// The bytes appended, or `Err(OutOfMemory)` if the sink stopped.
+    pub fn finish(self) -> Result<Vec<u8>, OutOfMemory> {
+        if self.stopped {
+            Err(OutOfMemory)
+        } else {
+            Ok(self.bytes)
+        }
+    }
+}
+
+impl ByteSink for StoppingSink {
+    #[inline]
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        if self.stopped {
+            return;
+        }
+        if self.bytes.try_reserve(bytes.len()).is_err() {
+            self.stopped = true;
+            self.bytes = Vec::new();
+            return;
+        }
+        self.bytes.extend_from_slice(bytes)
+    }
+
+    #[inline]
+    fn stopped(&self) -> bool {
+        self.stopped
     }
 }

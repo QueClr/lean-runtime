@@ -356,6 +356,11 @@ static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 /// pages stay resident (as a native worker thread's stack does).
 const POOLED_STACKS: usize = 8;
 
+/// Linux's `ENOMEM` and `EAGAIN` (the same on aarch64 and x86-64; `sched`
+/// may be built without `io`, whose constants these are).
+const ENOMEM: i32 = 12;
+const EAGAIN: i32 = 11;
+
 impl Contexts {
     pub(crate) fn new() -> Contexts {
         let mut main = Ctx::new(0);
@@ -554,7 +559,16 @@ impl Sched {
             Some(st) => st,
             None => match DefaultStack::new(size) {
                 Ok(st) => st,
-                Err(_) => thread_create_failed(),
+                // natively a thread that cannot map its stack: glibc's
+                // `pthread_create` reports the mapping's error, with
+                // `ENOMEM` turned into `EAGAIN`
+                Err(e) => {
+                    let code = match e.raw_os_error() {
+                        Some(ENOMEM) | None => EAGAIN,
+                        Some(c) => c,
+                    };
+                    super::thread_create_failed(&std::io::Error::from_raw_os_error(code))
+                }
             },
         };
         let bounds = bounds_of(&stack, size);
@@ -899,18 +913,6 @@ fn worker_main() {
             break;
         }
     }
-}
-
-/// Creating a context's stack failed: natively `lthread` throws
-/// `lean::exception("failed to create thread: <strerror>")`, which nothing
-/// catches: libc++ reports it and aborts (nothing is flushed). glibc's
-/// `pthread_create` fails with `EAGAIN` when it cannot map a stack.
-pub(crate) fn thread_create_failed() -> ! {
-    use std::io::Write;
-    let _ = std::io::stderr().write_all(
-        b"libc++abi: terminating due to uncaught exception of type lean::exception: failed to create thread: Resource temporarily unavailable\n",
-    );
-    std::process::abort()
 }
 
 /// How long a context able to run, or a task a worker has picked, waits

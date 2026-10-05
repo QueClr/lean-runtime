@@ -161,6 +161,46 @@ fn io_child_kill() {
     assert_eq!(child.process.kill().unwrap_err(), no_such_process(3));
 }
 
+/// A process object built from a pid and a flag (lean2rr's `Child` holds
+/// only those): `wait`, `tryWait` and `kill` make the system calls on the
+/// pid, as on the object `spawn` returned, and fail as natively once the
+/// child is gone.
+#[test]
+fn from_pid_makes_the_system_calls() {
+    let c = cfg(Stdio::Null, Stdio::Null, Stdio::Null);
+    let child = spawn(c, &args(b"sh", &[b"-c", b"exit 3"])).unwrap();
+    let p = ChildProcess::from_pid(child.process.pid(), false);
+    assert_eq!(p.wait().unwrap(), 3);
+    assert_eq!(p.wait().unwrap_err(), no_such_process(10));
+    assert_eq!(p.try_wait().unwrap_err(), no_such_process(10));
+    assert_eq!(p.kill().unwrap_err(), no_such_process(3));
+    assert_eq!(child.process.wait().unwrap_err(), no_such_process(10));
+
+    let child = spawn(c, &args(b"sleep", &[b"30"])).unwrap();
+    let p = ChildProcess::from_pid(child.process.pid(), false);
+    assert_eq!(p.try_wait().unwrap(), None);
+    p.kill().unwrap();
+    assert_eq!(p.wait().unwrap(), 137);
+
+    // with `setsid`, `kill` is `killpg` of the child's group
+    let mut a = args(b"sleep", &[b"30"]);
+    a.setsid = true;
+    let child = spawn(c, &a).unwrap();
+    let p = ChildProcess::from_pid(child.process.pid(), true);
+    assert!(p.setsid() && p.pid() == child.process.pid());
+    p.kill().unwrap();
+    assert_eq!(child.process.wait().unwrap(), 137);
+    assert_eq!(p.kill().unwrap_err(), no_such_process(3));
+
+    // a pid that is not positive is taken as one that is gone
+    for pid in [0, u32::MAX] {
+        let p = ChildProcess::from_pid(pid, false);
+        assert_eq!(p.wait().unwrap_err(), no_such_process(10));
+        assert_eq!(p.try_wait().unwrap_err(), no_such_process(10));
+        assert_eq!(p.kill().unwrap_err(), no_such_process(3));
+    }
+}
+
 /// lean (proc_spawn): `pid positive: true`; a child that could not start has
 /// pid 0 (leanrs DV15 (a); natively it has a pid, case `failed_child_pid`).
 #[test]
@@ -289,6 +329,24 @@ impl ByteSink for Capped {
     fn stopped(&self) -> bool {
         self.stopped
     }
+}
+
+/// The crate's stopping sink keeps what `output` reads; `finish` gives it
+/// (the stop itself: the cases `process/output_oom` and
+/// `output_oom_both_pipes`, whose twins use it under `ulimit -v`).
+#[test]
+fn output_into_stopping_sinks() {
+    let (mut o, mut e) = (
+        crate::io::StoppingSink::default(),
+        crate::io::StoppingSink::default(),
+    );
+    let a = args(b"sh", &[b"-c", b"echo out; echo err >&2; exit 2"]);
+    let code = output(&a, None, &mut o, &mut e).unwrap();
+    assert!(!o.stopped() && !e.stopped());
+    assert_eq!(
+        (code, o.finish(), e.finish()),
+        (2, Ok(b"out\n".to_vec()), Ok(b"err\n".to_vec()))
+    );
 }
 
 /// AR-5: once a sink stops, `output` returns at once with `ENOMEM`'s error,

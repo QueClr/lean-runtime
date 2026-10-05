@@ -92,16 +92,30 @@ pub fn timeit<R>(msg: &[u8], act: impl FnOnce() -> R) -> R {
     r
 }
 
-/// `Std.Time.Timestamp.now` (`lean_get_current_time`): the system clock
-/// (`std::chrono::system_clock`, `CLOCK_REALTIME`) as nanoseconds since the
-/// Unix epoch, split into seconds and nanoseconds by C++'s truncating `/` and
-/// `%` (both negative before the epoch). The translator builds Lean's
-/// `Timestamp` from the two `Int`s.
-pub fn current_time() -> (i64, i64) {
-    let nanos: i64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
+/// The clock of `Std.Time.Timestamp.now` (`lean_get_current_time`): the
+/// system clock (`std::chrono::system_clock`, `CLOCK_REALTIME`) as
+/// nanoseconds since the Unix epoch, negative before it (`time_since_epoch`
+/// in nanoseconds, a signed 64-bit count). A glue whose `Timestamp` is built
+/// by Lean's `Timestamp.ofNanosecondsSinceUnixEpoch` passes it as an `Int`;
+/// [`current_time`] gives the seconds and nanoseconds `lean_get_current_time`
+/// makes of it.
+///
+/// Source: lean2rr leanrt `src/io.rs` (`realtime_nanos`) and leanrs_rt
+/// `src/io/time.rs` (`now_nanos`), which each joined `current_time`'s two
+/// parts again.
+pub fn current_time_nanos() -> i64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => i64::try_from(d.as_nanos()).unwrap_or(i64::MAX),
         Err(e) => i64::try_from(e.duration().as_nanos()).map_or(i64::MIN, |n| -n),
-    };
+    }
+}
+
+/// `Std.Time.Timestamp.now` (`lean_get_current_time`): [`current_time_nanos`]
+/// split into seconds and nanoseconds by C++'s truncating `/` and `%` (both
+/// negative before the epoch). The translator builds Lean's `Timestamp` from
+/// the two `Int`s.
+pub fn current_time() -> (i64, i64) {
+    let nanos = current_time_nanos();
     (nanos / 1_000_000_000, nanos % 1_000_000_000)
 }
 
@@ -170,6 +184,10 @@ mod tests {
     fn now_splits_as_cpp() {
         let (s, n) = current_time();
         assert!(s > 1_700_000_000 && (0..1_000_000_000).contains(&n));
+        // the count both translators rebuilt from the two parts, read later
+        let t = current_time_nanos();
+        let joined = s.wrapping_mul(1_000_000_000).wrapping_add(n);
+        assert!((t - joined).abs() < 60_000_000_000, "{t} {joined}");
     }
 
     #[test]

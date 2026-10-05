@@ -1,5 +1,5 @@
 //! The process rows: `IO.getEnv`, `IO.appPath`, `IO.Process.getPID`,
-//! `IO.getRandomBytes`, the monotonic clock and `IO.sleep`.
+//! `IO.getTID`, `IO.getRandomBytes`, the monotonic clock and `IO.sleep`.
 //!
 //! Sources: leanrs's `rt/leanrs_rt/src/io/env.rs` (`get_env`, `app_path`,
 //! `get_random_bytes`, `sleep`), lean2rr's `runtime/leanrt/src/fs.rs`
@@ -68,6 +68,25 @@ pub fn app_path<S: ByteSink + ?Sized>(out: &mut S) -> Result<(), IoError> {
 /// `IO.Process.getPID` (`lean_io_process_get_pid`, `getpid`).
 pub fn get_pid() -> u32 {
     nix::unistd::getpid().as_raw() as u32
+}
+
+/// `IO.getTID` (`lean_io_get_tid`, `syscall(SYS_gettid)`): the calling
+/// thread's id. Natively a task runs on a thread of the task manager, so it
+/// gets that thread's id. Where each task has a thread of its own (threads
+/// mode, or no scheduler), this is `gettid` itself. With the single-thread
+/// scheduler (feature `sched`) every task runs on `main`'s thread, so the id
+/// is `gettid` plus `sched::thread_number()`, the number of the thread the
+/// task natively runs on (0 for `main`'s own: in `main`, and in a task that
+/// natively runs there, such as a `LEAN_SYNC_PRIO` one). Tasks on different
+/// native threads get different ids.
+///
+/// Source: lean2rr's `IO.getTID` (`runtime/prelude.rr`, `l2r_io_get_tid`,
+/// and the generated `tid + toff`, `leanrt::task::tid_offset`).
+pub fn get_tid() -> u64 {
+    let tid = nix::unistd::gettid().as_raw() as u64;
+    #[cfg(feature = "sched")]
+    let tid = tid.wrapping_add(crate::sched::thread_number());
+    tid
 }
 
 /// `/dev/urandom`, open for one `IO.getRandomBytes` call: what

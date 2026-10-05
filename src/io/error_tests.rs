@@ -7,57 +7,19 @@
 
 use super::*;
 
-/// lean2rr's kind number of an error (`runtime/README.md`): which
-/// `lean_mk_io_error_*` constructor built it, the `_file` variants apart.
+/// The builder number of an error (`IoError::builder_index`, lean2rr's kind
+/// number), 24 for `unexpectedEof`, which has none.
 fn kind(e: &IoError) -> u32 {
-    use IoError as E;
-    let f = |file: &Option<String>, no: u32| if file.is_some() { no + 1 } else { no };
-    match e {
-        E::OtherError(..) => 0,
-        E::Interrupted(..) => 1,
-        E::InvalidArgument(fl, ..) => f(fl, 2),
-        E::NoFileOrDirectory(..) => 4,
-        E::PermissionDenied(fl, ..) => f(fl, 5),
-        E::ResourceExhausted(fl, ..) => f(fl, 7),
-        E::InappropriateType(fl, ..) => f(fl, 9),
-        E::NoSuchThing(fl, ..) => f(fl, 11),
-        E::AlreadyExists(fl, ..) => f(fl, 13),
-        E::HardwareFault(..) => 15,
-        E::UnsatisfiedConstraints(..) => 16,
-        E::IllegalOperation(..) => 17,
-        E::ResourceVanished(..) => 18,
-        E::ProtocolError(..) => 19,
-        E::TimeExpired(..) => 20,
-        E::ResourceBusy(..) => 21,
-        E::UnsupportedOperation(..) => 22,
-        E::UserError(..) => 23,
-        E::UnexpectedEof => 24,
-    }
+    e.builder_index().map_or(24, u32::from)
 }
 
+/// The code and details through the accessors (0 and `""` where there are
+/// none).
 fn code_details(e: &IoError) -> (u32, &str) {
-    use IoError as E;
-    match e {
-        E::AlreadyExists(_, c, d)
-        | E::Interrupted(_, c, d)
-        | E::NoFileOrDirectory(_, c, d)
-        | E::InvalidArgument(_, c, d)
-        | E::PermissionDenied(_, c, d)
-        | E::ResourceExhausted(_, c, d)
-        | E::InappropriateType(_, c, d)
-        | E::NoSuchThing(_, c, d) => (*c, d),
-        E::OtherError(c, d)
-        | E::ResourceBusy(c, d)
-        | E::ResourceVanished(c, d)
-        | E::UnsupportedOperation(c, d)
-        | E::HardwareFault(c, d)
-        | E::UnsatisfiedConstraints(c, d)
-        | E::IllegalOperation(c, d)
-        | E::ProtocolError(c, d)
-        | E::TimeExpired(c, d) => (*c, d),
-        E::UserError(m) => (0, m),
-        E::UnexpectedEof => (0, ""),
-    }
+    (
+        e.os_code().unwrap_or(0),
+        e.details().map_or("", String::as_str),
+    )
 }
 
 /// (errno, io kind, io code, io details, uv kind, uv code, uv details)
@@ -279,7 +241,7 @@ fn messages_and_mapping() {
         IoError::file_not_found(b"/x"),
         IoError::NoFileOrDirectory("/x".into(), 2, String::new())
     );
-    assert_eq!(IoError::UnexpectedEof.ctor_index(), 17);
+    assert_eq!(IoError::<String>::UnexpectedEof.ctor_index(), 17);
     assert_eq!(IoError::user_error("m").ctor_index(), 18);
 }
 
@@ -291,4 +253,166 @@ fn errno_is_per_thread() {
         .join()
         .unwrap();
     assert_eq!(errno(), EBADF);
+}
+
+/// One error of each constructor shape, with and without a file name.
+fn samples() -> Vec<IoError> {
+    let (f, d) = (|| "f".to_owned(), || "d".to_owned());
+    vec![
+        IoError::AlreadyExists(None, 17, d()),
+        IoError::AlreadyExists(Some(f()), 17, d()),
+        IoError::OtherError(1, d()),
+        IoError::ResourceBusy(16, d()),
+        IoError::ResourceVanished(32, d()),
+        IoError::UnsupportedOperation(38, d()),
+        IoError::HardwareFault(5, d()),
+        IoError::UnsatisfiedConstraints(39, d()),
+        IoError::IllegalOperation(25, d()),
+        IoError::ProtocolError(71, d()),
+        IoError::TimeExpired(110, d()),
+        IoError::Interrupted(f(), 4, d()),
+        IoError::NoFileOrDirectory(f(), 2, d()),
+        IoError::InvalidArgument(None, 22, d()),
+        IoError::InvalidArgument(Some(f()), 22, d()),
+        IoError::PermissionDenied(None, 13, d()),
+        IoError::PermissionDenied(Some(f()), 13, d()),
+        IoError::ResourceExhausted(None, 12, d()),
+        IoError::ResourceExhausted(Some(f()), 12, d()),
+        IoError::InappropriateType(None, 21, d()),
+        IoError::InappropriateType(Some(f()), 21, d()),
+        IoError::NoSuchThing(None, 6, d()),
+        IoError::NoSuchThing(Some(f()), 6, d()),
+        IoError::UnexpectedEof,
+        IoError::UserError("m".to_owned()),
+    ]
+}
+
+/// Each error's builder, by name: the one io.cpp's `decode_uv_error_impl`
+/// calls for its class (a `_file` builder when it has a file name), and
+/// lean2rr's numbering (`IO_ERROR_BUILDERS`, its `ioErrorBuilderSyms`).
+#[test]
+fn builder_names() {
+    let want = [
+        Some("lean_mk_io_error_already_exists"),
+        Some("lean_mk_io_error_already_exists_file"),
+        Some("lean_mk_io_error_other_error"),
+        Some("lean_mk_io_error_resource_busy"),
+        Some("lean_mk_io_error_resource_vanished"),
+        Some("lean_mk_io_error_unsupported_operation"),
+        Some("lean_mk_io_error_hardware_fault"),
+        Some("lean_mk_io_error_unsatisfied_constraints"),
+        Some("lean_mk_io_error_illegal_operation"),
+        Some("lean_mk_io_error_protocol_error"),
+        Some("lean_mk_io_error_time_expired"),
+        Some("lean_mk_io_error_interrupted"),
+        Some("lean_mk_io_error_no_file_or_directory"),
+        Some("lean_mk_io_error_invalid_argument"),
+        Some("lean_mk_io_error_invalid_argument_file"),
+        Some("lean_mk_io_error_permission_denied"),
+        Some("lean_mk_io_error_permission_denied_file"),
+        Some("lean_mk_io_error_resource_exhausted"),
+        Some("lean_mk_io_error_resource_exhausted_file"),
+        Some("lean_mk_io_error_inappropriate_type"),
+        Some("lean_mk_io_error_inappropriate_type_file"),
+        Some("lean_mk_io_error_no_such_thing"),
+        Some("lean_mk_io_error_no_such_thing_file"),
+        None,
+        Some("lean_mk_io_user_error"),
+    ];
+    let samples = samples();
+    assert_eq!(samples.len(), want.len());
+    for (e, w) in samples.iter().zip(want) {
+        let got = e.builder_index().map(|i| IO_ERROR_BUILDERS[usize::from(i)]);
+        assert_eq!(got, w, "{e:?}");
+    }
+    // the numbering lean2rr's shim decodes (`ioErrorOf`): user error 23
+    assert_eq!(IoError::user_error("m").builder_index(), Some(23));
+    assert_eq!(
+        IoError::decode_io_error(EACCES, Some(b"f")).builder_index(),
+        Some(6)
+    );
+    assert_eq!(
+        IoError::decode_io_error(EACCES, None).builder_index(),
+        Some(5)
+    );
+}
+
+/// The accessors read Lean's fields: `osCode`, `filename`, `details` (or a
+/// user error's message).
+#[test]
+fn accessors() {
+    for e in samples() {
+        let (code, name, details) = match &e {
+            IoError::UnexpectedEof => (None, None, None),
+            IoError::UserError(m) => (None, None, Some(m.as_str())),
+            IoError::Interrupted(..) | IoError::NoFileOrDirectory(..) => {
+                (e.os_code(), Some("f"), Some("d"))
+            }
+            _ => {
+                let has_name = e
+                    .builder_index()
+                    .is_some_and(|i| IO_ERROR_BUILDERS[usize::from(i)].ends_with("_file"));
+                (e.os_code(), has_name.then_some("f"), Some("d"))
+            }
+        };
+        assert_eq!(e.file_name().map(String::as_str), name, "{e:?}");
+        assert_eq!(e.details().map(String::as_str), details, "{e:?}");
+        assert_eq!(e.os_code(), code, "{e:?}");
+        assert_eq!(
+            e.os_code().is_some(),
+            !matches!(e, IoError::UnexpectedEof | IoError::UserError(_))
+        );
+    }
+    let e = IoError::decode_io_error(ENOENT, Some(b"/x"));
+    assert_eq!(e.os_code(), Some(2));
+    assert_eq!(e.file_name().map(String::as_str), Some("/x"));
+    assert_eq!(
+        e.details().map(String::as_str),
+        Some("no such file or directory")
+    );
+}
+
+/// A glue's own string type: `map_str` maps every string in field order
+/// and keeps the constructor, the code and the builder; `?` converts
+/// through `IoText`.
+#[test]
+fn own_string_type() {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Text(String);
+    impl IoText for Text {
+        fn from_io_text(s: String) -> Text {
+            Text(s)
+        }
+    }
+    for e in samples() {
+        let mut seen = Vec::new();
+        let m: IoError<Text> = e.clone().map_str(|s| {
+            seen.push(s.clone());
+            Text(s)
+        });
+        let want: Vec<String> = e
+            .file_name()
+            .into_iter()
+            .chain(e.details())
+            .cloned()
+            .collect();
+        assert_eq!(seen, want, "{e:?}");
+        assert_eq!(m.ctor_index(), e.ctor_index());
+        assert_eq!(m.builder_index(), e.builder_index());
+        assert_eq!(m.os_code(), e.os_code());
+        assert_eq!(m.clone().map_str(|t| t.0), e);
+        assert_eq!(IoError::<Text>::from(e.clone()), m);
+    }
+    fn fails() -> Result<(), IoError<Text>> {
+        Err(IoError::decode_io_error(ENOENT, None))?;
+        Ok(())
+    }
+    assert_eq!(
+        fails(),
+        Err(IoError::NoFileOrDirectory(
+            Text(String::new()),
+            2,
+            Text("no such file or directory".into())
+        ))
+    );
 }

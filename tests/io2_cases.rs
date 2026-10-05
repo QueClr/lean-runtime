@@ -39,7 +39,7 @@ use std::rc::Rc;
 use lean_runtime::io::process::{self, Child, SpawnArgs, Stdio, StdioConfig};
 use lean_runtime::io::streams::{self, StdStream};
 use lean_runtime::io::{
-    debug, env as lenv, exit, fs as lfs, temp, uvsys, ByteSink, FsMode, Handle, IoError,
+    debug, env as lenv, exit, fs as lfs, temp, uvsys, FsMode, Handle, IoError, StoppingSink,
 };
 use lean_runtime::semantics::array;
 use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
@@ -955,33 +955,6 @@ fn output_big(_: &[String]) -> R<()> {
     println(&format!("code {}", o.exit_code))
 }
 
-/// leanrs's `IO.Process.output` storage: each growth reserved fallibly; a
-/// failed reservation drops the bytes and stops the sink, and the glue ends
-/// with Lean's out of memory once `output` returns (AR-5).
-#[derive(Default)]
-struct Bytes {
-    v: Vec<u8>,
-    out_of_memory: bool,
-}
-
-impl ByteSink for Bytes {
-    fn extend_from_slice(&mut self, bytes: &[u8]) {
-        if self.out_of_memory {
-            return;
-        }
-        if self.v.try_reserve(bytes.len()).is_err() {
-            self.out_of_memory = true;
-            self.v = Vec::new();
-            return;
-        }
-        self.v.extend_from_slice(bytes);
-    }
-
-    fn stopped(&self) -> bool {
-        self.out_of_memory
-    }
-}
-
 /// The case `process/output_oom` (under `ulimit -v`): a child that writes one
 /// pipe without end and has closed the other.
 fn output_oom(args: &[String]) -> R<()> {
@@ -992,18 +965,21 @@ fn output_oom(args: &[String]) -> R<()> {
     } else {
         "exec yes >&2"
     };
-    let (mut o, mut e) = (Bytes::default(), Bytes::default());
+    // the crate's stopping sink: the glue ends with Lean's out of memory
+    // once `output` returns (AR-5)
+    let (mut o, mut e) = (StoppingSink::default(), StoppingSink::default());
     let r = cmd("sh")
         .args(&["-c", script])
         .with(|a| process::output(a, None, &mut o, &mut e));
-    if o.out_of_memory || e.out_of_memory {
-        internal_panic(InternalPanic::OutOfMemory);
-    }
+    let (o, e) = match (o.finish(), e.finish()) {
+        (Ok(o), Ok(e)) => (o, e),
+        (Err(oom), _) | (_, Err(oom)) => internal_panic(oom.into()),
+    };
     let code = r?;
     println(&format!(
         "after {which}: exit {code}, {} and {} bytes",
-        o.v.len(),
-        e.v.len()
+        o.len(),
+        e.len()
     ))
 }
 
@@ -1074,14 +1050,15 @@ fn output_drain_exit_force(_: &[String]) -> R<()> {
 /// once (LB-29: natively it hangs).
 fn output_oom_both_pipes(args: &[String]) -> R<()> {
     println("before")?;
-    let (mut o, mut e) = (Bytes::default(), Bytes::default());
+    let (mut o, mut e) = (StoppingSink::default(), StoppingSink::default());
     let r = cmd(args.first().map(String::as_str).unwrap_or("yes"))
         .with(|a| process::output(a, None, &mut o, &mut e));
-    if o.out_of_memory || e.out_of_memory {
-        internal_panic(InternalPanic::OutOfMemory);
-    }
+    let (o, _) = match (o.finish(), e.finish()) {
+        (Ok(o), Ok(e)) => (o, e),
+        (Err(oom), _) | (_, Err(oom)) => internal_panic(oom.into()),
+    };
     let code = r?;
-    println(&format!("after {code} {}", o.v.len()))
+    println(&format!("after {code} {}", o.len()))
 }
 
 fn failed_rows(label: &str, a: Spawn) -> R<()> {
@@ -1844,29 +1821,10 @@ fn process_title(args: &[String]) -> R<()> {
     ))
 }
 
-/// Lean's `lean_mk_string` of bytes: valid UTF-8 kept; at each byte where a
-/// sequence fails, one U+FFFD, and the byte and every continuation byte after
-/// it skipped (`lean_mk_string_lossy_recover`).
+/// Lean's `lean_mk_string` of bytes (the crate's `lossy_utf8`).
 fn lean_lossy(b: &[u8]) -> String {
     let mut out = String::new();
-    let mut i = 0;
-    while i < b.len() {
-        match std::str::from_utf8(&b[i..]) {
-            Ok(s) => {
-                out.push_str(s);
-                break;
-            }
-            Err(e) => {
-                let ok = e.valid_up_to();
-                out.push_str(std::str::from_utf8(&b[i..i + ok]).unwrap());
-                out.push('\u{FFFD}');
-                i += ok + 1;
-                while i < b.len() && (0x80..0xC0).contains(&b[i]) {
-                    i += 1;
-                }
-            }
-        }
-    }
+    let _ = lean_runtime::semantics::string::lossy_utf8(b, &mut out);
     out
 }
 

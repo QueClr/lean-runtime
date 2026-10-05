@@ -1,6 +1,9 @@
 //! The plain items both schedulers share: the single-thread `sched` (feature
 //! `sched`, `src/sched/task.rs`) and threads mode (feature `threads`,
 //! `src/sched/mt/`). A build compiles one of them, and this file with it.
+//! The functions here call the scheduler of the build through `super`
+//! (`sched::wait`, `sched::in_sync_task`), which has the same names in both
+//! modes.
 
 /// `IO.TaskState`, its constructors in Lean's order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,5 +41,89 @@ pub(crate) fn priority(prio: u64) -> (u8, bool) {
         (0, true)
     } else {
         ((p as u64).min(PRIOS as u64 - 1) as u8, false)
+    }
+}
+
+/// `Task.get` and `IO.wait` (`lean_task_get`, `task_manager::wait_for`) once
+/// the glue has found its slot for task `id` empty (the value fast path
+/// stays the glue's): inside a `sync` task ([`super::in_sync_task`]),
+/// `report(GET_IN_SYNC_TASK)` first, which the glue prints as the Lean panic
+/// it is (the program goes on unless `LEAN_ABORT_ON_PANIC`), then
+/// [`super::wait`]. For `TaskId::FINISHED` (a task the glue finished
+/// itself, such as `Task.pure`) it returns at once and reports nothing, as
+/// native's `wait_for` returns when the task has its value. The glue then
+/// reads its slot.
+///
+/// Example: a `sync := true` dependent that calls `Task.get` on a task that
+/// has not finished writes the line `` `Task.get` called from a `(sync :=
+/// true)` task `` (Lean's `lean_panic` of the message), then waits for it
+/// (case `tasks/get_in_sync_task`).
+///
+/// Source: lean2rr leanrt `src/task.rs` (`await_task`), leanrs_rt
+/// `src/task.rs` (`await_value`) and the crate's drivers
+/// (`tests/sched-driver*/src/lean.rs`, `Task::get`): the same rule.
+pub fn await_task(id: super::TaskId, report: impl FnOnce(&str)) {
+    if id == super::TaskId::FINISHED {
+        return;
+    }
+    if super::in_sync_task() {
+        report(GET_IN_SYNC_TASK);
+    }
+    super::wait(id);
+}
+
+/// A thread the task manager needs cannot be made (or, in the single-thread
+/// scheduler, a context's stack cannot be mapped): natively `lthread`
+/// throws `lean::exception("failed to create thread: " << strerror(err))`
+/// (`thread.cpp` 135-140), which nothing catches, so libc++ writes its
+/// report on standard error and aborts (status 134; no stream is flushed).
+/// Native writes the same line for `main`'s thread, a pool worker and a
+/// dedicated one. `err` is the error of std's `thread::Builder::spawn`
+/// (glibc's `pthread_create`); its `strerror` text ends the line. For a
+/// context's stack, pass the mapping's error as `pthread_create` reports a
+/// stack it cannot map: `ENOMEM` becomes `EAGAIN`. Example, the usual case
+/// (`ulimit -u`, or no memory for the stack): `libc++abi: terminating due to
+/// uncaught exception of type lean::exception: failed to create thread:
+/// Resource temporarily unavailable`.
+///
+/// Source: the crate's two copies, `sched/ctx.rs` (the text of `EAGAIN`)
+/// and `sched/mt/task.rs` (formatted); the judge's verdict on audit item
+/// 5.14 (2026-10-05, a native probe of each thread kind).
+pub fn thread_create_failed(err: &std::io::Error) -> ! {
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(thread_create_failed_line(err).as_bytes());
+    std::process::abort()
+}
+
+/// The line [`thread_create_failed`] writes: libc++'s report of the
+/// uncaught `lean::exception`, with `strerror(err)` (Rust's text of an OS
+/// error without its ` (os error N)`) and a newline.
+pub(crate) fn thread_create_failed_line(err: &std::io::Error) -> String {
+    let text = err.to_string();
+    let text = match (err.raw_os_error(), text.rfind(" (os error ")) {
+        (Some(_), Some(k)) => &text[..k],
+        _ => &text,
+    };
+    format!(
+        "libc++abi: terminating due to uncaught exception of type lean::exception: failed to create thread: {text}\n"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// glibc's `strerror(EAGAIN)`, the text the single-thread scheduler
+    /// wrote before (`sched/ctx.rs`).
+    #[test]
+    fn thread_create_failed_text() {
+        assert_eq!(
+            thread_create_failed_line(&std::io::Error::from_raw_os_error(11)),
+            "libc++abi: terminating due to uncaught exception of type lean::exception: failed to create thread: Resource temporarily unavailable\n"
+        );
+        assert_eq!(
+            thread_create_failed_line(&std::io::Error::from_raw_os_error(12)),
+            "libc++abi: terminating due to uncaught exception of type lean::exception: failed to create thread: Cannot allocate memory\n"
+        );
     }
 }

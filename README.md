@@ -129,6 +129,23 @@ hold a socket's number in the thread's registry of open sockets, so only
 the program's handles and the pending operations keep a socket open
 (AR-12). See `docs/net.md`.
 
+A small batch, `shared-1`, moves runtime code that both translators kept
+into the crate, so that neither keeps a copy of its own (the owner's rule
+of 2026-10-05):
+- `IoError<S>`: `IO.Error` generic over the glue's string type, with
+  accessors for its fields and the index of its `lean_mk_io_error_*`
+  builder;
+- `io::StoppingSink`: the sink of `IO.Process.output` that stops when it
+  cannot grow;
+- `semantics::string::lossy_utf8`: Lean's lossy decoding of the system's
+  bytes; and `push_unicode_scalar`, now public;
+- `sched::await_task`: `Task.get`'s rule, in both modes;
+- `io::env::get_tid`, `io::time::current_time_nanos`,
+  `ChildProcess::from_pid`, and the texts of `dbgTraceIfShared` and
+  `allocprof`;
+- one `sched::thread_create_failed`, and a hook that lets a test harness
+  take the runtime's own standard-error lines.
+
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
 that order. See `docs/development.md`, the rules for implementors.

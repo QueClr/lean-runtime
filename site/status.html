@@ -26,7 +26,7 @@
 <main>
 <h1>Status</h1>
 <p class="lead">State of 2026-10-04.
-The table of merged batches is at main 88ef877, with <code>threads-3</code>; the adoption and coverage sections are at main 0882b54.
+The table of merged batches is at main 88ef877, with <code>threads-3</code> and <code>shared-1</code>; the adoption and coverage sections are at main 0882b54.
 main holds the four modules <code>semantics</code>, <code>io</code>, <code>sched</code> and <code>net</code>, <a href="threads.html">threads mode</a>, and two native quirks, each behind a feature of its own.
 Every Lean symbol that needs shared code has a crate item on main.</p>
 
@@ -93,6 +93,10 @@ API requests AR-27 to AR-33.</td></tr>
 <tr><td><code>threads-3</code></td><td>The second test driver (T3) runs every <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code> case in threads mode, 5 times.
 It shares its Rust ports with the single-thread driver.
 Four new cases with real contention, recorded natively.</td></tr>
+<tr><td><code>shared-1</code></td><td>Runtime code that both translators kept moves into the crate (the owner's rule of 2026-10-05).
+<code>IoError</code> is generic over the string type, with accessors and the index of its builder.
+The crate gets the stopping sink of <code>IO.Process.output</code>, Lean's lossy UTF-8 decoding and <code>Task.get</code>'s rule (<code>await_task</code>).
+It also gets <code>IO.getTID</code>, a child object made from a pid, and a hook for the runtime's stderr lines in tests.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>

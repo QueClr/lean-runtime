@@ -93,16 +93,13 @@ impl<T: Clone + 'static> Task<T> {
     }
 
     /// `Task.get` / `IO.wait` (`lean_task_get`): the value if the slot
-    /// holds it; otherwise, from a `sync` task, Lean's panic message first
-    /// (`task_manager::wait_for`), then the wait.
+    /// holds it; otherwise `sched::await_task`: from a `sync` task, Lean's
+    /// panic message first (`task_manager::wait_for`), then the wait.
     pub fn get(&self) -> T {
         if let Some(v) = self.0.slot.get() {
             return v.clone();
         }
-        if sched::in_sync_task() {
-            crate::glue::lean_panic(sched::GET_IN_SYNC_TASK);
-        }
-        sched::wait(self.0.id);
+        sched::await_task(self.0.id, crate::glue::lean_panic);
         self.0
             .slot
             .get()

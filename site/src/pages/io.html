@@ -49,7 +49,8 @@ Small writes collect in the buffer; a write larger than the buffer goes out dire
     <code>read</code> fills initialized bytes; <code>read_vec</code> grows a <code>Vec</code> as the bytes come.</li>
   <li>An unbounded result (a line, a path, an environment value) is appended to the caller's <a href="glossary.html#g-bytesink">ByteSink</a>.</li>
   <li>A sink can stop when its storage cannot grow.
-    Then <code>getLine</code> and <code>IO.Process.output</code> read no more and return, and the glue ends the process (AR-5, AR-19).</li>
+    Then <code>getLine</code> and <code>IO.Process.output</code> read no more and return, and the glue ends the process (AR-5, AR-19).
+    <code>StoppingSink</code> is such a sink over a <code>Vec</code>; both translators use it for <code>IO.Process.output</code>.</li>
 </ul>
 </div>
 
@@ -107,7 +108,10 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
 <h2 id="errors">Errors</h2>
 <ul>
   <li><code>IoError</code> mirrors Lean's <code>IO.Error</code>: its 19 constructors in Lean's order, with plain fields.
-    Each translator converts it to its own value.</li>
+    Each translator converts it to its own value.
+    The type is generic over the string type, so a translator can also keep it with its own strings (<code>map_str</code>).</li>
+  <li>Accessors read the code, the file name and the details.
+    <code>builder_index</code> names the <code>lean_mk_io_error_*</code> function that makes the error in Lean.</li>
   <li><code>decode_io_error</code> maps an <code>errno</code> to libuv's code, picks the error class and libuv's message, and keeps the <code>errno</code> as the OS code.
     This is Lean 4.34's decoding in <code>io.cpp</code>.</li>
   <li><code>decode_uv_error</code> does the same for the operations that Lean implements with libuv.</li>
@@ -125,7 +129,10 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
     The exception is <code>setCurrentDir</code>, which uses the part before the NUL, as Lean's C string does.</li>
   <li>Paths are views: the bytes of a Lean string.
     Results of unbounded size (a path, a directory entry's name) go to the caller's <code>ByteSink</code> or callback, as bytes.</li>
-  <li><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, <code>IO.getRandomBytes</code>, <code>IO.sleep</code> and the monotonic clock (Lean's absolute <code>CLOCK_MONOTONIC</code>) are in <code>env</code>.</li>
+  <li><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, <code>IO.getTID</code>, <code>IO.getRandomBytes</code>, <code>IO.sleep</code> and the monotonic clock (Lean's absolute <code>CLOCK_MONOTONIC</code>) are in <code>env</code>.</li>
+  <li><code>IO.getTID</code> gives each task the id of the thread it natively runs on.
+    The single-thread scheduler adds the task's thread number to the id of <code>main</code>'s thread.</li>
+  <li>Bytes from the system (arguments, paths, names, environment values) become text by Lean's lossy decoding: <code>semantics::string::lossy_utf8</code>.</li>
   <li><code>dbgTrace</code> prints its message to stderr and continues; <code>dbgSleep</code> sleeps (decision DV5).
     With <code>streams</code>, the message goes to the current stderr stream, as natively.</li>
   <li><code>allocprof</code> runs its action, then prints its message and a note on stderr.
@@ -146,6 +153,7 @@ It then does what the forked child does before <code>execvp</code>:</p>
     It writes the message on the child's stderr and exits with status 255, as Lean's forked child does.</li>
 </ul>
 <p><code>wait</code>, <code>tryWait</code> and <code>kill</code> follow <code>process.cpp</code>.
+A glue that keeps only a child's pid and <code>setsid</code> flag makes the object again with <code>ChildProcess::from_pid</code>.
 <code>IO.Process.output</code> reads both pipes with <code>poll</code>.
 In a program with tasks, <code>wait</code> and <code>output</code> let the other tasks run while they wait (<a href="sched.html#sched-io">sched-io</a>).
 Three <a href="lean-bugs.html#confirmed">Lean bugs</a> are not copied.

@@ -1448,6 +1448,36 @@ fn status_code(st: rustix::process::WaitStatus) -> u32 {
 }
 
 impl ChildProcess {
+    /// The process object of a child by its pid and `setsid` flag, as Lean's
+    /// `Child` object holds them, for a glue that keeps only those two (or
+    /// no longer holds the object [`spawn`] returned, after the child is
+    /// reaped): [`wait`](Self::wait), [`try_wait`](Self::try_wait) and
+    /// [`kill`](Self::kill) then make the system call on the pid, as
+    /// `lean_io_process_child_wait` & co. do.
+    ///
+    /// What the crate assumes about `pid`:
+    /// - It is the pid of a child this process spawned, or of one that is
+    ///   gone. The calls on it are those of native's object: `waitpid(pid)`
+    ///   gives the child's status once, then `ECHILD`; `kill` signals the
+    ///   pid (its group with `setsid`), `ESRCH` when no process has that id
+    ///   any more (unless the system gave it to another process meanwhile,
+    ///   natively too).
+    /// - It is positive. Lean's `Child.pid` always is. For 0, or above
+    ///   `i32::MAX`, the calls fail as on a pid that is gone (`ECHILD`,
+    ///   `ESRCH`), where natively `waitpid(0)` and `kill(0)` would reach a
+    ///   process group.
+    /// - It is not a modelled child's (module comment, item 6: a child that
+    ///   could not start when no `/bin/sh` could stand in): such a child has
+    ///   no process, so only the object [`spawn`] returned (or its clones)
+    ///   can wait for it. Built from its pid, it is a child that is gone.
+    pub fn from_pid(pid: u32, setsid: bool) -> ChildProcess {
+        ChildProcess {
+            pid,
+            setsid,
+            modelled: None,
+        }
+    }
+
     /// `Child.pid` (`lean_io_process_child_pid`).
     pub fn pid(&self) -> u32 {
         self.pid
@@ -1504,7 +1534,7 @@ impl ChildProcess {
                 Ok(())
             };
         }
-        let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| os_error(ESRCH))?;
+        let pid = child_pid(self.pid).ok_or_else(|| os_error(ESRCH))?;
         let r = if self.setsid {
             rustix::process::kill_process_group(pid, Signal::KILL)
         } else {
@@ -1527,6 +1557,15 @@ impl Modelled {
     }
 }
 
+/// A child's pid as rustix's `Pid`: `None` for 0 and for a value above
+/// `i32::MAX` (negative as a `pid_t`). To `waitpid` and `kill` those name a
+/// process group, any child or every process (`kill(-1, SIGKILL)`), never
+/// one child, so a pid of [`ChildProcess::from_pid`] that is not positive
+/// is taken as a child that is gone.
+fn child_pid(pid: u32) -> Option<Pid> {
+    i32::try_from(pid).ok().and_then(Pid::from_raw)
+}
+
 /// `waitpid(pid, &status, options)` once (Lean does not retry `EINTR`). A
 /// blocking wait in a program with tasks first lets the other contexts run
 /// until the child has exited (sched-io, `io::coop`).
@@ -1534,7 +1573,7 @@ fn waitpid_once(
     pid: u32,
     opts: WaitOptions,
 ) -> Result<Option<rustix::process::WaitStatus>, IoError> {
-    let pid = Pid::from_raw(pid as i32).ok_or_else(|| os_error(ECHILD))?;
+    let pid = child_pid(pid).ok_or_else(|| os_error(ECHILD))?;
     #[cfg(feature = "sched")]
     if opts.is_empty() && crate::sched::coop_possible() {
         super::coop::before_waitpid(pid);
@@ -1758,7 +1797,7 @@ fn ready(fds: &[&Option<OwnedFd>]) {
 /// UTF-8 error. Returns the exit code; the sinks then hold valid UTF-8.
 ///
 /// **A sink that stops** ([`ByteSink::stopped`], its storage could not grow;
-/// AR-5): `output` returns at once, without reading either pipe further and
+/// AR-5; the crate's [`super::StoppingSink`]): `output` returns at once, without reading either pipe further and
 /// without waiting for the child, and the glue ends the process with Lean's
 /// `INTERNAL PANIC: out of memory`, exit status 1. Natively the allocation
 /// of the growing `ByteArray` fails in `readToEnd` (the standard-output task

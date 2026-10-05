@@ -482,11 +482,16 @@ impl Utf8Set {
 }
 
 /// `push_unicode_scalar` (`src/runtime/utf8.cpp`): the UTF-8 bytes of `code`
-/// in `d`, and their number. As in C, a value of 0x10000 or more takes four
-/// bytes, masked (a `Char` is always a scalar value, so the masks change
-/// nothing in Lean).
+/// in `d`, and their number (1 to 4). As in C, a value of 0x10000 or more
+/// takes four bytes, masked (a `Char` is always a scalar value, so the masks
+/// change nothing in Lean). A glue calls it where Lean's C encodes one
+/// character into a string it updates itself (`String.push`,
+/// `lean_string_push`); it stays inline, as it is on that hot path.
+///
+/// Source: lean2rr leanrt `src/string.rs` (`encode_scalar`), the same
+/// encoder.
 #[inline]
-fn push_unicode_scalar(code: u32, d: &mut [u8; 4]) -> u8 {
+pub fn push_unicode_scalar(code: u32, d: &mut [u8; 4]) -> u8 {
     if code < 0x80 {
         d[0] = code as u8;
         1
@@ -585,6 +590,45 @@ fn set_cold(size: usize, start: usize, lead: u8, c: u32) -> Option<Utf8Set> {
 #[inline]
 pub fn validate_utf8(b: &[u8]) -> bool {
     core::str::from_utf8(b).is_ok()
+}
+
+/// Lean's lossy decoding of bytes into a string (`lean_mk_string_from_bytes`
+/// and `lean_mk_string_lossy_recover`, `src/runtime/object.cpp`, which
+/// `lean_decode_lossy_utf8` and `mk_string` call: the runtime decodes so
+/// every text the system gives, such as arguments, paths, names and
+/// environment values).
+/// Valid UTF-8 is written as it is. At each byte where `validate_utf8_one`
+/// fails, one U+FFFD is written, and that byte and every continuation byte
+/// after it (`0x80` to `0xBF`) are skipped. Examples:
+/// - `61 FF 62` gives `a\u{FFFD}b`;
+/// - `C0 80` gives one U+FFFD (Rust's `String::from_utf8_lossy` gives two);
+/// - `E2 28 A1` gives `\u{FFFD}(\u{FFFD}`.
+///
+/// The text goes to `out` in pieces (`write_str`): valid input in one piece.
+/// The only error is `out`'s own. A glue that caches a character count
+/// counts the result (`utf8_strlen`): each U+FFFD is one character, as in C.
+///
+/// Source: leanrs_rt `src/str.rs` (`from_bytes_lossy`) and lean2rr leanrt
+/// `src/string.rs` (`from_bytes_lossy`), the same algorithm. `from_utf8`
+/// accepts exactly what C's `validate_utf8_one` accepts (see
+/// `validate_utf8`), so its `valid_up_to` is the byte where C's scan fails.
+pub fn lossy_utf8<W: core::fmt::Write + ?Sized>(bytes: &[u8], out: &mut W) -> core::fmt::Result {
+    let mut rest = bytes;
+    loop {
+        match core::str::from_utf8(rest) {
+            Ok(s) => return out.write_str(s),
+            Err(e) => {
+                let (valid, bad) = rest.split_at(e.valid_up_to());
+                if !valid.is_empty() {
+                    // the prefix `from_utf8` accepted: never the default
+                    out.write_str(core::str::from_utf8(valid).unwrap_or_default())?;
+                }
+                out.write_str("\u{FFFD}")?;
+                let skip = 1 + bad[1..].iter().take_while(|&&c| c & 0xC0 == 0x80).count();
+                rest = &bad[skip..];
+            }
+        }
+    }
 }
 
 /// `String.decLt` and `String.Slice`'s `<` (`lean_string_dec_lt`, which is
@@ -795,5 +839,159 @@ mod tests {
         let p = utf8_set(b"a", 0, 0xD800).unwrap();
         assert_eq!(p.new_bytes(), b"\xed\xa0\x80");
         assert_eq!(p.new_str(&mut [0; 4]), None);
+    }
+
+    /// `lean_mk_string_from_bytes` (4.34.0), line by line: `validate_utf8`,
+    /// then `lean_mk_string_lossy_recover` from the first failure.
+    fn c_lossy(s: &[u8]) -> Vec<u8> {
+        let mut pos = 0;
+        while pos < s.len() && c_validate_one(s, &mut pos) {}
+        if pos == s.len() {
+            return s.to_vec();
+        }
+        let mut out = s[..pos].to_vec();
+        let mut start = pos;
+        while pos < s.len() {
+            if !c_validate_one(s, &mut pos) {
+                out.extend_from_slice(&s[start..pos]);
+                out.extend_from_slice("\u{fffd}".as_bytes());
+                pos += 1;
+                while pos < s.len() && s[pos] & 0xc0 == 0x80 {
+                    pos += 1;
+                }
+                start = pos;
+            }
+        }
+        out.extend_from_slice(&s[start..pos]);
+        out
+    }
+
+    fn lossy(b: &[u8]) -> String {
+        let mut out = String::new();
+        lossy_utf8(b, &mut out).unwrap();
+        out
+    }
+
+    /// `lossy_utf8` against C's decoder: every string of one and two bytes,
+    /// and every pair followed by one or two bytes of each kind (as in
+    /// `validate_utf8_matches_c`), then the same after valid prefixes and
+    /// between valid characters.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn lossy_utf8_matches_c() {
+        let kinds = [
+            0x00, 0x41, 0x7F, 0x80, 0xBF, 0xC0, 0xC2, 0xE0, 0xED, 0xF0, 0xF4, 0xFF,
+        ];
+        let check = |s: &[u8]| assert_eq!(lossy(s).as_bytes(), c_lossy(s), "{s:02x?}");
+        check(&[]);
+        for a in 0..=255u8 {
+            check(&[a]);
+            for b in 0..=255u8 {
+                check(&[a, b]);
+                for &c in &kinds {
+                    check(&[a, b, c]);
+                    for &d in &kinds {
+                        check(&[a, b, c, d]);
+                    }
+                }
+            }
+        }
+        for &a in &kinds {
+            for &b in &kinds {
+                let mut s = "x€".as_bytes().to_vec();
+                s.extend_from_slice(&[a, b]);
+                s.extend_from_slice("😀y".as_bytes());
+                s.extend_from_slice(&[b, a]);
+                check(&s);
+            }
+        }
+    }
+
+    /// The bytes leanrs's io probe decoded natively (Lean 4.34.0's
+    /// `lean_mk_string_from_bytes`), each with the code points it gave, and
+    /// lean2rr's unit case. A U+FFFD is one character.
+    #[test]
+    fn lossy_utf8_native_cases() {
+        let cases: &[(&[u8], &[u32])] = &[
+            (&[65], &[0x41]),
+            (&[192, 128], &[0xfffd]),
+            (&[192, 128, 128, 65], &[0xfffd, 0x41]),
+            (&[226, 130], &[0xfffd]),
+            (&[226, 130, 65], &[0xfffd, 0x41]),
+            (&[226, 130, 172], &[0x20ac]),
+            (&[237, 160, 128], &[0xfffd]),
+            (&[240, 159, 152, 128], &[0x1f600]),
+            (&[240, 159, 152], &[0xfffd]),
+            (&[244, 144, 128, 128], &[0xfffd]),
+            (&[248, 128, 128, 128, 128], &[0xfffd]),
+            (&[255], &[0xfffd]),
+            (&[128], &[0xfffd]),
+            (&[128, 128, 65], &[0xfffd, 0x41]),
+            (&[65, 255, 66], &[0x41, 0xfffd, 0x42]),
+            (&[194], &[0xfffd]),
+            (&[194, 65], &[0xfffd, 0x41]),
+            (&[224, 128, 128], &[0xfffd]),
+            (&[224, 160, 128], &[0x800]),
+            (&[240, 128, 128, 128], &[0xfffd]),
+            (&[195, 169, 255, 195, 169], &[0xe9, 0xfffd, 0xe9]),
+            (&[254, 255], &[0xfffd, 0xfffd]),
+            (&[226, 40, 161], &[0xfffd, 0x28, 0xfffd]),
+            (&[240, 40, 140, 188], &[0xfffd, 0x28, 0xfffd]),
+            (&[241, 128, 128], &[0xfffd]),
+            (&[0], &[0]),
+            (&[65, 0, 66], &[0x41, 0, 0x42]),
+            (&[], &[]),
+            // lean2rr's case
+            (b"a\xffb\xe2\x82", &[0x61, 0xfffd, 0x62, 0xfffd]),
+        ];
+        for &(bytes, points) in cases {
+            let got = lossy(bytes);
+            let got_points: Vec<u32> = got.chars().map(u32::from).collect();
+            assert_eq!(got_points, points, "{bytes:?}");
+            assert_eq!(utf8_strlen(got.as_bytes()), points.len() as u64);
+        }
+    }
+
+    /// The writer's error ends the decoding and is returned.
+    #[test]
+    fn lossy_utf8_passes_the_writers_error() {
+        struct Full(usize);
+        impl core::fmt::Write for Full {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                if self.0 == 0 {
+                    return Err(core::fmt::Error);
+                }
+                self.0 -= 1;
+                let _ = s;
+                Ok(())
+            }
+        }
+        assert!(lossy_utf8(b"a\xffb", &mut Full(1)).is_err());
+        assert!(lossy_utf8(b"a\xffb", &mut Full(3)).is_ok());
+        assert!(lossy_utf8(b"ab", &mut Full(0)).is_err());
+    }
+
+    /// `push_unicode_scalar` is `char::encode_utf8` on scalar values.
+    #[test]
+    fn push_unicode_scalar_encodes_scalars() {
+        for c in [
+            '\0',
+            'a',
+            '\u{7f}',
+            '\u{80}',
+            '\u{7ff}',
+            '\u{800}',
+            '\u{ffff}',
+            '\u{10000}',
+            '\u{10ffff}',
+        ] {
+            let mut d = [0; 4];
+            let n = push_unicode_scalar(c as u32, &mut d);
+            assert_eq!(
+                &d[..usize::from(n)],
+                c.encode_utf8(&mut [0; 4]).as_bytes(),
+                "{c:?}"
+            );
+        }
     }
 }

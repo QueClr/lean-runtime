@@ -37,7 +37,7 @@ This file covers:
 | `src/sched/slots.rs` | With `io`: the current standard streams and modelled `errno` of each context and each emulated worker, swapped in while it runs (review AR-24) |
 | `src/sched/uv_signals.rs` | The process-wide part of the signal watchers' delivery (signal-hook's handlers, the signal pipe, the counts), shared with threads mode's `sched::uv` (T2) |
 | `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
-| `src/sched/common.rs` | The plain items both modes share: `TaskState`, the messages, the priorities |
+| `src/sched/common.rs` | The plain items both modes share: `TaskState`, the messages, the priorities, `await_task` (`Task.get`'s rule) and `thread_create_failed` (native's abort when a thread cannot be made) |
 | `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt`, with `sched::mt::uv`, `Std.Internal.UV` on a loop thread of its own (T2) |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
 | `src/io/coop.rs` | sched-io in the io layer (features `io` and `sched`): the cooperative reads, writes, `flock` and `waitpid`, and the stream locks |
@@ -1113,13 +1113,19 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - `Task.map`/`bind`, `IO.mapTask`/`bindTask`: when
      `dependent_runs_now(src, sync)` is true, apply `f` at once; otherwise
      `depend(src, job, prio, sync, keep_alive)`;
-   - `Task.get`/`IO.wait`: if the slot holds the value, that; otherwise, if
-     `in_sync_task()`, report the Lean panic `GET_IN_SYNC_TASK` (native's
-     "`Task.get` called from a `(sync := true)` task", `wait_for`;
-     `tasks/get_in_sync_task`), then `wait(id)` and read the slot;
+   - `Task.get`/`IO.wait`: if the slot holds the value, that; otherwise
+     `await_task(id, report)`, then read the slot. `await_task` is the
+     rule: in a `sync` task (`in_sync_task()`) it calls `report` with
+     `GET_IN_SYNC_TASK` first, and the glue prints it as a Lean panic
+     (native's "`Task.get` called from a `(sync := true)` task",
+     `wait_for`; `tasks/get_in_sync_task`); then it calls `wait(id)`. For
+     `TaskId::FINISHED` it does nothing. Threads mode has the same
+     function;
    - `IO.getTaskState`: `state(id)`; `IO.waitAny`: `wait_any(ids)`;
    - `IO.cancel`: `cancel(id)`; `IO.checkCanceled`: `check_canceled()`;
-   - `IO.getTID` in a task: `main`'s id plus `thread_number()`;
+   - `IO.getTID`: `io::env::get_tid()` (with `io`): `gettid` plus
+     `thread_number()`, so a task gets the id of the thread it natively
+     runs on (`main`'s in `main`). In threads mode it is `gettid` alone;
    - `Task.pure a` (`lean_task_pure`): no call, glue only. Natively it is
      a task object that holds `a` and has no task-manager state
      (`alloc_task(v)`, `object.cpp` 1180-1201: `m_value` set, `m_imp`
