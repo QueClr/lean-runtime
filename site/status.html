@@ -107,6 +107,9 @@ A free inside a resolution resolves its own promises first, as natively.</td></t
 The feature <code>startup-fds</code> opens the startup descriptors in the crate's own constructor: the third native quirk.
 The scheduler can start lazily, at the first task (<code>start_lazy</code>).
 The crate's constructors use no global allocator (AR-36).</td></tr>
+<tr><td><code>shared-3</code></td><td>The panic and exit executor that both translators kept moves into the crate (<code>io::panic</code>).
+A translator gives its streams through a glue trait, whose defaults are native's behaviour.
+The internal panic builds its line on the stack, with no allocation.</td></tr>
 </tbody></table></div>
 <p>Each batch has its rows or program cases, and benchmark pairs: one per <code>semantics</code> function, and one per hot path of <code>io</code> (<a href="testing.html">Testing</a>).
 No timing session has run yet.</p>

@@ -1,7 +1,8 @@
 //! The texts and exit statuses of Lean 4.34.0's panics (`src/runtime/object.cpp`
 //! lines 76-210, `src/runtime/stack_overflow.cpp`, `src/runtime/io.cpp`), as
-//! data: what to print, where, and how the process goes on. Each translator
-//! prints with its own streams and ends its process itself.
+//! data: what to print, where, and how the process goes on. `io::panic`
+//! (feature `io`) carries the plans out, each translator supplying its own
+//! streams (`io::panic::PanicGlue`).
 //!
 //! Two paths:
 //! - **`lean_panic_fn`** (`panic!`, `get!` out of bounds, ...): the message
@@ -47,10 +48,13 @@ pub const ABORT_STATUS: i32 = 134;
 /// on (`LEAN_BACKTRACE` unset or not `0`); the frames follow, one per line.
 pub const BACKTRACE_HEADER: &str = "backtrace:";
 
-/// The frame line of a runtime without backtrace support
-/// (`print_backtrace` when `LEAN_SUPPORTS_BACKTRACE` is 0). Native Lean on
-/// Linux prints the real frames, which no translator reproduces; lean2rr
-/// prints this line instead.
+/// The line lean2rr prints after `backtrace:` in place of native's frames,
+/// which no translator reproduces (their addresses change from run to run);
+/// `io::panic` prints it too. Native never prints it after `backtrace:`:
+/// it is the text of `print_backtrace`'s `#else` branch, which is dead, since
+/// `lean_panic_impl` prints `backtrace:` and calls `print_backtrace` only
+/// under `#if LEAN_SUPPORTS_BACKTRACE` (`object.cpp` 179-185; without
+/// backtrace support native prints neither line; review RSH3-03).
 pub const NO_BACKTRACE: &str = "(stack trace unavailable)";
 
 /// What the stack-overflow handler writes to descriptor 2 before it aborts

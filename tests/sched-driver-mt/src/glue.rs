@@ -32,7 +32,6 @@
 //! the case fails.
 
 pub use crate::glue_common::*;
-use lean_runtime::io::exit;
 use lean_runtime::sched::{self, Glue};
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -175,5 +174,6 @@ pub fn run(init: impl FnOnce(), main: impl FnOnce(&[String]) -> u32, args: &[Str
             "sched-cases-mt: finish returned without workers_end"
         );
     }
-    exit::exit(code as i32)
+    // an uncaught error's line after the task manager's end, or the exit
+    end(code)
 }

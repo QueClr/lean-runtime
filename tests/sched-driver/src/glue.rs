@@ -6,7 +6,6 @@
 //! are in `glue_common.rs`, which the threads-mode driver shares.
 
 pub use crate::glue_common::*;
-use lean_runtime::io::exit;
 use lean_runtime::sched::{self, CtxId, Glue, Suspend};
 use std::rc::Rc;
 
@@ -66,5 +65,6 @@ pub fn run(init: impl FnOnce(), main: impl FnOnce(&[String]) -> u32, args: &[Str
         );
     }
     sched::finish();
-    exit::exit(code as i32)
+    // an uncaught error's line after the task manager's end, or the exit
+    end(code)
 }

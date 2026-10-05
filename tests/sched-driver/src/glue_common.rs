@@ -1,12 +1,13 @@
 //! The glue's parts that do not depend on the scheduler, shared by both
 //! drivers (`tests/sched-driver-mt` includes this file by path): the
-//! standard streams' output, Lean's panics, `IO.Process.exit`, and native
-//! Lean's startup descriptors. Each driver's `glue.rs` adds its `Glue` and
+//! standard streams' output, Lean's panics and `IO.Process.exit` (the
+//! crate's executor, `io::panic`, with its native glue), and native Lean's
+//! startup descriptors. Each driver's `glue.rs` adds its `Glue` and
 //! the program's entry (`run`), and re-exports these.
 
-use lean_runtime::io::{debug, exit, Handle};
+use lean_runtime::io::panic::{self, Native};
+use lean_runtime::io::Handle;
 use lean_runtime::sched;
-use lean_runtime::semantics::panic::{self, PanicEnd, PanicSettings, PanicStream};
 
 // ---------------------------------------------------------------------------
 // Standard streams: the crate's glibc `FILE` model (`lean_runtime::io`):
@@ -31,77 +32,54 @@ pub fn eprintln(s: &str) {
     let _ = Handle::stderr().put_str(l.as_bytes());
 }
 
-/// The settings `lean_panic_impl` reads (`LEAN_ABORT_ON_PANIC`,
-/// `LEAN_BACKTRACE`; exit-on-panic off and messages on, as in a program
-/// after its initializers).
-fn panic_settings() -> PanicSettings {
-    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
-    let backtrace = std::env::var_os("LEAN_BACKTRACE");
-    PanicSettings::from_env(
-        abort.as_ref().map(|v| v.as_encoded_bytes()),
-        backtrace.as_ref().map(|v| v.as_encoded_bytes()),
-    )
-}
-
-/// The runtime's `lean_panic(msg, force_stderr)`, by
-/// `lean_panic_plan(settings, force_stderr)`: an effect point, as for any
-/// output; the lines on Lean's current stderr (`io_eprintln`, which
-/// `IO.setStderr` redirects: `io::debug::runtime_eprintln`) or on the
-/// process's stderr (`std::cerr`: C's `stdout` flushed first, then
-/// `stderr`, whatever `IO.setStderr` set); then the abort or the exit the
-/// plan says; otherwise it returns. No backtrace frames: the frame line of
-/// a runtime without backtraces (`NO_BACKTRACE`).
-fn report_panic(msg: &str, force_stderr: bool) {
-    let plan = panic::lean_panic_plan(panic_settings(), force_stderr);
-    if plan.print {
-        sched::effect();
-        let mut lines = vec![msg];
-        if plan.backtrace {
-            lines.extend([panic::BACKTRACE_HEADER, panic::NO_BACKTRACE]);
-        }
-        match plan.stream {
-            PanicStream::LeanStderr => {
-                for l in lines {
-                    debug::runtime_eprintln(l.as_bytes());
-                }
-            }
-            PanicStream::ProcessStderr => {
-                let _ = Handle::stdout().flush();
-                let err = Handle::stderr();
-                for l in lines {
-                    let _ = err.put_str(l.as_bytes());
-                    let _ = err.put_str(b"\n");
-                }
-            }
-        }
-    }
-    match plan.end {
-        PanicEnd::Abort => std::process::abort(),
-        PanicEnd::Exit => exit::exit(panic::PANIC_EXIT_STATUS),
-        PanicEnd::Return => {}
-    }
-}
-
 /// A Lean panic of the runtime (`lean_panic(msg)`: `Task.get` in a `sync`
-/// task): on Lean's current stderr, which `IO.setStderr` redirects, unless
-/// the process is about to end; the program goes on.
+/// task): the crate's executor (`io::panic::report`) with native's glue on
+/// the crate's streams: on Lean's current stderr, which `IO.setStderr`
+/// redirects, unless the process is about to end; the program goes on.
 pub fn lean_panic(msg: &str) {
-    report_panic(msg, false)
+    panic::report(msg.as_bytes(), false, &mut Native)
 }
 
 /// `lean_panic(msg, force_stderr = true)`, the report of
 /// `IO.Option.getOrBlock!` on `none` (`sched::option_get_or_block`): always
 /// on the process's stderr, never on the stream `IO.setStderr` set.
 pub fn lean_panic_forced(msg: &str) {
-    report_panic(msg, true)
+    panic::report(msg.as_bytes(), true, &mut Native)
 }
 
-/// `IO.Process.exit` (`lean_io_exit`): an effect point, then C's `exit`,
-/// which flushes the streams but neither finalizes the task manager nor
-/// waits for any task.
+/// The text of the uncaught error a port's `main` ended with
+/// ([`uncaught_after_main`]), reported by [`end`].
+static UNCAUGHT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
+
+/// A port's `main` ends with an uncaught error whose text is `text`
+/// (`IO.Error.toString`); it returns status 1. The driver's `run` reports
+/// it after `sched::finish` ([`end`]), as Lean's generated `main` calls
+/// `lean_io_result_show_error` after `lean_finalize_task_manager` (review
+/// RSH3-04). Only the net ports call it, which the threads-mode driver
+/// does not compile yet.
+#[allow(dead_code)]
+pub fn uncaught_after_main(text: &[u8]) {
+    *UNCAUGHT.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.to_vec());
+}
+
+/// The end of the driver's `run`, after `sched::finish`: an uncaught error
+/// recorded by [`uncaught_after_main`] through the crate's executor
+/// (`io::panic::uncaught`: its line, status 1), otherwise C's `exit` with
+/// `main`'s status.
+pub fn end(code: u32) -> ! {
+    let pending = UNCAUGHT.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(text) = pending {
+        panic::uncaught(&text, &mut Native)
+    }
+    lean_runtime::io::exit::exit(code as i32)
+}
+
+/// `IO.Process.exit` (`lean_io_exit`): the crate's executor
+/// (`io::panic::process_exit`): an effect point, then C's `exit`, which
+/// flushes the streams but neither finalizes the task manager nor waits
+/// for any task.
 pub fn process_exit(code: u8) -> ! {
-    sched::effect();
-    exit::exit(code as i32)
+    panic::process_exit(code, &mut Native)
 }
 
 // ---------------------------------------------------------------------------

@@ -179,6 +179,13 @@ impl CFile {
         }
     }
 
+    /// Whether this is glibc's `stderr` (the guard's holder tracking,
+    /// [`super::handle::stderr_held_here`]).
+    #[inline]
+    pub(crate) fn is_stderr(&self) -> bool {
+        matches!(self.fd, Fd::Std(2))
+    }
+
     /// A clone of an opened stream's cell, for the open-file list.
     pub(crate) fn busy_arc(&self) -> Option<Arc<AtomicU8>> {
         self.busy.clone()

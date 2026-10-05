@@ -55,10 +55,11 @@ fn eprintln(s: &str) {
 fn ok<T>(r: R<T>) -> T {
     match r {
         Ok(v) => v,
-        Err(e) => {
-            exit::show_error(error_text(&e).as_bytes());
-            exit::exit(1)
-        }
+        // `lean_io_result_show_error`, then status 1 (`io::panic::uncaught`)
+        Err(e) => lean_runtime::io::panic::uncaught(
+            error_text(&e).as_bytes(),
+            &mut lean_runtime::io::panic::Native,
+        ),
     }
 }
 
@@ -183,9 +184,9 @@ impl<T: Val> Promise<T> {
     fn new() -> Promise<T> {
         let id = match sched::promise_new() {
             Ok(id) => id,
+            // `lean_internal_panic` (the crate's executor, native's glue)
             Err(msg) => {
-                eprintln(&format!("INTERNAL PANIC: {msg}"));
-                exit::exit(1)
+                lean_runtime::io::panic::internal_panic(msg, &mut lean_runtime::io::panic::Native)
             }
         };
         Promise {

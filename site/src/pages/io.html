@@ -29,6 +29,7 @@ It copies the behaviour of glibc where a Lean program can see it.</p>
 <tr><td><code>startup</code></td><td>The descriptors native Lean has open before <code>main</code>, and <code>main</code> on a thread of its own (<code>run_main</code>).
 Its ELF constructor needs the feature <code>startup-fds</code>.</td><td>main</td></tr>
 <tr><td><code>exit</code></td><td>What the exit does with the streams; <code>IO.Process.exit</code>, <code>forceExit</code>, the uncaught-error message.</td><td>main</td></tr>
+<tr><td><code>panic</code></td><td>The panic and exit executor: a panic's lines and its end, the internal panic, the uncaught error, <code>IO.Process.exit</code>.</td><td>main (shared-3)</td></tr>
 <tr><td><code>process</code>, <code>environ</code></td><td>Child processes; the process environment as C's <code>environ</code> holds it.</td><td>main (io-2)</td></tr>
 <tr><td><code>streams</code></td><td>The current standard streams: <code>IO.getStdout</code>, <code>IO.setStdout</code> and the others.</td><td>main (io-2)</td></tr>
 <tr><td><code>temp</code>, <code>time</code>, <code>uvsys</code></td><td>Temporary files; <code>timeit</code> and <code>Std.Time</code>'s clock; the <code>Std.Internal.UV.System</code> queries.</td><td>main (io-2)</td></tr>
@@ -278,6 +279,18 @@ The crate cannot register an <code>atexit</code> handler without <code>unsafe</c
 Tasks join before the streams flush.
 So a runaway task keeps the process alive, and <code>main</code>'s buffered output never appears.</figcaption>
 </figure>
+
+<h2 id="panic">Panics</h2>
+<p>A panic, an internal panic, an uncaught error and <code>IO.Process.exit</code> each end in a fixed order of steps.
+The module <code>io::panic</code> carries out these steps for both translators.</p>
+<ul>
+  <li>A panic that goes on prints its lines on Lean's current stderr stream, one <code>putStr</code> per line.</li>
+  <li>Under <code>LEAN_ABORT_ON_PANIC</code>, stdout is flushed first, the lines go to the process's stderr, and the process aborts.</li>
+  <li>An internal panic writes its line before stdout, with no allocation, then exits with status 1.</li>
+  <li>Each translator gives its own streams through a glue trait, <code>PanicGlue</code>.
+    Its defaults are native's behaviour on the crate's streams.</li>
+</ul>
+<p class="more">Detail: <a href="repo:src/io/panic.rs">src/io/panic.rs</a>, with <a href="repo:docs/panic.md">docs/panic.md</a> (native's order and the copies' differences).</p>
 
 <p class="more">Detail: <a href="repo:src/io/mod.rs">src/io/mod.rs</a> (the layout, "no bulk copies", concurrency), <a href="repo:src/io/cfile.rs">cfile.rs</a>, <a href="repo:src/io/debug.rs">debug.rs</a>, <a href="repo:src/io/env.rs">env.rs</a>, <a href="repo:src/io/error.rs">error.rs</a>, <a href="repo:src/io/exit.rs">exit.rs</a>, <a href="repo:src/io/fs.rs">fs.rs</a>, <a href="repo:src/io/handle.rs">handle.rs</a>, <a href="repo:src/io/startup.rs">startup.rs</a>.
 From io-2: <a href="repo:src/io/environ.rs">environ.rs</a>, <a href="repo:src/io/process.rs">process.rs</a>, <a href="repo:src/io/streams.rs">streams.rs</a>, <a href="repo:src/io/temp.rs">temp.rs</a>, <a href="repo:src/io/time.rs">time.rs</a>, <a href="repo:src/io/uvsys.rs">uvsys.rs</a>.

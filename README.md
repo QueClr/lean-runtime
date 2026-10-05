@@ -183,6 +183,17 @@ It also makes the crate's ELF constructors use no global allocator
 (AR-36): the title's constructor copies the arguments into a block it
 maps, and both read `/proc` into stack buffers (`tests/ctor_alloc.rs`).
 
+Batch `shared-3` moves the last code both translators kept, the panic and
+exit executor (audit item 3.4), into `io::panic`: a panic's plan carried
+out (the effect point, Lean's stderr or the process's, the flush of
+stdout, then the abort or the exit), the internal panic (its line built on
+the stack, with no allocation), the uncaught error and `IO.Process.exit`.
+A translator supplies its streams and its ways out through
+`io::panic::PanicGlue`, whose defaults are native's behaviour on the
+crate's streams; leanrs keeps its own panic settings through it until it
+decides. `docs/panic.md` has native's order, the copies' differences and
+the resolution; `tests/io_panic.rs` checks the paths in child processes.
+
 The two projects are finishing a cross-test of their runtimes, then moving
 to Lean 4.34.0, then extracting the rest of `semantics`, `io` and `sched` in
 that order. See `docs/development.md`, the rules for implementors.

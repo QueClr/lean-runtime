@@ -222,9 +222,9 @@ impl<T: Clone + 'static> Promise<T> {
     pub fn new() -> Promise<T> {
         let id = match sched::promise_new() {
             Ok(id) => id,
+            // `lean_internal_panic` (the crate's executor, native's glue)
             Err(msg) => {
-                eprintln!("INTERNAL PANIC: {msg}");
-                std::process::exit(1)
+                lean_runtime::io::panic::internal_panic(msg, &mut lean_runtime::io::panic::Native)
             }
         };
         Promise {

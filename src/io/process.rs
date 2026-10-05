@@ -1721,21 +1721,15 @@ fn drain_in_background(fd: Option<OwnedFd>) {
 }
 
 /// The drain's storage could not grow: Lean's `lean_internal_panic_out_of_memory`
-/// from that thread, its line on standard error, then `exit(1)` (an abort
-/// under `LEAN_ABORT_ON_PANIC`).
+/// from that thread ([`super::panic::internal_panic`]: its line on standard
+/// error, built on the stack, then `exit(1)`, or an abort under
+/// `LEAN_ABORT_ON_PANIC`).
 fn drain_out_of_memory() -> ! {
-    use crate::semantics::panic::{
-        internal_panic_end, InternalPanic, PanicEnd, PanicSettings, PANIC_EXIT_STATUS,
-    };
-    let mut line = String::new();
-    let _ = InternalPanic::OutOfMemory.write_line(&mut line);
-    let _ = Handle::stderr().put_str(line.as_bytes());
-    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
-    let s = PanicSettings::from_env(abort.as_ref().map(|v| v.as_encoded_bytes()), None);
-    match internal_panic_end(s) {
-        PanicEnd::Abort => std::process::abort(),
-        _ => super::exit::exit(PANIC_EXIT_STATUS),
-    }
+    use crate::semantics::panic::InternalPanic;
+    super::panic::internal_panic(
+        InternalPanic::OutOfMemory.message(),
+        &mut super::panic::Native,
+    )
 }
 
 /// Waits until every drain `output` left running has read its pipe to the

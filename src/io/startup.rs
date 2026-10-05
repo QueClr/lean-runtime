@@ -209,30 +209,13 @@ impl StartupFailure {
     }
 
     /// [`StartupFailure::message`] into `w`, with no allocation of its own.
-    fn write_message(self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
+    fn write_message(self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
         let code = super::error::crt_to_uv(self.errno());
         w.write_str("Failed to initialize event loop: ")?;
         match super::error::uv_strerror_named(code) {
             Some(m) => w.write_str(m),
             None => write!(w, "Unknown system error {code}"),
         }
-    }
-}
-
-/// A line built on the stack ([`end_startup`] in an ELF constructor, which
-/// must not allocate: AR-36). A longer line is cut, which no message reaches
-/// (the longest is under 120 bytes).
-struct StackLine {
-    buf: [u8; 256],
-    len: usize,
-}
-
-impl std::fmt::Write for StackLine {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        let n = s.len().min(self.buf.len() - self.len);
-        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
-        self.len += n;
-        Ok(())
     }
 }
 
@@ -443,9 +426,10 @@ fn ring(entries: u32, polling: bool) -> Option<IoUring> {
 /// `io/startup_fd_exhausted`).
 ///
 /// The line is built on the stack and written to descriptor 2 at once (the
-/// unbuffered standard error, which no stream has used yet), so the call
-/// allocates nothing unless `LEAN_ABORT_ON_PANIC` is set (read with
-/// `std::env::var_os`; the crate's constructor reads it with `getenv`).
+/// unbuffered standard error, which no stream has used yet), as
+/// [`super::panic::internal_panic`] writes its line, so the call allocates
+/// nothing unless `LEAN_ABORT_ON_PANIC` is set to a non-empty value (read
+/// with `std::env::var_os`; the crate's constructor reads it with `getenv`).
 pub fn end_startup(failure: StartupFailure) -> ! {
     let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
     end_startup_with(failure, abort.as_ref().map(|v| v.as_encoded_bytes()))
@@ -454,26 +438,12 @@ pub fn end_startup(failure: StartupFailure) -> ! {
 /// [`end_startup`] with `LEAN_ABORT_ON_PANIC`'s value given (`None` when
 /// unset). Allocates nothing (AR-36).
 pub(crate) fn end_startup_with(failure: StartupFailure, abort_on_panic: Option<&[u8]>) -> ! {
-    use crate::semantics::panic::{
-        internal_panic_end, PanicEnd, PanicSettings, INTERNAL_PANIC_PREFIX, PANIC_EXIT_STATUS,
-    };
-    use std::fmt::Write;
-    let mut line = StackLine {
-        buf: [0; 256],
-        len: 0,
-    };
-    let _ = line.write_str(INTERNAL_PANIC_PREFIX);
-    let _ = failure.write_message(&mut line);
-    let _ = line.write_str("\n");
-    let mut rest = &line.buf[..line.len];
-    while !rest.is_empty() {
-        match rustix::io::write(rustix::stdio::stderr(), rest) {
-            Ok(0) => break,
-            Ok(n) => rest = &rest[n..],
-            Err(rustix::io::Errno::INTR) => {}
-            Err(_) => break,
-        }
-    }
+    use crate::semantics::panic::{internal_panic_end, PanicEnd, PanicSettings, PANIC_EXIT_STATUS};
+    // the internal panic's line, built on the stack (`io::panic`)
+    super::panic::write_internal_line(
+        |w| failure.write_message(w),
+        &mut super::panic::write_stderr_fd,
+    );
     let s = PanicSettings::from_env(abort_on_panic, None);
     match internal_panic_end(s) {
         PanicEnd::Abort => std::process::abort(),
@@ -967,7 +937,6 @@ mod tests {
     /// does not name gets its `Unknown system error` text.
     #[test]
     fn failure_lines() {
-        use std::fmt::Write;
         for (f, text) in [
             (
                 StartupFailure::SignalLock(24),
@@ -983,20 +952,13 @@ mod tests {
             ),
         ] {
             assert_eq!(f.message(), text);
-            let mut line = StackLine {
-                buf: [0; 256],
-                len: 0,
-            };
-            f.write_message(&mut line).unwrap();
-            assert_eq!(&line.buf[..line.len], text.as_bytes());
+            // the internal panic's line, as `end_startup_with` builds it
+            let mut line = Vec::new();
+            crate::io::panic::write_internal_line(|w| f.write_message(w), &mut |p| {
+                line.extend_from_slice(p)
+            });
+            assert_eq!(line, format!("INTERNAL PANIC: {text}\n").into_bytes());
         }
-        // a longer line is cut at the buffer's end
-        let mut line = StackLine {
-            buf: [0; 256],
-            len: 250,
-        };
-        line.write_str("0123456789").unwrap();
-        assert_eq!((line.len, &line.buf[250..]), (256, &b"012345"[..]));
     }
 
     /// libuv's `uv__slurp`: at most `len - 1` bytes, the file's start.

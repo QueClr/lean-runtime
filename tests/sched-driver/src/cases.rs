@@ -75,6 +75,14 @@ pub const CASES: &[(&str, Case)] = &[
         (no_init, result_bang_dropped_abort),
     ),
     (
+        "promise_in_initialize",
+        (init_promise, promise_in_initialize),
+    ),
+    (
+        "promise_in_initialize_abort",
+        (init_promise, promise_in_initialize),
+    ),
+    (
         "result_bang_dropped_first",
         (no_init, result_bang_dropped_first),
     ),
@@ -1179,6 +1187,23 @@ fn result_bang_dropped_in_task(args: &[String]) -> u32 {
 // let p ← IO.Promise.new (α := Nat)
 // let t := p.result!
 // IO.eprintln s!"not reached: {← IO.hasFinished t}"
+// tests/cases/tasks/promise_in_initialize{,_abort}.lean (review RSH3-05 of
+// shared-3)
+
+/// `initialize IO.print "pending;"`, then `initialize p : IO.Promise Nat ←
+/// IO.Promise.new`: before the task manager runs, Lean's internal panic
+/// (`Promise::new`, through the crate's `io::panic::internal_panic`), so
+/// `main` never runs.
+fn init_promise() {
+    let _ = Handle::stdout().put_str(b"pending;");
+    let _p: Promise<u64> = Promise::new();
+}
+
+fn promise_in_initialize(args: &[String]) -> u32 {
+    println(&format!("main {}", args.len()));
+    0
+}
+
 fn result_bang_dropped_abort(_: &[String]) -> u32 {
     println("before");
     // Under `LEAN_ABORT_ON_PANIC` every Lean panic goes to the process's

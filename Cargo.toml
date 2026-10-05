@@ -152,6 +152,14 @@ required-features = ["io"]
 name = "keyed_alloc"
 required-features = ["sched"]
 
+# The panic and exit executor (`io::panic`) in child processes
+# (tests/io_panic.rs): a binary of its own with a counting allocator, without
+# libtest, whose lines would mix with the children's stdout.
+[[test]]
+name = "io_panic"
+harness = false
+required-features = ["io"]
+
 # Program cases in threads mode (tests/threads_twins.rs): the uvloop cases
 # over `sched::uv` on its loop thread, each twin inside a task, and the task
 # cases of review AR-24. The binary is also each case's twin, so it runs

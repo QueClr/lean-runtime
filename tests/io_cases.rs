@@ -189,10 +189,11 @@ fn finish(r: R<()>) -> ! {
     exit::after_main();
     match r {
         Ok(()) => exit::exit(0),
-        Err(e) => {
-            exit::show_error(to_string(&e).as_bytes());
-            exit::exit(1)
-        }
+        // `lean_io_result_show_error`, then status 1 (`io::panic::uncaught`)
+        Err(e) => lean_runtime::io::panic::uncaught(
+            to_string(&e).as_bytes(),
+            &mut lean_runtime::io::panic::Native,
+        ),
     }
 }
 

@@ -43,9 +43,12 @@ static FALLBACK: RwLock<Option<StderrFallback>> = RwLock::new(None);
 /// `proptest`). A program built for use leaves it unset: the lines then go
 /// to glibc's `stderr`, as natively. The hook is a plain `fn`, so a capture
 /// per thread keeps its buffer in a `thread_local!`. It may write to any
-/// stream, but must not call [`set_stderr_fallback`]. It covers no other
-/// write of the crate: an uncaught error, a panic, an internal panic, or
-/// the handle of `IO.getStderr`.
+/// stream, but must not call [`set_stderr_fallback`]. It also takes a
+/// panic's lines on Lean's stream (`io::panic::report` through the default
+/// `PanicGlue::lean_eprintln`), but no other write of the crate: a panic's
+/// lines on the process's stderr (`LEAN_ABORT_ON_PANIC`, `force_stderr`),
+/// an internal panic, an uncaught error, or the handle of `IO.getStderr`
+/// (review RSH3-02).
 pub fn set_stderr_fallback(hook: Option<StderrFallback>) -> Option<StderrFallback> {
     let mut slot = FALLBACK.write().unwrap_or_else(PoisonError::into_inner);
     std::mem::replace(&mut *slot, hook)
@@ -121,7 +124,7 @@ pub const ALLOCPROF_NOTE: &[u8] =
 
 /// `msg` up to its first NUL byte: C's view of a Lean string
 /// (`string_cstr`).
-fn up_to_nul(msg: &[u8]) -> &[u8] {
+pub(crate) fn up_to_nul(msg: &[u8]) -> &[u8] {
     match msg.iter().position(|&b| b == 0) {
         Some(n) => &msg[..n],
         None => msg,

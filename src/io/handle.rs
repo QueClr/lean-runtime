@@ -87,6 +87,7 @@ pub struct StreamGuard<'a> {
 impl<'a> StreamGuard<'a> {
     #[inline]
     pub(crate) fn plain(g: MutexGuard<'a, CFile>) -> StreamGuard<'a> {
+        note_hold(&g, true);
         StreamGuard {
             g,
             #[cfg(feature = "sched")]
@@ -96,8 +97,59 @@ impl<'a> StreamGuard<'a> {
 
     #[cfg(feature = "sched")]
     pub(crate) fn tracked(g: MutexGuard<'a, CFile>, key: usize) -> StreamGuard<'a> {
+        note_hold(&g, true);
         StreamGuard { g, key }
     }
+}
+
+thread_local! {
+    /// This thread holds `STDERR`'s lock (one of its contexts, with
+    /// `sched`). A `const` cell with no destructor: reading or setting it
+    /// never allocates, also on a thread's first use.
+    static STDERR_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A guard on `STDERR` is made (`held`) or dropped: the thread-local mark
+/// that [`stderr_held_here`] reads. Nothing for the other streams.
+#[inline]
+fn note_hold(f: &CFile, held: bool) {
+    if f.is_stderr() {
+        let _ = STDERR_HELD.try_with(|h| h.set(held));
+    }
+}
+
+/// Whether this thread holds the lock of glibc's `stderr` model (`STDERR`):
+/// a lock that would wait for good if this thread took it again (std's
+/// `Mutex` is not recursive, where glibc's `FILE` lock is). Allocates
+/// nothing. With `sched`, a suspended context of this thread holding it
+/// counts as this thread.
+pub(crate) fn stderr_held_here() -> bool {
+    STDERR_HELD.try_with(|h| h.get()).unwrap_or(false)
+}
+
+/// `STDERR`'s lock for an internal panic's line (`io::panic`), as
+/// `fprintf(stderr, ...)` takes glibc's `FILE` lock (recursive per thread):
+/// the line waits for another thread's write in progress and never splits
+/// it (review RSH3-01). `None`, the line then written without the lock:
+/// - when this thread holds the lock already (an internal panic raised
+///   during its own write: glibc's recursive lock lets it in; std's would
+///   wait for good);
+/// - with `sched`, once the program has a task, a promise, a timer or a
+///   watch (`coop_possible`): the cooperative lock allocates and may switch
+///   contexts, which the out-of-memory end must not (docs/panic.md, row 10).
+///
+/// Allocates nothing: std's `Mutex` is a futex.
+pub(crate) fn stderr_for_internal_panic() -> Option<StreamGuard<'static>> {
+    #[cfg(feature = "sched")]
+    if crate::sched::coop_possible() {
+        return None;
+    }
+    if stderr_held_here() {
+        return None;
+    }
+    Some(StreamGuard::plain(
+        STDERR.lock().unwrap_or_else(PoisonError::into_inner),
+    ))
 }
 
 impl std::ops::Deref for StreamGuard<'_> {
@@ -120,6 +172,7 @@ impl Drop for StreamGuard<'_> {
     fn drop(&mut self) {
         // what the holder was doing ends with the hold (LB-29)
         self.g.unmark();
+        note_hold(&self.g, false);
         // The waiters are woken before `g` unlocks, which is fine: waking
         // switches nothing, and `g` drops right after this.
         #[cfg(feature = "sched")]

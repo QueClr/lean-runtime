@@ -8,7 +8,7 @@ use crate::glue::println;
 use crate::lean::{as_task, sleep, PRIO_DEDICATED};
 use crate::lio::{error_text, quote, R};
 use crate::lnet::*;
-use lean_runtime::io::{exit, IoError};
+use lean_runtime::io::IoError;
 use lean_runtime::net::tcp::TcpSocket;
 use lean_runtime::net::udp::UdpSocket;
 use lean_runtime::net::{iface, IpAddr, SocketAddr};
@@ -47,13 +47,14 @@ pub fn lookup(id: &str) -> Option<Case> {
     })
 }
 
-/// A program's `main` ending with an uncaught error: Lean's message, status
-/// 1 (`lean_io_result_show_error`).
+/// A program's `main` ending with an uncaught error: Lean's message after
+/// the task manager's end (`glue::end`), status 1
+/// (`lean_io_result_show_error`).
 fn run(r: R<()>) -> u32 {
     match r {
         Ok(()) => 0,
         Err(e) => {
-            exit::show_error(error_text(&e).as_bytes());
+            crate::glue::uncaught_after_main(error_text(&e).as_bytes());
             1
         }
     }

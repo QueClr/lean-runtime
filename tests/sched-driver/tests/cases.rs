@@ -1018,6 +1018,8 @@ cases!(
     result_bang_dropped,
     result_bang_dropped_in_task,
     result_bang_dropped_abort,
+    promise_in_initialize,
+    promise_in_initialize_abort,
     result_bang_dropped_first,
     task_pure_graph,
     result_bang_dropped_redirected,

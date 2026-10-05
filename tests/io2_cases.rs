@@ -42,7 +42,7 @@ use lean_runtime::io::{
     debug, env as lenv, exit, fs as lfs, temp, uvsys, FsMode, Handle, IoError, StoppingSink,
 };
 use lean_runtime::semantics::array;
-use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
+use lean_runtime::semantics::panic::InternalPanic;
 
 #[cfg(feature = "threads")]
 mod in_task;
@@ -185,10 +185,11 @@ fn finish(r: R<()>) -> ! {
     exit::after_main();
     match r {
         Ok(()) => exit::exit(0),
-        Err(e) => {
-            exit::show_error(to_string(&e).as_bytes());
-            exit::exit(1)
-        }
+        // `lean_io_result_show_error`, then status 1 (`io::panic::uncaught`)
+        Err(e) => lean_runtime::io::panic::uncaught(
+            to_string(&e).as_bytes(),
+            &mut lean_runtime::io::panic::Native,
+        ),
     }
 }
 
@@ -2914,22 +2915,11 @@ fn mono_clock_origin(args: &[String]) -> R<()> {
     println(&format!("arguments {}", args.len()))
 }
 
-/// `lean_internal_panic`: its line on the C `stderr`, then `exit(1)` (or an
-/// abort under `LEAN_ABORT_ON_PANIC`).
+/// `lean_internal_panic`: the crate's executor (`io::panic::internal_panic`,
+/// native's glue): its line on the C `stderr`, then `exit(1)` (or an abort
+/// under `LEAN_ABORT_ON_PANIC`).
 fn internal_panic(p: InternalPanic) -> ! {
-    let mut line = String::new();
-    let _ = p.write_line(&mut line);
-    let _ = Handle::stderr().put_str(line.as_bytes());
-    let abort = std::env::var_os("LEAN_ABORT_ON_PANIC");
-    let backtrace = std::env::var_os("LEAN_BACKTRACE");
-    let s = PanicSettings::from_env(
-        abort.as_ref().map(|v| v.as_encoded_bytes()),
-        backtrace.as_ref().map(|v| v.as_encoded_bytes()),
-    );
-    match panic::internal_panic_end(s) {
-        PanicEnd::Abort => std::process::abort(),
-        _ => exit::exit(panic::PANIC_EXIT_STATUS),
-    }
+    lean_runtime::io::panic::internal_panic(p.message(), &mut lean_runtime::io::panic::Native)
 }
 
 /// The case `panics/replicate_overflow`: the allocators' size rules

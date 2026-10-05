@@ -1,0 +1,5 @@
+id = "promise_in_initialize"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime shared-3 review RSH3-05: lean_promise_new before lean_init_task_manager (object.cpp lean_promise_new), lean_internal_panic, 2026-10-05"
+streams = "separate"

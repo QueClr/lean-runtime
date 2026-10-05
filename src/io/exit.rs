@@ -52,7 +52,7 @@
 //! leanrs's `rt/leanrs_rt/src/io/env.rs` (`uncaught`, `process_force_exit`).
 
 use super::cfile::{std_busy, CFile, BUSY_INPUT};
-use super::handle::{lock, open_files_newest_first, try_lock, StreamGuard, STDERR, STDIN, STDOUT};
+use super::handle::{open_files_newest_first, try_lock, StreamGuard, STDERR, STDIN, STDOUT};
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -88,7 +88,9 @@ pub fn after_main() {
 ///   scope (review RFX1-17 (a));
 /// - the holder the exiting context itself (an exit while it holds a
 ///   stream's guard, which a glue must not do): `None`, the stream's pending
-///   output unwritten, where a relock would wait for good (RFX1-17 (c)).
+///   output unwritten, where a relock would wait for good (RFX1-17 (c));
+///   for `stderr` also outside the cooperative locks (an internal panic
+///   raised while this thread writes to it: `io::panic`, review RSH3-01).
 pub(crate) fn exit_lock(m: &Mutex<CFile>, reading: impl Fn() -> bool) -> Option<StreamGuard<'_>> {
     const FIRST: std::time::Duration = std::time::Duration::from_millis(1);
     const MAX: std::time::Duration = std::time::Duration::from_millis(16);
@@ -113,6 +115,12 @@ pub(crate) fn exit_lock(m: &Mutex<CFile>, reading: impl Fn() -> bool) -> Option<
                 }
                 Holder::Other => {}
             }
+        }
+        // this thread holds `stderr` outside the cooperative locks (which
+        // `holder_of` knows: a suspended context's write is waited for
+        // above): a relock would wait for good, as RFX1-17 (c)
+        if std::ptr::eq(m, &STDERR) && super::handle::stderr_held_here() {
+            return None;
         }
         std::thread::sleep(nap);
         nap = (nap * 2).min(MAX);
@@ -228,12 +236,8 @@ pub(crate) fn exiting_without_flush() -> bool {
 /// exception: " << msg << std::endl`. `std::cerr` is tied to `std::cout`, so
 /// `stdout` is flushed first; then three unbuffered writes to `stderr`, `msg`
 /// up to its first NUL byte (Lean prints a C string). Errors are ignored. The
-/// translator then exits with status 1 ([`exit`]).
+/// translator then exits with status 1 ([`exit`]). [`super::panic::uncaught`]
+/// does all of it (the line, through a translator's glue, then the exit).
 pub fn show_error(msg: &[u8]) {
-    let _ = lock(&STDOUT).flush();
-    let shown = msg.split(|&b| b == 0).next().unwrap_or(&[]);
-    let mut err = lock(&STDERR);
-    let _ = err.put(b"uncaught exception: ");
-    let _ = err.put(shown);
-    let _ = err.put(b"\n");
+    super::panic::show_error(msg, &mut super::panic::Native)
 }

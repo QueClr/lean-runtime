@@ -8,11 +8,10 @@
 
 use crate::lean::{as_task, bind_task, has_finished, map_task, Task, UvPromise, PRIO_DEFAULT};
 use crate::lio::R;
-use lean_runtime::io::{exit, Handle, IoError};
+use lean_runtime::io::IoError;
 use lean_runtime::net::tcp::TcpSocket;
 use lean_runtime::net::udp::UdpSocket;
 use lean_runtime::net::{dns, IpAddr, SocketAddr};
-use lean_runtime::sched;
 use lean_runtime::semantics::panic::InternalPanic;
 
 /// `IO.Promise (Except IO.Error α)`, as the externs return it.
@@ -40,14 +39,11 @@ pub fn is_resolved<T: Clone + 'static>(p: &P<T>) -> bool {
     has_finished(&p.result_opt())
 }
 
-/// `lean_internal_panic`: `INTERNAL PANIC: <msg>` on C's `stderr`, then
-/// `exit(1)`.
+/// `lean_internal_panic`: the crate's executor (`io::panic::internal_panic`,
+/// native's glue): `INTERNAL PANIC: <msg>` on C's `stderr`, then `exit(1)`
+/// (an abort under `LEAN_ABORT_ON_PANIC`).
 pub fn internal_panic(p: InternalPanic) -> ! {
-    sched::effect();
-    let mut s = String::new();
-    let _ = p.write_line(&mut s);
-    let _ = Handle::stderr().put_str(s.as_bytes());
-    exit::exit(1)
+    lean_runtime::io::panic::internal_panic(p.message(), &mut lean_runtime::io::panic::Native)
 }
 
 /// `lean_alloc_sarray(1, 0, size)`: Lean's checked size arithmetic, then the

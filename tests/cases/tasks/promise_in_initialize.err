@@ -1,0 +1,1 @@
+INTERNAL PANIC: `IO.Promise.new` called before the task manager is running; this typically happens when called (directly or transitively, e.g. via `IO.CancelToken.new`) from an `initialize` block. Construct lazily on first use instead.

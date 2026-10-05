@@ -14,6 +14,7 @@
 //! | [`cfile`] | glibc's `FILE` ([`cfile::CFile`]): buffering, read-ahead, positions, the sticky indicators |
 //! | [`handle`] | `IO.FS.Handle` ([`Handle`]): open modes, the standard streams, the Lean handle primitives, the open-handle list |
 //! | [`exit`] | what a native Lean program's exit does with the streams (libc++'s `ios_base::Init`, then glibc's `_IO_cleanup`), `IO.Process.exit`, `forceExit`, the uncaught-error message |
+//! | [`panic`] | the panic and exit executor: a panic's plan carried out (the effect point, Lean's stderr or the process's, the flush of stdout, then the abort or the exit), the internal panic (its line built on the stack), the uncaught error and `IO.Process.exit`, over a translator's [`panic::PanicGlue`]; `docs/panic.md` |
 //! | [`fs`] | the file system: directories, metadata, `realPath`, removal, renaming, links, permissions, the working directory |
 //! | [`env`](mod@env) | `IO.getEnv`, `IO.appPath`, the process id, `IO.getTID`, random bytes, the monotonic clock, `IO.sleep` |
 //! | [`debug`] | the IO parts of `dbgTrace`, `dbgTraceIfShared`, `dbgSleep` and `allocprof`, the runtime's own standard-error lines, and a test harness's hook for them |
@@ -138,6 +139,7 @@ pub mod error;
 pub mod exit;
 pub mod fs;
 pub mod handle;
+pub mod panic;
 pub mod process;
 pub mod startup;
 #[cfg(feature = "startup-fds")]
