@@ -571,8 +571,8 @@ impl Sched {
     }
 
     /// Start the loop context if a callback is due and none runs.
-    /// Whether context `n` is the event loop's (`loop_main`).
-    #[cfg(feature = "io")]
+    /// Whether context `n` is the event loop's (`loop_main`): for `slots`
+    /// (with `io`) and `IO.getTID`'s loop thread (`tid_offset`).
     pub(crate) fn is_loop_ctx(&self, n: CtxId) -> bool {
         self.ev.loop_ctx == Some(n)
     }

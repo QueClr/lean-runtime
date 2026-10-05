@@ -61,6 +61,7 @@ pub fn lookup(id: &str) -> Option<Case> {
         "signal_stop_drops_promise" => (no_init, signal_stop_drops_promise),
         "signal_rearm_in_sync_dependent" => (no_init, signal_rearm_in_dependent),
         "signal_rearm_in_async_dependent" => (no_init, signal_rearm_in_dependent),
+        "get_tid_loop_thread" => (no_init, get_tid_loop_thread),
         // tests/cases/io: the cases with tasks
         "lock_blocked" => (no_init, lock_blocked),
         "lock_exit" => (no_init, lock_exit),
@@ -517,6 +518,30 @@ fn loop_configure(args: &[String]) -> u32 {
     println(&format!("configured, alive: {}", uv::loop_alive()));
     uv_ok(uv::loop_configure(false, false));
     println(&format!("alive: {}", uv::loop_alive()));
+    0
+}
+
+// tests/cases/uvloop/get_tid_loop_thread.lean (review AR-37)
+fn get_tid_loop_thread(_: &[String]) -> u32 {
+    use lean_runtime::io::env::get_tid;
+    let mt = get_tid();
+    let a = as_task(get_tid, PRIO_DEFAULT).get();
+    let on_loop = || {
+        let t: UTimer = Timer::new(20, false);
+        let p = t.next(UvPromise::new);
+        let s = map_task(|_| get_tid(), p.result_opt(), PRIO_DEFAULT, true, true);
+        drop(p);
+        s.get()
+    };
+    let x = on_loop();
+    sleep(50);
+    let y = on_loop();
+    println(&format!(
+        "both timers' dependents on one thread: {}",
+        x == y
+    ));
+    println(&format!("not main's: {}", x != mt));
+    println(&format!("not the pool worker's: {}", x != a));
     0
 }
 

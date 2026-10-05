@@ -1131,8 +1131,45 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - `IO.getTaskState`: `state(id)`; `IO.waitAny`: `wait_any(ids)`;
    - `IO.cancel`: `cancel(id)`; `IO.checkCanceled`: `check_canceled()`;
    - `IO.getTID`: `io::env::get_tid()` (with `io`): `gettid` plus
-     `thread_number()`, so a task gets the id of the thread it natively
-     runs on (`main`'s in `main`). In threads mode it is `gettid` alone;
+     `tid_offset()`, so the code gets the id of the OS thread it natively
+     runs on (review AR-37, lean2rr's RS5-04). Natively
+     (`task_manager`, `object.cpp`) a pool worker stays alive and takes
+     the next pool task once idle, and a new worker starts only when none
+     is idle (`enqueue_core`, 805-806); a dedicated task always gets a new
+     thread (`spawn_dedicated_worker`, 873-883); a `sync` dependent runs
+     on the thread that finishes its source (`handle_finished`), or
+     resolves its promise; the event loop is one thread for the whole
+     program (`libuv.cpp` 26). So `tid_offset()` is:
+     - 0 in `main`, and in a `sync` task run on `main`'s thread;
+     - in a pool task, its emulated worker's number (`running_worker`),
+       the same for every task of that worker: pool tasks one after the
+       other share one id, as natively they share the one idle worker;
+     - in a dedicated task, a new number, even after every earlier task
+       has finished;
+     - in a `sync` task, the number of the thread below it;
+     - in the event loop's callbacks, the loop thread's number, the same
+       for every loop context.
+
+     New numbers count up from 1 in the order the scheduler first needs
+     them, as Linux hands out the ids of new threads, so a program's ids
+     usually come out as native's do (`main`'s id plus 1, 2, ...). Each
+     context keeps the number of the code running on it (`Ctx::tid`),
+     which a pool or dedicated task replaces from its begin to the end of
+     its run (`enter_worker`, `WorkerGuard`). `thread_number()` is not
+     this number: it is the depth of nested tasks on the context, with
+     which the scheduler tells the owners of locks and taken references
+     apart (`sched::sync`, lean2rr's `refs`), and two tasks run one after
+     the other at the same depth share it. Before AR-37 `IO.getTID` used
+     it, so a dedicated task that followed a finished pool task got the
+     pool task's id, and each new loop context an id of its own. Cases
+     `tasks/get_tid_threads` (with its twin in threads mode) and
+     `uvloop/get_tid_loop_thread`; unit tests
+     `tid_offset_tells_a_dedicated_task_from_the_idle_worker` and
+     `tid_offset_of_the_event_loop_is_one_thread`. The numbers are unique
+     on one scheduler: with schedulers on several OS threads (an
+     embedder, the crate's tests), `gettid` plus one thread's number may
+     equal another thread's id. In threads mode `get_tid` is `gettid`
+     alone, and `tid_offset()` is `thread_number()`;
    - `Task.pure a` (`lean_task_pure`): no call, glue only. Natively it is
      a task object that holds `a` and has no task-manager state
      (`alloc_task(v)`, `object.cpp` 1180-1201: `m_value` set, `m_imp`
@@ -2399,7 +2436,8 @@ joins its thread pool (`docs/net.md`).
 - Thread numbers (`thread_number`) are 64-bit: a worker context's number
   from a process-wide counter, times 2^32, plus the depth of nested tasks
   on it. They stay unique across threads, and neither wrap nor run into
-  each other (review RS1S-07).
+  each other (review RS1S-07). `IO.getTID`'s numbers (`tid_offset`, review
+  AR-37) are each scheduler's own, and are added to its thread's `gettid`.
 - The event loop (sched-io): each scheduler has its own registrations,
   timers and loop context; the first takes native's libuv epoll descriptor,
   later ones make their own. The io layer's stream-lock lists (`HELD`,

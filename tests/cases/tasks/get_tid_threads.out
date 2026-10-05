@@ -1,0 +1,9 @@
+tasks differ from main: true
+sequential pool vs dedicated differ: true
+sequential pool tasks share the idle worker: true
+dedicated tasks never share a thread: true
+a dedicated task is on no pool worker: true
+a later pool task takes the idle worker: true
+pool tasks alive at once differ: true
+sync dependent on its source's thread: true
+sync dependent of a promise on the resolving thread: true

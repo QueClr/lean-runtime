@@ -1,0 +1,3 @@
+both timers' dependents on one thread: true
+not main's: true
+not the pool worker's: true

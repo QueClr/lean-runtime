@@ -231,7 +231,8 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
     Results of unbounded size (a path, a directory entry's name) go to the caller's <code>ByteSink</code> or callback, as bytes.</li>
   <li><code>IO.getEnv</code>, <code>IO.appPath</code>, the process id, <code>IO.getTID</code>, <code>IO.getRandomBytes</code>, <code>IO.sleep</code> and the monotonic clock (Lean's absolute <code>CLOCK_MONOTONIC</code>) are in <code>env</code>.</li>
   <li><code>IO.getTID</code> gives each task the id of the thread it natively runs on.
-    The single-thread scheduler adds the task's thread number to the id of <code>main</code>'s thread.</li>
+    The single-thread scheduler adds the number of the emulated thread to the id of <code>main</code>'s thread.
+    A pool task gets the number of its worker, and a dedicated task gets a new number (review AR-37).</li>
   <li>Bytes from the system (arguments, paths, names, environment values) become text by Lean's lossy decoding: <code>semantics::string::lossy_utf8</code>.</li>
   <li><code>dbgTrace</code> prints its message to stderr and continues; <code>dbgSleep</code> sleeps (decision DV5).
     With <code>streams</code>, the message goes to the current stderr stream, as natively.</li>

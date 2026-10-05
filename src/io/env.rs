@@ -75,17 +75,20 @@ pub fn get_pid() -> u32 {
 /// gets that thread's id. Where each task has a thread of its own (threads
 /// mode, or no scheduler), this is `gettid` itself. With the single-thread
 /// scheduler (feature `sched`) every task runs on `main`'s thread, so the id
-/// is `gettid` plus `sched::thread_number()`, the number of the thread the
-/// task natively runs on (0 for `main`'s own: in `main`, and in a task that
+/// is `gettid` plus `sched::tid_offset()`, the number of the thread the
+/// code natively runs on (0 for `main`'s own: in `main`, and in a task that
 /// natively runs there, such as a `LEAN_SYNC_PRIO` one). Tasks on different
-/// native threads get different ids.
+/// native threads get different ids, and tasks on the same native thread
+/// the same id: the pool tasks of one emulated worker, one after the other.
+/// A dedicated task's id is new, even after every earlier task has finished
+/// (review AR-37).
 ///
 /// Source: lean2rr's `IO.getTID` (`runtime/prelude.rr`, `l2r_io_get_tid`,
 /// and the generated `tid + toff`, `leanrt::task::tid_offset`).
 pub fn get_tid() -> u64 {
     let tid = nix::unistd::gettid().as_raw() as u64;
     #[cfg(feature = "sched")]
-    let tid = tid.wrapping_add(crate::sched::thread_number());
+    let tid = tid.wrapping_add(crate::sched::tid_offset());
     tid
 }
 

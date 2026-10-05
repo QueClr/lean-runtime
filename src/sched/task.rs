@@ -376,6 +376,13 @@ pub(crate) struct Tasks {
     /// The last token handed out for a hold of a worker id (never 0): a
     /// hold ends only if the id still has its token (`release_worker`).
     worker_seq: u32,
+    /// The emulated OS thread of each worker id for `IO.getTID`
+    /// (`worker_tid`, review AR-37): 0 before the id's first task.
+    worker_tids: Vec<u64>,
+    /// The last emulated OS thread number given (`fresh_tid`; 0: none yet).
+    last_tid: u64,
+    /// The event loop thread's number (`cur_tid`; 0 before its first use).
+    loop_tid: u64,
     /// The walks of dependents in progress, on every context: (owner,
     /// generation). Their owners have their values, and their waiters wake at
     /// the next `notify_all` (review RS2-10 of sched-2: no scan of the
@@ -427,6 +434,9 @@ impl Tasks {
             picked_io: Vec::new(),
             worker_ids: Vec::new(),
             worker_seq: 0,
+            worker_tids: Vec::new(),
+            last_tid: 0,
+            loop_tid: 0,
             open_walks: Vec::new(),
             notify_seq: 0,
             workers_ended: false,
@@ -2282,12 +2292,16 @@ pub(crate) fn run_task(i: u32) {
 
 /// The emulated pool worker a running task occupies (`Sched::enter_worker`),
 /// from its begin to the end of its run: its drop gives the context its
-/// former innermost worker back and frees the id.
+/// former innermost worker back and frees the id; a task with a thread of
+/// its own also gives back the former emulated OS thread (`Ctx::tid`).
 struct WorkerGuard {
     /// The id a pool task occupies (for `slots` and `running_worker`) and
     /// its hold token.
     held: Option<(u32, u32)>,
     prev: Option<u32>,
+    /// The context's `tid` before a pool or dedicated task began (`None`
+    /// for a `sync` task, which keeps the thread below it).
+    prev_tid: Option<Option<u64>>,
 }
 
 impl Drop for WorkerGuard {
@@ -2295,6 +2309,9 @@ impl Drop for WorkerGuard {
         if super::alive() {
             with(|s| {
                 s.cx.cur_ctx().worker = self.prev;
+                if let Some(t) = self.prev_tid {
+                    s.cx.cur_ctx().tid = t;
+                }
                 if let Some((w, token)) = self.held {
                     s.release_worker(w, token);
                 }
@@ -2304,6 +2321,51 @@ impl Drop for WorkerGuard {
 }
 
 impl Sched {
+    /// A new emulated OS thread's number for `IO.getTID` (`tid_offset`,
+    /// review AR-37), never given before on this scheduler: natively a new
+    /// thread gets an id no other thread has (Linux hands them out in
+    /// increasing order, and reuses one only after `pid_max` more).
+    fn fresh_tid(&mut self) -> u64 {
+        self.tk.last_tid += 1;
+        self.tk.last_tid
+    }
+
+    /// The emulated OS thread of pool worker id `w` (review AR-37): its
+    /// own from its first task on, as a native worker thread lives until
+    /// the task manager ends.
+    fn worker_tid(&mut self, w: u32) -> u64 {
+        let w = w as usize;
+        if self.tk.worker_tids.len() <= w {
+            self.tk.worker_tids.resize(w + 1, 0);
+        }
+        if self.tk.worker_tids[w] == 0 {
+            self.tk.worker_tids[w] = self.fresh_tid();
+        }
+        self.tk.worker_tids[w]
+    }
+
+    /// The emulated OS thread of the code running now (`tid_offset`): the
+    /// running context's `tid`. Outside its tasks, a context other than
+    /// `main`'s gets one at the first ask, and keeps it: an event loop
+    /// context the loop's (`loop_tid`: natively the loop is one thread for
+    /// the whole program, `libuv.cpp` 26, while here a loop context ends
+    /// once no callback is due), another context a fresh one.
+    fn cur_tid(&mut self) -> u64 {
+        if let Some(t) = self.cx.cur_ctx().tid {
+            return t;
+        }
+        let t = if self.is_loop_ctx(self.cx.cur) {
+            if self.tk.loop_tid == 0 {
+                self.tk.loop_tid = self.fresh_tid();
+            }
+            self.tk.loop_tid
+        } else {
+            self.fresh_tid()
+        };
+        self.cx.cur_ctx().tid = Some(t);
+        t
+    }
+
     /// The lowest emulated worker id that no task holds, now held (with a
     /// new token).
     fn reserve_worker(&mut self) -> u32 {
@@ -2348,7 +2410,8 @@ impl Sched {
     /// RF3-01), else the lowest free emulated worker id, which becomes the
     /// context's innermost worker; a dedicated task makes it `None`; a
     /// `sync` task (not `own`) runs on the thread below it and keeps its
-    /// worker (review RF3-03, as threads mode answers).
+    /// worker (review RF3-03, as threads mode answers). The context's `tid`
+    /// follows (review AR-37).
     fn enter_worker(&mut self, own: bool, dedicated: bool, reserved: Option<u32>) -> WorkerGuard {
         let pool = own && !dedicated;
         if !pool {
@@ -2369,7 +2432,20 @@ impl Sched {
             None
         };
         let prev = std::mem::replace(&mut self.cx.cur_ctx().worker, worker);
-        WorkerGuard { held, prev }
+        // the OS thread `IO.getTID` names (review AR-37): a pool task's
+        // worker's, a dedicated task's a new one; a `sync` task keeps the
+        // thread below it
+        let tid = match (pool, worker) {
+            (true, Some(w)) => Some(self.worker_tid(w)),
+            _ if own => Some(self.fresh_tid()),
+            _ => None,
+        };
+        let prev_tid = tid.map(|t| self.cx.cur_ctx().tid.replace(t));
+        WorkerGuard {
+            held,
+            prev,
+            prev_tid,
+        }
     }
 }
 
@@ -2731,12 +2807,44 @@ pub fn in_sync_task() -> bool {
     })
 }
 
-/// `IO.getTID` inside tasks: natively a task runs on a worker thread, a task
-/// needed by a running task on another one, a `sync` dependent on the thread
-/// that finished its source. The number to add to `main`'s thread id (0 in
-/// `main`).
+/// The thread the running code is on, as the scheduler tells threads apart
+/// (0 in `main`): the running context's base, plus the depth of the
+/// innermost task running on it, a task run on a context's stack being
+/// natively on another thread than the code below it; a `sync` dependent
+/// on the thread that finished its source. With the context
+/// (`current_context`) it names the owner of a lock or of a taken
+/// reference (`sched::sync`, lean2rr's `refs`). Two tasks run one after the
+/// other at the same depth get the same number, whatever thread they
+/// natively run on: `IO.getTID` uses `tid_offset` (review AR-37).
 pub fn thread_number() -> u64 {
     with(|s| s.cur_thread())
+}
+
+/// `IO.getTID` (`io::env::get_tid`): the number to add to `main`'s thread
+/// id, which names the OS thread the running code natively runs on (review
+/// AR-37, lean2rr's RS5-04):
+/// - 0 in `main`, and in a `sync` task run on `main`'s thread;
+/// - a pool task: its emulated worker's (`running_worker`), the same for
+///   every task of that worker, as natively a worker thread stays alive and
+///   takes the next pool task once idle;
+/// - a dedicated task: a new number, never given before, as natively it
+///   always gets a new thread (`spawn_dedicated_worker`);
+/// - a `sync` task: the number of the thread below it (the finishing or
+///   resolving thread's, for a `sync` dependent);
+/// - the event loop's callbacks (outside tasks): the loop thread's number,
+///   the same for every loop context, as natively the loop is one thread
+///   for the whole program (`libuv.cpp` 26).
+///
+/// New numbers count up from 1 in the order the scheduler first needs
+/// them, as Linux hands out the ids of new threads. They are unique on one
+/// scheduler; with schedulers on several OS threads (an embedder, the
+/// crate's tests), `gettid` plus one thread's number may equal another
+/// thread's id.
+pub fn tid_offset() -> u64 {
+    if !super::alive() {
+        return 0;
+    }
+    with(|s| s.cur_tid())
 }
 
 // ---------------------------------------------------------------------------

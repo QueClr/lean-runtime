@@ -1,0 +1,5 @@
+id = "get_tid_loop_thread"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review AR-37 (fixes-5): the event loop's callbacks are on one thread; each loop context of the single-thread scheduler had an IO.getTID of its own"
+streams = "separate"

@@ -1,0 +1,5 @@
+id = "get_tid_threads"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean2rr's step-5 review RS5-04, lean-runtime review AR-37 (fixes-5): a pool task and a dedicated task started after it had the same IO.getTID on the single-thread scheduler"
+streams = "separate"

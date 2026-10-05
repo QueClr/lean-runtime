@@ -867,7 +867,7 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | A thunk forced on two threads | The glue's waiter list (`block_sync`, `wake`). Forced inside itself: `hang` | A blocking once-cell in the glue. Forced inside itself: its thread hangs (LB-08) |
 | Stack overflow | The crate's report (`install_stack_overflow_handler`, feature `stack-overflow`, AR-11): the guard of the registered thread's stack or of the context running on it | The guard of each OS thread. Each worker and each dedicated task's thread calls `install_stack_overflow_handler` at its entry, before the glue's `thread_start` (leanrs's point 4): its alternate signal stack and its record; the table grows with the live threads (review RS3-01) |
 | Current streams, `errno` | Per context and per emulated worker (`slots`): a pool task gets the lowest free worker's set, which keeps what it leaves; a dedicated task a fresh one | Per OS thread: a pool worker keeps them from one task to the next, a new worker and a dedicated task's thread start fresh (0.5 item 2) |
-| `IO.getTID` | `io::env::get_tid()`: `main`'s id plus `thread_number()` | `io::env::get_tid()`: the thread's own `gettid`, native's answer (`lean_io_get_tid`, `process.cpp` 340). `thread_number()` is still there: 0 on `start`'s thread, a number of its own on any other |
+| `IO.getTID` | `io::env::get_tid()`: `main`'s id plus `tid_offset()`, the emulated OS thread's number: a pool task's worker's, a dedicated task's a new one (review AR-37) | `io::env::get_tid()`: the thread's own `gettid`, native's answer (`lean_io_get_tid`, `process.cpp` 340). `thread_number()` and `tid_offset()` are still there, both the thread's number: 0 on `start`'s thread, a number of its own on any other |
 | `LEAN_NUM_THREADS=0` | Tasks run at once | The same |
 | A Rust panic in a job | Goes on as `main`'s panic | Aborts the process after Rust's message, since no thread can take it over (leanrs agrees, 6). So does a panic in a glue hook, on any thread, `main`'s included, and in the destructor of a value the crate drops (a released task's continuation, the glue; review RT1-01) |
 
@@ -1057,7 +1057,7 @@ pub fn release(id: TaskId);                 // from any thread
 pub fn end_running_task(id: TaskId);        // AR-26: a job ends its own task early
 pub fn in_sync_task() -> bool;
 pub fn await_task(id: TaskId, report: impl FnOnce(&str));  // Task.get's rule
-pub fn thread_number() -> u64;
+pub fn thread_number() -> u64;  pub fn tid_offset() -> u64;  // AR-37: the same here
 pub fn thread_create_failed(err: &std::io::Error) -> !;
 pub fn running_worker() -> Option<u32>;     // AR-32: the standard worker's index
 pub fn manager_running() -> bool;

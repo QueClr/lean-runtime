@@ -267,6 +267,8 @@ pub const CASES: &[(&str, Case)] = &[
         "late_tasks_while_enqueuing",
         (no_init, late_tasks_while_enqueuing),
     ),
+    // fixes-5: review AR-37
+    ("get_tid_threads", (no_init, get_tid_threads)),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -4531,5 +4533,86 @@ fn promise_nested_free_order(_: &[String]) -> u32 {
     let outer = Ref::new(Arr::new(vec![pb, pa]));
     outer.set(Arr::new(vec![]));
     println("  after the free");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-5: `IO.getTID` names the task's emulated OS thread (review AR-37,
+// lean2rr's RS5-04): a pool task its worker's, a dedicated task a new one.
+
+// def main : IO Unit := do
+//   let mt ← IO.getTID
+//   let a ← IO.wait (← IO.asTask IO.getTID)
+//   let d ← IO.wait (← IO.asTask (prio := .dedicated) IO.getTID)
+//   let b ← IO.wait (← IO.asTask IO.getTID)
+//   let e ← IO.wait (← IO.asTask (prio := .dedicated) IO.getTID)
+//   let p ← IO.Promise.new (α := Unit)
+//   let t1 ← IO.asTask (do let _ ← IO.wait p.result?; IO.getTID)
+//   let t2 ← IO.asTask (prio := .dedicated) (do let _ ← IO.wait p.result?; IO.getTID)
+//   let t3 ← IO.asTask (do let _ ← IO.wait p.result?; IO.getTID)
+//   let s1 ← IO.mapTask (sync := true) (fun _ => IO.getTID) t1
+//   let sp ← IO.mapTask (sync := true) (fun _ => IO.getTID) p.result?
+//   IO.sleep 100
+//   p.resolve ()
+//   match a, d, b, e, ← IO.wait t1, ← IO.wait t2, ← IO.wait t3, ← IO.wait s1, ← IO.wait sp with
+//   | .ok a, .ok d, .ok b, .ok e, .ok t1, .ok t2, .ok t3, .ok s1, .ok sp =>
+//     IO.println s!"tasks differ from main: {...}"
+//     ... (nine relations, as printed below)
+fn get_tid_threads(_: &[String]) -> u32 {
+    use lean_runtime::io::env::get_tid;
+    let mt = get_tid();
+    let a = as_task(get_tid, PRIO_DEFAULT).get();
+    let d = as_task(get_tid, PRIO_DEDICATED).get();
+    let b = as_task(get_tid, PRIO_DEFAULT).get();
+    let e = as_task(get_tid, PRIO_DEDICATED).get();
+    let p: Promise<()> = Promise::new();
+    let waiting = |prio| {
+        let r = p.result_opt();
+        as_task(
+            move || {
+                r.get();
+                get_tid()
+            },
+            prio,
+        )
+    };
+    let t1 = waiting(PRIO_DEFAULT);
+    let t2 = waiting(PRIO_DEDICATED);
+    let t3 = waiting(PRIO_DEFAULT);
+    let s1 = map_task(|_| get_tid(), t1.clone(), PRIO_DEFAULT, true, true);
+    let sp = map_task(|_| get_tid(), p.result_opt(), PRIO_DEFAULT, true, true);
+    sleep(100);
+    p.resolve(());
+    let (t1, t2, t3, s1, sp) = (t1.get(), t2.get(), t3.get(), s1.get(), sp.get());
+    println(&format!(
+        "tasks differ from main: {}",
+        a != mt && d != mt && t1 != mt && t2 != mt && t3 != mt
+    ));
+    println(&format!("sequential pool vs dedicated differ: {}", a != d));
+    println(&format!(
+        "sequential pool tasks share the idle worker: {}",
+        a == b
+    ));
+    println(&format!(
+        "dedicated tasks never share a thread: {}",
+        d != e && d != t2 && e != t2
+    ));
+    println(&format!(
+        "a dedicated task is on no pool worker: {}",
+        d != b && e != a && t2 != t1 && t2 != t3
+    ));
+    println(&format!(
+        "a later pool task takes the idle worker: {}",
+        t1 == a
+    ));
+    println(&format!("pool tasks alive at once differ: {}", t1 != t3));
+    println(&format!(
+        "sync dependent on its source's thread: {}",
+        s1 == t1
+    ));
+    println(&format!(
+        "sync dependent of a promise on the resolving thread: {}",
+        sp == mt
+    ));
     0
 }

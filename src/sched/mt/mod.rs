@@ -380,6 +380,15 @@ pub fn thread_number() -> u64 {
     task::thread_number()
 }
 
+/// The single-thread scheduler's `tid_offset` (review AR-37), for a glue
+/// written for both: here `thread_number`, since each task runs on its
+/// native thread (a pool worker's, kept from one task to the next; a
+/// dedicated task's new one). `io::env::get_tid` gives native's answer,
+/// the thread's `gettid`, in threads mode.
+pub fn tid_offset() -> u64 {
+    task::thread_number()
+}
+
 /// The pool worker the calling thread is, as the single-thread scheduler
 /// offers it (review AR-32): the standard worker's index (the order the
 /// task manager made it in), on that thread whatever task runs there (a

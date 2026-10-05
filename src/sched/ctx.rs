@@ -303,6 +303,12 @@ pub(crate) struct Ctx {
     /// (`running_worker`, review AR-32): `None` for a dedicated or a `sync`
     /// task, and outside tasks.
     pub(crate) worker: Option<u32>,
+    /// The emulated OS thread `IO.getTID` names for the code running on it
+    /// (`tid_offset`, review AR-37): the innermost pool or dedicated task's
+    /// (its worker's, a new one), which a `sync` task keeps; outside them
+    /// the context's own: `Some(0)` for `main`'s, `None` for another's until
+    /// its first use (then an event loop context's is the loop thread's).
+    pub(crate) tid: Option<u64>,
 }
 
 impl Ctx {
@@ -321,6 +327,7 @@ impl Ctx {
             at_effect: false,
             holds: false,
             worker: None,
+            tid: None,
         }
     }
 }
@@ -373,6 +380,7 @@ impl Contexts {
     pub(crate) fn new() -> Contexts {
         let mut main = Ctx::new(0);
         main.status = Status::Running;
+        main.tid = Some(0);
         Contexts {
             ctxs: vec![main],
             free: Vec::new(),

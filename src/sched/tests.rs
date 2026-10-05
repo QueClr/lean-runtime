@@ -339,8 +339,9 @@ fn await_task_reports_in_a_sync_task_then_waits() {
 }
 
 /// `IO.getTID` (`io::env::get_tid`): `gettid` plus the number of the thread
-/// a task natively runs on: `main`'s id in a `LEAN_SYNC_PRIO` task, which
-/// runs on the calling thread, and another one in a task a worker runs.
+/// a task natively runs on (`tid_offset`): `main`'s id in a `LEAN_SYNC_PRIO`
+/// task, which runs on the calling thread, and another one in a task a
+/// worker runs (the first worker's: 1).
 #[cfg(feature = "io")]
 #[test]
 fn get_tid_tells_the_tasks_threads_apart() {
@@ -1828,6 +1829,137 @@ fn a_sync_dependent_shares_its_threads_worker() {
     );
     resolve(p, || {});
     assert_eq!(*seen.borrow(), [("sync on main", None)]);
+    finish();
+}
+
+// --- Review AR-37 (fixes-5, lean2rr's RS5-04): `tid_offset`, the OS
+// thread `IO.getTID` names.
+
+/// Natively a pool worker stays alive and takes the next pool task once
+/// idle, and a dedicated task always gets a new thread. Before the fix the
+/// number was `thread_number`, the depth on the context: every task below
+/// that runs on `main`'s stack got 1, so a dedicated task that followed a
+/// pool task had the pool task's id, and the tasks the waiter ran 2.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn tid_offset_tells_a_dedicated_task_from_the_idle_worker() {
+    start_test(1);
+    assert_eq!(tid_offset(), 0, "main");
+    let seen: Rc<RefCell<Vec<(&'static str, u64)>>> = Rc::default();
+    let rec = |tag: &'static str| -> Job {
+        let s = seen.clone();
+        Box::new(move || {
+            s.borrow_mut().push((tag, tid_offset()));
+            Outcome::Done
+        })
+    };
+    // one after the other: pool (with a `sync` dependent, on its thread),
+    // dedicated, pool, dedicated
+    let a = spawn(rec("pool a"), 0, true);
+    depend(a, rec("sync after a"), 0, true, true);
+    wait(a);
+    for (tag, prio) in [("dedicated d", 9), ("pool b", 0), ("dedicated e", 9)] {
+        let t = spawn(rec(tag), prio, true);
+        wait(t);
+    }
+    // a pool task that makes and waits for a pool task, then a dedicated
+    // task: the first takes the next worker (natively a new one, since the
+    // waiter's thread waits in `Task.get`), the second a new thread; the
+    // waiter has its own number again after them
+    let (s, rc, ry) = (
+        seen.clone(),
+        rec("pool c, waited for"),
+        rec("dedicated y, waited for"),
+    );
+    let x = spawn(
+        Box::new(move || {
+            s.borrow_mut().push(("pool x before", tid_offset()));
+            wait(spawn(rc, 0, true));
+            wait(spawn(ry, 9, true));
+            s.borrow_mut().push(("pool x after", tid_offset()));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    wait(x);
+    // a `sync` dependent of a promise that `main` resolves: `main`'s thread
+    let p = promise_new().unwrap();
+    depend(p, rec("sync on main"), 0, true, true);
+    resolve(p, || {});
+    assert_eq!(tid_offset(), 0, "main again");
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("pool a", 1),
+            ("sync after a", 1),
+            ("dedicated d", 2),
+            ("pool b", 1),
+            ("dedicated e", 3),
+            ("pool x before", 1),
+            ("pool c, waited for", 4),
+            ("dedicated y, waited for", 5),
+            ("pool x after", 1),
+            ("sync on main", 0),
+        ]
+    );
+    finish();
+}
+
+/// The event loop's callbacks, and the `sync` dependents they run, are on
+/// native's one loop thread (`libuv.cpp` 26): one number for every loop
+/// context (a loop context ends once no callback is due, so each timer
+/// below runs on a new one), neither `main`'s nor a worker's. Before, each
+/// loop context had a number of its own.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn tid_offset_of_the_event_loop_is_one_thread() {
+    start_test(1);
+    let seen: Rc<RefCell<Vec<(&'static str, u64)>>> = Rc::default();
+    let s = seen.clone();
+    wait(spawn(
+        Box::new(move || {
+            s.borrow_mut().push(("pool", tid_offset()));
+            Outcome::Done
+        }),
+        0,
+        true,
+    ));
+    for (tag, dep) in [("timer 1", "sync after 1"), ("timer 2", "sync after 2")] {
+        let p = promise_new().unwrap();
+        let s = seen.clone();
+        depend(
+            p,
+            Box::new(move || {
+                s.borrow_mut().push((dep, tid_offset()));
+                Outcome::Done
+            }),
+            0,
+            true,
+            true,
+        );
+        let s = seen.clone();
+        let cb: Rc<dyn Fn()> = Rc::new(move || {
+            s.borrow_mut().push((tag, tid_offset()));
+            resolve(p, || {});
+        });
+        timer_start(
+            std::time::Instant::now() + std::time::Duration::from_millis(5),
+            cb,
+        );
+        wait(p);
+    }
+    assert_eq!(tid_offset(), 0, "main");
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("pool", 1),
+            ("timer 1", 2),
+            ("sync after 1", 2),
+            ("timer 2", 2),
+            ("sync after 2", 2),
+        ]
+    );
     finish();
 }
 
