@@ -1463,6 +1463,13 @@ impl Sched {
         self.oldest_picked()
     }
 
+    /// Whether entry `i` of generation `g` is a pure task a worker has
+    /// started (`PICKED`), for `register_block`'s check (review RF8-03).
+    pub(crate) fn is_picked(&self, i: u32, g: u32) -> bool {
+        let e = self.ent(i);
+        e.gen == g && e.flags & PICKED != 0
+    }
+
     pub(crate) fn has_queued(&mut self) -> bool {
         self.first_queued().is_some()
     }
@@ -1755,9 +1762,10 @@ impl Sched {
         // The woken worker may have started `i` just now (`pick`). `pick`
         // wakes `i`'s waiters, but this waiter has not blocked yet, and
         // nothing wakes it later: the hub starts a started pure task by
-        // itself only when nothing else can happen (`last_resort`, never
-        // with a descriptor watched). `i` is needed, so it runs here, as
-        // above (fixes-8, lean2rr's RtTcp hang).
+        // itself only when nothing else can happen (`last_resort`, which a
+        // watched descriptor prevents for good, and a pending sleep or
+        // timer until it ends). `i` is needed, so it runs here, as above
+        // (fixes-8, lean2rr's RtTcp hang; review RF8-01).
         if self.ent(i).flags & PICKED != 0 {
             return true;
         }

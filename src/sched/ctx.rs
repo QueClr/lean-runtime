@@ -552,6 +552,15 @@ impl Sched {
         x.status = Status::Blocked;
         x.wait = w;
         self.cx.blocked += 1;
+        // Nothing wakes a waiter of a started pure task (`pick`'s wake-up
+        // has gone by): it runs on the waiter's stack instead
+        // (`may_run_awaited`; fixes-8, review RF8-03).
+        if let Wait::Cell(i, g) = w {
+            debug_assert!(
+                !self.is_picked(i, g),
+                "lean-runtime: a context blocks on the started pure task {i}/{g}"
+            );
+        }
         self.refresh_holds(c);
         match w {
             Wait::Cell(i, g) => self.cx.cell_waiters.entry((i, g)).or_default().push(c),

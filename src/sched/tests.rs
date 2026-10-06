@@ -1942,6 +1942,65 @@ fn a_pure_task_the_worker_starts_in_the_waiters_look_runs_there() {
     finish();
 }
 
+/// As above, for `IO.waitAny`'s lone task (`wait_any_step`, review RF8-02).
+/// Before fixes-8 the look said no, and the started task ran on a context
+/// of its own.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_pure_task_the_worker_starts_in_wait_anys_look_runs_there() {
+    start_test(1);
+    let ran_on = Rc::new(Cell::new(None));
+    let r2 = ran_on.clone();
+    let p = spawn(
+        Box::new(move || {
+            r2.set(Some(current_context()));
+            Outcome::Done
+        }),
+        0,
+        false,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    assert_eq!(wait_any(&[p]), 0);
+    assert_eq!(ran_on.get(), Some(MAIN), "p ran in main's IO.waitAny");
+    need_ok();
+    finish();
+}
+
+/// As above, for the root of the chain `main` waits for: `main` waits for
+/// `p.map f`, and the worker starts `p` in the look (review RF8-02). No
+/// descriptor is watched; a pending timer alone kept the hub from its last
+/// resort, so before fixes-8 `main` waited until the timer had run
+/// (review RF8-01).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_chain_root_the_worker_starts_in_the_waiters_look_runs_there() {
+    start_test(1);
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    let timer = timer_start(
+        std::time::Instant::now() + std::time::Duration::from_secs(2),
+        Rc::new(move || f2.set(true)),
+    );
+    let ran_on = Rc::new(Cell::new(None));
+    let r2 = ran_on.clone();
+    let p = spawn(
+        Box::new(move || {
+            r2.set(Some(current_context()));
+            Outcome::Done
+        }),
+        0,
+        false,
+    );
+    let m = depend(p, Box::new(|| Outcome::Done), 0, false, false);
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    wait(m);
+    assert!(!fired.get(), "main waited until the timer had run");
+    assert_eq!(ran_on.get(), Some(MAIN), "p ran in main's wait");
+    need_ok();
+    assert!(timer_stop(timer));
+    finish();
+}
+
 // --- Review AR-27 (fixes-3): the per-task bookkeeping.
 
 #[test]

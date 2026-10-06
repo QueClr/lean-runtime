@@ -276,10 +276,15 @@ AR-10, corrected; `src/sched/task.rs`):
   blocks, so its wake-up reaches nobody: the look checks the mark again
   and runs the task (fixes-8). Before that fix the waiter blocked on the
   started task with no wake-up to come. The hub starts a started pure task
-  by itself only as its last resort, which a watched descriptor prevents,
-  so the hub waited in `epoll_wait` forever (lean2rr's `RtTcp`: about one
-  run in 20 hung after the worker's 90 µs latency passed between the
-  task's enqueue and the wait). `IO.waitAny` and the polling
+  by itself only as its last resort, which a watched descriptor prevents
+  for good, and a pending sleep or timer until it ends. With a descriptor
+  watched, the hub waited in `epoll_wait` forever (lean2rr's `RtTcp`:
+  about one run in 20 hung after the worker's 90 µs latency passed
+  between the task's enqueue and the wait). With only sleeps or timers
+  pending, the waiter waited until every one of them had ended (for good
+  while a task slept in a loop): for example, a `Task.get` waited out an
+  unrelated `IO.sleep 5000` (review RF8-01). A debug build checks that no context blocks on a started pure
+  task (`register_block`, review RF8-03). `IO.waitAny` and the polling
   threshold start such a task, when a task they wait for needs it, on a
   context of its own (as the last resort does). A started pure task keeps
   its worker until it has run (review AR-25): an awaited pure task needs a
@@ -498,7 +503,13 @@ timer that keeps the hub from its last resort,
 `polling_runs_the_started_pure_tasks_the_polled_task_waits_behind`;
 with a watched descriptor and a timer that ends the watch after 2 s,
 `a_pure_task_the_worker_starts_in_the_waiters_look_runs_there` (fixes-8:
-without the second check of the mark, `main` blocks until the timer).
+without the second check of the mark, `main` blocks until the timer);
+for the chain's root, with a pending timer only,
+`a_chain_root_the_worker_starts_in_the_waiters_look_runs_there` (without
+the check, `main` waits until the timer has run); for `IO.waitAny`'s lone
+task, `a_pure_task_the_worker_starts_in_wait_anys_look_runs_there`
+(without the check, the task runs on a context of its own) (review
+RF8-02).
 Mutation checks (2026-10-04): the first two unit tests and the first two
 cases fail on the code before AR-25; without the hub's `needed_picked`,
 `IO.waitAny`'s or the polling threshold's start of the oldest started task,
