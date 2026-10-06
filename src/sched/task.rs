@@ -1752,6 +1752,15 @@ impl Sched {
             return true;
         }
         self.settle_worker();
+        // The woken worker may have started `i` just now (`pick`). `pick`
+        // wakes `i`'s waiters, but this waiter has not blocked yet, and
+        // nothing wakes it later: the hub starts a started pure task by
+        // itself only when nothing else can happen (`last_resort`, never
+        // with a descriptor watched). `i` is needed, so it runs here, as
+        // above (fixes-8, lean2rr's RtTcp hang).
+        if self.ent(i).flags & PICKED != 0 {
+            return true;
+        }
         let in_use = self.pool_in_use()
             - u32::from(spare && self.cx.cur_ctx().holds && self.wait_raises_limit());
         if in_use >= self.cx.pool_limit {

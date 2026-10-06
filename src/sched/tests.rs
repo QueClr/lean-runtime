@@ -1889,6 +1889,59 @@ fn polling_runs_the_started_pure_tasks_the_polled_task_waits_behind() {
     finish();
 }
 
+/// fixes-8 (lean2rr's RtTcp hang): the woken worker can start the awaited
+/// pure task in the waiter's own look (`may_run_awaited`, its
+/// `settle_worker`). `pick` then wakes the task's waiters, but this waiter
+/// has not blocked yet. The task runs on the waiter's stack, as an awaited
+/// started task does. Before the fix the waiter blocked on the started task
+/// and no wake-up came: with a descriptor watched the hub never starts a
+/// started pure task by itself (`last_resort`), so it waited in
+/// `epoll_wait` forever. Here a timer ends the watch after 2 s, so the old
+/// behaviour fails the test and does not hang it.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_pure_task_the_worker_starts_in_the_waiters_look_runs_there() {
+    start_test(1);
+    // A descriptor that never becomes readable is watched (in RtTcp, the
+    // listening socket).
+    let (r, w) = rustix::pipe::pipe().unwrap();
+    let wid = watch(r, Interest::READ, Rc::new(|_| {})).unwrap();
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    let timer = timer_start(
+        std::time::Instant::now() + std::time::Duration::from_secs(2),
+        Rc::new(move || {
+            f2.set(true);
+            unwatch(wid);
+        }),
+    );
+    let ran_on = Rc::new(Cell::new(None));
+    let r2 = ran_on.clone();
+    // A pure task queued by `main`: the idle worker wakes (`enqueue`).
+    let p = spawn(
+        Box::new(move || {
+            r2.set(Some(current_context()));
+            Outcome::Done
+        }),
+        0,
+        false,
+    );
+    // The worker's latency (90 µs) passes, and nothing looks at the
+    // scheduler meanwhile: the worker starts `p` in `main`'s wait.
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    wait(p);
+    assert!(
+        !fired.get(),
+        "main blocked on the started task until the timer ended the watch"
+    );
+    assert_eq!(ran_on.get(), Some(MAIN), "p ran in main's wait");
+    need_ok();
+    assert!(timer_stop(timer));
+    unwatch(wid);
+    drop(w);
+    finish();
+}
+
 // --- Review AR-27 (fixes-3): the per-task bookkeeping.
 
 #[test]

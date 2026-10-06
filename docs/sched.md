@@ -241,7 +241,11 @@ AR-10, corrected; `src/sched/task.rs`):
   Otherwise the waiter blocks on that task (`Wait::Cell`; a pool waiter's
   worker is free meanwhile), and the hub starts the heads on contexts of
   their own; the awaited task starts when it becomes the head, there or
-  on the waiter's stack when the waiter looks again. `may_run_awaited`
+  on the waiter's stack when the waiter looks again. Before it decides,
+  `may_run_awaited` lets the woken worker take what it would have taken
+  by now (`settle_worker`). If that worker starts the awaited pure task
+  (`pick`), the task runs on the waiter's stack, as any started task does
+  (fixes-8, below). `may_run_awaited`
   also says yes for a pending task in no queue that waits for nothing
   (`QUEUED` clear): the state of a task handed to a context that is about
   to begin it, between `hand` and `begin`. On one thread no other context
@@ -267,7 +271,15 @@ AR-10, corrected; `src/sched/task.rs`):
 - **The pure-task rule** still holds: a worker that reaches a queued pure
   task no IO task waits for only marks it started (`pick`). A waiter needs
   it, so the mark wakes the waiters of that task, and `wait` then runs it on
-  its stack (it is started, so it may); `IO.waitAny` and the polling
+  its stack (it is started, so it may). A mark made during the waiter's own
+  look (`settle_worker` in `may_run_awaited`) comes before the waiter
+  blocks, so its wake-up reaches nobody: the look checks the mark again
+  and runs the task (fixes-8). Before that fix the waiter blocked on the
+  started task with no wake-up to come. The hub starts a started pure task
+  by itself only as its last resort, which a watched descriptor prevents,
+  so the hub waited in `epoll_wait` forever (lean2rr's `RtTcp`: about one
+  run in 20 hung after the worker's 90 µs latency passed between the
+  task's enqueue and the wait). `IO.waitAny` and the polling
   threshold start such a task, when a task they wait for needs it, on a
   context of its own (as the last resort does). A started pure task keeps
   its worker until it has run (review AR-25): an awaited pure task needs a
@@ -483,7 +495,10 @@ Unit tests (`src/sched/tests.rs`): `an_awaited_pure_task_waits_for_the_pure_task
 timer that keeps the hub from its last resort,
 `a_waiter_runs_the_started_pure_tasks_it_waits_behind`,
 `wait_any_runs_the_started_pure_tasks_its_list_waits_behind`,
-`polling_runs_the_started_pure_tasks_the_polled_task_waits_behind`.
+`polling_runs_the_started_pure_tasks_the_polled_task_waits_behind`;
+with a watched descriptor and a timer that ends the watch after 2 s,
+`a_pure_task_the_worker_starts_in_the_waiters_look_runs_there` (fixes-8:
+without the second check of the mark, `main` blocks until the timer).
 Mutation checks (2026-10-04): the first two unit tests and the first two
 cases fail on the code before AR-25; without the hub's `needed_picked`,
 `IO.waitAny`'s or the polling threshold's start of the oldest started task,
