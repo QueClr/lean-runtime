@@ -32,7 +32,7 @@ use lean_runtime::semantics::int::{self, Int};
 use lean_runtime::semantics::nat::{self, Nat};
 use lean_runtime::semantics::panic::{self, InternalPanic, PanicEnd, PanicSettings};
 use lean_runtime::semantics::{array, repr};
-use refbig::{RInt, RNat};
+use refbig::{OInt, RInt, RNat};
 
 // ------------------------------------------------------------------ rows
 
@@ -1085,5 +1085,165 @@ fn equality_is_semantic() {
             assert!(Int::Small(x) == ibig && ibig == Int::Small(x), "-{v}");
         }
         assert!(ibig != Int::Big(RInt::from_i128(v as i128 + 1)));
+    }
+}
+
+/// `BigInt`'s word methods (perf-2): `OInt`, which overrides them with
+/// magnitude-and-word code, gives the same results as `RInt`, which keeps
+/// the defaults (`from_i64`, then the big operation), through the `Int`
+/// rules with a big and a word operand in both orders, and called directly;
+/// on big values of both signs around 0, 2^31, 2^63, 2^64 and beyond, words
+/// around 0, ±1, ±2^31 and the `i64` bounds; and both against `i128`
+/// arithmetic where it holds the values. The calls are counted, so each
+/// override is seen to be reached from the rules.
+#[test]
+#[cfg_attr(
+    all(
+        miri,
+        any(not(feature = "unsafe-fast"), feature = "io", feature = "sched")
+    ),
+    ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
+)]
+fn int_word_methods_match_defaults() {
+    let mut bigs = Vec::new();
+    for v in [
+        0i128,
+        1,
+        2,
+        7,
+        (1 << 31) - 1,
+        1 << 31,
+        (1 << 31) + 1,
+        1 << 32,
+        (1 << 63) - 1,
+        1 << 63,
+        (1 << 63) + 1,
+        (1 << 64) - 1,
+        1 << 64,
+        (1 << 64) + 1,
+        (1 << 100) + 12345,
+        3i128.pow(70),
+    ] {
+        bigs.push(RInt::from_i128(v));
+        bigs.push(RInt::from_i128(-v));
+    }
+    let three = RInt::from_nat(RNat::from_u64(3).pow(100));
+    bigs.push(three.clone());
+    bigs.push(three.neg());
+    let words = [
+        i64::MIN,
+        i64::MIN + 1,
+        -(1 << 32),
+        -(1 << 31) - 1,
+        -(1 << 31),
+        -(1 << 31) + 1,
+        -7,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        7,
+        (1 << 31) - 1,
+        1 << 31,
+        (1 << 31) + 1,
+        1 << 32,
+        1_000_000_007,
+        i64::MAX - 1,
+        i64::MAX,
+    ];
+    fn text<B: BigInt>(i: &Int<B>) -> String {
+        let mut s = String::new();
+        int::write_decimal(i, &mut s).unwrap();
+        s
+    }
+    type Ring<B> = fn(Int<B>, Int<B>) -> Result<Int<B>, InternalPanic>;
+    type Div<B> = fn(Int<B>, Int<B>) -> Int<B>;
+    type Wide = fn(i128, i128) -> Option<i128>;
+    let ring: [(&str, Ring<RInt>, Ring<OInt>, Wide); 3] = [
+        ("add", int::add, int::add, i128::checked_add),
+        ("sub", int::sub, int::sub, i128::checked_sub),
+        ("mul", int::mul, int::mul, i128::checked_mul),
+    ];
+    let divs: [(&str, Div<RInt>, Div<OInt>, Wide); 4] = [
+        ("tdiv", int::tdiv, int::tdiv, i128::checked_div),
+        ("tmod", int::tmod, int::tmod, i128::checked_rem),
+        ("ediv", int::ediv, int::ediv, i128::checked_div_euclid),
+        ("emod", int::emod, int::emod, i128::checked_rem_euclid),
+    ];
+    // the i128 result, when `b` and the result are in its range
+    let wide = |b: &RInt, f: Wide, x: i128, y: i128| {
+        b.to_i128().and_then(|_| f(x, y)).map(|v| v.to_string())
+    };
+    for b in &bigs {
+        let bi = b.to_i128().unwrap_or(0);
+        for &w in &words {
+            let (r, o) = (|| Int::Big(b.clone()), || Int::Big(OInt(b.clone())));
+            for (name, fr, fo, f) in ring {
+                let d = text(&fr(r(), Int::Small(w)).unwrap());
+                assert_eq!(
+                    d,
+                    text(&fo(o(), Int::Small(w)).unwrap()),
+                    "{b:?} {name} {w}"
+                );
+                if let Some(v) = wide(b, f, bi, w as i128) {
+                    assert_eq!(d, v, "{b:?} {name} {w}");
+                }
+                let d = text(&fr(Int::Small(w), r()).unwrap());
+                assert_eq!(
+                    d,
+                    text(&fo(Int::Small(w), o()).unwrap()),
+                    "{w} {name} {b:?}"
+                );
+                if let Some(v) = wide(b, f, w as i128, bi) {
+                    assert_eq!(d, v, "{w} {name} {b:?}");
+                }
+            }
+            for (name, fr, fo, f) in divs {
+                let d = text(&fr(r(), Int::Small(w)));
+                assert_eq!(d, text(&fo(o(), Int::Small(w))), "{b:?} {name} {w}");
+                if let Some(v) = wide(b, f, bi, w as i128) {
+                    assert_eq!(d, v, "{b:?} {name} {w}");
+                }
+                let d = text(&fr(Int::Small(w), r()));
+                assert_eq!(d, text(&fo(Int::Small(w), o())), "{w} {name} {b:?}");
+            }
+            // an exact division of b * w by w gives b back
+            let p = b.clone().mul_i64(w);
+            let (pr, po) = (Int::Big(p.clone()), Int::Big(OInt(p.clone())));
+            let d = text(&int::div_exact(pr, Int::Small(w)));
+            assert_eq!(
+                d,
+                text(&int::div_exact(po, Int::Small(w))),
+                "{b:?} * {w} / {w}"
+            );
+            if w != 0 {
+                assert_eq!(d, b.to_decimal(), "{b:?} * {w} / {w}");
+            }
+        }
+    }
+    for (i, m) in OInt::METHODS.iter().enumerate() {
+        let n = refbig::CALLS[i].load(std::sync::atomic::Ordering::Relaxed);
+        assert!(n > 0, "the rules never called OInt::{m}");
+    }
+    // the methods themselves, override against default
+    for b in &bigs {
+        for &w in &words {
+            let o = || OInt(b.clone());
+            assert_eq!(o().add_i64(w).0, b.clone().add_i64(w));
+            assert_eq!(OInt::i64_add(w, o()).0, RInt::i64_add(w, b.clone()));
+            assert_eq!(o().sub_i64(w).0, b.clone().sub_i64(w));
+            assert_eq!(OInt::i64_sub(w, o()).0, RInt::i64_sub(w, b.clone()));
+            assert_eq!(o().mul_i64(w).0, b.clone().mul_i64(w));
+            assert_eq!(OInt::i64_mul(w, o()).0, RInt::i64_mul(w, b.clone()));
+            if w != 0 {
+                assert_eq!(o().tdiv_i64(w).0, b.clone().tdiv_i64(w), "{b:?} {w}");
+                assert_eq!(o().tmod_i64(w).0, b.clone().tmod_i64(w), "{b:?} {w}");
+                assert_eq!(o().ediv_i64(w).0, b.clone().ediv_i64(w), "{b:?} {w}");
+                assert_eq!(o().emod_i64(w).0, b.clone().emod_i64(w), "{b:?} {w}");
+                let p = b.clone().mul_i64(w);
+                assert_eq!(OInt(p.clone()).div_exact_i64(w).0, p.div_exact_i64(w));
+            }
+        }
     }
 }

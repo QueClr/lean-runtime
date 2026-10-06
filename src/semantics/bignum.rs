@@ -28,6 +28,18 @@
 //!   required ones. An implementation may override them with a faster
 //!   equivalent (lean2rr's fused `mpn` Euclidean division, say); the rows in
 //!   `tests/cases/{nat,int}` are what equivalent means.
+//! - `BigInt`'s word methods (`add_i64`, `i64_add`, `sub_i64`, `i64_sub`,
+//!   `mul_i64`, `i64_mul`, `tdiv_i64`, `tmod_i64`, `ediv_i64`, `emod_i64`,
+//!   `div_exact_i64`) are what the `Int` rules call for `+`, `-` and `*` of
+//!   a word (`Int::Small`) and a big number, in either order, and for the
+//!   division of a big number by a word (perf-2); a word divided by a big
+//!   number still builds the temporary. Each default is the
+//!   rule's code before: the word made a big number with `from_i64`, then
+//!   the big operation, with the operands in the same order, so a backend
+//!   that does not override them computes exactly as before. A backend
+//!   overrides them to compute from the word, without the temporary big
+//!   number (87.5 % of lean2rr's `from_i64` calls in its Liasolver
+//!   benchmark were these temporaries).
 //!
 //! # Backend limits
 //!
@@ -323,6 +335,77 @@ pub trait BigInt: Sized {
     /// `self / o` where `o` divides `self` and `o != 0` (`mpz_divexact`).
     fn div_exact(self, o: Self) -> Self {
         self.tdiv(o)
+    }
+
+    // The word methods (the module's contract): one operand big, the other
+    // a word. The big operand may hold any value, also zero or one in the
+    // word range; the word may be any `i64`, `i64::MIN` included (its
+    // magnitude, 2^63, is its `unsigned_abs`). The rules test the result's
+    // size first, as for the big operations; the translator normalizes the
+    // result, as every big result.
+
+    /// `self + o`. The default is `self.add(Self::from_i64(o))`.
+    fn add_i64(self, o: i64) -> Self {
+        self.add(Self::from_i64(o))
+    }
+
+    /// `a + o`, a word plus a big number. The default is
+    /// `Self::from_i64(a).add(o)`.
+    fn i64_add(a: i64, o: Self) -> Self {
+        Self::from_i64(a).add(o)
+    }
+
+    /// `self - o`. The default is `self.sub(Self::from_i64(o))`.
+    fn sub_i64(self, o: i64) -> Self {
+        self.sub(Self::from_i64(o))
+    }
+
+    /// `a - o`, a word minus a big number. The default is
+    /// `Self::from_i64(a).sub(o)`.
+    fn i64_sub(a: i64, o: Self) -> Self {
+        Self::from_i64(a).sub(o)
+    }
+
+    /// `self * o`. The default is `self.mul(Self::from_i64(o))`.
+    fn mul_i64(self, o: i64) -> Self {
+        self.mul(Self::from_i64(o))
+    }
+
+    /// `a * o`, a word times a big number. The default is
+    /// `Self::from_i64(a).mul(o)`.
+    fn i64_mul(a: i64, o: Self) -> Self {
+        Self::from_i64(a).mul(o)
+    }
+
+    /// `tdiv`'s quotient of a big number by a word, rounded toward zero,
+    /// where `o != 0`. The default is `self.tdiv(Self::from_i64(o))`.
+    fn tdiv_i64(self, o: i64) -> Self {
+        self.tdiv(Self::from_i64(o))
+    }
+
+    /// `tmod`'s remainder of a big number by a word, with the sign of
+    /// `self`, where `o != 0`. The default is `self.tmod(Self::from_i64(o))`.
+    fn tmod_i64(self, o: i64) -> Self {
+        self.tmod(Self::from_i64(o))
+    }
+
+    /// `ediv`'s quotient of a big number by a word (the remainder in
+    /// `[0, |o|)`), where `o != 0`. The default is
+    /// `self.ediv(Self::from_i64(o))`.
+    fn ediv_i64(self, o: i64) -> Self {
+        self.ediv(Self::from_i64(o))
+    }
+
+    /// `emod`'s remainder of a big number by a word, in `[0, |o|)`, where
+    /// `o != 0`. The default is `self.emod(Self::from_i64(o))`.
+    fn emod_i64(self, o: i64) -> Self {
+        self.emod(Self::from_i64(o))
+    }
+
+    /// `div_exact` of a big number by a word, where `o` divides `self` and
+    /// `o != 0`. The default is `self.div_exact(Self::from_i64(o))`.
+    fn div_exact_i64(self, o: i64) -> Self {
+        self.div_exact(Self::from_i64(o))
     }
 
     /// The decimal digits with a leading `-` for a negative value

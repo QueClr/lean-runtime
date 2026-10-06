@@ -119,6 +119,11 @@ lean-runtime keeps that split (decision Q4).</p>
     They decide what happens with a zero divisor, a truncating subtraction, an exponent or a shift amount.</li>
   <li><strong>Big-number arithmetic</strong> is a trait, <code>BigNat</code> (and <code>BigInt</code>).
     Each translator implements it with its own library: lean2rr with GMP, leanrs with malachite.</li>
+  <li><strong>Word methods.</strong> For <code>+</code>, <code>-</code> and <code>*</code> of a word and a big <code>Int</code>, in either order, the rules call a word method of <code>BigInt</code>.
+    They also call one to divide a big <code>Int</code> by a word, but not to divide a word by a big <code>Int</code>.
+    Examples are <code>add_i64</code>, <code>i64_sub</code> and <code>tdiv_i64</code>.
+    By default, the method makes the word a big number and calls the big operation.
+    A backend can compute from the word directly, without that temporary number.</li>
   <li><strong>Two layers.</strong> Word helpers (<code>*_small</code>) take <code>u64</code> or <code>i64</code> values and give the exact result, for a translator's own fast path.
     Rules take <code>Nat&lt;B&gt;</code>: a word (<code>Small</code>) or a big number (<code>Big</code>) of the backend <code>B</code>.</li>
   <li><strong>Normalization.</strong> Each translator normalizes results with its own boundary.

@@ -20,8 +20,9 @@ use core::fmt;
 /// precedence or above.
 pub const MAX_PREC: u64 = 1024;
 
-/// The two-digit groups 00..99, for `decimal_u64`.
-const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
+/// The two-digit groups 00..99, for `decimal_u64` and the fast path of
+/// `float::to_string`.
+pub(crate) const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
 2021222324252627282930313233343536373839\
 4041424344454647484950515253545556575859\
 6061626364656667686970717273747576777879\

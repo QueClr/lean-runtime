@@ -452,3 +452,177 @@ impl BigInt for RInt {
         out.write_str(&self.to_decimal())
     }
 }
+
+/// `RInt` with `BigInt`'s word methods overridden (perf-2), as a backend
+/// with limb arithmetic overrides them: the magnitude and the word's
+/// magnitude (`unsigned_abs`) through `RNat`'s word operations, the sign
+/// apart, never a big number for the word. `rows2.rs`
+/// (`int_word_methods_match_defaults`) checks it against `RInt`, which keeps
+/// the defaults. `CALLS` counts each override's calls, so the test can see
+/// that the rules reach them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OInt(pub RInt);
+
+/// The calls of each `OInt` override, in the order of `OInt::METHODS`.
+pub static CALLS: [std::sync::atomic::AtomicU64; 11] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 11];
+
+impl OInt {
+    /// The overridden methods, in the order of `CALLS`.
+    pub const METHODS: [&'static str; 11] = [
+        "add_i64",
+        "i64_add",
+        "sub_i64",
+        "i64_sub",
+        "mul_i64",
+        "i64_mul",
+        "tdiv_i64",
+        "tmod_i64",
+        "ediv_i64",
+        "emod_i64",
+        "div_exact_i64",
+    ];
+
+    fn count(i: usize) {
+        CALLS[i].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// `a + (-w if neg_w else w)`.
+    fn add_word(a: RInt, neg_w: bool, w: u64) -> RInt {
+        if w == 0 {
+            a
+        } else if a.neg == neg_w {
+            RInt::new(a.neg, a.mag.add_u64(w))
+        } else if a.mag.compare_u64(w) != Ordering::Less {
+            RInt::new(a.neg, a.mag.sub_u64(w))
+        } else {
+            let m = a.mag.to_u64().expect("below a word");
+            RInt::new(neg_w, RNat::from_u64(w - m))
+        }
+    }
+
+    fn mul_word(a: RInt, o: i64) -> RInt {
+        RInt::new(a.neg != (o < 0), a.mag.mul_u64(o.unsigned_abs()))
+    }
+
+    /// The quotient's and the remainder's magnitudes.
+    fn divrem_word(a: &RInt, o: i64) -> (RNat, u64) {
+        let w = o.unsigned_abs();
+        (a.mag.clone().div_u64(w), a.mag.rem_u64(w))
+    }
+}
+
+impl BigInt for OInt {
+    type Nat = RNat;
+
+    fn from_i64(v: i64) -> OInt {
+        OInt(RInt::from_i64(v))
+    }
+    fn from_i128(v: i128) -> OInt {
+        OInt(RInt::from_i128(v))
+    }
+    fn from_nat(n: RNat) -> OInt {
+        OInt(RInt::from_nat(n))
+    }
+    fn nat_abs(self) -> RNat {
+        self.0.nat_abs()
+    }
+    fn to_i64(&self) -> Option<i64> {
+        self.0.to_i64()
+    }
+    fn low_u64(&self) -> u64 {
+        self.0.low_u64()
+    }
+    fn is_neg(&self) -> bool {
+        self.0.is_neg()
+    }
+    fn bit_len(&self) -> u64 {
+        self.0.bit_len()
+    }
+    fn compare(&self, o: &OInt) -> Ordering {
+        self.0.compare(&o.0)
+    }
+    fn neg(self) -> OInt {
+        OInt(self.0.neg())
+    }
+    fn add(self, o: OInt) -> OInt {
+        OInt(self.0.add(o.0))
+    }
+    fn sub(self, o: OInt) -> OInt {
+        OInt(self.0.sub(o.0))
+    }
+    fn mul(self, o: OInt) -> OInt {
+        OInt(self.0.mul(o.0))
+    }
+    fn tdiv_rem(self, o: &OInt) -> (OInt, OInt) {
+        let (q, r) = self.0.tdiv_rem(&o.0);
+        (OInt(q), OInt(r))
+    }
+    fn write_decimal<W: fmt::Write + ?Sized>(&self, out: &mut W) -> fmt::Result {
+        self.0.write_decimal(out)
+    }
+
+    fn add_i64(self, o: i64) -> OInt {
+        OInt::count(0);
+        OInt(OInt::add_word(self.0, o < 0, o.unsigned_abs()))
+    }
+    fn i64_add(a: i64, o: OInt) -> OInt {
+        OInt::count(1);
+        OInt(OInt::add_word(o.0, a < 0, a.unsigned_abs()))
+    }
+    fn sub_i64(self, o: i64) -> OInt {
+        OInt::count(2);
+        OInt(OInt::add_word(self.0, o > 0, o.unsigned_abs()))
+    }
+    fn i64_sub(a: i64, o: OInt) -> OInt {
+        // a - o = (-o) + a
+        OInt::count(3);
+        OInt(OInt::add_word(o.0.neg(), a < 0, a.unsigned_abs()))
+    }
+    fn mul_i64(self, o: i64) -> OInt {
+        OInt::count(4);
+        OInt(OInt::mul_word(self.0, o))
+    }
+    fn i64_mul(a: i64, o: OInt) -> OInt {
+        OInt::count(5);
+        OInt(OInt::mul_word(o.0, a))
+    }
+    fn tdiv_i64(self, o: i64) -> OInt {
+        OInt::count(6);
+        let (q, _) = OInt::divrem_word(&self.0, o);
+        OInt(RInt::new(self.0.neg != (o < 0), q))
+    }
+    fn tmod_i64(self, o: i64) -> OInt {
+        OInt::count(7);
+        let (_, r) = OInt::divrem_word(&self.0, o);
+        OInt(RInt::new(self.0.neg, RNat::from_u64(r)))
+    }
+    fn ediv_i64(self, o: i64) -> OInt {
+        // a negative dividend with a remainder: one further from zero
+        OInt::count(8);
+        let (q, r) = OInt::divrem_word(&self.0, o);
+        let q = if self.0.neg && r != 0 {
+            q.add_u64(1)
+        } else {
+            q
+        };
+        OInt(RInt::new(self.0.neg != (o < 0), q))
+    }
+    fn emod_i64(self, o: i64) -> OInt {
+        // a negative dividend with a remainder: |o| - r
+        OInt::count(9);
+        let (_, r) = OInt::divrem_word(&self.0, o);
+        let r = if self.0.neg && r != 0 {
+            o.unsigned_abs() - r
+        } else {
+            r
+        };
+        OInt(RInt::new(false, RNat::from_u64(r)))
+    }
+    fn div_exact_i64(self, o: i64) -> OInt {
+        OInt::count(10);
+        let (q, r) = OInt::divrem_word(&self.0, o);
+        assert_eq!(r, 0, "div_exact_i64: {o} does not divide");
+        OInt(RInt::new(self.0.neg != (o < 0), q))
+    }
+}

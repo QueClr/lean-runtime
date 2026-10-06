@@ -259,22 +259,24 @@ fn neg_slow<B: BigInt>(a: Int<B>) -> Int<B> {
     }
 }
 
-/// The bit length of the magnitude: 0 for zero.
+/// The bit length of a word's magnitude: 0 for zero.
 #[inline]
-fn bit_len<B: BigInt>(a: &Int<B>) -> u64 {
-    match a {
-        Small(x) => u64::from(u64::BITS - x.unsigned_abs().leading_zeros()),
-        Big(b) => b.bit_len(),
-    }
+fn small_bit_len(x: i64) -> u64 {
+    u64::from(u64::BITS - x.unsigned_abs().leading_zeros())
 }
 
 /// The word path is a checked `i64` operation, two instructions (review
 /// RS2-04); an overflow, rare, takes the slow path, which computes in `i128`.
 /// When a translator's words are narrower (lean2rr's `int32` range), the
 /// compiler sees that the operation cannot overflow and drops the check.
+///
+/// In the slow path, a word and a big operand go to the backend's word
+/// methods (`$big_word` for a big first operand, `$word_big` for a word
+/// first; perf-2), whose defaults are the code before: `from_i64` of the
+/// word, then the big operation, in the same order.
 macro_rules! ring_op {
     ($(#[$doc:meta])* $name:ident, $slow:ident, $checked:ident, $small:ident, $method:ident,
-     $bits:expr) => {
+     $big_word:ident, $word_big:ident, $bits:expr) => {
         $(#[$doc])*
         #[inline]
         pub fn $name<B: BigInt>(a: Int<B>, b: Int<B>) -> Result<Int<B>, InternalPanic> {
@@ -289,12 +291,23 @@ macro_rules! ring_op {
         #[cold]
         #[inline(never)]
         fn $slow<B: BigInt>(a: Int<B>, b: Int<B>) -> Result<Int<B>, InternalPanic> {
-            if let (Small(x), Small(y)) = (&a, &b) {
-                return Ok(of_i128($small(*x, *y)));
-            }
             let bits: fn(u64, u64) -> u128 = $bits;
-            check_result_bits::<B::Nat>(bits(bit_len(&a), bit_len(&b)))?;
-            Ok(Big(a.into_big().$method(b.into_big())))
+            let size = |x: u64, y: u64| check_result_bits::<B::Nat>(bits(x, y));
+            Ok(match (a, b) {
+                (Small(x), Small(y)) => of_i128($small(x, y)),
+                (Big(x), Big(y)) => {
+                    size(x.bit_len(), y.bit_len())?;
+                    Big(x.$method(y))
+                }
+                (Big(x), Small(y)) => {
+                    size(x.bit_len(), small_bit_len(y))?;
+                    Big(x.$big_word(y))
+                }
+                (Small(x), Big(y)) => {
+                    size(small_bit_len(x), y.bit_len())?;
+                    Big(B::$word_big(x, y))
+                }
+            })
         }
     };
 }
@@ -305,24 +318,30 @@ ring_op!(
     /// (`nat::check_result_bits`).
     ///
     /// Source: lean2rr leanrt `src/nat.rs` (`int_add`) and leanrs_rt
-    /// `src/int.rs` (`add_ref`, `add_slow`), merged.
+    /// `src/int.rs` (`add_ref`, `add_slow`), merged; the word methods are
+    /// new (perf-2).
     add,
     add_slow,
     checked_add,
     add_small,
     add,
+    add_i64,
+    i64_add,
     |x, y| u128::from(x.max(y)) + 1
 );
 ring_op!(
     /// `Int.sub` (`lean_int_sub`), with `add`'s size test.
     ///
     /// Source: lean2rr leanrt `src/nat.rs` (`int_sub`) and leanrs_rt
-    /// `src/int.rs` (`sub_ref`, `sub_slow`), merged.
+    /// `src/int.rs` (`sub_ref`, `sub_slow`), merged; the word methods are
+    /// new (perf-2).
     sub,
     sub_slow,
     checked_sub,
     sub_small,
     sub,
+    sub_i64,
+    i64_sub,
     |x, y| u128::from(x.max(y)) + 1
 );
 ring_op!(
@@ -330,12 +349,15 @@ ring_op!(
     /// operands' bit lengths: above `MAX_BITS` it is `OutOfMemory`.
     ///
     /// Source: lean2rr leanrt `src/nat.rs` (`int_mul`) and leanrs_rt
-    /// `src/int.rs` (`mul_ref`, `mul_slow`), merged.
+    /// `src/int.rs` (`mul_ref`, `mul_slow`), merged; the word methods are
+    /// new (perf-2).
     mul,
     mul_slow,
     checked_mul,
     mul_small,
     mul,
+    mul_i64,
+    i64_mul,
     |x, y| u128::from(x) + u128::from(y)
 );
 
@@ -368,13 +390,26 @@ fn div_slow<B: BigInt>(a: Int<B>, b: Int<B>, k: Div) -> Int<B> {
             Div::EMod => Small(emod_small(x, y)),
         };
     }
-    let (a, b) = (a.into_big(), b.into_big());
-    Big(match k {
-        Div::T => a.tdiv(b),
-        Div::TMod => a.tmod(b),
-        Div::E => a.ediv(b),
-        Div::EMod => a.emod(b),
-        Div::Exact => a.div_exact(b),
+    Big(match (a, b) {
+        // A word divisor goes to the backend's word methods, whose defaults
+        // are the code below with `from_i64` of the word (perf-2).
+        (Big(a), Small(y)) => match k {
+            Div::T => a.tdiv_i64(y),
+            Div::TMod => a.tmod_i64(y),
+            Div::E => a.ediv_i64(y),
+            Div::EMod => a.emod_i64(y),
+            Div::Exact => a.div_exact_i64(y),
+        },
+        (a, b) => {
+            let (a, b) = (a.into_big(), b.into_big());
+            match k {
+                Div::T => a.tdiv(b),
+                Div::TMod => a.tmod(b),
+                Div::E => a.ediv(b),
+                Div::EMod => a.emod(b),
+                Div::Exact => a.div_exact(b),
+            }
+        }
     })
 }
 
