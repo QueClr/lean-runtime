@@ -330,17 +330,64 @@ pub fn get_byte_fast(s: &[u8], pos: u64) -> u8 {
 /// The number of characters of UTF-8 bytes, as `lean_utf8_n_strlen`
 /// (`src/runtime/utf8.cpp`) counts it when Lean makes a string (it counts by
 /// lead-byte sizes; on valid UTF-8 that equals the number of bytes that are
-/// not continuation bytes, which is what this counts, vectorized).
+/// not continuation bytes, which is what this counts).
 ///
 /// This is the count a translator caches when it makes a string, as Lean
 /// caches it in `m_length`. `String.length` (`lean_string_length`) must read
 /// that cached count, never call this: counting is O(n) where Lean's is O(1).
 ///
+/// The continuation bytes are counted eight at a time in a `u64`
+/// (`continuation_bytes`, perf-3): the whole words, then the last eight
+/// bytes with those already counted masked off; below eight bytes, the
+/// first four and the last four the same way, and single bytes below four.
+/// The filter before (`(b as i8) >= -0x40`, counted into a `usize`) was
+/// vectorized with every byte widened to a 64-bit lane: about 2 instructions
+/// a byte and about 25 to start, for the few bytes of a substring.
+///
 /// Source: leanrs_rt `src/str.rs` (`count_chars`) and lean2rr leanrt
-/// `src/string.rs` (`utf8_count`), the same count, written as one filter.
+/// `src/string.rs` (`utf8_count`), the same count; the word loop is new
+/// (perf-3).
 #[inline]
 pub fn utf8_strlen(s: &[u8]) -> u64 {
-    s.iter().filter(|&&b| (b as i8) >= -0x40).count() as u64
+    let n = s.len();
+    let cont = if n >= 8 {
+        let (words, rest) = s.as_chunks::<8>();
+        let mut c = 0u64;
+        for w in words {
+            c += u64::from(continuation_bytes(u64::from_le_bytes(*w)));
+        }
+        if !rest.is_empty() {
+            // The last eight bytes; the bytes of `rest` are its top ones.
+            let mut last = [0u8; 8];
+            last.copy_from_slice(&s[n - 8..]);
+            let keep = u64::MAX << (8 * (8 - rest.len()));
+            c += u64::from(continuation_bytes(u64::from_le_bytes(last) & keep));
+        }
+        c
+    } else if n >= 4 {
+        // The first four bytes and the last four, which overlap by `8 - n`
+        // bytes: the overlap is masked off the last four.
+        let mut first = [0u8; 4];
+        let mut last = [0u8; 4];
+        first.copy_from_slice(&s[..4]);
+        last.copy_from_slice(&s[n - 4..]);
+        let keep = u32::MAX.checked_shl(8 * (8 - n as u32)).unwrap_or(0);
+        let w =
+            u64::from(u32::from_le_bytes(first)) | u64::from(u32::from_le_bytes(last) & keep) << 32;
+        u64::from(continuation_bytes(w))
+    } else {
+        s.iter().map(|&b| u64::from(b & 0xC0 == 0x80)).sum()
+    };
+    n as u64 - cont
+}
+
+/// The number of continuation bytes (`10xxxxxx`) among the eight bytes of
+/// `w`: bit 7 of the byte set and bit 6 clear. `w << 1` moves each byte's
+/// bit 6 to its bit 7 (the bit that crosses into the next byte lands on its
+/// bit 0, which is not tested).
+#[inline(always)]
+const fn continuation_bytes(w: u64) -> u32 {
+    (w & !(w << 1) & 0x8080_8080_8080_8080).count_ones()
 }
 
 /// `utf8_strlen` at compile time, for a string literal's cached count (a
@@ -656,6 +703,49 @@ pub fn compare(a: &[u8], b: &[u8]) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `utf8_strlen` counts as the filter of bytes that are not continuation
+    /// bytes, for every length up to 40 (every path: single bytes, the two
+    /// overlapping halves, whole words and the masked last word), with one
+    /// continuation byte at each position and with pseudo-random bytes from
+    /// every class (ASCII, continuation, lead bytes, and 0xF8 to 0xFF, which
+    /// are not UTF-8: the count is defined on any bytes).
+    #[test]
+    fn utf8_strlen_counts_every_length_and_position() {
+        fn filter(s: &[u8]) -> u64 {
+            s.iter().filter(|&&b| (b as i8) >= -0x40).count() as u64
+        }
+        let classes = [
+            0x00u8, 0x41, 0x7F, 0x80, 0x9F, 0xBF, 0xC0, 0xC3, 0xDF, 0xE2, 0xEF, 0xF0, 0xF4, 0xF8,
+            0xFF,
+        ];
+        let mut state = 0x1234_5678_9ABC_DEF0u64;
+        let mut next = || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        let mut buf = [0u8; 48];
+        for n in 0..=40usize {
+            for i in 0..n {
+                for (a, c) in [(b'a', 0x80u8), (0x80, b'a'), (0xE2, 0xBF)] {
+                    let mut v = vec![a; n];
+                    v[i] = c;
+                    assert_eq!(utf8_strlen(&v), filter(&v), "n {n} at {i}: {v:x?}");
+                }
+            }
+            for _ in 0..200 {
+                for b in buf.iter_mut() {
+                    *b = classes[(next() % classes.len() as u64) as usize];
+                }
+                let off = (next() % 8) as usize;
+                let v = &buf[off..off + n];
+                assert_eq!(utf8_strlen(v), filter(v), "{v:x?}");
+            }
+        }
+    }
 
     /// `utf8_strlen_const` runs at compile time.
     const LITERAL: u64 = utf8_strlen_const("a€😀é".as_bytes());

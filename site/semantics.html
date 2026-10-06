@@ -214,7 +214,9 @@ So no backend gets a request above its limit, and both translators end the same 
 <ul>
   <li><code>float</code> and <code>float32</code> hold what is not one Rust operator: <code>toString</code>, the saturating conversions to integers, <code>ofBits</code>/<code>toBits</code>, <code>frExp</code>, <code>scaleB</code> and the classification functions.</li>
   <li><code>Float.toString</code> is C's <code>%f</code>: six decimals, every integer digit, <code>NaN</code>, <code>inf</code>.
-    It writes into a <code>fmt::Write</code> and allocates nothing.</li>
+    It writes into a <code>fmt::Write</code> and allocates nothing.
+    For a finite value below 2<sup>53</sup> in magnitude, <code>to_string_fast_bytes</code> gives the same text as bytes in the caller's buffer.
+    A translator that copies bytes into its own string uses it, and does not check that the text is UTF-8.</li>
   <li><code>libm</code> has one function per C function (<code>sin</code>, <code>pow</code>, <code>cbrtf</code> and so on).
     Native Lean calls glibc's libm.
     Rust's <code>f64</code> and <code>f32</code> methods call the same libm, with the exceptions below.</li>
@@ -255,6 +257,9 @@ So no backend gets a request above its limit, and both translators end the same 
     Otherwise the glue moves the tail of the string, if the block has room.</li>
   <li><code>ByteArray.validateUTF8</code> accepts exactly the well-formed UTF-8 of the Unicode standard, as Lean's C validator does.
     It rejects overlong forms, surrogates and values above U+10FFFF.</li>
+  <li><code>utf8_strlen</code> counts the characters of a new string: the bytes that are not continuation bytes.
+    It counts eight bytes at a time in a <code>u64</code>.
+    A translator keeps the count in its string object, as Lean does.</li>
   <li><code>Substring.Raw</code>'s externs are Lean code, so they are not here.</li>
 </ul>
 

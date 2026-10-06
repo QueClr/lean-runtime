@@ -46,7 +46,10 @@ const fn is_nan_bits(bits: u64) -> bool {
 pub fn to_string(x: f64, out: &mut impl fmt::Write) -> fmt::Result {
     let bits = x.to_bits();
     if (bits >> 52) & 0x7FF < FIXED6_EXP {
-        out.write_str(fixed6(bits, &mut [0; FIXED6_LEN]))
+        match core::str::from_utf8(fixed6(bits, &mut [0; FIXED6_LEN])) {
+            Ok(s) => out.write_str(s),
+            Err(_) => unreachable!("a sign, digits and a point are ASCII"),
+        }
     } else if x.is_nan() {
         out.write_str("NaN")
     } else if x == f64::INFINITY {
@@ -58,13 +61,33 @@ pub fn to_string(x: f64, out: &mut impl fmt::Write) -> fmt::Result {
     }
 }
 
+/// `to_string`'s text as bytes for a value of its fast path (finite and
+/// below 2^53 in magnitude, `fixed6`), written at the end of `buf`; `None`
+/// for the other values, whose text `to_string` writes. A glue that copies
+/// bytes into its own string takes these directly; `to_string` gives a
+/// `&str`, whose ASCII check (`core::str::from_utf8`) is the price of
+/// staying safe: in lean2rr's `strings` benchmark it took about 86
+/// instructions a call, where `fixed6` takes about 130 (as
+/// `repr::decimal_u64_bytes` beside `repr::decimal_u64`).
+///
+/// Source: new (perf-3).
+#[inline]
+pub fn to_string_fast_bytes(x: f64, buf: &mut [u8; FIXED6_LEN]) -> Option<&[u8]> {
+    let bits = x.to_bits();
+    if (bits >> 52) & 0x7FF < FIXED6_EXP {
+        Some(fixed6(bits, buf))
+    } else {
+        None
+    }
+}
+
 /// The biased exponent of 2^53: a finite `f64` with a smaller one is below
 /// 2^53 in magnitude, the range of `fixed6`.
 const FIXED6_EXP: u64 = 1023 + 53;
 
 /// The longest text of `fixed6`: the sign, 16 integer digits (below 2^53),
-/// the point and the six decimals.
-const FIXED6_LEN: usize = 24;
+/// the point and the six decimals (the buffer of `to_string_fast_bytes`).
+pub const FIXED6_LEN: usize = 24;
 
 /// `%f` of the `f64` of `bits`, finite and below 2^53 in magnitude
 /// (`to_string`'s fast path), written at the end of `buf`: `-` when the sign
@@ -73,7 +96,7 @@ const FIXED6_LEN: usize = 24;
 /// rounding.
 ///
 /// Source: new (perf-2).
-fn fixed6(bits: u64, buf: &mut [u8; FIXED6_LEN]) -> &str {
+fn fixed6(bits: u64, buf: &mut [u8; FIXED6_LEN]) -> &[u8] {
     // Two digits at `buf[i..i + 2]`.
     fn pair(buf: &mut [u8; FIXED6_LEN], i: usize, d: u64) {
         let d = d as usize * 2;
@@ -108,10 +131,7 @@ fn fixed6(bits: u64, buf: &mut [u8; FIXED6_LEN]) -> &str {
         i -= 1;
         buf[i] = b'-';
     }
-    match core::str::from_utf8(&buf[i..]) {
-        Ok(s) => s,
-        Err(_) => unreachable!("a sign, digits and a point are ASCII"),
-    }
+    &buf[i..]
 }
 
 /// `n = round_half_even(|x| * 10^6)` for the `f64` of `bits`, finite and
@@ -435,8 +455,17 @@ mod tests {
             to_string(x, &mut self.got).unwrap();
             reference(x, &mut self.want);
             assert_eq!(self.got, self.want, "bits {:#018x}", x.to_bits());
+            let fast = to_string_fast_bytes(x, &mut [0; FIXED6_LEN]).map(<[u8]>::to_vec);
             if (x.to_bits() >> 52) & 0x7FF < FIXED6_EXP {
                 self.fast += 1;
+                assert_eq!(
+                    fast.as_deref(),
+                    Some(self.want.as_bytes()),
+                    "bytes of {:#018x}",
+                    x.to_bits()
+                );
+            } else {
+                assert_eq!(fast, None, "bytes of {:#018x}", x.to_bits());
             }
         }
 
@@ -506,6 +535,25 @@ mod tests {
         assert_eq!(text(f64::NAN), "NaN");
         assert_eq!(text(-f64::NAN), "NaN");
         assert_eq!(text(f64::from_bits(0xFFF0_0000_0000_0001)), "NaN");
+    }
+
+    /// `to_string_fast_bytes` leaves the infinities and NaN to `to_string`.
+    #[test]
+    fn fast_bytes_leave_infinities_and_nan() {
+        for x in [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            -f64::NAN,
+            f64::from_bits(0xFFF0_0000_0000_0001),
+        ] {
+            assert_eq!(
+                to_string_fast_bytes(x, &mut [0; FIXED6_LEN]),
+                None,
+                "bits {:#018x}",
+                x.to_bits()
+            );
+        }
     }
 
     /// `fixed6` against `{:.6}` on the edges of its arithmetic: zeros,
