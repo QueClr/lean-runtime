@@ -1,0 +1,5 @@
+id = "signal_reset_urg_in_async_dependent"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "leanrs's review of fixes-9 (AR-50: libuv's SA_RESETHAND for a signal whose default action is to ignore it)"
+streams = "separate"

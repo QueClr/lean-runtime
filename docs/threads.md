@@ -524,7 +524,12 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   the byte, the loop thread could deliver the signal to a one-shot watcher
   and stop it before the handler's check, which then killed the process
   (the twin of `uvloop/signal_stop_in_sync_dependent`, status 138 now and
-  then).
+  then). Under a one-shot registration the loop thread delivers only the
+  first signal it takes, and drops the later ones (review AR-50,
+  `docs/sched.md`): the registration is spent when the loop takes the
+  signal, so it does not matter that the handler, on another thread, may
+  not have run its reset pair yet (twins of
+  `uvloop/signal_reset_*_dependent`).
 - **The lock order.** The loop lock first. Under it: a handle's state lock
   and the loop's `data` lock, each held only for plain data (a handle's
   before `data`, never the other way); and, through translator code (a

@@ -61,6 +61,10 @@ pub fn lookup(id: &str) -> Option<Case> {
         "signal_stop_drops_promise" => (no_init, signal_stop_drops_promise),
         "signal_rearm_in_sync_dependent" => (no_init, signal_rearm_in_dependent),
         "signal_rearm_in_async_dependent" => (no_init, signal_rearm_in_dependent),
+        "signal_reset_urg_in_sync_dependent" => (no_init, signal_reset_in_dependent),
+        "signal_reset_winch_in_sync_dependent" => (no_init, signal_reset_in_dependent),
+        "signal_reset_usr1_in_sync_dependent" => (no_init, signal_reset_in_dependent),
+        "signal_reset_urg_in_async_dependent" => (no_init, signal_reset_in_dependent),
         "get_tid_loop_thread" => (no_init, get_tid_loop_thread),
         // tests/cases/io: the cases with tasks
         "lock_blocked" => (no_init, lock_blocked),
@@ -1611,6 +1615,37 @@ fn signal_rearm_in_dependent(args: &[String]) -> u32 {
     let t = pb.result_opt();
     drop(pb);
     println(&format!("B got {}", repr_int(&t.get())));
+    0
+}
+
+// tests/cases/uvloop/signal_reset_*_dependent.lean (review AR-50): argv is
+// sync or async, the signal's Lean number and its name for `kill`
+fn signal_reset_in_dependent(args: &[String]) -> u32 {
+    let sync = args[0] == "sync";
+    let num: i32 = args[1].parse().expect("an Int");
+    let name = args[2].clone();
+    let a: USignal = Signal::new(num, false);
+    let pa = uv_ok(a.next(UvPromise::new));
+    let tb = map_task(
+        move |_: Option<i64>| {
+            let b: USignal = Signal::new(num, false);
+            let pb = uv_ok(b.next(UvPromise::new));
+            (b, pb)
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        sync,
+        true,
+    );
+    drop(pa);
+    kill_self(&name);
+    let (b, pb) = tb.get();
+    println("B listening");
+    let _ = Handle::stdout().flush();
+    kill_self(&name);
+    sleep(300);
+    println(&format!("B got: {}", finished(&pb)));
+    let _ = b.stop();
     0
 }
 

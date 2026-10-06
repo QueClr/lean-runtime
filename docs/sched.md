@@ -856,6 +856,12 @@ its own.
   `SA_RESETHAND`, and the next signal takes the default action (case
   `uvloop/signal_rearm_in_sync_dependent`, status 138; with an async
   dependent, `signal_rearm_in_async_dependent`, the new watcher gets it).
+  For a signal whose default is to ignore it, the new watcher never gets
+  the next signal: the loop drops it (review AR-50, below; cases
+  `uvloop/signal_reset_urg_in_sync_dependent` and
+  `signal_reset_winch_in_sync_dependent`, "B got: false"; the controls
+  `signal_reset_usr1_in_sync_dependent`, status 138, and
+  `signal_reset_urg_in_async_dependent`, "B got: true").
 
 **Signal delivery** uses signal-hook's safe API only (review RSIOB-05):
 - A signal's handlers are installed at its first watcher and never taken
@@ -875,7 +881,9 @@ its own.
      the flag, then a `flag::register` that sets it. That is libuv's
      `SA_RESETHAND` for one-shot watchers: the first signal passes the
      check and sets the flag, so a second signal takes the default action
-     before the loop has delivered the first (RSIOB-02, = leanrs's R1).
+     before the loop has delivered the first (RSIOB-02, = leanrs's R1),
+     when that action ends or stops the process; for a signal that is
+     ignored by default, the loop drops the second signal (below).
      Each registration gets a pair on a fresh flag, registered and
      unregistered (`low_level::unregister`, the check first) as
      `uv__signal_start` and `uv__signal_stop` re-register libuv's handler:
@@ -935,6 +943,43 @@ its own.
   one signal between two calls are one delivery, where libuv makes one per
   occurrence (its pipe carries one message per occurrence and watcher); a
   repeating watcher's promise takes one value either way.
+- **A one-shot registration delivers one signal** (review AR-50). Under a
+  one-shot registration (every listener one-shot), the first signal that the
+  loop takes spends the registration, and the loop drops the later ones
+  until the next registration (`Hooked::take`): natively the kernel restored
+  `SIG_DFL` when it delivered the first, and a later one takes the default
+  action. For a signal that ends or stops the process, the reset pair's
+  check takes that action in the handler, as before. For a signal whose
+  default is to ignore it (SIGCHLD, SIGCONT, SIGURG, SIGWINCH), the pair's
+  action does nothing, and the handler has already set the flag and written
+  the byte, so the drop is that signal's default action. For a stop signal,
+  the drop is what happens when the process continues: natively the stop was
+  all the signal did. Before the fix, in RSIOB-11's state (above), the new
+  one-shot watcher got the second SIGURG or SIGWINCH, which natively the
+  kernel discards (leanrs's repro), and a second SIGTSTP, SIGTTIN or SIGTTOU
+  when the process continued after the stop. The loop marks the registration
+  when it takes a signal, not when the kernel delivers one, so the two can
+  differ at a registration, both ways. A signal that came before a
+  registration and that the loop takes after it spends the new registration,
+  as natively a signal that came just after the registration does: before
+  the re-registration when a repeating watcher stops and one-shot ones
+  remain, or at the first watcher's start, between `listen`'s clearing of
+  `arrived` (RSIOB-03) and the end of `register`, while `default` is still
+  set (an ignored signal's default action does nothing, so the handler sets
+  the flag; natively the signal came before `sigaction` and was discarded;
+  review RF10-02). That matters only if a one-shot watcher then starts in a
+  `sync` dependent of that delivery. The other way round, a signal that came
+  under a spent registration and that the loop has not taken yet would be
+  delivered by the next registration: a repeating watcher that joins before
+  the loop's next look would get it, and the one-shot one with it, where
+  natively the kernel discarded it (review RF10-01). So `register` clears
+  `arrived` when it takes back a spent registration's pair: the first
+  signal's flag was taken when the loop spent it, and the take-back waits
+  for the handlers that are running (signal-hook's wait), so the flag holds
+  only later signals of the spent registration. Unit test
+  `a_spent_oneshot_registration_drops_a_later_signal` (it fails without the
+  rule or without the clear); the cases above in both drivers fail without
+  it.
 - **A signal that came while no watcher of it listened is no watcher's**:
   its flag is cleared when the signal's first watcher starts (RSIOB-03;
   cases `uvloop/signal_stale`, `signal_stale_deferred`).
@@ -962,11 +1007,18 @@ Lean bug):
   at that moment may also take it, after the stop, where natively the
   signal does one or the other (the old order had the mirror window, with
   neither). No case (a stopped process).
-- the reset of a one-shot watcher's handler happens in the handler, where
-  the kernel's `SA_RESETHAND` resets the disposition before the handler
-  runs: the same outcome for a second signal (case
+- the reset of a one-shot watcher's handler happens in the handler and in
+  the loop, where the kernel's `SA_RESETHAND` resets the disposition
+  before the handler runs: the same outcome for a second signal. The
+  reset pair's check ends or stops the process (case
   `uvloop/signal_oneshot_twice`: two SIGUSR1 50 ms apart while `main`
-  computes without a yield point, status 138).
+  computes without a yield point, status 138), and the loop drops a
+  second signal that is ignored by default (AR-50, above). Two handlers
+  of one signal that run at the same time on two threads can both pass
+  the pair's check, where natively the second takes the default action:
+  a second signal that ends the process then does not (no case: a race of
+  two deliveries); one that is ignored by default is still dropped by the
+  loop.
 
 **The loop holds a running handle**, as natively `lean_inc(obj)`: a
 running timer or a listening watcher fires even if the program dropped it.
