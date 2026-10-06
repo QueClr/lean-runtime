@@ -174,8 +174,21 @@ pub fn frexp(x: f32) -> (f32, i32) {
 
 /// `Float32.scaleB` (`lean_float32_scaleb`, `src/runtime/object.cpp`):
 /// `x * 2^i` with `Float.scaleB`'s argument handling (`i` saturated to `i64`
-/// by the caller), computed on the widened value, where it is exact down to
-/// `2^-1074`, then rounded once to `f32`, which equals `scalbnf`.
+/// by the caller and clamped to `INT_MIN`..`INT_MAX`), computed as
+/// `float::scaleb` of the widened value, then converted to `f32`. This
+/// is `scalbnf`'s result, the correctly rounded `x * 2^i`:
+/// - for a result from 2^-1051 up to below 2^1024 in magnitude, the `f64`
+///   step is exact (a 24-bit significand whose lowest bit is at least
+///   2^-1074), so the conversion is the one rounding;
+/// - below 2^-1051, the `f64` result is at most 2^-1051, and both it and
+///   the exact result are far below 2^-150, half of `f32`'s smallest
+///   subnormal: both roundings give a zero with the sign of `x`;
+/// - from 2^1024 up, the `f64` step gives an infinity, which is right for
+///   `f32` too, whose largest finite value is below 2^128;
+/// - a zero, an infinity and a NaN go through unchanged.
+///
+/// For an `i` outside the `int` range, native's big-`Int` branch has
+/// `Float.scaleB`'s bug (LB-36), which this does not copy either.
 ///
 /// Source: leanrs_rt `src/float32.rs` (`scaleb`), adapted to take the
 /// saturated `i64`.

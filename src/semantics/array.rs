@@ -22,13 +22,18 @@
 //!   swaps); the `ByteArray`/`FloatArray` ones are written with `Array`'s
 //!   (`bs[i]!`, `bs.set! i b`), whose externs print, so compiling those
 //!   definitions instead of the externs would print where C does not
-//!   (review RS2-08).
+//!   (review RS2-08). `ByteArray.get!`'s docstring says that it panics out
+//!   of bounds, so C's silence is a candidate Lean bug (LB-38 of
+//!   `docs/lean-bugs.md`), not judged yet: until a judge decides, these
+//!   functions stay silent as C is.
 //! - `Array.pop` of an empty array is the empty array.
-//! - The allocators end the process with `INTERNAL PANIC: integer overflow in
-//!   runtime computation` when the object size `24 + elem * n` exceeds
-//!   2^64 - 1, and with `INTERNAL PANIC: out of memory` when a size argument
-//!   is not a word (2^64 or more for `Array.replicate`, 2^63 or more for the
-//!   capacity of `mkEmpty`/`emptyWithCapacity`) or the allocation fails.
+//! - `Array.replicate` ends the process with `INTERNAL PANIC: integer
+//!   overflow in runtime computation` when the object size `24 + 8n` exceeds
+//!   2^64 - 1, and with `INTERNAL PANIC: out of memory` when `n` is not a
+//!   word (2^64 or more) or the allocation fails.
+//! - `mkEmpty`/`emptyWithCapacity` reserve nothing for a capacity that
+//!   cannot be reserved, and give the empty array, as their Lean definitions
+//!   do (LB-37 lifted: native ends with one of the two internal panics).
 //! - `ByteArray.copySlice` follows its Lean definition; an offset or a
 //!   length of 2^64 or more is read as `u64::MAX` (LB-06 lifted: native ends
 //!   with `INTERNAL PANIC: out of memory` there, `lean_nat_to_size_t`).
@@ -204,24 +209,34 @@ pub fn replicate_len(n: Option<u64>) -> Result<usize, InternalPanic> {
 /// `Array.mkEmpty c`, `Array.emptyWithCapacity c`
 /// (`lean_mk_empty_array_with_capacity`), `ByteArray.emptyWithCapacity c`
 /// (`lean_mk_empty_byte_array`) and `FloatArray.emptyWithCapacity c`
-/// (`lean_mk_empty_float_array`): the capacity to reserve. A capacity that
-/// is not a word, 2^63 or more (`lean_is_scalar` fails), is `OutOfMemory`;
-/// a smaller one goes through `alloc_bytes` with `elem` bytes per element
-/// (8 for `Array` and `FloatArray`, 1 for `ByteArray`, whose 24 + c then
-/// never overflows).
+/// (`lean_mk_empty_float_array`): the capacity to reserve for the empty
+/// array, `c`, or 0 when `alloc_bytes` refuses `c` elements of `elem` bytes
+/// (8 for `Array` and `FloatArray`, 1 for `ByteArray`): an object size above
+/// 2^64 - 1 or above `isize::MAX`, which covers every `c` of 2^63 or more
+/// (`u64::MAX` stands for a `Nat` of 2^64 or more).
 ///
-/// leanrs keeps its own rule here (its DV17 (d): an unreservable capacity
-/// is ignored).
+/// The capacity is only a hint: the Lean definitions are `{ toList := [] }`
+/// and `{ data := #[] }`, the empty array whatever `c` is. So no capacity
+/// ends the process (LB-37 of `docs/lean-bugs.md`, a lifted limit). Native
+/// ends with `INTERNAL PANIC: out of memory` for a capacity of 2^63 or more
+/// (not a scalar) or a failed allocation, and with `INTERNAL PANIC: integer
+/// overflow in runtime computation` for an object size above 2^64 - 1. A
+/// translator whose allocator fails to reserve the returned capacity
+/// reserves nothing too, rather than ending the process: so it reserves
+/// fallibly (a null check of its allocation, or `Vec::try_reserve_exact`),
+/// never with an infallible reservation (`Vec::with_capacity` aborts on a
+/// failed allocation). A capacity that can be reserved is reserved, as
+/// natively.
 ///
 /// Source: lean2rr's `runtime/prelude.rr` (`l2r_mk_empty_with_capacity`) and
-/// leanrt `src/array.rs` (`with_capacity_checked`), merged.
+/// leanrt `src/array.rs` (`with_capacity_checked`), merged, with leanrs's
+/// rule for a capacity that cannot be reserved (its DV17 (d): ignored).
 #[inline]
-pub fn empty_with_capacity(elem: u64, c: u64) -> Result<usize, InternalPanic> {
-    if c >> 63 != 0 {
-        return Err(InternalPanic::OutOfMemory);
+pub fn empty_with_capacity(elem: u64, c: u64) -> usize {
+    match alloc_bytes(elem, c) {
+        Ok(_) => c as usize,
+        Err(_) => 0,
     }
-    alloc_bytes(elem, c)?;
-    Ok(c as usize)
 }
 
 /// What `ByteArray.copySlice` does to `dest`: the bytes
@@ -285,17 +300,36 @@ mod tests {
         assert_eq!(replicate_len(Some((1 << 61) - 3)), overflow);
         assert_eq!(replicate_len(Some(u64::MAX)), overflow);
         assert_eq!(replicate_len(None), oom);
-        assert_eq!(
-            empty_with_capacity(WORD_ELEMENT_BYTES, (1 << 61) - 3),
-            overflow
-        );
-        assert_eq!(
-            empty_with_capacity(WORD_ELEMENT_BYTES, (1 << 63) - 1),
-            overflow
-        );
-        assert_eq!(empty_with_capacity(WORD_ELEMENT_BYTES, 1 << 63), oom);
-        assert_eq!(empty_with_capacity(BYTE_ELEMENT_BYTES, (1 << 63) - 1), oom);
         assert_eq!(alloc_bytes(8, 0), Ok(24));
+    }
+
+    /// `mkEmpty`/`emptyWithCapacity` (LB-37): the capacity, up to the largest
+    /// object `alloc_bytes` accepts (`isize::MAX` bytes with the header),
+    /// then no reservation; never an end. The rows' capacities
+    /// (`tests/cases/array`, `mkempty.*`, `bytesempty.*`, `floatsempty.*`)
+    /// are among them.
+    #[test]
+    fn capacities() {
+        let (w, b) = (WORD_ELEMENT_BYTES, BYTE_ELEMENT_BYTES);
+        assert_eq!(empty_with_capacity(w, 0), 0);
+        assert_eq!(empty_with_capacity(w, 3), 3);
+        assert_eq!(empty_with_capacity(b, 3), 3);
+        // 24 + 8 (2^60 - 4) = 2^63 - 8; 24 + (2^63 - 25) = 2^63 - 1
+        assert_eq!(empty_with_capacity(w, (1 << 60) - 4), (1 << 60) - 4);
+        assert_eq!(empty_with_capacity(b, (1 << 63) - 25), (1 << 63) - 25);
+        // a size the allocator then fails to reserve: the translator
+        // reserves nothing (the program case `panics/replicate_overflow`)
+        assert_eq!(empty_with_capacity(b, 1 << 62), 1 << 62);
+        let past_word = [(1 << 60) - 3, (1 << 61) - 4, (1 << 61) - 3, 1 << 62];
+        for c in past_word
+            .into_iter()
+            .chain([(1 << 63) - 1, 1 << 63, u64::MAX])
+        {
+            assert_eq!(empty_with_capacity(w, c), 0, "word {c}");
+        }
+        for c in [(1 << 63) - 24, (1 << 63) - 1, 1 << 63, u64::MAX] {
+            assert_eq!(empty_with_capacity(b, c), 0, "byte {c}");
+        }
     }
 
     /// `copySlice` plans (`tests/cases/array`, `copyslice.*`).

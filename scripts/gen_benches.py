@@ -687,8 +687,8 @@ add("array_alloc_bytes", "array::alloc_bytes", NONE,
     "(ByteArray.emptyWithCapacity ((x >>> 4) &&& 0xFF).toNat).size.toUInt64",
     note="ByteArray.emptyWithCapacity: one allocation of the object's 24 + c bytes on both sides")
 add("array_empty_with_capacity", "array::empty_with_capacity", NONE,
-    "match array::empty_with_capacity(array::WORD_ELEMENT_BYTES, nat_unbox(nat_box((x >> 4) & 0xFF))) "
-    "{ Ok(c) => black_box(new_object(24 + 8 * c as u64)).len() as u64 - 24, Err(p) => end(p) }",
+    "black_box(new_object(24 + 8 * array::empty_with_capacity(array::WORD_ELEMENT_BYTES, "
+    "nat_unbox(nat_box((x >> 4) & 0xFF))) as u64)).len() as u64 - 24",
     "(Array.mkEmpty (α := Nat) ((x >>> 4) &&& 0xFF).toNat).size.toUInt64",
     note="Array.mkEmpty: one allocation of the object's 24 + 8c bytes on both sides")
 add("array_replicate_len", "array::replicate_len", NONE,

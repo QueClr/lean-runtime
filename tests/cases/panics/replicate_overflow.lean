@@ -8,6 +8,7 @@
 --   `FloatArray.emptyWithCapacity` are `out of memory` for every big `Nat`;
 --   a small capacity overflows like `replicate` (`24 + elem * n`) or fails
 --   to allocate (`out of memory`).
+-- The case expects the empty array for those capacities (LB-37, docs/lean-bugs.md).
 -- The .pipe runs one allocation per process; the allocator and the size come
 -- from the command line. (lean2rr's `replicate` said `out of memory` for
 -- every big `Nat`: cross-test XT-5, leanrs prims `panics` row

@@ -151,6 +151,11 @@ For <code>cancel</code>, it is our own correction.</td></tr>
 The double free makes the process hang at exit.</td><td>The same order as LB-33.
 A judge confirmed LB-33 and LB-34 on 2026-10-04, and leanrs agreed.
 Their cases are <code>uvloop/*_rearm_*</code>, <code>uvloop/*_keep_in_sync_dependent</code> and <code>uvloop/timer_oneshot_cancel_resubscribe</code>.</td></tr>
+<tr id="lb-36"><td>LB-36</td><td><code>Float.scaleB x i</code> and <code>Float32.scaleB x i</code> with an <code>i</code> outside the C <code>int</code> range give <code>+0.0</code> when <code>x</code> is zero or <code>i</code> is negative.
+So a NaN, an infinity, <code>-0.0</code> and a negative <code>x</code> lose their value or their sign.</td><td>It computes <code>x * 2<sup>i</sup></code>, as Lean's documentation says.
+It clamps <code>i</code> to the <code>int</code> range and calls <code>scalbn</code>, which gives a zero or an infinity with the sign of <code>x</code>.
+A NaN, an infinity and a zero stay as they are.
+Its rows are <code>float/scaleb*</code> with an exponent outside the C <code>int</code> range.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>
@@ -166,8 +171,21 @@ So the shared rules impose no cap: they compute the definition's result as far a
 <tr id="lb-06"><td>LB-06</td><td><code>ByteArray.copySlice</code> with an offset or length of 2<sup>64</sup> or more: <code>INTERNAL PANIC: out of memory</code>.</td><td>Returns the definition's clamped copy.</td></tr>
 <tr id="lb-11"><td>LB-11</td><td><code>Nat.pow</code> with an exponent of 2<sup>32</sup> or more: <code>INTERNAL PANIC</code>, also for the bases 0 and 1.</td><td>Computes the result for the bases 0 and 1, and for other bases while it fits <code>MAX_BITS</code>.</td></tr>
 <tr id="lb-12"><td>LB-12</td><td><code>Nat.shiftLeft</code> of a nonzero value by 2<sup>32</sup> or more: <code>INTERNAL PANIC</code>.</td><td>Computes the result while it fits <code>MAX_BITS</code>.</td></tr>
+<tr id="lb-37"><td>LB-37</td><td><code>Array.mkEmpty</code> and the <code>emptyWithCapacity</code> functions with a capacity that cannot be reserved: <code>INTERNAL PANIC</code>.</td><td>Reserves nothing and returns the empty array, as the Lean definition does.
+The capacity is only a hint.</td></tr>
 </tbody></table></div>
 <p>Above <code>MAX_BITS</code>, these rules print native's own message for an exponent or shift of 2<sup>32</sup> or more.</p>
+
+<h2 id="candidates">Candidates: not judged yet</h2>
+<p>A candidate is a suspected bug that waits for a judge.
+Until a judge decides, lean-runtime and both translators follow native.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Id</th><th>Behaviour</th><th>The evidence</th></tr></thead>
+<tbody>
+<tr id="lb-38"><td>LB-38</td><td><code>ByteArray.get!</code> and <code>FloatArray.get!</code> out of bounds return 0 with no panic message.</td><td>Their Lean definitions use <code>xs[i]!</code>, which prints a message.
+The docstring of <code>ByteArray.get!</code> says that it panics.
+The value is the same, so only the message is different.</td></tr>
+</tbody></table></div>
 
 <h2 id="not-bugs">Not bugs: followed as native</h2>
 <p>These candidates failed the rule.

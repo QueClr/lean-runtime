@@ -46,45 +46,47 @@ INTERNAL PANIC: integer overflow in runtime computation
 replicateFloat 18446744073709551615: exit 1
 INTERNAL PANIC: out of memory
 replicateFloat 18446744073709551616: exit 1
-INTERNAL PANIC: out of memory
-mkEmpty 2305843009213693948: exit 1
-INTERNAL PANIC: integer overflow in runtime computation
-mkEmpty 2305843009213693949: exit 1
-INTERNAL PANIC: integer overflow in runtime computation
-mkEmpty 9223372036854775807: exit 1
-INTERNAL PANIC: out of memory
-mkEmpty 9223372036854775808: exit 1
-INTERNAL PANIC: out of memory
-mkEmpty 18446744073709551615: exit 1
-INTERNAL PANIC: out of memory
-mkEmpty 18446744073709551616: exit 1
-INTERNAL PANIC: out of memory
-mkEmptyNat 2305843009213693948: exit 1
-INTERNAL PANIC: integer overflow in runtime computation
-mkEmptyNat 2305843009213693949: exit 1
-INTERNAL PANIC: integer overflow in runtime computation
-mkEmptyNat 9223372036854775807: exit 1
-INTERNAL PANIC: out of memory
-mkEmptyNat 9223372036854775808: exit 1
-INTERNAL PANIC: out of memory
-mkEmptyNat 18446744073709551615: exit 1
-INTERNAL PANIC: out of memory
-mkEmptyNat 18446744073709551616: exit 1
-INTERNAL PANIC: out of memory
-floatArray 2305843009213693948: exit 1
-INTERNAL PANIC: integer overflow in runtime computation
-floatArray 2305843009213693949: exit 1
-INTERNAL PANIC: integer overflow in runtime computation
-floatArray 9223372036854775807: exit 1
-INTERNAL PANIC: out of memory
-floatArray 9223372036854775808: exit 1
-INTERNAL PANIC: out of memory
-floatArray 18446744073709551615: exit 1
-INTERNAL PANIC: out of memory
-floatArray 18446744073709551616: exit 1
-INTERNAL PANIC: out of memory
-byteArray 9223372036854775807: exit 1
-INTERNAL PANIC: out of memory
-byteArray 9223372036854775808: exit 1
-INTERNAL PANIC: out of memory
-byteArray 18446744073709551616: exit 1
+0
+mkEmpty 2305843009213693948: exit 0
+0
+mkEmpty 2305843009213693949: exit 0
+0
+mkEmpty 9223372036854775807: exit 0
+0
+mkEmpty 9223372036854775808: exit 0
+0
+mkEmpty 18446744073709551615: exit 0
+0
+mkEmpty 18446744073709551616: exit 0
+0
+mkEmptyNat 2305843009213693948: exit 0
+0
+mkEmptyNat 2305843009213693949: exit 0
+0
+mkEmptyNat 9223372036854775807: exit 0
+0
+mkEmptyNat 9223372036854775808: exit 0
+0
+mkEmptyNat 18446744073709551615: exit 0
+0
+mkEmptyNat 18446744073709551616: exit 0
+0
+floatArray 2305843009213693948: exit 0
+0
+floatArray 2305843009213693949: exit 0
+0
+floatArray 9223372036854775807: exit 0
+0
+floatArray 9223372036854775808: exit 0
+0
+floatArray 18446744073709551615: exit 0
+0
+floatArray 18446744073709551616: exit 0
+0
+byteArray 4611686018427387904: exit 0
+0
+byteArray 9223372036854775807: exit 0
+0
+byteArray 9223372036854775808: exit 0
+0
+byteArray 18446744073709551616: exit 0

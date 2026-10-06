@@ -28,7 +28,7 @@ Rows are <code>[[row]]</code> tables in <code>tests/cases/&lt;area&gt;/&lt;area&
   <li>A float row also has the exact bits, because <code>repr</code> loses NaN payloads and <code>-0.0</code>.</li>
   <li>A panic row has the message, the default value and the stderr text.
     A row that ends the process has its stderr and exit status.</li>
-  <li>A row for a <a href="lean-bugs.html#limits">lifted limit</a> (LB-04, LB-06, LB-11, LB-12) expects the definition's result and records native's outcome beside it.</li>
+  <li>A row for a <a href="lean-bugs.html#limits">lifted limit</a> (LB-04, LB-06, LB-11, LB-12, LB-37) expects the definition's result and records native's outcome beside it.</li>
   <li><code>scripts/gen_rows.py</code> writes the expected values.
     It runs <code>scripts/oracle</code>, a Lean program built natively with Lean 4.34.0.</li>
   <li><code>tests/rows.rs</code> and <code>tests/rows2.rs</code> run every row against the crate.

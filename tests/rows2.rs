@@ -696,23 +696,21 @@ fn array_fns(r: &mut Registry) {
             env,
         )
     });
-    r.add("Array.mkEmpty", |a, _, env| {
-        ending(
-            array::empty_with_capacity(array::WORD_ELEMENT_BYTES, sat(&a[0])).map(|_| "#[]".into()),
-            env,
-        )
+    // A glue reserves the capacity `empty_with_capacity` gives if its
+    // allocator can, and nothing otherwise; the result is the empty array
+    // either way (LB-37), so no row's capacity is observable and none is
+    // reserved here.
+    r.add("Array.mkEmpty", |a, _, _| {
+        let _capacity = array::empty_with_capacity(array::WORD_ELEMENT_BYTES, sat(&a[0]));
+        "#[]".to_string()
     });
-    r.add("ByteArray.emptyWithCapacity", |a, _, env| {
-        ending(
-            array::empty_with_capacity(array::BYTE_ELEMENT_BYTES, sat(&a[0])).map(|_| "[]".into()),
-            env,
-        )
+    r.add("ByteArray.emptyWithCapacity", |a, _, _| {
+        let _capacity = array::empty_with_capacity(array::BYTE_ELEMENT_BYTES, sat(&a[0]));
+        "[]".to_string()
     });
-    r.add("FloatArray.emptyWithCapacity", |a, _, env| {
-        ending(
-            array::empty_with_capacity(array::WORD_ELEMENT_BYTES, sat(&a[0])).map(|_| "[]".into()),
-            env,
-        )
+    r.add("FloatArray.emptyWithCapacity", |a, _, _| {
+        let _capacity = array::empty_with_capacity(array::WORD_ELEMENT_BYTES, sat(&a[0]));
+        "[]".to_string()
     });
     r.add("ByteArray.get!", |a, _, _| {
         array::byte_array_get(bytes(&a[0]), sat(&a[1])).to_string()
@@ -947,7 +945,7 @@ fn int_rows() {
     ignore = "under Miri, rows2 runs with --features unsafe-fast only (see `run`)"
 )]
 fn array_rows() {
-    run("array", include_str!("cases/array/array.rows.toml"), 5);
+    run("array", include_str!("cases/array/array.rows.toml"), 21);
 }
 
 #[test]

@@ -2924,23 +2924,25 @@ fn internal_panic(p: InternalPanic) -> ! {
 
 /// The case `panics/replicate_overflow`: the allocators' size rules
 /// (`semantics::array`); the size is below 2^64 (`Nat::to_u64`) or `None`.
-/// A size the rules accept is reserved (the translator's allocator; its
-/// failure is `out of memory` too); the case's sizes never get there.
+/// A size `replicate_len` accepts is reserved (the translator's allocator;
+/// its failure is `out of memory` too; the case's sizes never get there). A
+/// capacity `empty_with_capacity` gives is reserved if the allocator can,
+/// and otherwise nothing is (LB-37: `byteArray` 2^62, which no allocator
+/// grants, gives the empty array).
 fn replicate_overflow(args: &[String]) -> R<()> {
     let n: Option<u64> = args[1].parse().ok();
     let word = array::WORD_ELEMENT_BYTES;
     let reserve = |elem: u64, len: usize| {
         let mut v: Vec<u8> = Vec::new();
-        if v.try_reserve_exact(len.saturating_mul(elem as usize))
-            .is_err()
-        {
-            internal_panic(InternalPanic::OutOfMemory);
-        }
+        v.try_reserve_exact(len.saturating_mul(elem as usize))
+            .is_ok()
     };
     let size = match args[0].as_str() {
         "replicate" | "replicateNat" | "replicateInt" | "replicateFloat" => {
             let len = array::replicate_len(n).unwrap_or_else(|p| internal_panic(p));
-            reserve(word, len);
+            if !reserve(word, len) {
+                internal_panic(InternalPanic::OutOfMemory);
+            }
             len
         }
         k @ ("mkEmpty" | "mkEmptyNat" | "byteArray" | "floatArray") => {
@@ -2949,9 +2951,11 @@ fn replicate_overflow(args: &[String]) -> R<()> {
             } else {
                 word
             };
-            let c = array::empty_with_capacity(elem, n.unwrap_or(u64::MAX))
-                .unwrap_or_else(|p| internal_panic(p));
-            reserve(elem, c);
+            // the empty array whether or not the capacity was reserved
+            let _reserved = reserve(
+                elem,
+                array::empty_with_capacity(elem, n.unwrap_or(u64::MAX)),
+            );
             0
         }
         _ => return println("unknown case"),

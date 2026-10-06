@@ -105,7 +105,7 @@ Nothing here owns or allocates a Lean value.</p>
 <figcaption>Figure 1. The glue lends the string's bytes (without C's terminating NUL) and receives a <code>u32</code>.
 The ASCII test is inline; the decoder is a separate cold function.</figcaption>
 </figure>
-<p>The <code>Nat</code>, <code>Int</code> and <code>String</code> rules and <code>Float.scaleB</code> follow one pattern.
+<p>The <code>Nat</code>, <code>Int</code> and <code>String</code> rules follow one pattern.
 The short common case is inline.
 The rare case is in a function marked <code>#[cold]</code> and <code>#[inline(never)]</code>.
 So a translator can call the function for every value, and the code it inlines stays small.</p>
@@ -220,6 +220,11 @@ So no backend gets a request above its limit, and both translators end the same 
   <li><code>libm</code> has one function per C function (<code>sin</code>, <code>pow</code>, <code>cbrtf</code> and so on).
     Native Lean calls glibc's libm.
     Rust's <code>f64</code> and <code>f32</code> methods call the same libm, with the exceptions below.</li>
+  <li><code>scaleB x i</code> is <code>x * 2<sup>i</sup></code> for every <code>Int</code>.
+    An <code>i</code> outside the C <code>int</code> range is clamped to it.
+    So a finite nonzero <code>x</code> gives a zero or an infinity with its sign.
+    A NaN, an infinity or a zero stays as it is.
+    Native gives <code>+0.0</code> there for <code>-0.0</code>, and for a NaN, an infinity or a negative <code>x</code> when <code>i</code> is negative (<a href="lean-bugs.html#lb-36">LB-36</a>).</li>
 </ul>
 <h3>The exceptions</h3>
 <ul>
@@ -295,7 +300,9 @@ The translator carries out the decision on its own array.</p>
     Then they return the default value, or the array unchanged.</li>
   <li><code>ByteArray.get!</code>, <code>FloatArray.get!</code> and their <code>set!</code> out of bounds are silent: 0, 0.0, or the array unchanged.</li>
   <li><code>Array.pop</code> of an empty array gives the empty array.</li>
-  <li>The allocators stop with <code>INTERNAL PANIC</code> when a size overflows or is not a machine word.</li>
+  <li><code>Array.replicate</code> stops with <code>INTERNAL PANIC</code> when its size overflows or is not a machine word.</li>
+  <li><code>Array.mkEmpty</code> and the <code>emptyWithCapacity</code> functions return the empty array for every capacity (<a href="lean-bugs.html#limits">LB-37</a>).
+    A capacity that cannot be reserved gives no reservation.</li>
   <li><code>ByteArray.copySlice</code> follows its Lean definition, also for offsets of 2<sup>64</sup> or more (<a href="lean-bugs.html#limits">LB-06</a>).</li>
 </ul>
 

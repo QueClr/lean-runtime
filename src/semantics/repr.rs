@@ -87,6 +87,10 @@ pub fn usize_repr<W: fmt::Write + ?Sized>(n: u64, out: &mut W) -> fmt::Result {
 /// (`nat::Nat::to_u64_saturating`), which is at least `MAX_PREC` as the
 /// `Nat` is (review RS2-09).
 ///
+/// For `Float` and `Float32`, `negative` is IEEE `<`, not the sign bit
+/// (`Float.repr` tests `n < 0`): `-0.0` and NaN take no parentheses, so
+/// `reprPrec (-0.0) 1024` is `-0.000000` (rows `float/reprprec.*`).
+///
 /// Source: leanrs_rt `src/fmt.rs` (`add_app_paren`), as a test.
 #[inline]
 pub fn needs_app_paren(negative: bool, prec: u64) -> bool {

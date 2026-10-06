@@ -21,13 +21,14 @@ fn kernel(inp: &(), n: u64) -> u64 {
         x = step(x);
         acc = mix(
             acc,
-            match array::empty_with_capacity(
-                array::WORD_ELEMENT_BYTES,
-                nat_unbox(nat_box((x >> 4) & 0xFF)),
-            ) {
-                Ok(c) => black_box(new_object(24 + 8 * c as u64)).len() as u64 - 24,
-                Err(p) => end(p),
-            },
+            black_box(new_object(
+                24 + 8 * array::empty_with_capacity(
+                    array::WORD_ELEMENT_BYTES,
+                    nat_unbox(nat_box((x >> 4) & 0xFF)),
+                ) as u64,
+            ))
+            .len() as u64
+                - 24,
         );
     }
     acc

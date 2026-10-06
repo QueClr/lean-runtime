@@ -595,143 +595,176 @@ id = "array/mkempty.2^61-4"
 area = "array"
 fn = "Array.mkEmpty"
 args = ["2305843009213693948"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "#[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/floatsempty.2^61-4"
 area = "array"
 fn = "FloatArray.emptyWithCapacity"
 args = ["2305843009213693948"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/mkempty.2^61-3"
 area = "array"
 fn = "Array.mkEmpty"
 args = ["2305843009213693949"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+expected = "#[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
 
 [[row]]
 id = "array/floatsempty.2^61-3"
 area = "array"
 fn = "FloatArray.emptyWithCapacity"
 args = ["2305843009213693949"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
 
 [[row]]
 id = "array/mkempty.2^63-1"
 area = "array"
 fn = "Array.mkEmpty"
 args = ["9223372036854775807"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+expected = "#[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
 
 [[row]]
 id = "array/floatsempty.2^63-1"
 area = "array"
 fn = "FloatArray.emptyWithCapacity"
 args = ["9223372036854775807"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
 
 [[row]]
 id = "array/mkempty.2^63"
 area = "array"
 fn = "Array.mkEmpty"
 args = ["9223372036854775808"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "#[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/floatsempty.2^63"
 area = "array"
 fn = "FloatArray.emptyWithCapacity"
 args = ["9223372036854775808"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/mkempty.2^64"
 area = "array"
 fn = "Array.mkEmpty"
 args = ["18446744073709551616"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "#[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/floatsempty.2^64"
 area = "array"
 fn = "FloatArray.emptyWithCapacity"
 args = ["18446744073709551616"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/bytesempty.2^63-1"
 area = "array"
 fn = "ByteArray.emptyWithCapacity"
 args = ["9223372036854775807"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/bytesempty.2^63"
 area = "array"
 fn = "ByteArray.emptyWithCapacity"
 args = ["9223372036854775808"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/bytesempty.2^64"
 area = "array"
 fn = "ByteArray.emptyWithCapacity"
 args = ["18446744073709551616"]
-expected = "ends"
-ends = { stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+expected = "[]"
 lean_version = "4.34.0"
-source = "lean-runtime batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow: capacities that cannot be reserved end the process as natively; leanrs keeps its DV17 (d) (the empty array)"
-deviations = { leanrs = "DV17 (d)" }
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
+
+[[row]]
+id = "array/mkempty.2^62"
+area = "array"
+fn = "Array.mkEmpty"
+args = ["4611686018427387904"]
+expected = "#[]"
+lean_version = "4.34.0"
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+
+[[row]]
+id = "array/floatsempty.2^62"
+area = "array"
+fn = "FloatArray.emptyWithCapacity"
+args = ["4611686018427387904"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: integer overflow in runtime computation\n", code = 1 }
+
+[[row]]
+id = "array/bytesempty.2^62"
+area = "array"
+fn = "ByteArray.emptyWithCapacity"
+args = ["4611686018427387904"]
+expected = "[]"
+lean_version = "4.34.0"
+source = "LB-37 (docs/lean-bugs.md), semantics-4 (HS-02): a capacity that cannot be reserved gives the Lean definition's empty array (the capacity is only a hint), where native ends with INTERNAL PANIC: out of memory (a capacity of 2^63 or more, or a failed allocation) or integer overflow in runtime computation (an object size above 2^64 - 1); batch 2 and lean2rr tests/runtime RtAllocBigNat, RtAllocOom, RtAllocOverflow; leanrs DV17 (d)"
+deviations = { lean2rr = "LB-37", leanrs = "LB-37" }
+native = { expected = "ends", stderr = "INTERNAL PANIC: out of memory\n", code = 1 }
 
 [[row]]
 id = "array/copyslice.0.0.0.true"

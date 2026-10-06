@@ -23,6 +23,66 @@ lean_version = "4.34.0"
 source = "lean-runtime batch 1: Float.toString (C's %f): ties, carries, signs, every digit; matches leanrs rt/leanrs_rt/tests/float.rs (float_to_string_neg_zero)"
 
 [[row]]
+id = "float/reprprec.-0.1024"
+area = "float"
+fn = "Float.reprPrec"
+args = ["(-0.0)", "1024"]
+bits = { args = ["0x8000000000000000"] }
+expected = '"-0.000000"'
+lean_version = "4.34.0"
+source = "semantics-4: Float.repr puts the text in parentheses at max_prec 1024 when n < 0 by IEEE comparison (Init/Data/Float/Float.lean), so -0.0 and NaN take none, -inf and -1.5 do, and nothing does at 1023 (repr::needs_app_paren)"
+
+[[row]]
+id = "float/reprprec.nan.1024"
+area = "float"
+fn = "Float.reprPrec"
+args = ["(0.0 / 0.0)", "1024"]
+bits = { args = ["0x7ff8000000000000"] }
+expected = '"NaN"'
+lean_version = "4.34.0"
+source = "semantics-4: Float.repr puts the text in parentheses at max_prec 1024 when n < 0 by IEEE comparison (Init/Data/Float/Float.lean), so -0.0 and NaN take none, -inf and -1.5 do, and nothing does at 1023 (repr::needs_app_paren)"
+
+[[row]]
+id = "float/reprprec.-nan.1024"
+area = "float"
+fn = "Float.reprPrec"
+args = ["(-(0.0 / 0.0))", "1024"]
+bits = { args = ["0xfff8000000000000"] }
+expected = '"NaN"'
+lean_version = "4.34.0"
+source = "semantics-4: Float.repr puts the text in parentheses at max_prec 1024 when n < 0 by IEEE comparison (Init/Data/Float/Float.lean), so -0.0 and NaN take none, -inf and -1.5 do, and nothing does at 1023 (repr::needs_app_paren)"
+
+[[row]]
+id = "float/reprprec.-inf.1024"
+area = "float"
+fn = "Float.reprPrec"
+args = ["(-1.0 / 0.0)", "1024"]
+bits = { args = ["0xfff0000000000000"] }
+expected = '"(-inf)"'
+lean_version = "4.34.0"
+source = "semantics-4: Float.repr puts the text in parentheses at max_prec 1024 when n < 0 by IEEE comparison (Init/Data/Float/Float.lean), so -0.0 and NaN take none, -inf and -1.5 do, and nothing does at 1023 (repr::needs_app_paren)"
+
+[[row]]
+id = "float/reprprec.-1.5.1024"
+area = "float"
+fn = "Float.reprPrec"
+args = ["(-1.5)", "1024"]
+bits = { args = ["0xbff8000000000000"] }
+expected = '"(-1.500000)"'
+lean_version = "4.34.0"
+source = "semantics-4: Float.repr puts the text in parentheses at max_prec 1024 when n < 0 by IEEE comparison (Init/Data/Float/Float.lean), so -0.0 and NaN take none, -inf and -1.5 do, and nothing does at 1023 (repr::needs_app_paren)"
+
+[[row]]
+id = "float/reprprec.-1.5.1023"
+area = "float"
+fn = "Float.reprPrec"
+args = ["(-1.5)", "1023"]
+bits = { args = ["0xbff8000000000000"] }
+expected = '"-1.500000"'
+lean_version = "4.34.0"
+source = "semantics-4: Float.repr puts the text in parentheses at max_prec 1024 when n < 0 by IEEE comparison (Init/Data/Float/Float.lean), so -0.0 and NaN take none, -inf and -1.5 do, and nothing does at 1023 (repr::needs_app_paren)"
+
+[[row]]
 id = "float/tostring.1.0"
 area = "float"
 fn = "Float.toString"
@@ -2997,10 +3057,12 @@ id = "float/scaleb.-1.0.-2147483649"
 area = "float"
 fn = "Float.scaleB"
 args = ["(-1.0)", "(-2147483649)"]
-bits = { args = ["0xbff0000000000000"], result = "0x0000000000000000" }
-expected = "0.000000"
+bits = { args = ["0xbff0000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
 
 [[row]]
 id = "float/scaleb.1.0.2147483647"
@@ -3037,10 +3099,12 @@ id = "float/scaleb.-0.1099511627776"
 area = "float"
 fn = "Float.scaleB"
 args = ["(-0.0)", "1099511627776"]
-bits = { args = ["0x8000000000000000"], result = "0x0000000000000000" }
-expected = "0.000000"
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
 
 [[row]]
 id = "float/scaleb.0.-1099511627776"
@@ -3053,24 +3117,40 @@ lean_version = "4.34.0"
 source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
 
 [[row]]
+id = "float/scaleb.-0.-1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-0.0)", "(-1099511627776)"]
+bits = { args = ["0x8000000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
+
+[[row]]
 id = "float/scaleb.-1.0.-1099511627776"
 area = "float"
 fn = "Float.scaleB"
 args = ["(-1.0)", "(-1099511627776)"]
-bits = { args = ["0xbff0000000000000"], result = "0x0000000000000000" }
-expected = "0.000000"
+bits = { args = ["0xbff0000000000000"], result = "0x8000000000000000" }
+expected = "-0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
 
 [[row]]
 id = "float/scaleb.nan.-1099511627776"
 area = "float"
 fn = "Float.scaleB"
 args = ["(0.0 / 0.0)", "(-1099511627776)"]
-bits = { args = ["0x7ff8000000000000"], result = "0x0000000000000000" }
-expected = "0.000000"
+bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
+expected = "NaN"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
 
 [[row]]
 id = "float/scaleb.nan.1099511627776"
@@ -3097,10 +3177,12 @@ id = "float/scaleb.inf.-1099511627776"
 area = "float"
 fn = "Float.scaleB"
 args = ["(1.0 / 0.0)", "(-1099511627776)"]
-bits = { args = ["0x7ff0000000000000"], result = "0x0000000000000000" }
-expected = "0.000000"
+bits = { args = ["0x7ff0000000000000"], result = "0x7ff0000000000000" }
+expected = "inf"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
 
 [[row]]
 id = "float/scaleb.inf.-5"
@@ -3111,6 +3193,18 @@ bits = { args = ["0x7ff0000000000000"], result = "0x7ff0000000000000" }
 expected = "inf"
 lean_version = "4.34.0"
 source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb.-inf.-1099511627776"
+area = "float"
+fn = "Float.scaleB"
+args = ["(-1.0 / 0.0)", "(-1099511627776)"]
+bits = { args = ["0xfff0000000000000"], result = "0xfff0000000000000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x0000000000000000" }
 
 [[row]]
 id = "float/scaleb.-inf.1099511627776"
@@ -3233,24 +3327,38 @@ lean_version = "4.34.0"
 source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
 
 [[row]]
+id = "float/scaleb32.-1.0.-2147483648"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(-1.0)", "(-2147483648)"]
+bits = { args = ["0xbf800000"], result = "0x80000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "lean-runtime semantics-4 review (RSE4-06): scaleB at INT_MIN, a scalar Int, goes to scalbnf natively and gives -0.0, as float/scaleb32.-1.0.-2147483649 now does (LB-36)"
+
+[[row]]
 id = "float/scaleb32.-1.0.-2147483649"
 area = "float"
 fn = "Float32.scaleB"
 args = ["(-1.0)", "(-2147483649)"]
-bits = { args = ["0xbf800000"], result = "0x00000000" }
-expected = "0.000000"
+bits = { args = ["0xbf800000"], result = "0x80000000" }
+expected = "-0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x00000000" }
 
 [[row]]
 id = "float/scaleb32.nan.-1099511627776"
 area = "float"
 fn = "Float32.scaleB"
 args = ["(0.0 / 0.0)", "(-1099511627776)"]
-bits = { args = ["0x7fc00000"], result = "0x00000000" }
-expected = "0.000000"
+bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
+expected = "NaN"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x00000000" }
 
 [[row]]
 id = "float/scaleb32.nan.1099511627776"
@@ -3261,6 +3369,42 @@ bits = { args = ["0x7fc00000"], result = "0x7fc00000" }
 expected = "NaN"
 lean_version = "4.34.0"
 source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+
+[[row]]
+id = "float/scaleb32.inf.-1099511627776"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(1.0 / 0.0)", "(-1099511627776)"]
+bits = { args = ["0x7f800000"], result = "0x7f800000" }
+expected = "inf"
+lean_version = "4.34.0"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x00000000" }
+
+[[row]]
+id = "float/scaleb32.-inf.-1099511627776"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(-1.0 / 0.0)", "(-1099511627776)"]
+bits = { args = ["0xff800000"], result = "0xff800000" }
+expected = "-inf"
+lean_version = "4.34.0"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x00000000" }
+
+[[row]]
+id = "float/scaleb32.-1.0.-1099511627776"
+area = "float"
+fn = "Float32.scaleB"
+args = ["(-1.0)", "(-1099511627776)"]
+bits = { args = ["0xbf800000"], result = "0x80000000" }
+expected = "-0.000000"
+lean_version = "4.34.0"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x00000000" }
 
 [[row]]
 id = "float/scaleb32.1.0.300"
@@ -3287,7 +3431,9 @@ id = "float/scaleb32.-0.1099511627776"
 area = "float"
 fn = "Float32.scaleB"
 args = ["(-0.0)", "1099511627776"]
-bits = { args = ["0x80000000"], result = "0x00000000" }
-expected = "0.000000"
+bits = { args = ["0x80000000"], result = "0x80000000" }
+expected = "-0.000000"
 lean_version = "4.34.0"
-source = "lean-runtime batch 1: scaleB, scalbn rounding and lean_float_scaleb's big-Int branch"
+source = "LB-36 (docs/lean-bugs.md), semantics-4 (HS-01): scaleB with an Int outside the C int range is x * 2^i, a zero or an infinity with the sign of a finite x, and a zero, an infinity or a NaN unchanged, where native's big-Int branch gives +0.0 when x == 0 or i < 0 and x * inf otherwise; lean-runtime batch 1"
+deviations = { lean2rr = "LB-36", leanrs = "LB-36" }
+native = { expected = "0.000000", bits = "0x00000000" }

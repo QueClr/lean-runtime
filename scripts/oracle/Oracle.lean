@@ -174,6 +174,7 @@ def unreachable : String := "!unreachable"
 def runFloat (fn : String) (a : List Arg) : IO (Option String) := do
   match fn, a with
   | "Float.toString", [x] => return r (Float.toString (← fA x))
+  | "Float.reprPrec", [x, p] => return r (reprPrec (← fA x) (← natA p)).pretty
   | "Float.toUInt8", [x] => return r (Float.toUInt8 (← fA x))
   | "Float.toUInt16", [x] => return r (Float.toUInt16 (← fA x))
   | "Float.toUInt32", [x] => return r (Float.toUInt32 (← fA x))

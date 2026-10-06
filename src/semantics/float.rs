@@ -383,35 +383,28 @@ pub(crate) fn scalbn(x: f64, mut n: i32) -> f64 {
     y * f64::from_bits(((0x3ff + n) as u64) << 52)
 }
 
-/// `Float.scaleB` (`lean_float_scaleb`, `src/runtime/object.cpp`): `x * 2^i`.
+/// `Float.scaleB` (`lean_float_scaleb`, `src/runtime/object.cpp`): `x * 2^i`,
+/// as Lean documents it ("Efficiently computes `x * 2^i`"), for every `i`.
 ///
-/// `i` is the `Int` argument, which the caller saturates to `i64` (only its
-/// sign matters outside `i32`). Lean passes an `Int` that is a scalar (on
-/// 64-bit platforms, one in the C `int` range) to `scalbn`. For a larger one
-/// it returns `+0.0` when `x == 0` or `i < 0`, whatever the sign of `x` (and
-/// also for a NaN `x` with `i < 0`), and `x * inf` otherwise.
+/// `i` is the `Int` argument, which the caller saturates to `i64`. Lean
+/// passes an `Int` in the C `int` range (a scalar on 64-bit platforms) to
+/// `scalbn`, as this does. Outside that range this clamps `i` to it:
+/// `scalbn(x, INT_MIN)` and `scalbn(x, INT_MAX)` already scale a finite
+/// nonzero `x` (at least 2^-1074, below 2^1024 in magnitude) past the range
+/// of `f64`, so they give the exact result's rounding, a zero or an infinity
+/// with the sign of `x`, and they keep a zero, an infinity and a NaN as they
+/// are, as `x * 2^i` does.
+/// Native's branch for a big `Int` instead returns `+0.0` when `x == 0`
+/// (also for `-0.0`, whatever the sign of `i`) or `i < 0` (also for a NaN,
+/// an infinity and a negative `x`), and `x * inf` otherwise: a Lean bug that
+/// the crate does not copy (LB-36 in `docs/lean-bugs.md`).
 ///
-/// Source: leanrs_rt `src/float.rs` (`scaleb`, `scaleb_big`), adapted to take
-/// the saturated `i64` instead of leanrs's `Int`.
+/// Source: leanrs_rt `src/float.rs` (`scaleb`), adapted to take the
+/// saturated `i64` instead of leanrs's `Int`, with the big-`Int` branch
+/// replaced by the clamp (LB-36).
 #[inline]
 pub fn scaleb(x: f64, i: i64) -> f64 {
-    match i32::try_from(i) {
-        Ok(n) => scalbn(x, n),
-        Err(_) => scaleb_big(x, i < 0),
-    }
-}
-
-/// The branch of `lean_float_scaleb` for an `Int` that is a big number.
-///
-/// Source: leanrs_rt `src/float.rs` (`scaleb_big`), unchanged.
-#[cold]
-#[inline(never)]
-fn scaleb_big(x: f64, negative: bool) -> f64 {
-    if x == 0.0 || negative {
-        0.0
-    } else {
-        x * f64::INFINITY
-    }
+    scalbn(x, i.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32)
 }
 
 #[cfg(test)]
@@ -671,6 +664,94 @@ mod tests {
             super::super::float32::to_string(x, &mut got).unwrap();
             reference(f64::from(x), &mut want);
             assert_eq!(got, want, "f32 bits {bits:#010x}");
+        }
+    }
+
+    /// The exponents of the `scaleb` tests: the bounds of the C `int` range,
+    /// which native passes to `scalbn`, and beyond them, where native's
+    /// big-`Int` branch was wrong (LB-36). `i64::MIN`/`MAX` stand for a big
+    /// `Int`, which the caller saturates.
+    const SCALEB_LOW: [i64; 4] = [i32::MIN as i64, i32::MIN as i64 - 1, -(1 << 40), i64::MIN];
+    const SCALEB_HIGH: [i64; 4] = [i32::MAX as i64, 1 << 31, 1 << 40, i64::MAX];
+
+    /// `Float.scaleB` outside the `int` range is `x * 2^i` (LB-36): a zero or
+    /// an infinity with the sign of a finite nonzero `x` (normal or
+    /// subnormal), and a zero, an infinity or a NaN unchanged, as at the
+    /// bounds of the range, so the result has no step past `INT_MIN` or
+    /// `INT_MAX`.
+    #[test]
+    fn scaleb_beyond_the_int_range() {
+        let tiny = f64::from_bits(1);
+        for x in [
+            1.0,
+            -1.0,
+            0.7,
+            -1.5e300,
+            f64::MAX,
+            -f64::MAX,
+            f64::MIN_POSITIVE,
+            tiny,
+            -tiny,
+        ] {
+            for i in SCALEB_LOW {
+                assert_eq!(
+                    scaleb(x, i).to_bits(),
+                    0.0f64.copysign(x).to_bits(),
+                    "{x:e} {i}"
+                );
+            }
+            for i in SCALEB_HIGH {
+                let inf = f64::INFINITY.copysign(x);
+                assert_eq!(scaleb(x, i).to_bits(), inf.to_bits(), "{x:e} {i}");
+            }
+        }
+        for i in SCALEB_LOW.into_iter().chain(SCALEB_HIGH) {
+            for x in [0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
+                assert_eq!(scaleb(x, i).to_bits(), x.to_bits(), "{x} {i}");
+            }
+            assert!(scaleb(f64::NAN, i).is_nan(), "NaN {i}");
+            assert!(scaleb(-f64::NAN, i).is_nan(), "-NaN {i}");
+        }
+        // inside the range, the rows' boundaries
+        assert_eq!(scaleb(1.0, -1074).to_bits(), 1);
+        assert_eq!(scaleb(1.0, -1075).to_bits(), 0);
+        assert_eq!(scaleb(tiny, 2097), pow2(1023));
+        assert_eq!(scaleb(tiny, 2098), f64::INFINITY);
+    }
+
+    /// `Float32.scaleB`, which scales the widened value, alike.
+    #[test]
+    fn scaleb32_beyond_the_int_range() {
+        use super::super::float32::scaleb;
+        let tiny = f32::from_bits(1);
+        for x in [
+            1.0f32,
+            -1.0,
+            0.7,
+            f32::MAX,
+            -f32::MAX,
+            f32::MIN_POSITIVE,
+            tiny,
+            -tiny,
+        ] {
+            for i in SCALEB_LOW {
+                assert_eq!(
+                    scaleb(x, i).to_bits(),
+                    0.0f32.copysign(x).to_bits(),
+                    "{x:e} {i}"
+                );
+            }
+            for i in SCALEB_HIGH {
+                let inf = f32::INFINITY.copysign(x);
+                assert_eq!(scaleb(x, i).to_bits(), inf.to_bits(), "{x:e} {i}");
+            }
+        }
+        for i in SCALEB_LOW.into_iter().chain(SCALEB_HIGH) {
+            for x in [0.0f32, -0.0, f32::INFINITY, f32::NEG_INFINITY] {
+                assert_eq!(scaleb(x, i).to_bits(), x.to_bits(), "{x} {i}");
+            }
+            assert!(scaleb(f32::NAN, i).is_nan(), "NaN {i}");
+            assert!(scaleb(-f32::NAN, i).is_nan(), "-NaN {i}");
         }
     }
 }

@@ -74,8 +74,9 @@ pub const UNCAUGHT_EXCEPTION_PREFIX: &str = "uncaught exception: ";
 pub enum InternalPanic {
     /// `lean_internal_panic_out_of_memory`: a failed allocation, a size of
     /// 2^64 or more (`lean_mk_array`), a capacity of 2^63 or more
-    /// (`lean_mk_empty_array_with_capacity`); here also a `Nat` or `Int`
-    /// result above the big-number backend's `MAX_BITS`
+    /// (`lean_mk_empty_array_with_capacity`; lifted, LB-37:
+    /// `array::empty_with_capacity` reserves nothing instead); here also a
+    /// `Nat` or `Int` result above the big-number backend's `MAX_BITS`
     /// (`nat::check_result_bits`).
     OutOfMemory,
     /// `lean_internal_panic_unreachable`.

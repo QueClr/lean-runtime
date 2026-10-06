@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use common::{Toml, Value};
-use lean_runtime::semantics::{float, float32, hash, libm, net, sint, string, toolchain, uint};
+use lean_runtime::semantics::{
+    float, float32, hash, libm, net, repr, sint, string, toolchain, uint,
+};
 
 mod common;
 
@@ -41,6 +43,8 @@ struct Row {
     default: Option<String>,
     stderr: Option<String>,
     result_bits: Option<String>,
+    /// The row records native's outcome in `native` (an `LB-nn` deviation).
+    deviation: bool,
 }
 
 fn parse_nat(text: &str) -> Option<(u128, usize)> {
@@ -224,6 +228,19 @@ fn read_rows(file: &str, text: &str) -> Vec<Row> {
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap_or_else(|e| panic!("{file}: {id}: {e}"));
             assert!(float_bits.next().is_none(), "{id}: unused bits.args");
+            // An `LB-nn` deviation (the crate's own) expects the definition's
+            // result and records native's in `native`; a one-translator
+            // deviation (leanrs's `DVn`) expects native's (as `tests/rows2.rs`).
+            let deviation = t.get("native").is_some();
+            let lb = t.get("deviations").is_some_and(|d| {
+                d.entries()
+                    .iter()
+                    .any(|(_, v)| v.as_str().starts_with("LB-"))
+            });
+            assert_eq!(
+                deviation, lb,
+                "{id}: an LB deviation records native's outcome"
+            );
             Row {
                 func,
                 args,
@@ -233,6 +250,7 @@ fn read_rows(file: &str, text: &str) -> Vec<Row> {
                 result_bits: bits
                     .and_then(|b| b.get("result"))
                     .map(|v| v.as_str().to_string()),
+                deviation,
                 id,
             }
         })
@@ -478,6 +496,19 @@ fn float_fns(r: &mut Registry) {
         let mut s = String::new();
         float32::to_string(f32a(&a[0]), &mut s).unwrap();
         str_repr(s.as_bytes())
+    });
+    // `Float.repr`: parentheses when `n < 0` by IEEE comparison, so not for
+    // -0.0 or a NaN (`repr::needs_app_paren`)
+    r.add("Float.reprPrec", |a| {
+        let x = f64a(&a[0]);
+        let prec = u64::try_from(nat(&a[1])).unwrap_or(u64::MAX);
+        let t = f64_str(x);
+        let t = if repr::needs_app_paren(x < 0.0, prec) {
+            format!("({t})")
+        } else {
+            t
+        };
+        str_repr(t.as_bytes())
     });
     macro_rules! conv {
         ($($lean:literal => $f:path, $arg:ident, $show:expr;)*) => {
@@ -915,11 +946,19 @@ fn mismatch(row: &Row, out: &Out) -> Option<String> {
     }
 }
 
+/// Runs the rows of `file`, of which `deviations` record native's outcome in
+/// `native` (the `LB-nn` rows, which expect the definition's result).
+///
 /// The rows are compiled in (`include_str!`), so the tests read no files and
 /// also run under Miri.
-fn run(file: &str, text: &str) {
+fn run(file: &str, text: &str, deviations: usize) {
     let rows = read_rows(file, text);
     assert!(!rows.is_empty(), "{file}: no rows");
+    assert_eq!(
+        rows.iter().filter(|r| r.deviation).count(),
+        deviations,
+        "{file}: the rows with deviations"
+    );
     let reg = registry();
     let mut failures = Vec::new();
     for row in &rows {
@@ -942,39 +981,39 @@ fn run(file: &str, text: &str) {
 
 #[test]
 fn hash_rows() {
-    run("hash", include_str!("cases/hash/hash.rows.toml"));
+    run("hash", include_str!("cases/hash/hash.rows.toml"), 0);
 }
 
 #[test]
 fn float_rows() {
-    run("float", include_str!("cases/float/float.rows.toml"));
+    run("float", include_str!("cases/float/float.rows.toml"), 13);
 }
 
 /// glibc's libm is foreign code, which Miri does not run.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn libm_rows() {
-    run("libm", include_str!("cases/libm/libm.rows.toml"));
+    run("libm", include_str!("cases/libm/libm.rows.toml"), 0);
 }
 
 #[test]
 fn uint_rows() {
-    run("uint", include_str!("cases/uint/uint.rows.toml"));
+    run("uint", include_str!("cases/uint/uint.rows.toml"), 0);
 }
 
 #[test]
 fn sint_rows() {
-    run("sint", include_str!("cases/sint/sint.rows.toml"));
+    run("sint", include_str!("cases/sint/sint.rows.toml"), 0);
 }
 
 #[test]
 fn string_rows() {
-    run("string", include_str!("cases/string/string.rows.toml"));
+    run("string", include_str!("cases/string/string.rows.toml"), 0);
 }
 
 #[test]
 fn net_rows() {
-    run("net", include_str!("cases/net/net.rows.toml"));
+    run("net", include_str!("cases/net/net.rows.toml"), 0);
 }
 
 /// The toolchain's facts as native Lean 4.34.0 reports them on the pinned host
@@ -984,5 +1023,6 @@ fn toolchain_rows() {
     run(
         "toolchain",
         include_str!("cases/toolchain/toolchain.rows.toml"),
+        0,
     );
 }
