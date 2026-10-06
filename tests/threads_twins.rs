@@ -1016,6 +1016,55 @@ fn signal_reset_in_dependent(args: &[String]) -> u32 {
     0
 }
 
+/// tests/cases/uvloop/signal_reset_*_after_repeating_stop.lean (review AR-50,
+/// part 2): argv is the signal's Lean number, its name for `kill`, the
+/// native busy loop's length and the twin's spin in ms. W's dependent runs
+/// on the loop thread, which takes no signal while it spins.
+fn signal_reset_after_repeating_stop(args: &[String]) -> u32 {
+    let num: i32 = args[0].parse().expect("an Int");
+    let name = args[1].clone();
+    let ms = to_nat(&args[3]);
+    let pid = get_pid();
+    let w: USignal = Signal::new(num, true);
+    let pw = uv_ok(w.next(UvPromise::new));
+    let o: USignal = Signal::new(num, false);
+    let w2 = w.clone();
+    let kill_name = name.clone();
+    let tt = map_task(
+        move |_: Option<i64>| {
+            let po = uv_ok(o.next(UvPromise::new));
+            let tb = map_task(
+                move |_: Option<i64>| {
+                    let b: USignal = Signal::new(num, false);
+                    let pb = uv_ok(b.next(UvPromise::new));
+                    (b, pb)
+                },
+                po.result_opt(),
+                PRIO_DEFAULT,
+                true,
+            );
+            drop(po);
+            spawn_sh(&format!("sleep 0.1; kill -{kill_name} {pid}"));
+            spin_ms(ms);
+            uv_ok(w2.stop());
+            tb
+        },
+        pw.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(pw);
+    kill_self(&name);
+    let (b, pb) = tt.get().get();
+    println("B listening");
+    let _ = Handle::stdout().flush();
+    kill_self(&name);
+    sleep(300);
+    println(&format!("B got: {}", finished(&pb)));
+    let _ = b.stop();
+    0
+}
+
 // ---------------------------------------------------------------------------
 // The cases of LB-33 and LB-34 (tests/cases/uvloop/*_rearm_*, *_keep_*,
 // *_resubscribe, signal_stop_drops_promise), as tests/sched-driver ports
@@ -1606,6 +1655,14 @@ const TWINS: &[(&str, Twin)] = &[
     (
         "signal_reset_urg_in_async_dependent",
         signal_reset_in_dependent,
+    ),
+    (
+        "signal_reset_usr1_after_repeating_stop",
+        signal_reset_after_repeating_stop,
+    ),
+    (
+        "signal_reset_urg_after_repeating_stop",
+        signal_reset_after_repeating_stop,
     ),
     (
         "timer_oneshot_stop_resubscribe",

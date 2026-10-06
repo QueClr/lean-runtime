@@ -77,20 +77,38 @@
 //! signal: the reset pair's check had passed it on, and the flag and the byte
 //! were already there. The loop marks the registration spent (`Reset::spent`,
 //! which no handler reads) when it takes a signal, not when the kernel delivers
-//! one. So a signal that came before a registration, but that the loop takes
-//! after it, spends the new registration, as natively a signal that came just
-//! after it would. That needs a signal between the loop's last look and the
-//! registration, and a one-shot watcher started by a `sync` dependent of that
-//! delivery. The registrations: when a repeating watcher stops and one-shot
-//! ones remain; and at the first watcher's start, between `listen`'s clearing
+//! one. So a signal that came under the registration before and that the loop
+//! has not taken must not spend the new one. When a repeating watcher stops and
+//! one-shot ones remain, `register` moves the `arrived` flag into the new
+//! pair's `carried`, and the loop delivers that signal without spending the
+//! registration, as natively it was caught before the `sigaction` with
+//! `SA_RESETHAND` (review AR-50, part 2; cases
+//! `uvloop/signal_reset_{usr1,urg}_after_repeating_stop`: a repeating watcher
+//! W, a one-shot one O, and a `sync` dependent of W's promise, on the loop,
+//! that computes while the signal comes, then stops W). Before, that signal
+//! spent the registration, and the loop dropped the next one, which natively
+//! a watcher started by O's promise gets. The pair's
+//! registration waits for the handlers that are running (signal-hook's wait),
+//! so by the move the flag holds every signal of the registration before;
+//! without that wait, a late one would spend the new registration, as before.
+//! A signal of the new registration whose handler has run the pair by the
+//! move is moved with it and spends the registration ([`Reset::carry`],
+//! review RF11-03). A window remains: a handler that sets `arrived` before
+//! the move's swap of it and the pair's flag after the move's read of it
+//! (one on another thread still in its pipe write when the move runs, for
+//! example) has its signal moved without spending the registration, so the
+//! next ignored signal is delivered once more, a stop signal stops the
+//! process and is then delivered, and in the two-handler race (below) a
+//! terminating one is delivered (review RF11-07).
+//! At the first watcher's start a window remains: between `listen`'s clearing
 //! of `arrived` (RSIOB-03) and the end of `register`, while `default` is still
-//! set, where an ignored signal's default action does nothing and the handler
-//! sets the flag (natively the signal came before `sigaction` and was
-//! discarded, review RF10-02). Natively the signal's time decides between the
-//! two outcomes too. The other way round, a signal that came under a spent
+//! set, an ignored signal's default action does nothing and the handler sets
+//! the flag, which spends the new registration (natively the signal came
+//! before `sigaction` and was discarded, review RF10-02: one delivery either
+//! way). The other way round, a signal that came under a spent
 //! registration and that the loop has not taken yet is not the next
-//! registration's: `register` clears `arrived` when it takes back a spent
-//! registration's pair (review RF10-01). Without that, a repeating watcher that
+//! registration's: `register` (and `unregister`) clears `arrived` when it
+//! takes back a spent registration's pair (review RF10-01). Without that, a repeating watcher that
 //! joins before the loop's next look would get the signal, and the one-shot one
 //! with it, where natively the kernel discarded it. The flag of the
 //! registration's first signal was taken when the loop spent it, so a flag set
@@ -99,6 +117,38 @@
 //! set the flag by the clear, and a flag set after it is the new registration's
 //! signal; without that wait, a handler still running would have its signal
 //! delivered, as before the clear.
+//!
+//! Two handlers of one signal can run at the same time on two threads (the
+//! kernel blocks a signal only on the thread whose handler runs it), and both
+//! can pass a reset pair's check before either sets its flag. Natively the
+//! kernel resets the disposition when it delivers the first signal, in the
+//! same step, and the second one takes the default action (review AR-50, part
+//! 2). Within signal-hook's safe API and without descriptors of our own, the
+//! check and the set cannot be one step: the safe actions are stores, which
+//! leave the same state whether one handler ran or two, and an action of our
+//! own (an atomic swap) needs `low_level::register`, which is unsafe (a pipe
+//! per registration, whose bytes would count the handlers, would cost two
+//! descriptors that native does not open, review RF11-05). What the loop can
+//! see is the second handler's flag, set after the loop spent the
+//! registration: at its next take, or at the registration's take-back
+//! (`unregister`, when the watcher it delivered to was the last one; a
+//! repeating watcher's start). For a signal that ends the process, the loop
+//! then takes the default action itself ([`later_default`]). For such a
+//! signal, that flag needs a handler that passed the check (the race), or one
+//! that saw the flag set and ends the process itself: either way the process
+//! ends, with the signal's status, as natively. The spending signal came
+//! after the registration (one from before is carried; at the first watcher's
+//! start, `default` being set, a terminating one ended the process in its
+//! handler), so its handler ran the pair, and a later handler that passed the
+//! check ran at the same time as that one. The loop takes the action when it
+//! next looks at the flag, not when the second signal comes. Cases left,
+//! recorded in docs/sched.md: when both handlers set `arrived` before the
+//! loop takes it, the loop sees one signal, and the second one, natively the
+//! default action, is lost; and a stop signal that the loop finds after the
+//! registration is spent is dropped, since its handler may have stopped the
+//! process already (RSIOB-11's state, after the process continued), so in the
+//! race the process does not stop (nor at a take-back's window, review
+//! RF11-04).
 //!
 //! Locks: `HOOKED` and a signal's `reset`, each held only around plain data
 //! and signal-hook's registration calls, never across a scheduler's lock or
@@ -115,6 +165,10 @@ pub(crate) const EINVAL: i32 = 22;
 /// `SIGIO`, whose default action signal-hook's table lacks (review
 /// RSIOB-06).
 pub(crate) const SIGIO: i32 = 29;
+
+/// The stop signals of Lean's table (SIGTSTP, SIGTTIN, SIGTTOU): their
+/// default action stops the process.
+const STOP_SIGNALS: [i32; 3] = [20, 21, 22];
 
 /// `lean_uv_signal_mk`'s table (Lean's `Std.Internal.IO.Async.Signal`
 /// numbers, Linux's): the signal, or 0 for one it does not know, which
@@ -205,20 +259,52 @@ fn install(signum: i32, actions: &[Action]) -> Result<Vec<signal_hook::SigId>, i
     Ok(ids)
 }
 
+/// The default action of a later signal of a spent one-shot registration
+/// that the loop finds, at its take or at the registration's take-back
+/// (review AR-50, part 2): natively the kernel took it under `SIG_DFL`.
+/// Its handler may have passed the reset pair's check, if it ran at the same
+/// time as the first signal's handler, on another thread, before that one
+/// set its flag; the module comment explains why the loop then takes the
+/// action that the handler did not. A signal that ends the process ends it
+/// here (signal-hook's `emulate_default_handler`: `SIG_DFL`, the signal
+/// unblocked and raised again, so the status is the signal's and the kernel
+/// dumps a core where the signal's default makes one; SIGIO's exit with
+/// status 157, as its conditional defaults, RSIOB-06). A signal whose
+/// default is to ignore it gets nothing (the loop drops it). A stop signal
+/// gets nothing either: its handler, if it saw the flag set, has stopped
+/// the process or is about to, and the loop cannot tell, so a second stop
+/// would be one too many.
+fn later_default(signum: i32) {
+    if signum == SIGIO {
+        signal_hook::low_level::exit(128 + SIGIO);
+    }
+    if !STOP_SIGNALS.contains(&signum) {
+        let _ = signal_hook::low_level::emulate_default_handler(signum);
+    }
+}
+
 /// The reset pair of one one-shot registration: its flag and its two
-/// actions, and whether the loop has taken a signal under it.
+/// actions, whether the loop has taken a signal under it, and whether a
+/// signal of the registration before it is still to deliver.
 struct Reset {
-    /// The pair's flag (its two actions hold their own references; the
-    /// tests read it here).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The pair's flag (its two actions hold their own references;
+    /// [`Reset::carry`] and the tests read it here).
     flag: Arc<AtomicBool>,
     ids: Vec<signal_hook::SigId>,
     /// The loop has taken a signal under this registration
-    /// ([`Hooked::take`]): natively the kernel has restored `SIG_DFL`, so
-    /// the loop drops a later signal (review AR-50). Only the loop and the
-    /// registration write it, under the `reset` lock; handlers never read
-    /// it.
+    /// ([`Hooked::take`]), or `register`'s move took one with the signal
+    /// from before ([`Reset::carry`]): natively the kernel has restored
+    /// `SIG_DFL`, so the loop drops a later signal (review AR-50). Only the
+    /// loop and the registration write it, under the `reset` lock; handlers
+    /// never read it.
     spent: bool,
+    /// A signal came under the registration that this one replaced, while
+    /// watchers listened, and the loop had not taken it
+    /// ([`Hooked::register`] with `carry`): the loop delivers it, but it
+    /// does not spend this registration, as natively a signal caught
+    /// before `sigaction` with `SA_RESETHAND` (review AR-50, part 2). Under
+    /// the `reset` lock, as `spent`.
+    carried: bool,
 }
 
 impl Reset {
@@ -231,7 +317,29 @@ impl Reset {
             flag,
             ids,
             spent: false,
+            carried: false,
         })
+    }
+
+    /// `register`'s move of a signal from the registration before:
+    /// `arrived` into `carried`. The pair's flag is read first: a handler
+    /// of this registration sets `arrived` before the pair's flag, so a
+    /// flag set by then means that the move also takes that handler's
+    /// signal, this registration's first, and the registration is spent
+    /// (review RF11-03). A flag read after the move could be a handler's
+    /// whose `arrived` came after the move: the loop's take must deliver
+    /// that signal as the registration's first, and a spent registration
+    /// would give it the default action instead. The order leaves a window
+    /// (review RF11-07): a handler that sets `arrived` before the swap and
+    /// the pair's flag after the read (one on another thread still in its
+    /// pipe write when the move runs, for example) has its signal moved
+    /// without spending the registration, so the next ignored signal is
+    /// delivered once more, a stop signal stops the process and is then
+    /// delivered, and in the two-handler race a terminating one is
+    /// delivered.
+    fn carry(&mut self, arrived: &AtomicBool) {
+        self.spent = self.flag.load(Ordering::SeqCst);
+        self.carried = arrived.swap(false, Ordering::SeqCst);
     }
 
     /// Takes the pair back, the check first: a handler that starts between
@@ -331,33 +439,58 @@ fn hooked(signum: i32) -> Result<Arc<Hooked>, i32> {
 impl Hooked {
     /// libuv's (re)registration of the signal's handler, with
     /// `SA_RESETHAND` when `oneshot`: the last registration's reset pair
-    /// taken back, a pair on a fresh flag exactly for a one-shot handler,
-    /// then the default's flag cleared. A spent registration's signals that
-    /// the loop has not taken came after its first one, so natively they
-    /// took the default action: the take-back clears `arrived` (review
-    /// RF10-01).
-    fn register(&self, signum: i32, oneshot: bool) {
+    /// taken back ([`Hooked::take_back`]), a pair on a fresh flag exactly
+    /// for a one-shot handler, then the default's flag cleared. `carry` is
+    /// `uv__signal_stop`'s re-registration, when a repeating watcher stops
+    /// and one-shot ones are left: a signal that came under the registration
+    /// it replaces and that the loop has not taken moves from `arrived` to
+    /// the new pair's `carried` (review AR-50, part 2; [`Reset::carry`]).
+    /// The pair's registration waits for the handlers that are running
+    /// (signal-hook's wait), so every handler without the new pair has set
+    /// `arrived` by then, and a flag set later is the new registration's
+    /// signal.
+    fn register(&self, signum: i32, oneshot: bool, carry: bool) {
         let mut r = self.reset.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(old) = r.take() {
-            let spent = old.spent;
-            old.remove();
-            if spent {
-                self.arrived.store(false, Ordering::SeqCst);
-            }
-        }
+        self.take_back(signum, &mut r);
         if oneshot {
             *r = Reset::new(signum);
+            if let (true, Some(new)) = (carry, r.as_mut()) {
+                new.carry(&self.arrived);
+            }
         }
         self.default.store(false, Ordering::SeqCst);
     }
 
     /// libuv's `uv__signal_unregister_handler`: the default action, then the
     /// reset pair taken back.
-    fn unregister(&self) {
+    fn unregister(&self, signum: i32) {
         self.default.store(true, Ordering::SeqCst);
         let mut r = self.reset.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(old) = r.take() {
-            old.remove();
+        self.take_back(signum, &mut r);
+    }
+
+    /// Takes back the current one-shot registration's reset pair, if any,
+    /// with the `reset` lock held. A spent registration's signals that the
+    /// loop has not taken came after its first one, so natively they took
+    /// the default action: the take-back clears `arrived` (review RF10-01),
+    /// and a signal that ends the process ends it ([`later_default`],
+    /// review AR-50, part 2: a handler that saw the pair's flag set has
+    /// done so or is about to). A signal carried from the registration
+    /// before is put back into `arrived`, for the loop to deliver. The pair
+    /// is taken back before the clear, so a stop signal that comes between
+    /// the two at a repeating watcher's start is dropped, where natively it
+    /// stops the process or is delivered (review RF11-04, docs/sched.md).
+    fn take_back(&self, signum: i32, r: &mut Option<Reset>) {
+        let Some(old) = r.take() else {
+            return;
+        };
+        let (spent, carried) = (old.spent, old.carried);
+        old.remove();
+        if spent && self.arrived.swap(false, Ordering::SeqCst) {
+            later_default(signum);
+        }
+        if carried {
+            self.arrived.store(true, Ordering::SeqCst);
         }
     }
 
@@ -373,21 +506,30 @@ impl Hooked {
     /// and written the byte: the drop is that signal's default action. The
     /// state: a one-shot watcher started in a `sync` dependent of another's
     /// promise (RSIOB-11), and, for a stop signal, the process continued.
-    /// The `reset` lock is held across the swap, so a registration comes
-    /// wholly before or after it.
-    fn take(&self) -> bool {
+    /// A signal that ends the process and that the loop finds here has
+    /// passed the pair's check, or is about to take its default action in
+    /// its handler: the loop takes that action ([`later_default`], review
+    /// AR-50, part 2). A signal carried from the registration before is
+    /// delivered, also when a later signal of a spent registration comes
+    /// with it (review RF11-03), and does not spend this one. The `reset`
+    /// lock is held across the swap, so a registration comes wholly before
+    /// or after it.
+    fn take(&self, signum: i32) -> bool {
         let mut r = self.reset.lock().unwrap_or_else(PoisonError::into_inner);
-        if !self.arrived.swap(false, Ordering::SeqCst) {
-            return false;
+        let new = self.arrived.swap(false, Ordering::SeqCst);
+        let Some(reset) = r.as_mut() else {
+            return new;
+        };
+        let carried = std::mem::take(&mut reset.carried);
+        if !new {
+            return carried;
         }
-        match r.as_mut() {
-            Some(reset) if reset.spent => false,
-            Some(reset) => {
-                reset.spent = true;
-                true
-            }
-            None => true,
+        if reset.spent {
+            later_default(signum);
+            return carried;
         }
+        reset.spent = true;
+        true
     }
 }
 
@@ -409,7 +551,7 @@ pub(crate) fn listen(signum: i32, oneshot: bool) -> Result<BorrowedFd<'static>, 
     // `uv__signal_start`: (re)register when no watcher listens, or when
     // only one-shot ones do and a repeating one comes.
     if n == 0 || (!oneshot && os == n) {
-        h.register(signum, oneshot);
+        h.register(signum, oneshot, false);
     }
     h.listening.fetch_add(1, Ordering::SeqCst);
     if oneshot {
@@ -430,11 +572,12 @@ pub(crate) fn unlisten(signum: i32, oneshot: bool) {
             x.oneshot.fetch_sub(1, Ordering::SeqCst);
         }
         if left == 0 {
-            x.unregister();
+            x.unregister(signum);
         } else if !oneshot && x.oneshot.load(Ordering::SeqCst) == left {
             // `uv__signal_stop`: only one-shot watchers remain, so the
-            // handler is registered again with `SA_RESETHAND`
-            x.register(signum, true);
+            // handler is registered again with `SA_RESETHAND`; a signal
+            // that came before is not the new registration's
+            x.register(signum, true, true);
         }
     }
 }
@@ -459,7 +602,7 @@ pub(crate) fn arrived() -> Vec<i32> {
     let h = HOOKED.lock().unwrap_or_else(PoisonError::into_inner);
     let mut v: Vec<i32> = h
         .iter()
-        .filter(|(_, x)| x.take())
+        .filter(|(s, x)| x.take(*s))
         .map(|(s, _)| *s)
         .collect();
     v.sort_unstable();
@@ -468,7 +611,7 @@ pub(crate) fn arrived() -> Vec<i32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{handlers, native_signum, reset_pair, Action, Hooked};
+    use super::{handlers, native_signum, reset_pair, Action, Hooked, Reset, SIGIO};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
 
@@ -543,26 +686,26 @@ mod tests {
     fn each_oneshot_registration_has_a_fresh_reset_flag() {
         let _s = SIGURG_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
         let h = hooked_alone();
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, false);
         let r1 = reset_flag(&h).expect("a one-shot registration has a reset pair");
         assert!(!Arc::ptr_eq(&r1, &h.default));
-        h.register(SIGURG, false);
+        h.register(SIGURG, false, false);
         assert!(reset_flag(&h).is_none());
         signal_hook::low_level::raise(SIGURG).expect("raise");
         assert!(!r1.load(Ordering::SeqCst), "the first pair was taken back");
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, true);
         let r2 = reset_flag(&h).expect("a one-shot registration has a reset pair");
         assert!(!Arc::ptr_eq(&r2, &r1) && !Arc::ptr_eq(&r2, &h.default));
         signal_hook::low_level::raise(SIGURG).expect("raise");
         assert!(r2.load(Ordering::SeqCst));
         assert!(!r1.load(Ordering::SeqCst));
-        h.unregister();
+        h.unregister(SIGURG);
         assert!(reset_flag(&h).is_none());
         assert!(takes_default(&h));
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, false);
         let r3 = reset_flag(&h).expect("a one-shot registration has a reset pair");
         assert!(!Arc::ptr_eq(&r3, &r1) && !Arc::ptr_eq(&r3, &r2));
-        h.unregister();
+        h.unregister(SIGURG);
     }
 
     /// AR-49's second race: one-shot watchers listen, and a handler sits
@@ -581,25 +724,25 @@ mod tests {
     fn a_late_reset_leaves_a_new_watcher_listening() {
         let _s = SIGURG_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
         let h = hooked_alone();
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, false);
         assert!(!takes_default(&h));
         let old = reset_flag(&h).expect("a one-shot registration has a reset pair");
         // a repeating watcher joins the one-shot ones
-        h.register(SIGURG, false);
+        h.register(SIGURG, false, false);
         // the late handler's reset, done inside the take-back's wait
         old.store(true, Ordering::SeqCst);
         assert!(!takes_default(&h), "the repeating watcher listens");
         signal_hook::low_level::raise(SIGURG).expect("raise");
         assert!(!takes_default(&h), "no reset with a repeating watcher");
         // the repeating watcher stops: only one-shot ones remain
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, true);
         assert!(!takes_default(&h));
         signal_hook::low_level::raise(SIGURG).expect("raise");
         let new = reset_flag(&h).expect("a one-shot registration has a reset pair");
         assert!(new.load(Ordering::SeqCst));
         assert!(takes_default(&h));
         // taken back: a signal sets the flag no more
-        h.unregister();
+        h.unregister(SIGURG);
         new.store(false, Ordering::SeqCst);
         signal_hook::low_level::raise(SIGURG).expect("raise");
         assert!(!new.load(Ordering::SeqCst));
@@ -634,60 +777,253 @@ mod tests {
         let _s = SIGURG_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
         let h = hooked_alone();
         // A, the first watcher, one-shot
-        h.register(SIGURG, true);
-        assert!(!h.take(), "no signal came");
+        h.register(SIGURG, true, false);
+        assert!(!h.take(SIGURG), "no signal came");
         arrive(&h);
-        assert!(h.take(), "A gets the first signal");
+        assert!(h.take(SIGURG), "A gets the first signal");
         // B starts in a `sync` dependent of A's promise: no registration
         arrive(&h);
-        assert!(!h.take(), "B does not get the second signal");
-        assert!(!h.take());
+        assert!(!h.take(SIGURG), "B does not get the second signal");
+        assert!(!h.take(SIGURG));
         // RF10-01: a third signal under the spent registration, and a
         // repeating watcher W2 joins before the loop takes it: natively the
         // kernel discarded it, so neither B nor W2 gets it; both get the
         // next one
         arrive(&h);
-        h.register(SIGURG, false);
-        assert!(!h.take(), "the spent registration's signal is no one's");
+        h.register(SIGURG, false, false);
+        assert!(
+            !h.take(SIGURG),
+            "the spent registration's signal is no one's"
+        );
         arrive(&h);
-        assert!(h.take(), "W2 and B get the next signal");
+        assert!(h.take(SIGURG), "W2 and B get the next signal");
         // a fresh one-shot registration's first signal, not yet taken when
         // a repeating watcher joins: kept (natively the handler caught it)
-        h.unregister();
-        h.register(SIGURG, true);
+        h.unregister(SIGURG);
+        h.register(SIGURG, true, false);
         arrive(&h);
-        h.register(SIGURG, false);
-        assert!(h.take(), "an unspent registration's signal is delivered");
+        h.register(SIGURG, false, false);
+        assert!(
+            h.take(SIGURG),
+            "an unspent registration's signal is delivered"
+        );
         // a fresh one-shot registration; the loop takes the first signal
         // before its handler's reset pair runs
-        h.unregister();
-        h.register(SIGURG, true);
+        h.unregister(SIGURG);
+        h.register(SIGURG, true, false);
         h.arrived.store(true, Ordering::SeqCst);
-        assert!(h.take(), "the first signal");
+        assert!(h.take(SIGURG), "the first signal");
         signal_hook::low_level::raise(SIGURG).expect("raise");
         arrive(&h);
-        assert!(!h.take(), "the second signal is dropped all the same");
+        assert!(!h.take(SIGURG), "the second signal is dropped all the same");
         // a repeating watcher joins: every signal
-        h.register(SIGURG, false);
+        h.register(SIGURG, false, false);
         for _ in 0..2 {
             arrive(&h);
-            assert!(h.take(), "the repeating watcher gets every signal");
+            assert!(h.take(SIGURG), "the repeating watcher gets every signal");
         }
         // it stops, one-shot watchers remain: one signal again
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, true);
         arrive(&h);
-        assert!(h.take(), "a fresh registration takes its first signal");
+        assert!(
+            h.take(SIGURG),
+            "a fresh registration takes its first signal"
+        );
         arrive(&h);
-        assert!(!h.take());
+        assert!(!h.take(SIGURG));
         // none listens: the flag is taken (no watcher to deliver to; the
         // next first watcher clears it, RSIOB-03)
-        h.unregister();
+        h.unregister(SIGURG);
         arrive(&h);
-        assert!(h.take());
+        assert!(h.take(SIGURG));
         // a new first watcher, one-shot
-        h.register(SIGURG, true);
+        h.register(SIGURG, true, false);
         arrive(&h);
-        assert!(h.take(), "a new registration takes its first signal");
-        h.unregister();
+        assert!(h.take(SIGURG), "a new registration takes its first signal");
+        h.unregister(SIGURG);
+    }
+
+    /// AR-50, part 2: a signal that came under the registration that a
+    /// one-shot one replaces, while watchers listened (a repeating watcher W
+    /// and a one-shot one O; W stops), and that the loop has not taken, is
+    /// delivered (to O), but does not spend the new registration: natively
+    /// it was caught before `sigaction` with `SA_RESETHAND`. So B, started
+    /// by O's promise, gets the registration's first signal, and a later one
+    /// is dropped (case `uvloop/signal_reset_urg_after_repeating_stop`).
+    /// Before, the loop counted it as the registration's own and dropped
+    /// B's signal; with `later_default`, a terminating one would have ended
+    /// the process. A carried signal and one of the registration's own
+    /// taken together spend it; a signal of the registration whose handler
+    /// ran the pair before the move is moved with the one from before and
+    /// spends it, and a later signal's take delivers the moved ones all the
+    /// same (RF11-03); a carried one that a repeating watcher's
+    /// arrival finds still there is delivered; the first watcher's
+    /// registration carries nothing (RF10-02, unchanged). And a later
+    /// signal of a spent registration that the last watcher's stop finds is
+    /// cleared (SIGURG: nothing else).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_signal_before_a_reregistration_does_not_spend_it() {
+        let _s = SIGURG_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let h = hooked_alone();
+        // W, repeating, and O, one-shot, listen; a signal the loop has not
+        // taken; W stops
+        h.register(SIGURG, false, false);
+        arrive(&h);
+        h.register(SIGURG, true, true);
+        assert!(!h.arrived.load(Ordering::SeqCst), "carried, not arrived");
+        assert!(h.take(SIGURG), "O gets the signal from before");
+        arrive(&h);
+        assert!(h.take(SIGURG), "B gets the registration's first signal");
+        arrive(&h);
+        assert!(!h.take(SIGURG), "a later one is dropped");
+        h.unregister(SIGURG);
+        // the signal from before and the registration's own, taken together
+        h.register(SIGURG, false, false);
+        arrive(&h);
+        h.register(SIGURG, true, true);
+        arrive(&h);
+        assert!(h.take(SIGURG), "one delivery");
+        arrive(&h);
+        assert!(!h.take(SIGURG), "spent by its own signal");
+        h.unregister(SIGURG);
+        // RF11-03: the registration's own signal before the move (its
+        // handler sets `arrived`, then the pair's flag), as `register` does
+        // it with the `reset` lock held
+        h.register(SIGURG, false, false);
+        arrive(&h);
+        {
+            let mut r = h.reset.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut new = Reset::new(SIGURG).expect("a reset pair");
+            arrive(&h);
+            new.carry(&h.arrived);
+            assert!(new.spent && new.carried, "moved, and spent");
+            *r = Some(new);
+        }
+        arrive(&h);
+        assert!(
+            h.take(SIGURG),
+            "the moved signals are delivered with a later one"
+        );
+        arrive(&h);
+        assert!(!h.take(SIGURG), "a later one is dropped");
+        h.unregister(SIGURG);
+        // a repeating watcher joins before the loop has taken it
+        h.register(SIGURG, false, false);
+        arrive(&h);
+        h.register(SIGURG, true, true);
+        h.register(SIGURG, false, false);
+        assert!(h.take(SIGURG), "the signal from before is delivered");
+        h.unregister(SIGURG);
+        // the first watcher, one-shot: a flag set before the end of its
+        // registration (RF10-02's window) spends it
+        h.arrived.store(true, Ordering::SeqCst);
+        h.register(SIGURG, true, false);
+        assert!(h.take(SIGURG));
+        arrive(&h);
+        assert!(!h.take(SIGURG));
+        // a later signal that the last watcher's stop finds
+        arrive(&h);
+        h.unregister(SIGURG);
+        assert!(!h.arrived.load(Ordering::SeqCst));
+    }
+
+    /// AR-50, part 2: two handlers of a one-shot registration's signal, on
+    /// two threads, can both pass the reset pair's check before either sets
+    /// its flag, where natively the second signal takes the default action
+    /// (`SA_RESETHAND`). The loop finds the second one's `arrived` after it
+    /// spent the registration, at its take or at the registration's
+    /// take-back (a repeating watcher joins, the last watcher stops), and
+    /// takes the default action: a terminating signal ends the process
+    /// with its own status (SIGUSR2), SIGIO exits with 157 (RSIOB-06). A
+    /// stop signal (SIGTSTP) is dropped and does not stop the process: its
+    /// handler may have stopped it already. Each run is a child process (the
+    /// test runs itself again), where `arrived` is set without the pair's
+    /// check, as when a handler passed it.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_later_signal_of_a_spent_registration_takes_its_default_action() {
+        use std::os::unix::process::ExitStatusExt;
+        const CHILD: &str = "LEAN_RUNTIME_TEST_LATER_SIGNAL";
+        const SIGUSR2: i32 = 12;
+        const SIGTSTP: i32 = 20;
+        if let Ok(v) = std::env::var(CHILD) {
+            let (signum, at) = v.split_once(' ').expect("SIGNUM WHERE");
+            let signum: i32 = signum.parse().expect("a signal number");
+            let h = hooked_alone();
+            h.register(signum, true, false);
+            // the first signal's handler, then the loop's take
+            h.arrived.store(true, Ordering::SeqCst);
+            assert!(h.take(signum));
+            // the second one's handler passed the pair's check
+            h.arrived.store(true, Ordering::SeqCst);
+            let delivered = match at {
+                "take" => h.take(signum),
+                "join" => {
+                    h.register(signum, false, false);
+                    h.take(signum)
+                }
+                "stop" => {
+                    h.unregister(signum);
+                    h.arrived.load(Ordering::SeqCst)
+                }
+                _ => unreachable!("{at}"),
+            };
+            println!("survived, delivered: {delivered}");
+            return;
+        }
+        let run = |signum: i32, at: &str| {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "sched::uv_signals::tests::\
+                     a_later_signal_of_a_spent_registration_takes_its_default_action",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, format!("{signum} {at}"))
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            // a stopped child would never end: give up after 60 s
+            let t0 = std::time::Instant::now();
+            let st = loop {
+                if let Some(st) = child.try_wait().unwrap() {
+                    break st;
+                }
+                if t0.elapsed() > std::time::Duration::from_secs(60) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("{signum} at {at}: the child did not end (stopped?)");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            };
+            let mut out = String::new();
+            use std::io::Read;
+            child
+                .stdout
+                .take()
+                .unwrap()
+                .read_to_string(&mut out)
+                .unwrap();
+            (st, out)
+        };
+        for at in ["take", "join", "stop"] {
+            let (st, out) = run(SIGUSR2, at);
+            assert_eq!(
+                st.signal(),
+                Some(SIGUSR2),
+                "SIGUSR2 at {at}: {st:?} {out:?}"
+            );
+            let (st, out) = run(SIGIO, at);
+            assert_eq!(st.code(), Some(157), "SIGIO at {at}: {st:?} {out:?}");
+            let (st, out) = run(SIGTSTP, at);
+            assert!(st.success(), "SIGTSTP at {at}: {st:?} {out:?}");
+            assert!(
+                out.contains("survived, delivered: false"),
+                "SIGTSTP at {at}: {out:?}"
+            );
+        }
     }
 }

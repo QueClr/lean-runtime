@@ -959,27 +959,123 @@ its own.
   kernel discards (leanrs's repro), and a second SIGTSTP, SIGTTIN or SIGTTOU
   when the process continued after the stop. The loop marks the registration
   when it takes a signal, not when the kernel delivers one, so the two can
-  differ at a registration, both ways. A signal that came before a
-  registration and that the loop takes after it spends the new registration,
-  as natively a signal that came just after the registration does: before
-  the re-registration when a repeating watcher stops and one-shot ones
-  remain, or at the first watcher's start, between `listen`'s clearing of
-  `arrived` (RSIOB-03) and the end of `register`, while `default` is still
-  set (an ignored signal's default action does nothing, so the handler sets
-  the flag; natively the signal came before `sigaction` and was discarded;
-  review RF10-02). That matters only if a one-shot watcher then starts in a
-  `sync` dependent of that delivery. The other way round, a signal that came
-  under a spent registration and that the loop has not taken yet would be
-  delivered by the next registration: a repeating watcher that joins before
-  the loop's next look would get it, and the one-shot one with it, where
-  natively the kernel discarded it (review RF10-01). So `register` clears
-  `arrived` when it takes back a spent registration's pair: the first
-  signal's flag was taken when the loop spent it, and the take-back waits
-  for the handlers that are running (signal-hook's wait), so the flag holds
-  only later signals of the spent registration. Unit test
+  differ at a registration, both ways. A signal that came under the
+  registration before, while watchers listened, and that the loop has not
+  taken yet must not spend the new one: when a repeating watcher stops and
+  one-shot ones remain, `register` moves the `arrived` flag into the new
+  pair's `carried`, and the loop delivers that signal without spending the
+  registration, as natively it was caught before the `sigaction` with
+  `SA_RESETHAND` (review AR-50, part 2). The pair's registration waits for
+  the handlers that are running (signal-hook's wait), so the flag then holds
+  every signal of the registration before. Before the fix, in cases
+  `uvloop/signal_reset_usr1_after_repeating_stop` and
+  `signal_reset_urg_after_repeating_stop` (a `sync` dependent of a repeating
+  watcher W's promise, on the loop, starts a one-shot watcher O, computes
+  while a signal comes, then stops W; a `sync` dependent of O's promise
+  starts a one-shot watcher B; then a third signal), the loop spent the new
+  registration with the second signal and dropped the third ("B got:
+  false", in both modes), which natively B gets ("B got: true"; strace: the
+  second signal is caught under W's `SA_RESTART` registration, before the
+  `SA_RESETHAND` one). The move reads the new pair's flag first: a handler
+  sets `arrived` before the pair's flag, so when the flag is set by then,
+  the move also takes a signal of the new registration, its first, and the
+  registration is spent; the loop delivers the moved signals once, and
+  drops a later one (review RF11-03). A flag read after the move could be
+  a handler's whose `arrived` came after the move, which the loop must
+  deliver as the registration's first. The order leaves a window: a
+  handler that sets `arrived` before the swap and the pair's flag after
+  the read (one on another thread still in its pipe write when the move
+  runs, for example) has its signal moved without spending the
+  registration, so the next ignored signal is delivered once more, a stop
+  signal stops the process and is then delivered, and in the two-handler
+  race (below) a terminating one is delivered (review RF11-07). At the
+  first watcher's start a window
+  remains, between `listen`'s clearing of `arrived` (RSIOB-03) and the end
+  of `register`, while `default` is still set: an ignored signal's default
+  action does nothing, so the handler sets the flag, which spends the new
+  registration (natively the signal came before `sigaction` and was
+  discarded; one delivery either way; review RF10-02). That matters only if
+  a one-shot watcher then starts in a `sync` dependent of that delivery. The
+  other way round, a signal that came under a spent registration and that
+  the loop has not taken yet would be delivered by the next registration: a
+  repeating watcher that joins before the loop's next look would get it, and
+  the one-shot one with it, where natively the kernel discarded it (review
+  RF10-01). So `register` clears `arrived` when it takes back a spent
+  registration's pair (`unregister` too): the first signal's flag was taken
+  when the loop spent it, and the take-back waits for the handlers that are
+  running (signal-hook's wait), so the flag holds only later signals of the
+  spent registration. Unit tests
   `a_spent_oneshot_registration_drops_a_later_signal` (it fails without the
-  rule or without the clear); the cases above in both drivers fail without
-  it.
+  rule or without the clear) and `a_signal_before_a_reregistration_does_not_spend_it`
+  (it fails without the move, when a take-back loses the carried signal,
+  when the move does not spend a registration whose flag is set, or when a
+  take under a spent registration loses the carried signal); the cases
+  above in both drivers fail without them.
+- **A later signal that ends the process ends it** (review AR-50, part 2).
+  Two handlers of one signal can run at the same time on two threads (the
+  kernel blocks a signal only on the thread whose handler runs it), and
+  both can pass the reset pair's check before either sets its flag, where
+  natively the kernel resets the disposition when it delivers the first
+  signal, in the same step, and the second one takes the default action,
+  whichever thread it goes to (a C probe: an `SA_RESETHAND` handler that
+  spins 300 ms with the signal blocked on its own thread only, and a second
+  SIGUSR1 50 ms after the first: status 138 every time, and no second
+  handler). Within signal-hook's safe API and without descriptors of our
+  own, the check and the set cannot be one step: the safe actions are
+  stores, which leave the same state whether one handler ran or two, and
+  an atomic swap needs an action of our own (`low_level::register`,
+  unsafe); a pipe per registration, whose bytes would count the handlers,
+  would cost two descriptors that native does not open (case
+  `uvloop/signal_fds`; review RF11-05). The loop sees the second
+  handler's flag when it comes after the loop spent the registration: at
+  its next take,
+  or at the registration's take-back (`unregister`, when the watcher it
+  delivered to was the last one, or a repeating watcher's start). For a
+  signal whose default action ends the process, the loop then takes it
+  (`later_default`: signal-hook's `emulate_default_handler`, which restores
+  `SIG_DFL` and raises the signal again, so the status is the signal's and
+  the kernel dumps a core where the signal's default makes one; SIGIO's
+  exit with status 157, RSIOB-06). Such a flag comes from a handler that
+  passed the check, or from one that saw the flag set and ends the process
+  itself: either way the process ends with the signal, as natively. The
+  spending signal came after the registration (one from before is carried;
+  at the first watcher's start a terminating one meets `default` and ends
+  the process), so its handler ran the pair. For a signal whose default is
+  to ignore it, the loop drops the flag, as before. Not covered, within
+  signal-hook's safe API and without descriptors of our own:
+  - the process ends when a thread next looks at the flag (the loop's
+    take, or a take-back), not when the second signal comes, as natively.
+    In both modes the loop runs the first delivery's `sync` dependents
+    before it looks again (in single-thread mode, at a yield point), so
+    one may run (and print) before the process ends, and if `main` ends
+    first the process exits with `main`'s status (reviews RF11-01,
+    RF11-08);
+  - a handler of a one-shot re-registration that sets `arrived` before the
+    move's swap of it and the pair's flag after the move's read of it has
+    its signal moved without spending the registration (above; review
+    RF11-07);
+  - when both handlers set `arrived` before the loop takes it, the loop sees
+    one signal: one delivery, and the second signal, natively the default
+    action, is lost (a terminating one does not end the process);
+  - a stop signal (SIGTSTP, SIGTTIN, SIGTTOU) that the loop finds after the
+    registration is spent is dropped: its handler may have stopped the
+    process already (RSIOB-11's state, after the process continued), and
+    the loop cannot tell, so a stop there would stop the process twice; in
+    the race the process does not stop, where natively it does. And a
+    take-back takes the pair back before it clears `arrived`: a stop signal
+    that comes between the two, when a repeating watcher starts under a
+    spent registration, is dropped, where natively it stops the process
+    (before the `sigaction`) or is delivered (after it) (review RF11-04).
+
+  The race needs two signals that the kernel delivers to two threads
+  within the few instructions between a handler's check and its set (or a
+  handler preempted there); the take-back's window, a stop signal between
+  two steps of a registration. No case can show the race on demand: which
+  thread runs a handler, and when, is the kernel's choice. Unit test
+  `a_later_signal_of_a_spent_registration_takes_its_default_action` sets
+  the second handler's flag without the pair's check, at the take and at
+  both take-backs, in a child process: SIGUSR2 ends it with its signal,
+  SIGIO with status 157, and SIGTSTP is dropped and does not stop it.
 - **A signal that came while no watcher of it listened is no watcher's**:
   its flag is cleared when the signal's first watcher starts (RSIOB-03;
   cases `uvloop/signal_stale`, `signal_stale_deferred`).
@@ -1015,10 +1111,13 @@ Lean bug):
   computes without a yield point, status 138), and the loop drops a
   second signal that is ignored by default (AR-50, above). Two handlers
   of one signal that run at the same time on two threads can both pass
-  the pair's check, where natively the second takes the default action:
-  a second signal that ends the process then does not (no case: a race of
-  two deliveries); one that is ignored by default is still dropped by the
-  loop.
+  the pair's check, where natively the second takes the default action.
+  A second signal that ends the process still ends it when the loop finds
+  its flag after the first one's delivery (AR-50, part 2, above); not when
+  both flags come before the loop's take (the loop sees one signal), and a
+  second stop signal does not stop the process. One that is ignored by
+  default is dropped by the loop either way. No case: a race of two
+  deliveries.
 
 **The loop holds a running handle**, as natively `lean_inc(obj)`: a
 running timer or a listening watcher fires even if the program dropped it.

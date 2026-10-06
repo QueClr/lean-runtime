@@ -1174,6 +1174,8 @@ cases!(
     signal_reset_winch_in_sync_dependent,
     signal_reset_usr1_in_sync_dependent,
     signal_reset_urg_in_async_dependent,
+    signal_reset_usr1_after_repeating_stop,
+    signal_reset_urg_after_repeating_stop,
     lock_blocked,
     lock_exit,
     lock_during_read,

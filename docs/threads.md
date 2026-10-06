@@ -529,7 +529,14 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   `docs/sched.md`): the registration is spent when the loop takes the
   signal, so it does not matter that the handler, on another thread, may
   not have run its reset pair yet (twins of
-  `uvloop/signal_reset_*_dependent`).
+  `uvloop/signal_reset_*_dependent`). A signal that came before a one-shot
+  re-registration (a repeating watcher stopped) does not spend it, and a
+  later signal that ends the process, whose handler passed the reset
+  pair's check at the same time as the first one's on another thread, ends
+  it from the thread that finds its flag after the first delivery (the
+  loop thread, or a thread whose stop or start takes the registration
+  back; review AR-50, part 2, and RF11-02; twins of
+  `uvloop/signal_reset_*_after_repeating_stop`).
 - **The lock order.** The loop lock first. Under it: a handle's state lock
   and the loop's `data` lock, each held only for plain data (a handle's
   before `data`, never the other way); and, through translator code (a

@@ -65,6 +65,8 @@ pub fn lookup(id: &str) -> Option<Case> {
         "signal_reset_winch_in_sync_dependent" => (no_init, signal_reset_in_dependent),
         "signal_reset_usr1_in_sync_dependent" => (no_init, signal_reset_in_dependent),
         "signal_reset_urg_in_async_dependent" => (no_init, signal_reset_in_dependent),
+        "signal_reset_usr1_after_repeating_stop" => (no_init, signal_reset_after_repeating_stop),
+        "signal_reset_urg_after_repeating_stop" => (no_init, signal_reset_after_repeating_stop),
         "get_tid_loop_thread" => (no_init, get_tid_loop_thread),
         // tests/cases/io: the cases with tasks
         "lock_blocked" => (no_init, lock_blocked),
@@ -1640,6 +1642,56 @@ fn signal_reset_in_dependent(args: &[String]) -> u32 {
     drop(pa);
     kill_self(&name);
     let (b, pb) = tb.get();
+    println("B listening");
+    let _ = Handle::stdout().flush();
+    kill_self(&name);
+    sleep(300);
+    println(&format!("B got: {}", finished(&pb)));
+    let _ = b.stop();
+    0
+}
+
+// tests/cases/uvloop/signal_reset_*_after_repeating_stop.lean (AR-50, part
+// 2): argv is the signal's Lean number, its name for `kill`, the native busy
+// loop's length and the port's spin in ms
+fn signal_reset_after_repeating_stop(args: &[String]) -> u32 {
+    let num: i32 = args[0].parse().expect("an Int");
+    let name = args[1].clone();
+    let ms = to_nat(&args[3]);
+    let pid = lio::get_pid();
+    let w: USignal = Signal::new(num, true);
+    let pw = uv_ok(w.next(UvPromise::new));
+    let o: USignal = Signal::new(num, false);
+    let w2 = w.clone();
+    let kill_name = name.clone();
+    let tt = map_task(
+        move |_: Option<i64>| {
+            let po = uv_ok(o.next(UvPromise::new));
+            let tb = map_task(
+                move |_: Option<i64>| {
+                    let b: USignal = Signal::new(num, false);
+                    let pb = uv_ok(b.next(UvPromise::new));
+                    (b, pb)
+                },
+                po.result_opt(),
+                PRIO_DEFAULT,
+                true,
+                true,
+            );
+            drop(po);
+            spawn_sh(&format!("sleep 0.1; kill -{kill_name} {pid}"));
+            spin_ms(ms);
+            uv_ok(w2.stop());
+            tb
+        },
+        pw.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(pw);
+    kill_self(&name);
+    let (b, pb) = tt.get().get();
     println("B listening");
     let _ = Handle::stdout().flush();
     kill_self(&name);

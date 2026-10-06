@@ -394,7 +394,9 @@ Batch sched-io (2026-10-04) makes such calls cooperate.</p>
   <li>Signals use signal-hook's safe API: flags, native's own signal pipe that the loop watches, and a conditional default action.
     When no watcher listens, a signal has its default action again, as natively.
     A second signal to a one-shot watcher takes the default action too, as libuv's reset handler does.
-    When the default action ignores the signal, the loop drops the second signal.</li>
+    When the default action ignores the signal, the loop drops the second signal.
+    When two handlers run at the same time on two threads, the loop can end the process for the second signal.
+    A signal that came before a one-shot registration does not use up that registration.</li>
   <li>Recorded deviations: SIGIO ends the program with status 157 instead of its signal.
     SIGTSTP, SIGTTIN and SIGTTOU stop it with SIGSTOP.</li>
   <li><code>Loop.alive</code> is true, and <code>Loop.configure</code> changes nothing a program can see.</li>

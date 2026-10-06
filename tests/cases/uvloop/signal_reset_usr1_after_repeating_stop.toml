@@ -1,0 +1,5 @@
+id = "signal_reset_usr1_after_repeating_stop"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime's judgement of AR-50's second point (fixes-11: a signal that came before a one-shot registration does not spend it)"
+streams = "separate"
