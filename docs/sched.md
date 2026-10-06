@@ -648,15 +648,25 @@ native's threads allow.
   again every 1 to 16 ms. `waitid(WNOWAIT)` looks without reaping, so the
   `waitpid` that follows gives the status, or `ECHILD` for a pid that is no
   child, as without the wait.
-- **The runtime's `IO.Process.output`** waits for both pipes with
-  `poll_fds` before its `poll(2)` and its reads.
+- **The runtime's `IO.Process.output`** waits for both pipes, and for room
+  in its input's pipe while it writes the input (LB-40), with `poll_fds`
+  before its `poll(2)` and its reads (case
+  `taskio/output_input_while_ticking`).
 
 Regular files, block devices and directories never block (natively they
 never give `EAGAIN` either), so their calls stay plain. So do descriptors
-already in non-blocking mode, whose `EAGAIN` is the result (the standard
-input of a child that could not start, `fdopen_bounded_pipe`). Each stream
-finds out which it is once, with `fstat` and `F_GETFL`, the first time a
-cooperating call needs it; the modelled `errno` is not touched.
+in non-blocking mode, whose `EAGAIN` is the result (the standard input of a
+child that could not start, `fdopen_bounded_pipe`). Each stream finds out
+its file type once, with `fstat`, the first time a cooperating call needs
+it; its non-blocking mode is read at every cooperating call (`F_GETFL`, one
+system call), since the flag belongs to the open file description, which
+the processes sharing it (the parent, a child spawned with `inherit`) may
+change at any time. Read once, a descriptor made blocking later got a plain
+call that blocked the scheduler's only thread, so a task that would make
+it ready never ran and the program waited for good; one made non-blocking
+later waited where native's call returns `EAGAIN` (io bug hunt HIO-06,
+io-fixes-1; unit test `the_nonblocking_mode_is_read_at_every_call`). The
+modelled `errno` is not touched.
 
 **Stream locks.** A stream's `FILE` lock (a `std::sync::Mutex`) stays held
 across such a wait, as glibc's lock stays held while its thread blocks in

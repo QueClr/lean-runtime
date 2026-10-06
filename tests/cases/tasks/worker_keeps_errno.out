@@ -1,2 +1,2 @@
-B's getLine: inappropriate type (error code: 20, not a directory)
-main's getLine: already exists (error code: 17, file already exists)
+B's getLine: ok "line1\n"
+main's getLine: ok ""

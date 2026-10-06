@@ -13,8 +13,9 @@
 //! `argv[0]`, `IO.appPath` and the environment the checker gives it; every
 //! twin's stdout, stderr and exit code must equal the case's expected
 //! outcome: native Lean 4.34.0's, or the correct one where native is wrong
-//! (LB-03, LB-14, LB-15, LB-16, LB-17 in `docs/lean-bugs.md`; native's is
-//! then in the case's `native` field), or the documented alternative where
+//! (LB-03, LB-14, LB-15, LB-16, LB-17, LB-40, LB-41, LB-42, LB-44 in
+//! `docs/lean-bugs.md`; native's is then in the case's `native` field, or,
+//! for `failed_child_order`, in its comment), or the documented alternative where
 //! LB-17's fix costs a descriptor (LIO2-05, `pipe_null_two_free`).
 //!
 //! With the feature `proc-title`, the crate's own ELF constructor
@@ -2807,6 +2808,57 @@ fn failed_child_order(args: &[String]) -> R<()> {
     eprintln(&format!("waited {code}"))
 }
 
+/// The case `process/output_large_input` (LB-40).
+fn output_large_input(args: &[String]) -> R<()> {
+    let n: usize = args[0].parse().unwrap();
+    let input = "a".repeat(n);
+    let out = cmd("cat").output(Some(&input))?;
+    println(&format!(
+        "cat {n}: exit {}, {} bytes back, same {}, stderr {}",
+        out.exit_code,
+        out.stdout.chars().count(),
+        out.stdout == input,
+        quote(&out.stderr)
+    ))
+}
+
+/// The case `process/failed_child_pending_stdout` (LB-42).
+fn failed_child_pending_stdout(args: &[String]) -> R<()> {
+    print("pending ")?;
+    let out = cmd(args.first().map_or("no-such-program-xyz", String::as_str)).output(None)?;
+    println(&format!(
+        "\nexit {} stdout {} stderr {}",
+        out.exit_code,
+        quote(&out.stdout),
+        quote(&out.stderr)
+    ))
+}
+
+/// The case `process/spawn_late_pipe_fails` (LB-44; under `ulimit -n 64`).
+fn spawn_late_pipe_fails(args: &[String]) -> R<()> {
+    let free: usize = args[0].parse().unwrap();
+    let exhaust = || {
+        let mut hs = Vec::new();
+        while let Ok(h) = Handle::open(b"/dev/null", FsMode::Read) {
+            hs.push(h);
+        }
+        hs
+    };
+    let mut hs = exhaust();
+    hs.truncate(hs.len() - free);
+    match cmd("true").stdio(Piped, Piped, Piped).spawn() {
+        Ok(_) => println("spawn ok")?,
+        Err(e) => println(&format!("spawn failed: {}", to_string(&e)))?,
+    }
+    let more = exhaust();
+    println(&format!(
+        "free after the failed spawn: {} of {free}",
+        more.len()
+    ))?;
+    drop(more);
+    println(&format!("handles kept open: {}", !hs.is_empty()))
+}
+
 fn spawn_fds_exhausted(_: &[String]) -> R<()> {
     let mut hs = Vec::new();
     while let Ok(h) = Handle::open(b"/dev/null", FsMode::Read) {
@@ -3022,6 +3074,9 @@ const TWINS: &[(&str, Twin)] = &[
     ("null_open_fails", null_open_fails),
     ("pipe_null_two_free", pipe_null_two_free),
     ("failed_child_order", failed_child_order),
+    ("output_large_input", output_large_input),
+    ("failed_child_pending_stdout", failed_child_pending_stdout),
+    ("spawn_late_pipe_fails", spawn_late_pipe_fails),
     ("spawn_fds_exhausted", spawn_fds_exhausted),
     ("group_missing_errno", group_missing_errno),
     ("dbg_trace_current_stderr", dbg_trace_current_stderr),

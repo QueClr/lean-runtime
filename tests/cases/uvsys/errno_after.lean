@@ -6,7 +6,9 @@ temporary file and directory (libuv's `uv__fs_work` sets it to 0, glibc's `__gen
 restores it), `osGetPriority` (libuv clears it before `getpriority`), `osGetPasswd`, `osGetGroup`
 and `osHomedir` without `HOME` (glibc's `getpwuid_r`/`getgrgid_r` leave it at their result, 0).
 Errors libuv makes itself leave it alone (`ENOBUFS`, `E2BIG`, the priority range check, the empty
-`TMPDIR`); a failing system call sets it (`ESRCH`; `getcwd`'s, below). Based on the reviewer's native repro (review-io2/repro/errno). -/
+`TMPDIR`); a failing system call sets it (`ESRCH`; `getcwd`'s, below). Based on the reviewer's native repro (review-io2/repro/errno).
+That is native's outcome (`native`): since LB-41 the correct `getLine` reports only its own error,
+so each probe's `getLine` reads its line. -/
 open Std.Internal.UV.System
 
 def probe (label : String) (act : IO Unit) : IO Unit := do

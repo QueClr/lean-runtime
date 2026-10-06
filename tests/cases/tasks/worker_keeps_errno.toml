@@ -3,3 +3,8 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "leanrs's review of lean-runtime threads-2 (AR-24 extended, 2026-10-04): a pool worker keeps its errno"
 streams = "separate"
+deviations = { lean2rr = "LB-41", leanrs = "LB-41" }
+native = { stdout = "B's getLine: inappropriate type (error code: 20, not a directory)\nmain's getLine: already exists (error code: 17, file already exists)\n", stderr = "", code = "0" }
+# LB-41 (io-fixes-1): `getLine` reports only its own error, so the probe's `getLine` reads its
+# line and the modelled `errno` no longer shows: the expected files are that correct outcome.
+# Native's outcome, each `getLine` failing with the `errno` C holds then, is `native`.

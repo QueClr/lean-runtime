@@ -141,8 +141,8 @@ So the oracle reads its inputs at run time.</p>
   <li>A case that natively never ends records the output before its timeout.</li>
   <li><code>scripts/cases.py check --exe-dir DIR</code> runs a translator's build of each case and compares it with the recorded files.</li>
   <li>Each run starts in a fresh directory, with an empty environment, pipes for the three streams, a memory cap and a CPU-time limit.</li>
-  <li>There are 273 program cases, in these areas:
-    <ul class="areas"><li><code>clock/</code> 1</li><li><code>cse/</code> 1</li><li><code>debug/</code> 3</li><li><code>folding/</code> 3</li><li><code>io/</code> 30</li><li><code>net/</code> 27</li><li><code>panics/</code> 1</li><li><code>process/</code> 32</li><li><code>refs/</code> 5</li><li><code>streams/</code> 4</li><li><code>sync/</code> 4</li><li><code>taskio/</code> 5</li><li><code>tasks/</code> 92</li><li><code>temp/</code> 7</li><li><code>time/</code> 3</li><li><code>uvloop/</code> 41</li><li><code>uvsys/</code> 14</li></ul></li>
+  <li>There are 279 program cases, in these areas:
+    <ul class="areas"><li><code>clock/</code> 1</li><li><code>cse/</code> 1</li><li><code>debug/</code> 3</li><li><code>folding/</code> 3</li><li><code>io/</code> 32</li><li><code>net/</code> 27</li><li><code>panics/</code> 1</li><li><code>process/</code> 35</li><li><code>refs/</code> 5</li><li><code>streams/</code> 4</li><li><code>sync/</code> 4</li><li><code>taskio/</code> 6</li><li><code>tasks/</code> 92</li><li><code>temp/</code> 7</li><li><code>time/</code> 3</li><li><code>uvloop/</code> 41</li><li><code>uvsys/</code> 14</li></ul></li>
 </ul>
 <p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
 For a translator's own deviation, the expected output stays native's, and the deviation's outcome is also allowed.

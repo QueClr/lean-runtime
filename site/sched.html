@@ -365,6 +365,8 @@ Batch sched-io (2026-10-04) makes such calls cooperate.</p>
   <li><strong>The same bytes and errors.</strong> Each call is the blocking call, made once it no longer blocks.
     Only the interleaving changes, to one that native's threads also allow.</li>
   <li><strong>Regular files</strong> never block, so their calls stay plain, as natively.</li>
+  <li><strong>Non-blocking descriptors</strong> stay plain too, so their <code>EAGAIN</code> is the result, as natively.
+    The mode is read at every call, because another process can change it.</li>
   <li><strong>Stream locks.</strong> A task blocked in a read keeps its stream's lock, as glibc does.
     Another context that wants the stream waits for it without blocking the thread.
     This holds for a lock held across any wait.</li>

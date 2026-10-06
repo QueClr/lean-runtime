@@ -14,8 +14,8 @@
 //! wrappers that start this binary as each case's twin, so every twin's
 //! stdout, stderr and exit code must equal the case's expected outcome:
 //! native Lean 4.34.0's, or the correct one where native is wrong (LB-02,
-//! LB-03 in `docs/lean-bugs.md`; native's is then in the case's `native`
-//! field). A twin whose case is missing fails the run (`NO CASE`).
+//! LB-03, LB-41, LB-43 in `docs/lean-bugs.md`; native's is then in the
+//! case's `native` field). A twin whose case is missing fails the run (`NO CASE`).
 //!
 //! In a threads build (feature `threads`) every twin runs inside a task,
 //! on a worker thread, which `main` waits for (`tests/in_task/mod.rs`):
@@ -238,6 +238,39 @@ fn random_open_first(args: &[String]) -> R<()> {
         println(&format!("getRandomBytes {n}: {r}"))?;
     }
     println(&format!("handles kept open: {}", !hs.is_empty()))
+}
+
+/// The case `io/random_overflow_fd` (LB-43; under `ulimit -n 64`).
+fn random_overflow_fd(args: &[String]) -> R<()> {
+    let (huge, small, free) = (nat(&args[0]), nat(&args[1]), nat(&args[2]));
+    let mut hs = Vec::new();
+    while let Ok(h) = open("/dev/null", FsMode::Read) {
+        hs.push(h);
+    }
+    hs.truncate(hs.len() - free);
+    for n in [huge, huge, small] {
+        let r = show_err(random_bytes(n), |b| format!("{} bytes", b.len()));
+        println(&format!("getRandomBytes {n}: {r}"))?;
+    }
+    println(&format!("handles kept open: {}", !hs.is_empty()))
+}
+
+/// The case `io/getline_after_error` (LB-41).
+fn getline_after_error(args: &[String]) -> R<()> {
+    let text: String = args.iter().map(|a| format!("{a}\n")).collect();
+    write_file("f.txt", &text)?;
+    let h = open("f.txt", FsMode::Read)?;
+    println(&format!("getLine: {}", quote(&get_line(&h)?)))?;
+    if let Err(e) = h.put_str(b"x") {
+        println(&format!("putStr: {}", to_string(&e)))?;
+    }
+    for _ in 0..args.len() {
+        match get_line(&h) {
+            Ok(l) => println(&format!("getLine: {}", quote(&l)))?,
+            Err(e) => println(&format!("getLine: error: {}", to_string(&e)))?,
+        }
+    }
+    Ok(())
 }
 
 fn exit_flush_order(args: &[String]) -> R<()> {
@@ -862,6 +895,8 @@ const TWINS: &[(&str, Twin)] = &[
     ("allocprof", allocprof),
     ("startup_rings", startup_rings),
     ("random_open_first", random_open_first),
+    ("random_overflow_fd", random_overflow_fd),
+    ("getline_after_error", getline_after_error),
     ("title_fd_limit", title_fd_limit),
 ];
 

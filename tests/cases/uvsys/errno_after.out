@@ -1,30 +1,30 @@
-baseline: invalid argument (error code: 9, bad file descriptor)
-createTempFile: unknown system error 0 (error code: 0)
-createTempDir: unknown system error 0 (error code: 0)
-osGetPriority: unknown system error 0 (error code: 0)
-osGetPasswd: unknown system error 0 (error code: 0)
-osGetGroup: unknown system error 0 (error code: 0)
-osTmpdir: invalid argument (error code: 9, bad file descriptor)
+baseline: ok "line1\n"
+createTempFile: ok "line1\n"
+createTempDir: ok "line1\n"
+osGetPriority: ok "line1\n"
+osGetPasswd: ok "line1\n"
+osGetGroup: ok "line1\n"
+osTmpdir: ok "line1\n"
 osSetPriority 20 act: invalid argument (error code: 22, invalid argument)
-osSetPriority 20: invalid argument (error code: 9, bad file descriptor)
+osSetPriority 20: ok "line1\n"
 random big act: resource exhausted (error code: 7, argument list too long)
-random big: invalid argument (error code: 9, bad file descriptor)
+random big: ok "line1\n"
 osGetPriority negative pid act: no such thing (error code: 3, no such process)
-osGetPriority negative pid: no such thing (error code: 3, no such process)
-spawn and wait: invalid argument (error code: 9, bad file descriptor)
-output: invalid argument (error code: 9, bad file descriptor)
-cpuInfo: invalid argument (error code: 9, bad file descriptor)
+osGetPriority negative pid: ok "line1\n"
+spawn and wait: ok "line1\n"
+output: ok "line1\n"
+cpuInfo: ok "line1\n"
 cwd of 4096 bytes act: resource exhausted (error code: 105, no buffer space available)
-cwd of 4096 bytes: unknown system error 0 (error code: 0)
+cwd of 4096 bytes: ok "line1\n"
 cwd of 4297 bytes act: unsupported operation (error code: 34, result too large)
-cwd of 4297 bytes: unsupported operation (error code: 34, result too large)
-osHomedir with HOME: invalid argument (error code: 9, bad file descriptor)
-osHomedir without HOME: unknown system error 0 (error code: 0)
+cwd of 4297 bytes: ok "line1\n"
+osHomedir with HOME: ok "line1\n"
+osHomedir without HOME: ok "line1\n"
 createTempFile tmpdir error act: no such file or directory (error code: 2)
   file: 
-createTempFile tmpdir error: invalid argument (error code: 9, bad file descriptor)
-osTmpdir error: invalid argument (error code: 9, bad file descriptor)
+createTempFile tmpdir error: ok "line1\n"
+osTmpdir error: ok "line1\n"
 createTempFile tmpdir error act: resource exhausted (error code: 105, no buffer space available)
-createTempFile tmpdir error: invalid argument (error code: 9, bad file descriptor)
+createTempFile tmpdir error: ok "line1\n"
 osTmpdir error act: resource exhausted (error code: 105, no buffer space available)
-osTmpdir error: invalid argument (error code: 9, bad file descriptor)
+osTmpdir error: ok "line1\n"

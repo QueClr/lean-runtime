@@ -1004,22 +1004,34 @@ impl CFile {
     }
 
     /// `Handle.getLine`: `getc` up to and including `\n` (or to end of file or
-    /// an error), each byte appended to `out`; then an error indicator (set
-    /// now or by any earlier failure) is `Err(errno)`, and the caller drops the
-    /// bytes appended (Lean loses the line); otherwise end of file is cleared.
+    /// an error), each byte appended to `out`; then an error of this call is
+    /// `Err(errno)`, and the caller drops the bytes appended (Lean loses the
+    /// line); otherwise end of file is cleared.
+    ///
+    /// **LB-41** (`docs/lean-bugs.md`): the error indicator is cleared first,
+    /// so only this call's error is reported. Lean's `getLine` tests
+    /// `ferror` after its loop without clearing it before (io.cpp 659-660),
+    /// and the indicator stays set until end of file (`clearerr` at 662): one
+    /// failure (an `EAGAIN` of a non-blocking descriptor, a failed write on
+    /// the handle) makes every later `getLine` read its line and fail with
+    /// whatever `errno` holds, the line lost. Only `getLine` reads the
+    /// indicator, so `read`, `putStr`, `flush` and end of file stay as
+    /// natively.
     ///
     /// **A sink that stops** ([`ByteSink::stopped`]; AR-19): `get_line` asks
     /// the sink before each read of the descriptor and once the line is
     /// complete. Once the sink has stopped, `get_line` reads no further and
     /// returns `Err(ENOMEM)`; the bytes it took from the stream stay consumed
-    /// (the sink dropped them), and the indicators and the modelled `errno`
-    /// are left as they were. The glue, whose sink stopped, then ends the
+    /// (the sink dropped them), and the end-of-file indicator and the
+    /// modelled `errno` are left as they were (the error indicator is
+    /// cleared, as at every call). The glue, whose sink stopped, then ends the
     /// process with its out-of-memory report. Natively
     /// `std::string::push_back` throws `std::bad_alloc`, which nothing
     /// catches: libc++ prints `terminating due to uncaught exception of type
     /// std::bad_alloc` and aborts (status 134). With a sink that never stops
     /// (the default), the bytes and the system calls are those of before.
     pub fn get_line<S: ByteSink + ?Sized>(&mut self, out: &mut S) -> Result<(), i32> {
+        self.flags &= !ERR_SEEN;
         loop {
             // The bytes in the get area, up to a newline, in one copy.
             if self.rp < self.re {

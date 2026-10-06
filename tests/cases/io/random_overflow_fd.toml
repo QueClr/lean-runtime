@@ -1,0 +1,9 @@
+id = "random_overflow_fd"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime io bug hunt HIO-05 (env.rs forgot the descriptor, as io.cpp leaves it open); io-fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-43", leanrs = "LB-43" }
+native = { stdout = "getRandomBytes 18446744073709551615: error: resource exhausted (error code: 12, not enough memory)\ngetRandomBytes 18446744073709551615: error: resource exhausted (error code: 24, too many open files)\n  file: /dev/urandom\ngetRandomBytes 8: error: resource exhausted (error code: 24, too many open files)\n  file: /dev/urandom\nhandles kept open: true\n", stderr = "", code = "0" }
+# `expected` is the correct outcome: the descriptor closes after the size check. Native's outcome
+# is `native`: the first call leaks the last free descriptor, so the next two fail at the open.

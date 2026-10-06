@@ -6,6 +6,8 @@
 -- and `readlink` on a component that is not a link leaves EINVAL; an
 -- absolute path without components changes nothing (review RIO1-16, the
 -- reviewer's RealPathErrno; leanrs review F2). The paths come from argv.
+-- That is native's outcome (`native`): since LB-41 the correct `getLine`
+-- reports only its own error, so each `getLine` reads (the line, then "").
 
 def main (args : List String) : IO Unit := do
   let h ← IO.FS.Handle.mk args[0]! .read

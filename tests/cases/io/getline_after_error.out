@@ -1,0 +1,5 @@
+getLine: "one\n"
+putStr: invalid argument (error code: 9, bad file descriptor)
+getLine: "two\n"
+getLine: "three\n"
+getLine: ""

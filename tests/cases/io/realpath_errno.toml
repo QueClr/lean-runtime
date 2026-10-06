@@ -3,3 +3,8 @@ area = "io"
 lean_version = "4.34.0"
 source = "lean-runtime review io-1 RIO1-16 (review-io1/native/RealPathErrno.lean); leanrs review F2"
 streams = "separate"
+deviations = { lean2rr = "LB-41", leanrs = "LB-41" }
+native = { stdout = "putStr: invalid argument (error code: 9, bad file descriptor)\nrealPath ., getLine: unsupported operation (error code: 34, result too large)\nrealPath x.txt, getLine: invalid argument (error code: 22, invalid argument)\nrealPath /, getLine: invalid argument (error code: 22, invalid argument)\nrealPath ., getLine: unsupported operation (error code: 34, result too large)\n", stderr = "", code = "0" }
+# LB-41 (io-fixes-1): `getLine` reports only its own error, so the probe's `getLine` reads its
+# line and the modelled `errno` no longer shows: the expected files are that correct outcome.
+# Native's outcome, each `getLine` failing with the `errno` C holds then, is `native`.

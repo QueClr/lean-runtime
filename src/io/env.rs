@@ -116,15 +116,16 @@ pub struct RandomSource {
 /// (io.cpp 866-877): `n = 0` opens nothing (an empty source); otherwise
 /// `/dev/urandom` is opened with `O_RDONLY | O_CLOEXEC`, an error naming it,
 /// and an `n` whose array would overflow (Lean's 24-byte header) fails with
-/// `ENOMEM`, the descriptor left open as Lean leaves it. The caller then
-/// allocates `n` bytes and fills them ([`RandomSource::fill`]).
+/// `ENOMEM`, the descriptor closed (Lean leaves it open for good: LB-43,
+/// `docs/lean-bugs.md`). The caller then allocates `n` bytes and fills them
+/// ([`RandomSource::fill`]).
 pub fn open_random(n: usize) -> Result<RandomSource, IoError> {
     if n == 0 {
         return Ok(RandomSource { file: None });
     }
     let f = open_urandom()?;
     if sarray_would_overflow(n) {
-        std::mem::forget(f);
+        drop(f);
         return Err(IoError::decode_io_error(ENOMEM, None));
     }
     Ok(RandomSource { file: Some(f) })
@@ -167,7 +168,8 @@ impl RandomSource {
 /// `IO.getRandomBytes`'s checks before its array exists
 /// (`lean_io_get_random_bytes`): for `n > 0` whose array would overflow,
 /// Lean opens `/dev/urandom` first (an open error names it), then fails with
-/// `ENOMEM` and leaves the descriptor open, as here. A translator calls it,
+/// `ENOMEM`; it leaves the descriptor open for good, where this closes it
+/// (LB-43). A translator calls it,
 /// allocates `n` bytes, then calls [`get_random_bytes`] on them. That
 /// opens `/dev/urandom` after the allocation; [`open_random`] keeps Lean's
 /// order.
@@ -175,8 +177,8 @@ pub fn check_random_size(n: usize) -> Result<(), IoError> {
     if n == 0 || !sarray_would_overflow(n) {
         return Ok(());
     }
-    let f = open_urandom()?;
-    std::mem::forget(f);
+    // opened first, so an open error wins (AR-1), then closed
+    drop(open_urandom()?);
     Err(IoError::decode_io_error(ENOMEM, None))
 }
 
@@ -265,4 +267,65 @@ pub fn mono_ms_now() -> u64 {
 /// milliseconds.
 pub fn sleep(ms: u32) {
     std::thread::sleep(std::time::Duration::from_millis(u64::from(ms)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// LB-43: a size whose array would overflow fails with `ENOMEM` after the
+    /// open of `/dev/urandom` (an open error still wins, AR-1) and closes the
+    /// descriptor, so the calls do not use up the descriptors (natively each
+    /// leaks one). In a child process with `RLIMIT_NOFILE` at 64 and one
+    /// descriptor free, where no other test opens descriptors meanwhile:
+    /// every call reaches the size check, and a small request still gets its
+    /// bytes after them.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn an_overflowing_size_closes_the_descriptor() {
+        if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "io::env::tests::an_overflowing_size_closes_the_descriptor",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("LEAN_RUNTIME_TEST_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            return;
+        }
+        let lim = rustix::process::getrlimit(rustix::process::Resource::Nofile);
+        rustix::process::setrlimit(
+            rustix::process::Resource::Nofile,
+            rustix::process::Rlimit {
+                current: Some(64),
+                maximum: lim.maximum,
+            },
+        )
+        .unwrap();
+        let mut fill = Vec::new();
+        while let Ok(f) = std::fs::File::open("/dev/null") {
+            fill.push(f);
+        }
+        fill.pop();
+        let enomem = IoError::decode_io_error(ENOMEM, None);
+        for _ in 0..3 {
+            assert_eq!(open_random(usize::MAX).unwrap_err(), enomem);
+            assert_eq!(check_random_size(usize::MAX).unwrap_err(), enomem);
+        }
+        let mut b = [0u8; 8];
+        open_random(8).unwrap().fill(&mut b).unwrap();
+        get_random_bytes(&mut b).unwrap();
+        // with no descriptor left, the open's error comes first (AR-1)
+        let last = std::fs::File::open("/dev/null").unwrap();
+        let emfile = open_random(usize::MAX).unwrap_err();
+        assert!(
+            matches!(emfile, IoError::ResourceExhausted(Some(_), 24, _)),
+            "{emfile:?}"
+        );
+        drop((fill, last));
+    }
 }

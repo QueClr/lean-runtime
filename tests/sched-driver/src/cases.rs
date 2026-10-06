@@ -264,6 +264,10 @@ pub const CASES: &[(&str, Case)] = &[
     ("task_reads_main_writes", (no_init, task_reads_main_writes)),
     ("wait_in_task", (no_init, wait_in_task)),
     ("output_while_ticking", (no_init, output_while_ticking)),
+    (
+        "output_input_while_ticking",
+        (no_init, output_input_while_ticking),
+    ),
     // threads mode, batch T3: cases that need real contention
     ("wait_chain_beyond_pool", (no_init, wait_chain_beyond_pool)),
     ("wait_any_faster", (no_init, wait_any_faster)),
@@ -3085,6 +3089,63 @@ fn output_while_ticking(args: &[String]) -> u32 {
         "output: {code} {} {}",
         quote(&String::from_utf8_lossy(&out)),
         quote(&String::from_utf8_lossy(&err))
+    ));
+    ticker.get();
+    println("done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args[0]!.toNat!
+//   let ticks := args[1]!.toNat!
+//   let ticker ← IO.asTask do
+//     for i in [0:ticks] do
+//       IO.sleep 50
+//       IO.println s!"ticker: {i}"
+//   let input := "".pushn 'a' n
+//   let o ← IO.Process.output { cmd := "sh", args := #["-c", "sleep \"$1\"; cat", "sh", args[2]!] } (some input)
+//   IO.println s!"output: {o.exitCode}, {o.stdout.length} bytes back, same {decide (o.stdout = input)}"
+//   let _ ← IO.wait ticker
+//   IO.println "done"
+//
+// The runtime's `output` writes the input while it reads both pipes (LB-40):
+// its wait for room in the input's pipe lets the ticker run.
+fn output_input_while_ticking(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]) as usize;
+    let ticks = to_nat(&args[1]);
+    let ticker = as_task(
+        move || {
+            for i in 0..ticks {
+                sleep(50);
+                println(&format!("ticker: {i}"));
+            }
+        },
+        PRIO_DEFAULT,
+    );
+    let input = vec![b'a'; n];
+    let script = "sleep \"$1\"; cat";
+    let a: [&[u8]; 4] = [b"-c", script.as_bytes(), b"sh", args[2].as_bytes()];
+    let spawn_args = lean_runtime::io::process::SpawnArgs {
+        cmd: b"sh",
+        args: &a,
+        cwd: None,
+        env: &[],
+        inherit_env: true,
+        setsid: false,
+    };
+    // a process spawn is an effect point
+    lean_runtime::sched::effect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = ok(lean_runtime::io::process::output(
+        &spawn_args,
+        Some(&input),
+        &mut out,
+        &mut err,
+    ));
+    println(&format!(
+        "output: {code}, {} bytes back, same {}",
+        out.len(),
+        out == input
     ));
     ticker.get();
     println("done");

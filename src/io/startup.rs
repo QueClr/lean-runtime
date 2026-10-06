@@ -26,8 +26,9 @@
 //!
 //! **The translator's glue duties** at startup (review RIO1-03):
 //! - ignore `SIGPIPE` before Lean code runs: Rust's `lang_start` does it for a
-//!   Rust `main`; an entry that is not `lang_start` (lean2rr's) must do it
-//!   itself;
+//!   Rust `main`, which both translators' executables have (lean2rr's are
+//!   built around Reussir's launcher, a Rust `fn main`); an entry that is not
+//!   `lang_start` must do it itself;
 //! - get native's startup descriptors opened before Rust's runtime starts:
 //!   - **with the feature `startup-fds`** (lean2rr), the crate's own ELF
 //!     constructor opens them (`.init_array.00101`, a native quirk written

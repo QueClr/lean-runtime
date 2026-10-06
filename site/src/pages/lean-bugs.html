@@ -103,6 +103,22 @@ So a NaN, an infinity, <code>-0.0</code> and a negative <code>x</code> lose thei
 It clamps <code>i</code> to the <code>int</code> range and calls <code>scalbn</code>, which gives a zero or an infinity with the sign of <code>x</code>.
 A NaN, an infinity and a zero stay as they are.
 Its rows are <code>float/scaleb*</code> with an exponent outside the C <code>int</code> range.</td></tr>
+<tr id="lb-40"><td>LB-40</td><td><code>IO.Process.output</code> with an input writes all of it before it reads the child's output.
+A child that fills its output pipe first, such as <code>cat</code> with 1 MiB, then waits for good, and so does the program.</td><td>lean-runtime writes the input while it reads both output pipes (<a href="io.html#processes">io</a>).
+A write error still ends <code>output</code> first, as natively.</td></tr>
+<tr id="lb-41"><td>LB-41</td><td>After one failed read or write on a handle, every later <code>getLine</code> reads its line, then fails with an old <code>errno</code>.
+The line is lost.</td><td><code>getLine</code> clears the error flag first, so it reports only its own error.
+So the <code>errno</code> model no longer shows through <code>getLine</code>.</td></tr>
+<tr id="lb-42"><td>LB-42</td><td>When a child cannot start, the forked child writes its copy of the parent's pending output before its message.
+The bytes appear twice, and <code>output</code> returns them as the child's output.</td><td>The child writes only its message.
+The parent's pending bytes stay with the parent (<a href="io.html#processes">io</a>).</td></tr>
+<tr id="lb-43"><td>LB-43</td><td><code>IO.getRandomBytes</code> with a size whose array would overflow fails, but it keeps <code>/dev/urandom</code> open.
+Each such call costs one descriptor.</td><td>The descriptor closes before the error returns.</td></tr>
+<tr id="lb-44"><td>LB-44</td><td>A spawn that fails at its second or third pipe keeps the pipes that it already made open.</td><td>The pipes made before the failure close.
+lean-runtime always did this.</td></tr>
+<tr><td colspan="3">The io bug hunt found LB-40 to LB-44 on 2026-10-06.
+Batch <code>io-fixes-1</code> fixed LB-40 to LB-43 and recorded LB-44.
+Their cases are in <code>process/</code>, <code>io/</code> and <code>taskio/</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>
@@ -132,6 +148,13 @@ Until a judge decides, lean-runtime and both translators follow native.</p>
 <tr id="lb-38"><td>LB-38</td><td><code>ByteArray.get!</code> and <code>FloatArray.get!</code> out of bounds return 0 with no panic message.</td><td>Their Lean definitions use <code>xs[i]!</code>, which prints a message.
 The docstring of <code>ByteArray.get!</code> says that it panics.
 The value is the same, so only the message is different.</td></tr>
+<tr id="lbc-01"><td>LBC-01</td><td><code>readDir</code> stops at a failed <code>readdir</code> and returns a short list as if it were complete.</td><td>No native repro yet: it needs a file system that fails during a listing.</td></tr>
+<tr id="lbc-02"><td>LBC-02</td><td>On a terminal, <code>putStr</code> succeeds when the flush of its line fails, and the line is lost.
+glibc empties the buffer after the failed write, so no later call reports the error.</td><td>No native repro yet. It is what <code>fwrite</code> does for every C program on glibc.</td></tr>
+<tr id="lbc-03"><td>LBC-03</td><td><code>realPath</code> reports every failure as <code>no such file or directory</code>, also a permission error.</td><td>No native repro yet. The helper's name shows a deliberate choice, and no data is lost.</td></tr>
+<tr id="lbc-04"><td>LBC-04</td><td>A <code>getLine</code> on a non-blocking descriptor that gets <code>EAGAIN</code> in the middle of a line fails, and the bytes that it took are lost.</td><td>Native does the same. glibc's <code>fgets</code> returns those bytes instead.</td></tr>
+<tr><td colspan="3">The io bug hunt and its review found LBC-01 to LBC-04 in the source on 2026-10-06.
+A confirmed one gets the next LB number.</td></tr>
 </tbody></table></div>
 
 <h2 id="not-bugs">Not bugs: followed as native</h2>

@@ -1,0 +1,9 @@
+id = "getline_after_error"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime io bug hunt HIO-02 (hunt-io native/sticky.py: an EAGAIN of a non-blocking stdin; here a failed write, deterministic); io-fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-41", leanrs = "LB-41" }
+native = { stdout = "getLine: \"one\\n\"\nputStr: invalid argument (error code: 9, bad file descriptor)\ngetLine: error: invalid argument (error code: 9, bad file descriptor)\ngetLine: error: invalid argument (error code: 9, bad file descriptor)\ngetLine: error: invalid argument (error code: 9, bad file descriptor)\n", stderr = "", code = "0" }
+# `expected` is the correct outcome: each `getLine` reports only its own error. Native's outcome
+# is `native`: the indicator the write set fails every later `getLine`, whose line is lost.

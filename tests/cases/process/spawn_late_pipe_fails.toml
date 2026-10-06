@@ -1,0 +1,9 @@
+id = "spawn_late_pipe_fails"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io bug hunt HIO-04 (hunt-io native/HuntIO.lean, mode leak); io-fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-44", leanrs = "LB-44" }
+native = { stdout = "spawn failed: resource exhausted (error code: 24, too many open files)\nfree after the failed spawn: 1 of 3\nhandles kept open: true\n", stderr = "", code = "0" }
+# `expected` is the correct outcome: the first pipe closes when the second fails. Native's outcome
+# is `native`: its two descriptors leak, so one of the three is free after the spawn.

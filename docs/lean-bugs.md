@@ -114,7 +114,7 @@ recorded here only; the Upstream field notes what upstream already knows.
 |---|---|
 | Summary | For each `null` standard stream, the program a child runs has one more open descriptor on `/dev/null`, inherited by its descendants |
 | Where | `src/runtime/process.cpp` `spawn`, in the forked child: `open("/dev/null", ...)` then `dup2(fd, n)` (474-477, 482-485, 490-493), without `O_CLOEXEC` and without closing `fd` before `execvp` (510); the pipes of the same function are `pipe2(fds, O_CLOEXEC)` (424) |
-| Why it is a bug | Lean's evident intent: PR #2138 (51e77d1, "Fix leaking of file descriptors", for #2137) made every descriptor the runtime opens close-on-exec (`Handle.mk`'s `O_CLOEXEC`, io.cpp 400-404: "do not inherit across process creation"; the pipes); this path was missed. A descriptor-auditing program reports it (lvm: "File descriptor 15 (/dev/null) leaked on lvm invocation"). A resource leak into the child, without data loss; the leaked descriptor takes the lowest number free in the forked child, above the parent's close-on-exec ones, so it shifts no descriptor the program sees first |
+| Why it is a bug | Lean's evident intent: PR #2138 (51e77d1, "Fix leaking of file descriptors into spawned processes", for #2137) made every descriptor the runtime opens close-on-exec (`Handle.mk`'s `O_CLOEXEC`, io.cpp 400-404: "do not inherit across process creation"; the pipes); this path was missed. A descriptor-auditing program reports it (lvm: "File descriptor 15 (/dev/null) leaked on lvm invocation"). A resource leak into the child, without data loss; the leaked descriptor takes the lowest number free in the forked child, above the parent's close-on-exec ones, so it shifts no descriptor the program sees first |
 | Native repro | The child lists `/proc/$$/fd`: with `stdin := .null` there is an extra `13 -> /dev/null`. Case: `process/null_fd_leak` |
 | Our behaviour | `/dev/null` is opened close-on-exec in the parent and `posix_spawn` `dup2`s it, so the program starts with 0-2 and what the parent lets through (`process::Ends::new`) |
 | Translators | leanrs is already correct; lean2rr's leanrt `proc.rs` leaks as native today (a fix and tests are coming on the lean2rr side) |
@@ -381,6 +381,71 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Upstream | Not reported (owner: record only) |
 | Verdict | Raised by the lean2rr-side semantics bug hunt (finding HS-01). Judged a bug by the coordinator, 2026-10-06, on the three points of the rule: the source lines (Lean 4.34.0's tree), why it is wrong (Lean's docstring, IEEE 754's `scaleB` and C's `scalbn`), and native rows with wrong values. Judged a bug independently by leanrs, 2026-10-06: "a true bug, not a spec choice". Every row's `native` field is recorded natively by `scripts/gen_rows.py`. The semantics-4 reviewer's own native repro on aarch64 (review RSE4, 2026-10-06) gives the same values for all 13 deviation rows with the rows' inputs, and `-0.0` for the two `INT_MIN` step rows |
 
+### LB-40: `IO.Process.output` with an input waits for good once the child fills a pipe
+
+| Field | Content |
+|---|---|
+| Summary | `IO.Process.output` with `some input` writes and flushes all of the input before it reads the child's standard output or error. A child that writes while it reads (`cat`, `tee`, any filter) fills its standard output's pipe (64 KiB) before it has read an input larger than the input's pipe holds. The child then waits for its output to be read, the parent waits for room in the input's pipe, and neither ever goes on |
+| Where | Lean code, `src/Init/System/IO.lean` 1544-1557 (`IO.Process.output`): `stdin.putStr input` and `stdin.flush` (1548-1549) come before `IO.asTask child.stdout.readToEnd` (1553) and `child.stderr.readToEnd` (1554). `putStr` is `lean_io_prim_handle_put_str` (io.cpp 671-680), a blocking `fwrite` into the pipe |
+| Why it is a bug | `output`'s documentation: "Runs a process to completion and captures its output and exit code. The child process is run with a null standard input or the specified input if provided, and the current process blocks until it has run to completion." The child never runs to completion: the program hangs on valid input. The definition reads standard output on a dedicated task so that neither output pipe can block the child, but it starts that task only after the whole input is written. This is the classic deadlock of a parent that writes a child's input before it reads the child's output (`pipe(7)`: a write blocks while the pipe is full) |
+| Native repro | `output { cmd := "cat" } (some s)` with 200 000 bytes (the io bug hunt's `HuntIO cat 200000`) or 1 048 576 bytes: native never returns (5 of 5 runs each). Cases: `process/output_large_input` (1 MiB to `cat`; `native`: the timeout, nothing printed; correct: `cat 1048576: exit 0, 1048576 bytes back, same true, stderr ""`) and `taskio/output_input_while_ticking` (the same with a task that prints meanwhile, through the single-thread scheduler's wait and in threads mode) |
+| Our behaviour | `process::output` writes the input while it reads both pipes: one `poll` waits for room in the input's pipe (whose parent end is made non-blocking; the child's end stays blocking) or for data on either output pipe, and the input's pipe closes once every byte is in (the child's end of file). A write error (`EPIPE` once the child has closed its standard input) still ends `output` at once, before any error of the reads, as Lean's `putStr` error comes first; the child is not waited. In a program with tasks, the wait lets the other tasks run (`io::coop::before_ready_any`). Unit test `io::process::tests::output_writes_the_input_while_reading` |
+| Translators | Both through lean-runtime's `io::process::output` (lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV15 (e)) |
+| Upstream | Not reported (owner: record only); unchanged on lean4 master |
+| Verdict | Raised by the lean2rr-side io bug hunt (finding HIO-01). Judged a bug by the coordinator, 2026-10-06, on the three points of the rule: the source lines (Init/System/IO.lean 1544-1557: `output` writes all of the input before it starts to read), why it is wrong (`output`'s docstring: "blocks until it has run to completion"), and native repros (the cases, 5 of 5 native runs each). Judged a true bug independently by leanrs, 2026-10-06, against 4.34.0. The io-fixes-1 reviewer checked the source lines (review RIO1, 2026-10-06). Fixed in batch io-fixes-1 |
+
+### LB-41: after one stream error, every later `getLine` fails and loses its line
+
+| Field | Content |
+|---|---|
+| Summary | Once a read or a write on a handle has failed, every later `Handle.getLine` on it reads its line, then fails with whatever `errno` holds: the line is lost. At end of file it fails too. Only a `Handle.read` that reaches end of file clears this state |
+| Where | `src/runtime/io.cpp` `lean_io_prim_handle_get_line` (645-668): the `getc_unlocked` loop (650-656), then `if (std::ferror(fp)) return io_result_mk_error(decode_io_error(errno, nullptr));` (659-660), checked before the end-of-file branch, whose `clearerr` (662) is the only place the error indicator is cleared; nothing clears it before the loop. C11 7.21.10.3: the error indicator stays set until `clearerr` or `rewind`. glibc 2.39 sets it on a failed `read(2)` (`_IO_new_file_underflow`, an `EAGAIN` of a non-blocking descriptor included) and on a failed write (`_IO_new_file_overflow`: `EBADF` on a read-only stream) |
+| Why it is a bug | `getLine`'s documentation (Init/System/IO.lean 856-861) says that it "Reads UTF-8-encoded text up to and including the next line break from the handle", and that after end of file "Subsequent reads may block and return more data". After one failure it never returns a line again: a line read successfully is discarded (data loss) and reported as an error that is not this call's (a stale `errno`, such as an earlier call's `EAGAIN` or `EBADF`). The code's own intent: it clears the indicators at end of file, so that they do not carry over to the next call (661-663), but not after an error. `ferror` after a `getc` loop tells an error from end of file only if the indicator was clear before the loop |
+| Native repro | A non-blocking standard input whose data arrives after the first `getLine` (the io bug hunt's `sticky.py`): the first call fails with `EAGAIN`, and both lines that arrive later are lost, each call failing again. Deterministic case `io/getline_after_error`: a failed `putStr` on a read-only handle, then three `getLine`s; native fails all three with `EBADF` (`two` and `three` lost; `native`), correct: `"two\n"`, `"three\n"`, `""`. The cases that observed the modelled `errno` through this state (`uvsys/errno_after`, `uvsys/group_missing_errno`, `io/realpath_errno`, `tasks/worker_keeps_errno`) keep native's outcome in `native` |
+| Our behaviour | `CFile::get_line` clears the error indicator first, so it reports only an error of its own call, with the `errno` that call set. Only `getLine` reads the indicator, so `read`, `putStr`, `flush` and end of file are unchanged. As a consequence, the modelled `errno` no longer shows through `getLine`: the four cases above expect each `getLine` to read its line, and the per-thread `errno` (AR-24) is checked by unit tests only. Unit tests `io::cfile::tests::get_line_reports_only_its_own_error` and `io_rows`'s `io_error_flag_after_a_failed_write` (A722 recorded native's sticky state) |
+| Translators | Both through lean-runtime's `io::cfile` (lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV20 (c)) |
+| Upstream | Not reported (owner: record only); unchanged on lean4 master |
+| Verdict | Raised by the lean2rr-side io bug hunt (finding HIO-02). Judged a bug by the coordinator, 2026-10-06, on the three points of the rule: the source lines (io.cpp 659-662: `ferror` is tested and the error returned without `clearerr`, which only the end-of-file path makes), why it is wrong (`getLine`'s docstring, and a line read successfully is lost), and native repros (`io/getline_after_error`, 5 of 5 native runs; the hunt's `sticky.py`). Judged a true bug independently by leanrs, 2026-10-06, against 4.34.0. The io-fixes-1 reviewer checked the source lines (review RIO1, 2026-10-06). Fixed in batch io-fixes-1 |
+
+### LB-42: a spawn whose child cannot start writes the parent's pending standard output a second time
+
+| Field | Content |
+|---|---|
+| Summary | When the program cannot be executed or `cwd` cannot be entered, Lean's forked child writes its copy of the parent's pending standard-output buffer before its message. The parent writes the same bytes again when it flushes, so they appear twice. With a piped standard output (`IO.Process.output`), the child's output is the parent's pending text |
+| Where | `src/runtime/process.cpp` `spawn`, in the forked child: `std::cerr << "could not change directory to " ...` (497) and `std::cerr << "could not execute external process '" ...` (511). `std::cerr` is tied to `std::cout` (C++ [narrow.stream.objects]: `cerr.tie()` returns `&cout`), so a write to it flushes `std::cout` first, which under `sync_with_stdio` flushes C's `stdout`: the buffer that `fork` (453) copied. The comment at 498-501 says that the child calls `_exit` "to avoid flushing stdio buffers that were inherited from the parent via `fork`. Those buffers share the underlying file descriptors with the parent, so flushing them here would duplicate the parent's buffered writes" |
+| Why it is a bug | The code's stated intent (that comment, and PR #13464 "fix: avoid duplicate buffered writes when `IO.Process.output` exec fails", which replaced `exit` by `_exit`) is that the child writes nothing of the parent's buffers. The tie still flushes standard output's buffer. Output is duplicated (on a terminal, and in a file or pipe the program writes to), and `output` returns the parent's own pending text as the child's standard output: wrong data from a documented call |
+| Native repro | `IO.print "pending "`, then `output { cmd := "no-such-program-xyz" }`: `stdout = "pending "`, and the program's own output has `pending ` twice, deterministically (case `process/failed_child_pending_stdout`, `native`; the io bug hunt's `HuntIO dup`). Correct: `stdout = ""`, and `pending ` once. The older cases `process/proc_output`, `proc_spawn` and `rt_process_spawn` had recorded the duplicate as the expected outcome (in `proc_spawn`, all of the program's buffered output so far appears twice); they now keep it in `native`. Native's three schedules of `process/failed_child_order` all have the duplicate; that case is hand-written (`hand_written`) |
+| Our behaviour | A child that cannot start (the stand-in `/bin/sh`, or the modelled child where none can start) writes only its message on its standard error; the parent's pending bytes stay the parent's (`process::stand_in`, `process::modelled_child`). Unit tests `failed_child_unread_stdout` and `modelled_child` in `io::process::tests` |
+| Translators | Both through lean-runtime's `io::process` (lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV15 (e), and DV15 (a)) |
+| Upstream | Not reported (owner: record only). PR #13464 changed only `exit` to `_exit`; the tie is unchanged on lean4 master |
+| Verdict | Raised by the lean2rr-side io bug hunt (finding HIO-03). Judged a bug by the coordinator, 2026-10-06, on the three points of the rule: the source lines (process.cpp 494-514: the comment at 498-501 states that the child must not flush the inherited stdio buffers, and the `std::cerr` line before each `_exit` flushes the tied `std::cout` copy), why it is wrong (that stated intent and PR #13464; duplicated output and wrong data from `output`), and native repros (`process/failed_child_pending_stdout`, 5 of 5 native runs, and the recorded cases). Judged a true bug independently by leanrs, 2026-10-06, against 4.34.0. The io-fixes-1 reviewer checked the source lines (review RIO1, 2026-10-06). Fixed in batch io-fixes-1 |
+
+### LB-43: `IO.getRandomBytes` of a size whose array would overflow leaks a descriptor
+
+| Field | Content |
+|---|---|
+| Summary | `IO.getRandomBytes n` with `n` above `USize.max - 24` (the array's 24-byte header would overflow its size) fails with `ENOMEM`, but leaves the `/dev/urandom` descriptor it opened open for good. Each such call costs one descriptor, so a program that retries runs out of them, and its later opens fail with `EMFILE` |
+| Where | `src/runtime/io.cpp` `lean_io_get_random_bytes` (872-933): `open("/dev/urandom", O_RDONLY \| O_CLOEXEC)` (878), then `if (lean_alloc_sarray_would_overflow(1, nbytes)) return io_result_mk_error(decode_io_error(ENOMEM, NULL));` (884-885) without the `close(fd_urandom)` that the read error path (917) and the success path (929) make |
+| Why it is a bug | A resource leak on an error path that the function's other paths handle (they close the descriptor). A catchable `IO.Error` leaves the process with one descriptor fewer each time |
+| Native repro | `ulimit -n 64`, one descriptor free: `getRandomBytes (2^64-1)` fails with `ENOMEM`; a second identical call fails at the open with `EMFILE` naming `/dev/urandom`, and so does `getRandomBytes 8` (case `io/random_overflow_fd`, `native`). Correct: `ENOMEM` twice, then 8 bytes |
+| Our behaviour | `env::open_random` and `env::check_random_size` open `/dev/urandom` first (an open error still comes first, AR-1), then close it before they return `ENOMEM`. Unit test `io::env::tests::an_overflowing_size_closes_the_descriptor` |
+| Translators | Both through lean-runtime's `io::env` (lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV15 (f)) |
+| Upstream | Not reported (owner: record only); unchanged on lean4 master |
+| Verdict | Raised by the lean2rr-side io bug hunt (finding HIO-05). Judged a bug by the coordinator, 2026-10-06, on the three points of the rule: the source lines (io.cpp 878-885: the `ENOMEM` return does not close the descriptor opened at 878), why it is wrong (a resource leak on an error path that the function's other paths handle), and a native repro (`io/random_overflow_fd`, 5 of 5 native runs). Judged a true bug independently by leanrs, 2026-10-06, against 4.34.0. The io-fixes-1 reviewer checked the source lines (review RIO1, 2026-10-06). Fixed in batch io-fixes-1 (lean-runtime had copied the leak with `std::mem::forget`) |
+
+### LB-44: a spawn that fails at a later pipe leaks the pipes made before it
+
+| Field | Content |
+|---|---|
+| Summary | `IO.Process.spawn` (and `output`) with more than one piped stream fails when a later `pipe2` fails (`EMFILE`, `ENFILE`), and leaves the pipes it already made open for good: two descriptors per pipe |
+| Where | `src/runtime/process.cpp` `spawn`: `auto stdin_pipe = setup_stdio(stdin_mode);`, then the same for standard output and error (442-444). `setup_stdio` (410-433) does `throw errno` when `pipe2` fails (424). The thrown `int` unwinds past `stdin_pipe`, an `optional<pipe>` of two raw descriptors, which no destructor closes |
+| Why it is a bug | A descriptor leak on an error path: the earlier pipes are neither handed to the program nor closed. Each failed spawn loses two or four descriptors, which makes the next failure (here caused by the descriptor limit itself) more likely |
+| Native repro | `ulimit -n 64`, three descriptors free, a spawn with three piped streams: it fails with `resource exhausted (error code: 24, too many open files)`, and afterwards one descriptor is free (case `process/spawn_late_pipe_fails`, `native`; the io bug hunt's `HuntIO leak`). Correct: three are free |
+| Our behaviour | `process::Ends::new` keeps every pipe end in an `OwnedFd`, so the pipes made before a failure close as the error returns. lean-runtime has always done this; the entry records native's bug so that it is not copied. Unit test `io::process::tests::a_failed_pipe_closes_the_earlier_ones` |
+| Translators | Both through lean-runtime's `io::process` (lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV15 (e)) |
+| Upstream | Not reported (owner: record only); unchanged on lean4 master |
+| Verdict | Raised by the lean2rr-side io bug hunt (finding HIO-04). Judged a bug by the coordinator, 2026-10-06, on the three points of the rule: the source lines (process.cpp 410-444: `setup_stdio`'s `throw errno` at 424 unwinds past the pipes made before it, raw descriptors that nothing closes), why it is wrong (a descriptor leak on an error path), and a native repro (`process/spawn_late_pipe_fails`, 5 of 5 native runs). Judged a true bug independently by leanrs, 2026-10-06, against 4.34.0. The io-fixes-1 reviewer checked the source lines (review RIO1, 2026-10-06). Recorded in batch io-fixes-1 (lean-runtime was already correct) |
+
 ## Limits
 
 Implementation caps where Lean's definition has a value but the runtime
@@ -440,6 +505,42 @@ changed as for any confirmed bug) or to "Not bugs".
 | Translators | lean2rr and leanrs follow native (no deviation) |
 | Upstream | Not reported |
 | Verdict | None yet: needs a judge. Raised by the lean2rr-side semantics bug hunt (finding HS-03), 2026-10-06 |
+
+The candidates of the io bug hunt and of its review (2026-10-06), found by
+reading the source, carry `LBC-nn` ids; a confirmed one gets the next
+`LB-nn`. Each needs a native repro first.
+
+### LBC-01: `readDir` returns a short list when `readdir` fails
+
+| Field | Content |
+|---|---|
+| Where | `src/runtime/io.cpp` `lean_io_read_dir` (1076-1098): `while (dirent * entry = readdir(dp))` ends at the first `NULL`, which is both the end of the directory and an error (POSIX `readdir`: `errno` set); the error is not checked |
+| Observation | A listing that fails part way (`EIO` on a failing disk, a `getdents64` error) returns the entries read so far as a complete listing. lean-runtime follows it: in `fs::read_dir` a failing entry ends the listing, its `errno` modelled |
+| Why not fixed now | No native repro: a `readdir` error in the middle of a listing needs a failing file system. The error to return (named after the directory, as `opendir`'s is) would be a new choice. The fix is small (`fs::read_dir` returns the error) once a judge confirms it |
+
+### LBC-02: `putStr` to a line-buffered stream succeeds and loses the line when the line's flush fails
+
+| Field | Content |
+|---|---|
+| Where | `src/runtime/io.cpp` `lean_io_prim_handle_put_str` (671-680) checks `fwrite`'s count. glibc 2.39's `_IO_fwrite` (libio/iofwrite.c) returns the full count when `_IO_sputn` gives `EOF`, which `_IO_new_file_xsputn` gives when every byte fits in the buffer but the flush of a line-buffered stream fails. That flush's `new_do_write` (libio/fileops.c) empties the put area after the `write(2)`, whatever it returned |
+| Observation | On a terminal (line buffered), `putStr "line\n"` whose write fails (`EIO` on a terminal that hung up, `EAGAIN` on a non-blocking one) reports success, and the line is lost: the put area is empty after the failed write, so a later `flush` has nothing to write and succeeds. Only the stream's error indicator records the failure; natively a later `getLine` on the same handle would report it only on a handle open for reading and writing (LB-41's stale error; on write-only stdout `getLine` fails with its own `EBADF`), and since LB-41 no Lean call reads it. So the loss is silent. lean-runtime's `CFile` follows glibc (`xsputn`'s `None`, `new_do_write`) |
+| Why not fixed now | No native repro of a Lean program yet (it needs a terminal whose write fails); the glibc mechanism is confirmed by a C check (io-fixes-1 review, 2026-10-06: `fwrite` returns the full count with the error indicator set, and a later `fflush` writes nothing). It is what `fwrite` does for every C program on glibc; whether Lean's `putStr` must report it (a line lost without an error) is for a judge to decide. Until then it stays a candidate, and the crate follows native |
+
+### LBC-03: `realPath` reports every failure as "no such file or directory"
+
+| Field | Content |
+|---|---|
+| Where | `src/runtime/io.cpp` `lean_io_realpath` (1014-1067): any failure of `realpath` returns `mk_file_not_found_error` (86-91), `noFileOrDirectory path 2 ""`, whatever `errno` is (`EACCES`, `ELOOP`, `ENAMETOOLONG`, `ENOTDIR`, `EIO`) |
+| Observation | A permission error or a loop of symbolic links reads as a missing file. lean-runtime follows it (`fs::real_path`, with `realpath`'s own code as the modelled `errno`) |
+| Why not fixed now | The helper's name (`mk_file_not_found_error`) shows a deliberate choice, and the result is still an error: no data is lost and nothing crashes. Another class would change the messages both translators match. `realPath`'s docstring names no errors, so a judge may find a documentation issue instead |
+
+### LBC-04: a `getLine` that gets `EAGAIN` in the middle of a line drops the bytes it took
+
+| Field | Content |
+|---|---|
+| Where | `src/runtime/io.cpp` `lean_io_prim_handle_get_line` (645-668): the bytes taken by the `getc_unlocked` loop are in `result`, and the `ferror` branch (659-660) returns the error without them. glibc 2.39's `fgets` (libio/iofgets.c) returns the bytes it read when the error is `EAGAIN` |
+| Observation | On a non-blocking descriptor (a pipe whose writer sends a line in pieces), a `getLine` that reads `hel`, then gets `EAGAIN`, fails, and `hel` is lost: the next `getLine` returns `lo\n`. lean-runtime follows native: `CFile::get_line` returns the error, and the glue drops the bytes appended (io bug hunt, review RIO1-08 of io-fixes-1) |
+| Why not fixed now | Native does the same, and `getLine`'s result has no form for "these bytes, then an error". Returning the bytes (as `fgets` does) or keeping them for the next call would be a new choice, for a judge |
 
 ## Not bugs (followed as native)
 

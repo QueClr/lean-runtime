@@ -1,11 +1,16 @@
 id = "failed_child_order"
 area = "process"
 lean_version = "4.34.0"
-source = "leanrs review of io-2, LRIO2-F2 (native/O.lean: the parent's line first in 49 of 50 native runs)"
+source = "leanrs review of io-2, LRIO2-F2 (native/O.lean: the parent's line first in 49 of 50 native runs); LB-42 (io bug hunt HIO-03, io-fixes-1)"
 streams = "merged"
-schedule_dependent = true
-# Native's schedules, each recorded (review RIO2-19); in 300 native runs on a loaded host (150 in
-# turn, 150 ten at a time): the parent's line first (283, failed_child_order.*); the child's
-# pending bytes and message first (13, .alt1.*); the parent's line between the child's two writes,
-# its flush of the pending bytes and its message (4, .alt2.*). `expect`'s few runs may miss the
-# rare ones and would then drop their files: re-record with `--runs 300` and keep any it misses.
+deviations = { lean2rr = "LB-42", leanrs = "LB-42" }
+hand_written = true
+# LB-42: the expected files are the correct outcomes, written by hand: the parent's line first
+# (failed_child_order.*) or the child's message first (.alt1.*), the parent's pending bytes once,
+# at its exit. Native's outcomes are wrong and schedule dependent (in 300 native runs on a loaded
+# host, review RIO2-19), each with the pending bytes twice, the child's copy flushed before its
+# message: "parent after spawn\npending could not execute external process
+# 'no-such-program-xyz'\nwaited 255\npending " (283); "pending could not execute external process
+# 'no-such-program-xyz'\nparent after spawn\nwaited 255\npending " (13); "pending parent after
+# spawn\ncould not execute external process 'no-such-program-xyz'\nwaited 255\npending " (4).
+# The deterministic case of LB-42 is process/failed_child_pending_stdout.

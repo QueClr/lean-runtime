@@ -137,25 +137,25 @@
 //!    disposition, so an ignored `SIGPIPE` stays ignored, as across `fork`.
 //! 6. **A child that cannot start.** Lean's `spawn` succeeds even when `cwd`
 //!    cannot be entered or the program cannot be executed: the forked child
-//!    flushes its copy of standard output's buffer (`std::cerr` is tied to
-//!    `std::cout`), writes `could not change directory to <cwd>` or `could
-//!    not execute external process '<cmd>'` and a newline to its standard
-//!    error, and exits with status 255. `posix_spawn` reports both failures
+//!    writes `could not change directory to <cwd>` or `could not execute
+//!    external process '<cmd>'` and a newline to its standard error, and
+//!    exits with status 255. Natively it first writes its copy of the
+//!    parent's pending standard-output bytes (`std::cerr` is tied to
+//!    `std::cout`, so the message flushes the buffer the fork copied), which
+//!    the parent writes again later; the runtime does not copy that (LB-42,
+//!    `docs/lean-bugs.md`). `posix_spawn` reports both failures
 //!    to the parent instead, and the runtime starts a stand-in, a `/bin/sh`
 //!    with the child's standard streams, in a new session when the program
 //!    failed and `setsid` was asked for (Lean's child calls `setsid()` after
 //!    `chdir`, before `execvp`). [`STAND_IN_LIFE`] after the spawn (about the
-//!    forked child's delay), the stand-in itself writes the pending bytes
-//!    (copied by `/bin/cat` from a pipe on its descriptor 4; like Lean's
-//!    child, it says nothing when nobody reads them) and the message
-//!    (its argument, by `printf`), and exits with 255. So the parent's next
-//!    lines come first, as natively, and the parent never blocks on a full
-//!    output pipe at the spawn. The child is a real process, with a pid,
+//!    forked child's delay), the stand-in itself writes the message (its
+//!    argument, by `printf`), and exits with 255. So the parent's next
+//!    lines come first, as natively. The child is a real process, with a pid,
 //!    `wait`, `kill` and `killpg`, and a standard input that closes when it
 //!    exits, as natively. Where the stand-in cannot be set up (no `/bin/sh`,
 //!    or no descriptor left for its pipes: `EMFILE`, which natively leaves
 //!    the forked child running), the runtime models that child: it writes the
-//!    pending bytes and the message at once; the pid is above any the kernel
+//!    message at once; the pid is above any the kernel
 //!    gives (counting down from `0x7FFFFFFF`); `wait` gives 255 once; `kill`
 //!    succeeds until it has been waited (`killpg` of a child that failed at
 //!    `chdir` finding no group); and a piped standard input takes a pipe's
@@ -191,7 +191,7 @@ use rustix::process::{Pid, Signal, WaitOptions};
 
 use super::error::{
     set_errno, IoError, E2BIG, EACCES, EAGAIN, ECHILD, EINVAL, EIO, EISDIR, ELOOP, EMFILE,
-    ENAMETOOLONG, ENFILE, ENODEV, ENOENT, ENOEXEC, ENOMEM, ENOTDIR, EPERM, ESRCH, ETIMEDOUT,
+    ENAMETOOLONG, ENFILE, ENODEV, ENOENT, ENOEXEC, ENOMEM, ENOTDIR, EPERM, EPIPE, ESRCH, ETIMEDOUT,
     ETXTBSY,
 };
 use super::handle::{FsMode, Handle};
@@ -1116,11 +1116,30 @@ impl Ends {
     }
 }
 
-/// A started child with the parent's ends: standard input as a handle,
-/// standard output and error as descriptors (`spawn` wraps them in handles,
-/// `output` reads them directly).
+/// The parent's end of a child's piped standard input.
+struct StdinEnd {
+    fd: OwnedFd,
+    /// The pipe's reader never reads (a modelled child): the end is
+    /// non-blocking, and a full pipe is `EPIPE`
+    /// ([`Handle::fdopen_bounded_pipe`]).
+    bounded: bool,
+}
+
+impl StdinEnd {
+    /// The end as `spawn`'s handle (`fdopen` `"w"`).
+    fn into_handle(self) -> Handle {
+        if self.bounded {
+            Handle::fdopen_bounded_pipe(self.fd)
+        } else {
+            Handle::fdopen(self.fd, FsMode::Write)
+        }
+    }
+}
+
+/// A started child with the parent's ends, as descriptors (`spawn` wraps
+/// them in handles, `output` writes and reads them directly).
 struct Started {
-    stdin: Option<Handle>,
+    stdin: Option<StdinEnd>,
     stdout: Option<OwnedFd>,
     stderr: Option<OwnedFd>,
     process: ChildProcess,
@@ -1133,7 +1152,7 @@ impl Started {
         drop(child);
         let [i, o, e] = parent;
         Started {
-            stdin: i.map(|fd| Handle::fdopen(fd, FsMode::Write)),
+            stdin: i.map(|fd| StdinEnd { fd, bounded: false }),
             stdout: o,
             stderr: e,
             process: ChildProcess {
@@ -1171,26 +1190,6 @@ fn fill_pipe(w: OwnedFd, bytes: Vec<u8>) -> Result<(), i32> {
         .map_err(thread_error)
 }
 
-/// What a child that cannot start writes on its output stream `target` (1 or
-/// 2): into the pipe's write end `end` for `piped`, on the parent's own
-/// descriptor for `inherit` (the forked child's inherited one), nowhere for
-/// `null`.
-fn deliver(cfg: Stdio, target: u8, end: Option<OwnedFd>, bytes: Vec<u8>) -> Result<(), i32> {
-    match (cfg, end) {
-        (Stdio::Piped, Some(w)) => fill_pipe(w, bytes),
-        (Stdio::Inherit, _) => {
-            let fd = if target == 1 {
-                rustix::stdio::stdout()
-            } else {
-                rustix::stdio::stderr()
-            };
-            write_all_fd(fd, &bytes);
-            Ok(())
-        }
-        _ => Ok(()),
-    }
-}
-
 // ---- a child that cannot start (module comment, item 6) ----
 
 /// How long the stand-in waits after the spawn before it writes and exits:
@@ -1203,40 +1202,30 @@ fn deliver(cfg: Stdio, target: u8, end: Option<OwnedFd>, bytes: Vec<u8>) -> Resu
 /// time.
 const STAND_IN_LIFE: std::time::Duration = std::time::Duration::from_millis(2);
 
-/// The stand-in's descriptors above the standard ones: the release pipe's
-/// read end and, when there are pending bytes, their pipe's read end.
+/// The stand-in's descriptor above the standard ones: the release pipe's
+/// read end.
 const RELEASE_FD: i32 = 3;
-const PENDING_FD: i32 = 4;
 
-/// `cat`, which copies the pending bytes in the stand-in (binary data, which
-/// no `sh` builtin copies).
-const CAT: &CStr = c"/bin/cat";
-
-/// A descriptor of `fd`'s file numbered `RELEASE_FD + 2` or above, so that
-/// the stand-in's `dup2`s onto 0 to 4 cannot overwrite it before it is
-/// copied.
+/// A descriptor of `fd`'s file numbered above `RELEASE_FD`, so that the
+/// stand-in's `dup2`s onto 0 to 3 cannot overwrite it before it is copied.
 fn above_targets(fd: OwnedFd) -> Result<OwnedFd, i32> {
-    if fd.as_raw_fd() > PENDING_FD {
+    if fd.as_raw_fd() > RELEASE_FD {
         return Ok(fd);
     }
-    rustix::io::fcntl_dupfd_cloexec(&fd, PENDING_FD + 1).map_err(|e| e.raw_os_error())
+    rustix::io::fcntl_dupfd_cloexec(&fd, RELEASE_FD + 1).map_err(|e| e.raw_os_error())
 }
 
-/// Spawns the stand-in, `/bin/sh` running `read x <&3`, then `cat <&4` when
-/// there are pending bytes (its own errors to `/dev/null`: where the child's
-/// standard output is a pipe nobody reads, Lean's child fails to write them
-/// without a word, while `cat` would report `write error: Broken pipe`;
-/// review RIO2-17), then `printf %s "$1"` onto its standard error,
-/// then `exit 255`, with the message as `$1`. It gets the child's standard
-/// streams `dups`, the read ends of `release` (descriptor 3) and of the
-/// pending bytes' pipe (descriptor 4, when given), and a new session when
-/// `session`. Once `release`'s write end is closed it writes the pending
-/// bytes on its standard output and the message on its standard error, as
-/// Lean's forked child does, and exits with 255.
+/// Spawns the stand-in, `/bin/sh` running `read x <&3`, then
+/// `printf %s "$1"` onto its standard error, then `exit 255`, with the
+/// message as `$1`. It gets the child's standard streams `dups`, the read
+/// end of `release` (descriptor 3) and a new session when `session`. Once
+/// `release`'s write end is closed it writes the message on its standard
+/// error, as Lean's forked child does, and exits with 255. It writes nothing
+/// on its standard output: the parent's pending standard-output bytes stay
+/// the parent's (LB-42).
 fn spawn_stand_in(
     dups: &[(i32, i32)],
     release: &OwnedFd,
-    pending: Option<&OwnedFd>,
     message: &CStr,
     session: bool,
 ) -> Result<Pid, i32> {
@@ -1251,21 +1240,12 @@ fn spawn_stand_in(
     actions
         .add_dup2(release.as_raw_fd(), RELEASE_FD)
         .map_err(|e| e as i32)?;
-    if let Some(p) = pending {
-        actions
-            .add_dup2(p.as_raw_fd(), PENDING_FD)
-            .map_err(|e| e as i32)?;
-    }
     let mut attr = PosixSpawnAttr::init().map_err(|e| e as i32)?;
     if session {
         attr.set_flags(PosixSpawnFlags::from_bits_retain(POSIX_SPAWN_SETSID))
             .map_err(|e| e as i32)?;
     }
-    let script: &CStr = if pending.is_some() {
-        c"read x <&3; /bin/cat <&4 2>/dev/null; printf %s \"$1\" >&2; exit 255"
-    } else {
-        c"read x <&3; printf %s \"$1\" >&2; exit 255"
-    };
+    let script: &CStr = c"read x <&3; printf %s \"$1\" >&2; exit 255";
     let argv: [&CStr; 5] = [c"/bin/sh", c"-c", script, c"sh", message];
     let envp: [&CStr; 0] = [];
     posix_spawn(c"/bin/sh", &actions, &attr, &argv, &envp)
@@ -1274,46 +1254,20 @@ fn spawn_stand_in(
 }
 
 /// The child that cannot start, as a stand-in process (module comment, item
-/// 6): it runs with the child's streams and writes the pending
-/// standard-output bytes and the message itself, `STAND_IN_LIFE` after the
-/// spawn, as the forked child writes them about a millisecond later. `None`
-/// when it cannot be set up (no `/bin/sh`, no descriptor or thread left):
-/// the child is then modelled.
-fn stand_in(
-    cfg: StdioConfig,
-    ends: Ends,
-    spec: &Spec,
-    f: Failure,
-    pending: &[u8],
-) -> Option<Started> {
+/// 6): it runs with the child's streams and writes the message itself,
+/// `STAND_IN_LIFE` after the spawn, as the forked child writes it about a
+/// millisecond later. `None` when it cannot be set up (no `/bin/sh`, no
+/// descriptor left): the child is then modelled.
+fn stand_in(ends: Ends, spec: &Spec, f: Failure) -> Option<Started> {
     let session = spec.setsid && f == Failure::Program;
     let message = CString::new(spec.failure_message(f)).ok()?;
     let (release, hold) = pipe().ok()?;
     let release = above_targets(release).ok()?;
-    // the pending bytes through a pipe the stand-in copies with `cat`
-    let copy = !pending.is_empty() && rustix::fs::access(CAT, rustix::fs::Access::EXEC_OK).is_ok();
-    let pending_end = if copy {
-        let (r, w) = pipe().ok()?;
-        let r = above_targets(r).ok()?;
-        fill_pipe(w, pending.to_vec()).ok()?;
-        Some(r)
-    } else {
-        None
-    };
     // a spawn without a `cwd`: in threads mode never while a fallback
     // spawn has the process in its `cwd` (`with_path_lookup`)
-    let pid = with_path_lookup(|| {
-        spawn_stand_in(
-            &ends.dups(),
-            &release,
-            pending_end.as_ref(),
-            &message,
-            session,
-        )
-    })
-    .ok()?;
+    let pid =
+        with_path_lookup(|| spawn_stand_in(&ends.dups(), &release, &message, session)).ok()?;
     drop(release);
-    drop(pending_end);
     // the stand-in proceeds `STAND_IN_LIFE` after the spawn (at once without
     // a thread)
     let _ = std::thread::Builder::new()
@@ -1322,16 +1276,6 @@ fn stand_in(
             std::thread::sleep(STAND_IN_LIFE);
             drop(hold);
         });
-    if !copy && !pending.is_empty() {
-        // no `cat`: the runtime writes the pending bytes at once
-        let mut ends = ends;
-        let stdout = ends.child[1].take();
-        if deliver(cfg.stdout, 1, stdout, pending.to_vec()).is_err() {
-            let _ = rustix::process::waitpid(Some(pid), WaitOptions::empty());
-            return None;
-        }
-        return Some(Started::running(ends, pid, spec.setsid));
-    }
     Some(Started::running(ends, pid, spec.setsid))
 }
 
@@ -1339,8 +1283,10 @@ fn stand_in(
 /// (`pid_max` is at most 2^22), counting down from `0x7FFFFFFF`.
 static NEXT_MODELLED_PID: AtomicU32 = AtomicU32::new(0x7FFF_FFFF);
 
-/// One output stream of a modelled child: a `piped` one is a new pipe holding
-/// the bytes, then end of file.
+/// One output stream `target` (1 or 2) of a modelled child, which writes
+/// `bytes` on it: a `piped` one is a new pipe holding the bytes, then end of
+/// file; an `inherit` one is the parent's own descriptor (the forked child's
+/// inherited one); a `null` one takes nothing.
 fn modelled_output(cfg: Stdio, target: u8, bytes: Vec<u8>) -> Result<Option<OwnedFd>, i32> {
     match cfg {
         Stdio::Piped => {
@@ -1348,19 +1294,25 @@ fn modelled_output(cfg: Stdio, target: u8, bytes: Vec<u8>) -> Result<Option<Owne
             fill_pipe(w, bytes)?;
             Ok(Some(r))
         }
-        _ => deliver(cfg, target, None, bytes).map(|()| None),
+        Stdio::Inherit => {
+            let fd = if target == 1 {
+                rustix::stdio::stdout()
+            } else {
+                rustix::stdio::stderr()
+            };
+            write_all_fd(fd, &bytes);
+            Ok(None)
+        }
+        Stdio::Null => Ok(None),
     }
 }
 
 /// The child that cannot start, modelled where `/bin/sh` cannot be spawned:
 /// a piped standard input whose read end it holds until it is waited,
-/// written through a non-blocking end that reports a full pipe as `EPIPE`.
-fn modelled_child(
-    cfg: StdioConfig,
-    spec: &Spec,
-    f: Failure,
-    pending: Vec<u8>,
-) -> Result<Started, i32> {
+/// written through a non-blocking end that reports a full pipe as `EPIPE`;
+/// a piped standard output at its end at once (nothing of the parent's
+/// pending bytes, LB-42); the message on its standard error.
+fn modelled_child(cfg: StdioConfig, spec: &Spec, f: Failure) -> Result<Started, i32> {
     let mut stdin_reader = None;
     let stdin = match cfg.stdin {
         Stdio::Piped => {
@@ -1368,11 +1320,14 @@ fn modelled_child(
             rustix::fs::fcntl_setfl(&w, rustix::fs::OFlags::NONBLOCK)
                 .map_err(|e| e.raw_os_error())?;
             stdin_reader = Some(r);
-            Some(Handle::fdopen_bounded_pipe(w))
+            Some(StdinEnd {
+                fd: w,
+                bounded: true,
+            })
         }
         Stdio::Inherit | Stdio::Null => None,
     };
-    let stdout = modelled_output(cfg.stdout, 1, pending)?;
+    let stdout = modelled_output(cfg.stdout, 1, Vec::new())?;
     let stderr = modelled_output(cfg.stderr, 2, spec.failure_message(f))?;
     Ok(Started {
         stdin,
@@ -1411,14 +1366,10 @@ fn start(cfg: StdioConfig, a: &SpawnArgs) -> Result<Started, IoError> {
     };
     match launched {
         Ok(pid) => Ok(Started::running(ends, pid, spec.setsid)),
-        Err(SpawnError::Child(f)) => {
-            // the forked child's copy of standard output's buffer
-            let pending = Handle::stdout().file().pending_output().to_vec();
-            match stand_in(cfg, ends, &spec, f, &pending) {
-                Some(s) => Ok(s),
-                None => modelled_child(cfg, &spec, f, pending).map_err(os_error),
-            }
-        }
+        Err(SpawnError::Child(f)) => match stand_in(ends, &spec, f) {
+            Some(s) => Ok(s),
+            None => modelled_child(cfg, &spec, f).map_err(os_error),
+        },
         Err(SpawnError::Os(e)) => Err(os_error(e)),
     }
 }
@@ -1427,7 +1378,7 @@ fn start(cfg: StdioConfig, a: &SpawnArgs) -> Result<Started, IoError> {
 pub fn spawn(cfg: StdioConfig, args: &SpawnArgs) -> Result<Child, IoError> {
     let s = start(cfg, args)?;
     Ok(Child {
-        stdin: s.stdin,
+        stdin: s.stdin.map(StdinEnd::into_handle),
         stdout: s.stdout.map(|fd| Handle::fdopen(fd, FsMode::Read)),
         stderr: s.stderr.map(|fd| Handle::fdopen(fd, FsMode::Read)),
         process: s.process,
@@ -1758,31 +1709,129 @@ fn sink_stopped() -> IoError {
 }
 
 /// Before `output` blocks in `poll` or a read of its pipes: in a program
-/// with tasks, wait until one is readable, letting the other contexts run
-/// (sched-io, `io::coop`).
+/// with tasks, wait until one of `reads` is readable or `write` (the input's
+/// pipe) is writable, letting the other contexts run (sched-io, `io::coop`).
 #[inline]
-fn ready(fds: &[&Option<OwnedFd>]) {
+fn ready(reads: &[&Option<OwnedFd>], write: Option<&OwnedFd>) {
     #[cfg(feature = "sched")]
     if crate::sched::coop_possible() && crate::sched::io_cooperative() {
-        let b: Vec<_> = fds
+        let b: Vec<_> = reads
             .iter()
             .filter_map(|f| f.as_ref().map(|f| f.as_fd()))
             .collect();
-        super::coop::before_read_any(&b);
+        super::coop::before_ready_any(&b, write.map(|w| w.as_fd()));
     }
     #[cfg(not(feature = "sched"))]
-    let _ = fds;
+    let _ = (reads, write);
+}
+
+/// Waits until one of `output`'s open ends is ready, and says which:
+/// standard output `o` or error `e` readable (data, end of file or an
+/// error), the input's pipe `w` writable (room, or the child's end closed).
+/// `EINTR` reports none.
+fn poll_ends(
+    o: &Option<OwnedFd>,
+    e: &Option<OwnedFd>,
+    w: Option<&OwnedFd>,
+) -> Result<[bool; 3], IoError> {
+    use nix::poll::{PollFd, PollFlags};
+    ready(&[o, e], w);
+    let ends = [
+        (o.as_ref(), PollFlags::POLLIN),
+        (e.as_ref(), PollFlags::POLLIN),
+        (w, PollFlags::POLLOUT),
+    ];
+    let mut fds = Vec::with_capacity(3);
+    let mut at = [None; 3];
+    for (i, (fd, flags)) in ends.into_iter().enumerate() {
+        if let Some(fd) = fd {
+            at[i] = Some(fds.len());
+            fds.push(PollFd::new(fd.as_fd(), flags));
+        }
+    }
+    match nix::poll::poll(&mut fds, nix::poll::PollTimeout::NONE) {
+        Ok(_) => Ok(at.map(|k| k.is_some_and(|k| fds[k].any().unwrap_or(true)))),
+        Err(Errno::EINTR) => Ok([false; 3]),
+        Err(x) => Err(os_error(x as i32)),
+    }
+}
+
+/// `output`'s input being written into the child's standard input while
+/// its pipes are read (LB-40).
+struct Writing<'a> {
+    fd: OwnedFd,
+    rest: &'a [u8],
+    /// The pipe's reader never reads (a modelled child, [`StdinEnd`]).
+    bounded: bool,
+}
+
+impl<'a> Writing<'a> {
+    /// The input's writer over the parent's end of the pipe, which is made
+    /// non-blocking (it is an open file description of its own: the child's
+    /// end stays blocking). `None` when nothing is left to write, the end
+    /// then closed (the child's end of file): an empty input, or the input
+    /// of a modelled child, which is written here at once (its pipe is never
+    /// read, so a write into the full pipe is `EPIPE`, never a wait). A write
+    /// error is `Err`.
+    fn start(end: StdinEnd, bytes: &'a [u8]) -> Result<Option<Writing<'a>>, IoError> {
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        if !end.bounded {
+            rustix::fs::fcntl_setfl(&end.fd, rustix::fs::OFlags::NONBLOCK)
+                .map_err(|e| os_error(e.raw_os_error()))?;
+        }
+        let mut w = Writing {
+            fd: end.fd,
+            rest: bytes,
+            bounded: end.bounded,
+        };
+        if w.bounded {
+            while !w.step().map_err(os_error)? {}
+            return Ok(None);
+        }
+        Ok(Some(w))
+    }
+
+    /// One `write(2)` of what the pipe takes now: `Ok(true)` once every byte
+    /// is written (the caller then drops the writer, which closes the pipe),
+    /// `Ok(false)` while bytes remain, or the write's `errno` (`EPIPE` once
+    /// the child has closed its standard input; a bounded pipe that is full).
+    fn step(&mut self) -> Result<bool, i32> {
+        match rustix::io::write(&self.fd, self.rest) {
+            Ok(n) => {
+                self.rest = &self.rest[n..];
+                Ok(self.rest.is_empty())
+            }
+            Err(rustix::io::Errno::INTR) => Ok(false),
+            Err(rustix::io::Errno::AGAIN) if self.bounded => Err(EPIPE),
+            Err(rustix::io::Errno::AGAIN) => Ok(false),
+            Err(e) => Err(e.raw_os_error()),
+        }
+    }
 }
 
 /// `IO.Process.output` (Lean code in `Init/System/IO.lean`, here an
 /// override): `spawn` with standard output and error piped and standard
-/// input `null`, or `piped` when `input` is given, in which case the input is
-/// written (`putStr`), flushed and its handle closed first, a write error
-/// ending `output`. Both pipes are then read to their end into `out` and
-/// `err`, the caller's storage, on the calling thread with `poll` (Lean reads
-/// standard output on a dedicated task while it reads standard error, so
-/// neither pipe can block the child). Then, in Lean's order: a read error of
-/// standard error, or standard error that is not UTF-8
+/// input `null`, or `piped` when `input` is given. Both pipes are read to
+/// their end into `out` and `err`, the caller's storage, on the calling
+/// thread with `poll` (Lean reads standard output on a dedicated task while
+/// it reads standard error, so neither pipe can block the child).
+///
+/// **The input** is written into the child's standard input while both
+/// pipes are read: `poll` waits for room in its pipe too, and the pipe
+/// closes once every byte is in (the child's end of file). Lean writes all
+/// of it (`putStr`, `flush`) before it reads anything, so a child that
+/// fills its standard output's pipe before it has read all its input (`cat`
+/// with more input than a pipe holds) waits for good, and so does Lean's
+/// `output` (LB-40, `docs/lean-bugs.md`; case `process/output_large_input`).
+/// A write error (`EPIPE` once the child has closed its standard input; a
+/// modelled child's full pipe) ends `output` at once, before any error of
+/// the reads, as Lean's `putStr` error comes first: the child is not waited,
+/// and the pipes close as `output` returns.
+///
+/// Then, in Lean's order: a read error of standard error, or standard error
+/// that is not UTF-8
 /// (`Tried to read from handle containing non UTF-8 data.`), fails before
 /// the child is waited (its standard output is still read to its end on a
 /// thread, which keeps the bytes as Lean's task does, until `main` has
@@ -1828,11 +1877,10 @@ where
         stderr: Stdio::Piped,
     };
     let s = start(cfg, args)?;
-    if let (Some(h), Some(bytes)) = (s.stdin, input) {
-        h.put_str(bytes)?;
-        h.flush()?;
-        // the handle closes here (Lean drops it after `flush`)
-    }
+    let mut w = match (s.stdin, input) {
+        (Some(end), Some(bytes)) => Writing::start(end, bytes)?,
+        _ => None,
+    };
     let mut o = Reading {
         fd: s.stdout,
         sink: out,
@@ -1846,30 +1894,28 @@ where
         error: None,
     };
     let mut buf = Vec::with_capacity(READ_CHUNK);
-    while e.fd.is_some() {
-        if o.fd.is_none() {
-            ready(&[&e.fd]);
+    // standard error to its end and the input written, standard output read
+    // meanwhile
+    while e.fd.is_some() || w.is_some() {
+        if o.fd.is_none() && w.is_none() {
+            ready(&[&e.fd], None);
             e.step(&mut buf);
             if e.stopped() {
                 return Err(sink_stopped());
             }
             continue;
         }
-        let (ro, re) = {
-            let (Some(fo), Some(fe)) = (&o.fd, &e.fd) else {
-                break;
-            };
-            ready(&[&o.fd, &e.fd]);
-            let mut fds = [
-                nix::poll::PollFd::new(fo.as_fd(), nix::poll::PollFlags::POLLIN),
-                nix::poll::PollFd::new(fe.as_fd(), nix::poll::PollFlags::POLLIN),
-            ];
-            match nix::poll::poll(&mut fds, nix::poll::PollTimeout::NONE) {
-                Ok(_) => (fds[0].any().unwrap_or(true), fds[1].any().unwrap_or(true)),
-                Err(Errno::EINTR) => (false, false),
-                Err(x) => return Err(os_error(x as i32)),
+        let [ro, re, rw] = poll_ends(&o.fd, &e.fd, w.as_ref().map(|w| &w.fd))?;
+        if rw {
+            if let Some(x) = &mut w {
+                match x.step() {
+                    // the input's pipe closes: the child's end of file
+                    Ok(true) => w = None,
+                    Ok(false) => {}
+                    Err(code) => return Err(os_error(code)),
+                }
             }
-        };
+        }
         if ro {
             o.step(&mut buf);
         }
@@ -1889,7 +1935,7 @@ where
         return Err(not_utf8());
     }
     while o.fd.is_some() {
-        ready(&[&o.fd]);
+        ready(&[&o.fd], None);
         o.step(&mut buf);
         if o.stopped() {
             return Err(sink_stopped());

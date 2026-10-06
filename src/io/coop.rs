@@ -27,8 +27,10 @@
 //!   exited), then makes the same `waitpid`.
 //!
 //! Regular files, block devices and directories never block, so their calls
-//! stay plain, as natively; so do descriptors already in non-blocking mode
-//! (whose `EAGAIN` is the result). A program that has created no task,
+//! stay plain, as natively; so do descriptors in non-blocking mode (whose
+//! `EAGAIN` is the result), a mode read at every call: it belongs to the
+//! open file description, which another process may change at any time
+//! ([`nonblocking`]). A program that has created no task,
 //! promise, timer or watch never gets here (`sched::coop_possible`, one
 //! relaxed load), and neither does a call made with no other context about
 //! (the speed floor O12), nor one in a no-suspend scope
@@ -67,16 +69,17 @@ use std::time::{Duration, Instant};
 const PIPE_BUF: usize = 4096;
 
 /// What a stream's descriptor is for the cooperative path, found the first
-/// time a cooperative call needs it (`fstat` and `F_GETFL`, without touching
-/// the modelled `errno`).
+/// time a cooperative call needs it (`fstat`, without touching the modelled
+/// `errno`). Its non-blocking mode is not part of it: that is read at every
+/// call ([`nonblocking`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Coop(u8);
 
 impl Coop {
     /// Not looked at yet.
     pub(crate) const UNKNOWN: Coop = Coop(0);
-    /// Calls stay plain: a regular file, a block device, a directory, a
-    /// descriptor in non-blocking mode, or none.
+    /// Calls stay plain: a regular file, a block device, a directory, or
+    /// none.
     const PLAIN: Coop = Coop(1);
     /// A pipe or a socket: wait first; writes try `RWF_NOWAIT`.
     const WAIT: Coop = Coop(2);
@@ -94,21 +97,18 @@ impl Coop {
         let Ok(st) = rustix::fs::fstat(b) else {
             return Coop::PLAIN;
         };
-        let kind = match st.st_mode & 0o170000 {
+        match st.st_mode & 0o170000 {
             // regular, block device, directory
-            0o100000 | 0o060000 | 0o040000 => return Coop::PLAIN,
+            0o100000 | 0o060000 | 0o040000 => Coop::PLAIN,
             0o020000 => Coop::CHAR,
             _ => Coop::WAIT,
-        };
-        match rustix::fs::fcntl_getfl(b) {
-            Ok(fl) if !fl.contains(rustix::fs::OFlags::NONBLOCK) => kind,
-            _ => Coop::PLAIN,
         }
     }
 
     /// Whether a call on `fd` cooperates now (classifying it the first
-    /// time). A descriptor known to stay plain costs no scheduler check
-    /// (review RSIO-04).
+    /// time): not while the descriptor is in non-blocking mode. A
+    /// descriptor known to stay plain costs no scheduler check (review
+    /// RSIO-04).
     fn waits(&mut self, fd: &Fd) -> bool {
         if *self == Coop::PLAIN || !sched::io_cooperative() {
             return false;
@@ -116,7 +116,25 @@ impl Coop {
         if *self == Coop::UNKNOWN {
             *self = Coop::of(fd);
         }
-        *self != Coop::PLAIN
+        *self != Coop::PLAIN && !nonblocking(fd)
+    }
+}
+
+/// Whether `fd` is in non-blocking mode now (`F_GETFL`; a failure counts as
+/// non-blocking: the call stays plain), so its `EAGAIN` is the result, as
+/// natively. Read at every cooperative call, one system call: the flag
+/// belongs to the open file description, which the processes that share it
+/// (the parent, a child spawned with `inherit`) may change at any time
+/// (HIO-06 of the io bug hunt). Read once, a descriptor made blocking later
+/// would get a plain read or write that blocks the scheduler's only thread,
+/// so a task that would make it ready (a task that writes a prompt the peer
+/// waits for before it sends the input) never runs and the program waits
+/// for good; one made non-blocking later would wait where native's call
+/// returns `EAGAIN`.
+fn nonblocking(fd: &Fd) -> bool {
+    match fd.borrow().map(rustix::fs::fcntl_getfl) {
+        Some(Ok(fl)) => fl.contains(rustix::fs::OFlags::NONBLOCK),
+        _ => true,
     }
 }
 
@@ -430,7 +448,7 @@ pub(crate) fn write_nowait(fd: &Fd, data: &[u8], coop: &mut Coop) -> Option<Resu
     if *coop == Coop::UNKNOWN {
         *coop = Coop::of(fd);
     }
-    if *coop == Coop::PLAIN {
+    if *coop == Coop::PLAIN || nonblocking(fd) {
         return None;
     }
     let b = fd.borrow()?;
@@ -707,13 +725,16 @@ extern "C" fn join_own_writers_slow(at: JoinAt) {
     }
 }
 
-/// Before a blocking read of any of `fds` (`IO.Process.output`'s pipes):
-/// in a program with other contexts, wait until one is readable.
-/// The caller has checked `sched::io_cooperative()` (review RSIO-04).
-pub(crate) fn before_read_any(fds: &[BorrowedFd<'_>]) {
-    let mut items: Vec<PollItem<'_>> = fds
+/// Before a blocking read of any of `reads` or a write of `write`
+/// (`IO.Process.output`'s pipes and its input's pipe): in a program with
+/// other contexts, wait until one of `reads` is readable or `write` is
+/// writable. The caller has checked `sched::io_cooperative()` (review
+/// RSIO-04).
+pub(crate) fn before_ready_any(reads: &[BorrowedFd<'_>], write: Option<BorrowedFd<'_>>) {
+    let mut items: Vec<PollItem<'_>> = reads
         .iter()
         .map(|&f| PollItem::new(f, Interest::READ))
+        .chain(write.map(|w| PollItem::new(w, Interest::WRITE)))
         .collect();
     let _ = sched::poll_fds(&mut items, None);
 }
@@ -1002,6 +1023,47 @@ mod tests {
         sched::finish();
     }
 
+    /// HIO-06: a stream's non-blocking mode is read at every call, since
+    /// another process sharing the open file description may change it. A
+    /// pipe first seen in non-blocking mode cooperates once it is made
+    /// blocking (a plain read would block the scheduler's only thread), and
+    /// is plain again once made non-blocking (its `EAGAIN` is the result, as
+    /// natively); a drop's flush takes its usual write then too.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn the_nonblocking_mode_is_read_at_every_call() {
+        use rustix::fs::{fcntl_setfl, OFlags};
+        use std::rc::Rc;
+        struct NoSuspend;
+        impl sched::Glue for NoSuspend {
+            fn suspend(&self, _: sched::Suspend<'_>) {
+                panic!("the crate's unit tests never suspend a context");
+            }
+        }
+        sched::start_with(Rc::new(NoSuspend), 1, 1 << 20);
+        sched::reactor_coop_on_for_tests();
+        // a queued task: io is cooperative
+        let _t = sched::spawn(Box::new(|| sched::Outcome::Done), 0, true);
+        assert!(sched::io_cooperative());
+        let (r, w) = rustix::pipe::pipe().unwrap();
+        fcntl_setfl(&r, OFlags::NONBLOCK).unwrap();
+        fcntl_setfl(&w, OFlags::NONBLOCK).unwrap();
+        let r = Fd::Owned(std::sync::Arc::new(r.into()));
+        let w = Fd::Owned(std::sync::Arc::new(w.into()));
+        let mut c = Coop::UNKNOWN;
+        assert!(!c.waits(&r), "non-blocking at the first call");
+        assert_eq!(c, Coop::WAIT);
+        fcntl_setfl(r.borrow().unwrap(), OFlags::empty()).unwrap();
+        assert!(c.waits(&r), "made blocking by another process");
+        fcntl_setfl(r.borrow().unwrap(), OFlags::NONBLOCK).unwrap();
+        assert!(!c.waits(&r), "made non-blocking again");
+        let mut cw = Coop::UNKNOWN;
+        assert_eq!(write_nowait(&w, b"x", &mut cw), None);
+        fcntl_setfl(w.borrow().unwrap(), OFlags::empty()).unwrap();
+        assert_eq!(write_nowait(&w, b"x", &mut cw), Some(Ok(1)));
+        sched::finish();
+    }
+
     #[test]
     fn a_no_suspend_scope_makes_io_plain() {
         assert!(!sched::in_no_suspend());
@@ -1023,11 +1085,11 @@ mod tests {
             Coop::WAIT
         );
         rustix::fs::fcntl_setfl(&w, rustix::fs::OFlags::NONBLOCK).unwrap();
-        // already non-blocking: its `EAGAIN` is the result
-        assert_eq!(
-            Coop::of(&Fd::Owned(std::sync::Arc::new(w.into()))),
-            Coop::PLAIN
-        );
+        // a pipe in non-blocking mode: still a pipe (the mode is read at
+        // every call: `the_nonblocking_mode_is_read_at_every_call`)
+        let w = Fd::Owned(std::sync::Arc::new(w.into()));
+        assert_eq!(Coop::of(&w), Coop::WAIT);
+        assert!(nonblocking(&w));
         let f = std::fs::File::open("/proc/self/exe").unwrap();
         assert_eq!(Coop::of(&Fd::Owned(std::sync::Arc::new(f))), Coop::PLAIN);
         // a character device: whole writes once writable (RSIO-05)

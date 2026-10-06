@@ -305,6 +305,30 @@ fn io_process_output() {
     assert_eq!((code, o.len(), e.len()), (4, 300000, 200000));
 }
 
+/// LB-40: the input is written while both pipes are read, so `cat` with more
+/// input than a pipe holds (it fills its standard output's pipe before it
+/// has read all its input) gives all of it back, where Lean's `output`
+/// writes all of it first and waits for good; so does a child that fills
+/// both pipes meanwhile. A child that exits before it has read all of it
+/// gives the write's `EPIPE`, before anything of the reads; an empty input
+/// closes the pipe at once.
+#[test]
+fn output_writes_the_input_while_reading() {
+    let input: Vec<u8> = (0..1 << 20).map(|i| b'a' + (i % 26) as u8).collect();
+    let (code, o, e) = run(&args(b"cat", &[]), Some(&input)).unwrap();
+    assert_eq!((code, o.as_bytes() == &input[..], e.len()), (0, true, 0));
+    let (code, o, e) = run(&args(b"sh", &[b"-c", b"tee /dev/stderr"]), Some(&input)).unwrap();
+    assert_eq!((code, o.len(), e.len()), (0, 1 << 20, 1 << 20));
+    assert_eq!(
+        run(&args(b"head", &[b"-c", b"10"]), Some(&input)).unwrap_err(),
+        broken_pipe()
+    );
+    assert_eq!(
+        run(&args(b"wc", &[b"-c"]), Some(b"")).unwrap(),
+        (0, "0\n".to_owned(), String::new())
+    );
+}
+
 /// A sink that stops once it would hold more than `cap` bytes, as a glue's
 /// sink whose reservation failed (leanrs's `Bytes`).
 struct Capped {
@@ -911,10 +935,11 @@ fn io_failed_child_stdin() {
 
 /// A child that cannot start, with pending standard-output bytes and a piped
 /// standard output whose read end the parent has closed: its standard error
-/// holds the message alone, as Lean's child fails to write the bytes without
-/// a word (review RIO2-17: the stand-in's `cat` reported `write error:
-/// Broken pipe`). In a child process, whose standard output (a pipe) holds
-/// the pending bytes.
+/// holds the message alone (review RIO2-17: the stand-in's `cat`, which
+/// copied the bytes before LB-42, reported `write error: Broken pipe`). With
+/// the read end open, its standard output holds nothing (LB-42: natively
+/// the parent's pending bytes, which the parent writes again later). In a
+/// child process, whose standard output (a pipe) holds the pending bytes.
 #[test]
 fn failed_child_unread_stdout() {
     if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
@@ -931,6 +956,10 @@ fn failed_child_unread_stdout() {
         assert_eq!(err, missing_message());
         assert_eq!(child.process.wait().unwrap(), 255);
     }
+    assert_eq!(
+        run(&args(MISSING, &[]), None).unwrap(),
+        (255, String::new(), missing_message())
+    );
 }
 
 /// Waits until process `pid` has exited (a zombie, not yet waited).
@@ -1029,6 +1058,48 @@ fn modelled_child() {
     let stdin = child.stdin.as_ref().unwrap();
     stdin.put_str(b"late").unwrap();
     assert_eq!(stdin.flush().unwrap_err(), broken_pipe());
+    // `output`'s input: what the pipe holds, then `EPIPE`; nothing of the
+    // pending standard-output bytes on the child's (LB-42)
+    Handle::stdout().put_str(b"pending").unwrap();
+    assert_eq!(
+        run(&args(MISSING, &[]), Some(&[b'y'; 4096])).unwrap(),
+        (255, String::new(), missing_message())
+    );
+    assert_eq!(
+        run(&args(MISSING, &[]), Some(&vec![b'z'; 2 << 20])).unwrap_err(),
+        broken_pipe()
+    );
+}
+
+/// LB-44: a spawn that fails at a later pipe (`EMFILE` at the second of
+/// three) closes the pipe it made first, so the descriptors free before it
+/// are free after it (natively the first pipe's two leak, process.cpp 424).
+/// In a child process, with `RLIMIT_NOFILE` at 64 and three descriptors
+/// free.
+#[test]
+fn a_failed_pipe_closes_the_earlier_ones() {
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        let out = run_self("io::process::tests::a_failed_pipe_closes_the_earlier_ones");
+        assert!(out.status.success(), "{out:?}");
+        return;
+    }
+    use nix::sys::resource::{setrlimit, Resource};
+    setrlimit(Resource::RLIMIT_NOFILE, 64, 64).unwrap();
+    let mut hs = Vec::new();
+    while let Ok(f) = std::fs::File::open("/dev/null") {
+        hs.push(f);
+    }
+    hs.truncate(hs.len() - 3);
+    let c = cfg(Stdio::Piped, Stdio::Piped, Stdio::Piped);
+    assert_eq!(
+        spawn(c, &args(b"true", &[])).unwrap_err(),
+        IoError::ResourceExhausted(None, 24, "too many open files".to_owned())
+    );
+    let free: Vec<_> = (0..4)
+        .map_while(|_| std::fs::File::open("/dev/null").ok())
+        .collect();
+    assert_eq!(free.len(), 3);
+    drop(hs);
 }
 
 /// glibc's `execvp` search: an empty name, `EACCES` remembered while the

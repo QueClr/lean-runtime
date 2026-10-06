@@ -1,0 +1,3 @@
+spawn failed: resource exhausted (error code: 24, too many open files)
+free after the failed spawn: 3 of 3
+handles kept open: true

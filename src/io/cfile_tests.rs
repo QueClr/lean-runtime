@@ -452,3 +452,63 @@ fn get_line_stop_on_the_line_end() {
     f.get_line(&mut sink).unwrap();
     assert_eq!((sink.stopped, &sink.v[..]), (false, &b"last\n"[..]));
 }
+
+/// LB-41: `get_line` reports only its own error. A read of an empty
+/// non-blocking pipe fails with `EAGAIN`; once the lines arrive, the next
+/// calls read them (natively the error indicator stays set and every later
+/// `getLine` reads its line and fails, the line lost). A failed write on a
+/// reading stream (`EBADF`) does not fail the next `get_line` either, and
+/// `read` and end of file go on as before.
+#[test]
+fn get_line_reports_only_its_own_error() {
+    let (r, w) = pipe();
+    rustix::fs::fcntl_setfl(&r, OFlags::NONBLOCK).unwrap();
+    let mut f = CFile::fdopen(r, FsMode::Read);
+    let mut line = Vec::new();
+    assert_eq!(f.get_line(&mut line), Err(EAGAIN));
+    assert!(f.is_err());
+    // blocking again, so the reads at the end wait for end of file: a child
+    // that another test thread spawns may hold a copy of the write end until
+    // its `exec` closes it (close-on-exec), and a non-blocking read would
+    // then get `EAGAIN`
+    rustix::fs::fcntl_setfl(f.descriptor().borrow().unwrap(), OFlags::empty()).unwrap();
+    rustix::io::write(&w, b"hello\nworld\nabc\nrest").unwrap();
+    drop(w);
+    line.clear();
+    f.get_line(&mut line).unwrap();
+    assert_eq!(line, b"hello\n");
+    assert!(!f.is_err());
+    // a failed write sets the indicator; the next line still reads
+    assert_eq!(f.put(b"x"), Err(EBADF));
+    assert!(f.is_err());
+    line.clear();
+    f.get_line(&mut line).unwrap();
+    assert_eq!(line, b"world\n");
+    // `read` is unchanged: its bytes, then end of file clears both
+    // indicators and gives 0
+    assert_eq!(f.put(b"x"), Err(EBADF));
+    let mut b = [0u8; 4];
+    assert_eq!(f.read(&mut b), Ok(4));
+    assert_eq!(&b, b"abc\n");
+    line.clear();
+    f.get_line(&mut line).unwrap();
+    assert_eq!(line, b"rest");
+    line.clear();
+    f.get_line(&mut line).unwrap();
+    assert_eq!(line, b"");
+}
+
+/// A put of no bytes returns at once (`fwrite` of none), so it sets no error
+/// indicator, also on a stream opened for reading only, where a put of one
+/// byte sets it (`EBADF`). Since LB-41 a later `get_line` no longer shows the
+/// indicator, so this checks it directly (case `io/zero_byte_ops`; review
+/// RIO1-05 of io-fixes-1).
+#[test]
+fn an_empty_put_sets_no_error_indicator() {
+    let (r, _w) = pipe();
+    let mut f = CFile::fdopen(r, FsMode::Read);
+    assert_eq!(f.put(b""), Ok(()));
+    assert!(!f.is_err());
+    assert_eq!(f.put(b"x"), Err(EBADF));
+    assert!(f.is_err());
+}

@@ -219,7 +219,9 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
   <li><code>decode_uv_error</code> does the same for the operations that Lean implements with libuv.</li>
   <li><strong>The <code>errno</code> model.</strong> rustix does not touch libc's <code>errno</code>.
     So the crate keeps its own copy per thread, and sets it as the C call would.
-    A program can see it: a later <code>getLine</code> on a stream with its error indicator set reports that <code>errno</code>.</li>
+    Natively, a program can see it: a later <code>getLine</code> on a stream with its error indicator set reports that <code>errno</code>.
+    lean-runtime's <code>getLine</code> reports only its own error (<a href="lean-bugs.html#lb-41">LB-41</a>).
+    That was the only channel, so no stale <code>errno</code> is visible to a Lean program.</li>
   <li><strong><a href="lean-bugs.html#confirmed">LB-03</a>.</strong> Some errors have no file name.
     When the error's class takes a file name (no such file, interrupted call), native Lean then crashes (SIGSEGV).
     lean-runtime gives the error with the file name <code>""</code>.</li>
@@ -257,11 +259,14 @@ It then does what the forked child does before <code>execvp</code>:</p>
 </ul>
 <p><code>wait</code>, <code>tryWait</code> and <code>kill</code> follow <code>process.cpp</code>.
 A glue that keeps only a child's pid and <code>setsid</code> flag makes the object again with <code>ChildProcess::from_pid</code>.
-<code>IO.Process.output</code> reads both pipes with <code>poll</code>.
+<code>IO.Process.output</code> reads both pipes with <code>poll</code>, and writes its input in the same loop.
 In a program with tasks, <code>wait</code> and <code>output</code> let the other tasks run while they wait (<a href="sched.html#sched-io">sched-io</a>).
-Three <a href="lean-bugs.html#confirmed">Lean bugs</a> are not copied.
+Six <a href="lean-bugs.html#confirmed">Lean bugs</a> are not copied.
 <code>takeStdin</code> keeps the <code>setsid</code> flag (LB-14).
-A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the parent, so nothing leaks (LB-15), and its failure is an error (LB-17).</p>
+A <code>null</code> stream opens <code>/dev/null</code> close-on-exec in the parent, so nothing leaks (LB-15), and its failure is an error (LB-17).
+Native <code>output</code> writes all of its input first, so a child that fills a pipe blocks it for good (LB-40).
+A child that cannot start writes nothing of the parent's pending output (LB-42).
+A spawn that fails at a later pipe closes the pipes that it made (LB-44).</p>
 
 <h2 id="streams">Stream redirection</h2>
 <ul>

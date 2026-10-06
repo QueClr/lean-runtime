@@ -3,3 +3,9 @@ area = "process"
 lean_version = "4.34.0"
 source = "lean2rr tests/runtime/RtProcessSpawn.lean"
 streams = "separate"
+deviations = { lean2rr = "LB-42", leanrs = "LB-42" }
+native = { stdout = "pending\nmissing: code 255 out \"pending\\n\" err \"could not execute external process 'rt-process-spawn-no-such-command'\\n\"\nbadcwd: code 255 out \"pending\\nmissing: code 255 out \\\"pending\\\\n\\\" err \\\"could not execute external process 'rt-process-spawn-no-such-command'\\\\n\\\"\\n\" err \"could not change directory to /rt-process-spawn-no-such-dir\\n\"\nenv: code 0 out \"[2][][unset]\\n\" err \"\"\nnoinherit: code 0 out \"ONLY=me\\n\" err \"\"\nsignal: code 143 out \"\" err \"\"\ninput: code 0 out \"fed\\n\" err \"done\\n\"\nlate writer: 0\ntryWait running: none\nkilled: 137\ntryWait after reap: no such thing (error code: 10, no such process)\nkill after reap: no such thing (error code: 3, no such process)\npolled: (some 7)\ngroup killed: 137\ngrandchild: gone\nrun failed: process 'sh' exited with code 3\nstderr:\noops\n\ncodes: [1, 2, 3]\nbad stdout: Tried to read from handle containing non UTF-8 data.\n", stderr = "", code = "0" }
+# LB-42 (io-fixes-1): a child that cannot start writes nothing of the parent's pending
+# standard-output bytes, so its standard output is empty: the expected files are that
+# correct outcome. Native's outcome is `native`: the forked child's message flushes its copy
+# of the parent's buffer, which the parent writes again later.

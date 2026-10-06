@@ -1,0 +1,10 @@
+id = "failed_child_pending_stdout"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io bug hunt HIO-03 (hunt-io native/HuntIO.lean, mode dup); io-fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-42", leanrs = "LB-42" }
+native = { stdout = "pending \nexit 255 stdout \"pending \" stderr \"could not execute external process 'no-such-program-xyz'\\n\"\n", stderr = "", code = "0" }
+# `expected` is the correct outcome: the child's standard output holds nothing. Native's outcome
+# is `native`: the forked child's message flushes its copy of the parent's buffer into the
+# child's standard output, and the parent writes the same bytes at its exit.

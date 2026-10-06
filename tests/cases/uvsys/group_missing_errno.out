@@ -1,5 +1,4 @@
 before
 group none true
-getLine: no such file or directory (error code: 2)
-  file: 
+getLine: ok "line1\n"
 after

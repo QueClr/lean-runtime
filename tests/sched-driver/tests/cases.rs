@@ -1129,6 +1129,7 @@ cases!(
     task_reads_main_writes,
     wait_in_task,
     output_while_ticking,
+    output_input_while_ticking,
     // threads mode, batch T3: cases that need real contention
     wait_chain_beyond_pool,
     wait_any_faster,

@@ -1,4 +1,4 @@
-pending could not execute external process 'no-such-program-xyz'
+could not execute external process 'no-such-program-xyz'
 parent after spawn
 waited 255
 pending 

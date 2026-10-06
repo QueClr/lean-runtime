@@ -27,12 +27,15 @@
 //! removed directory). The classes io.cpp asserts to have no file name ignore
 //! one, as its release build does.
 //!
-//! The errno model: C's `errno` is observable in Lean through a stream's
-//! sticky error indicator (a later `getLine` reports whatever `errno` holds
-//! then). The crate's system calls go through rustix, which does not touch
-//! libc's `errno`, so the crate keeps its own thread-local copy ([`errno`],
-//! [`set_errno`]), which every failing call the crate models sets as the C
-//! call would.
+//! The errno model: natively, C's `errno` is observable in Lean through a
+//! stream's sticky error indicator (a later `getLine` reports whatever
+//! `errno` holds then). lean-runtime's `getLine` reports only its own error
+//! (LB-41, `docs/lean-bugs.md`), and that was the only channel: no
+//! Lean-visible channel for a stale `errno` remains, and every error a call
+//! reports carries the `errno` that call set. The crate's system calls go
+//! through rustix, which does not touch libc's `errno`, so the crate keeps
+//! its own thread-local copy ([`errno`], [`set_errno`]), which every failing
+//! call the crate models sets as the C call would.
 //!
 //! Sources: lean2rr's `runtime/leanrt/src/fs.rs` (the 4.34 decoding: `crt_to_uv`,
 //! the libuv message table, the class table, checked against native for every

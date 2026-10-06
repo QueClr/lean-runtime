@@ -1,0 +1,11 @@
+id = "output_large_input"
+area = "process"
+lean_version = "4.34.0"
+source = "lean-runtime io bug hunt HIO-01 (hunt-io native/HuntIO.lean, mode cat: 200000 bytes time out natively); io-fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-40", leanrs = "LB-40" }
+native = { stdout = "", stderr = "", code = "timeout" }
+expect = { hang = 5 }
+# `expected` (the .out, .err and .code files) is the correct outcome, which the crate gives: the
+# input is written while both pipes are read. Native's outcome is `native`: `output` writes all
+# of the input first, `cat` fills its standard output's pipe, and both wait for good.

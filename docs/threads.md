@@ -447,12 +447,15 @@ Cases (recorded natively with `cases.py expect`, 5 runs each, identical):
 `tasks/worker_keeps_streams` (B's line lands in A's buffer; while A sleeps
 with its redirection, `main` prints to its own stdout; a dedicated task
 prints to the real one) and `tasks/worker_keeps_errno`
-(`LEAN_NUM_THREADS=1`: B's `getLine` on a handle with its sticky error flag
-reports A's leftover `ENOTDIR`, `main`'s reports its own `EEXIST`; A's
-`ENOENT` would crash natively, LB-03). Both pass on the single-thread
+(`LEAN_NUM_THREADS=1`: natively B's `getLine` on a handle with its sticky
+error flag reports A's leftover `ENOTDIR`, `main`'s reports its own
+`EEXIST`; A's `ENOENT` would crash natively, LB-03. Since LB-41 `getLine`
+reports only its own error, so the case expects both to read, native's
+outcome in `native`, and the per-worker `errno` shows in the unit tests
+only). Both pass on the single-thread
 scheduler (`tests/sched-driver`) and in threads mode
 (`tests/threads_twins.rs`); with the single-thread swaps disabled (the old
-shared state) both fail. Unit tests: `a_pool_worker_keeps_its_streams_and_errno`
+shared state) `worker_keeps_streams` fails (before LB-41, both did). Unit tests: `a_pool_worker_keeps_its_streams_and_errno`
 in `sched::tests` and in `sched::mt::tests` (under Miri too, with
 `io,threads`).
 

@@ -10,7 +10,8 @@ handle whose sticky error flag is set: `getLine` then reports whatever
 - `main` sets its own `errno` to `EEXIST` (a failed `createDir`);
 - task B, on the same worker, calls `getLine` on the handle: it reports A's
   `ENOTDIR`; `main`'s `getLine` reports `main`'s `EEXIST`.
-(Review AR-24 of lean-runtime.) -/
+(Review AR-24 of lean-runtime.) That is native's outcome (`native`): since LB-41 the correct
+`getLine` reports only its own error, so B's reads the line and `main`'s reads "". -/
 def main : IO Unit := do
   IO.FS.writeFile "e.txt" "line1\n"
   let h ← IO.FS.Handle.mk "e.txt" .read

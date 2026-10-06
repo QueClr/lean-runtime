@@ -1,0 +1,12 @@
+id = "output_input_while_ticking"
+area = "taskio"
+lean_version = "4.34.0"
+source = "lean-runtime io bug hunt HIO-01, with a task (the cooperative wait for room in the input's pipe, and threads mode); io-fixes-1"
+streams = "separate"
+deviations = { lean2rr = "LB-40", leanrs = "LB-40" }
+native = { stdout = "", stderr = "", code = "timeout" }
+expect = { hang = 5 }
+# `expected` is the correct outcome: the ticker's five lines (50 ms apart) come before the
+# output's line (the child sleeps 0.8 s first). Native's outcome is `native`: `output` writes all
+# of the input first and waits for good once `cat` fills its standard output's pipe; the ticker's
+# lines stay in standard output's buffer, lost when the run is killed.

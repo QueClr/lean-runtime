@@ -1532,13 +1532,25 @@ fn io_open_random() {
     );
 }
 
-/// The modelled `errno`: a `getLine` whose check finds the error indicator
-/// set reports the code C's `errno` holds then, which later operations change:
-/// every failure, and four successes (`realPath`'s `EINVAL` walk, a `false`
-/// `isTty`, a `false` `tryLock`, a flush of read-ahead that cannot seek back);
-/// the libuv-based rows clear it; a task's is its own. From leanrs's
-/// `io_modelled_errno` (`local/follow-native`; compiled Lean v4.34.0-rc1,
-/// leanrs's A820; leanrs review F2).
+/// The modelled `errno` as native's `getLine` reported it on a stream whose
+/// error indicator an earlier failure had set (`decode_io_error(errno,
+/// nullptr)`). Since LB-41 `getLine` reports only its own error, so the
+/// tests of the model read it directly.
+fn modelled_errno() -> String {
+    desc(&IoError::decode_io_error(
+        lean_runtime::io::error::errno(),
+        None,
+    ))
+}
+
+/// The modelled `errno`: the code C's `errno` holds after an operation,
+/// which natively a `getLine` whose check finds the error indicator set
+/// reported (until LB-41). Later operations change it: every failure, and
+/// four successes (`realPath`'s `EINVAL` walk, a `false` `isTty`, a `false`
+/// `tryLock`, a flush of read-ahead that cannot seek back); the libuv-based
+/// rows clear it; a task's is its own. From leanrs's `io_modelled_errno`
+/// (`local/follow-native`; compiled Lean v4.34.0-rc1, leanrs's A820; leanrs
+/// review F2).
 #[test]
 fn io_modelled_errno() {
     let d = setup("errno");
@@ -1550,7 +1562,10 @@ fn io_modelled_errno() {
         let h = open(&f, FsMode::Read).unwrap();
         assert!(put(&h, "x").is_err());
         act();
-        desc(&get_line(&h).unwrap_err())
+        let code = modelled_errno();
+        // LB-41: the indicator the failed write set fails no later `getLine`
+        assert_eq!(get_line(&h).unwrap(), "line1\n");
+        code
     };
     let ebadf = r#"InvalidArgument(None, 9, "bad file descriptor")"#;
     let einval = r#"InvalidArgument(None, 22, "invalid argument")"#;
@@ -1621,9 +1636,10 @@ fn io_modelled_errno() {
 
 /// A flush of standard input from a pipe gives the read-ahead back without
 /// the seek, which fails with `ESPIPE`; the flush succeeds and C's `errno`
-/// keeps `ESPIPE` (compiled Lean v4.34.0-rc1: `getLine`'s report after it is
-/// `unsupported operation (error code: 29, invalid seek)`). From leanrs's
-/// `io_modelled_errno_stdin_flush` (leanrs review F2).
+/// keeps `ESPIPE` (compiled Lean v4.34.0-rc1: the report of a `getLine` on a
+/// stream whose error indicator was set is `unsupported operation (error
+/// code: 29, invalid seek)`; since LB-41 the test reads the model directly).
+/// From leanrs's `io_modelled_errno_stdin_flush` (leanrs review F2).
 #[test]
 fn io_modelled_errno_stdin_flush() {
     if child_case().as_deref() == Some("pipe") {
@@ -1633,7 +1649,7 @@ fn io_modelled_errno_stdin_flush() {
         let i = Handle::stdin();
         get_line(&i).unwrap();
         i.flush().unwrap();
-        report(&[desc(&get_line(&h).unwrap_err())]);
+        report(&[modelled_errno()]);
     }
     let d = setup("errno-stdin");
     let f = p(&d, "r.txt");
@@ -1939,21 +1955,23 @@ fn io_zero_byte_writes() {
     assert_eq!(Handle::stdin().write(&[]), Ok(()));
 }
 
-/// After a failed write the error indicator is sticky: every later `getLine`
-/// consumes its line and fails with `EBADF`, and `read` returns its bytes
-/// (A722).
+/// After a failed write the error indicator is set, but `getLine` reports
+/// only its own errors (LB-41): the next `getLine` reads its line, and
+/// `read` returns its bytes. Natively the indicator is sticky: every later
+/// `getLine` consumes its line and fails with `EBADF` (A722) until end of
+/// file clears it.
 #[test]
-fn io_error_flag_sticky() {
+fn io_error_flag_after_a_failed_write() {
     let d = setup("err-flag");
     let f = p(&d, "ro.txt");
     fs::write(&f, "line1\nline2\nline3\n").unwrap();
     let h = open(&f, FsMode::Read).unwrap();
     assert_eq!(get_line(&h).unwrap(), "line1\n");
     assert_eq!(put(&h, "x"), Err(ebadf_err()));
-    assert_eq!(get_line(&h), Err(ebadf_err()));
+    assert_eq!(get_line(&h).unwrap(), "line2\n");
+    assert_eq!(put(&h, "x"), Err(ebadf_err()));
     assert_eq!(read(&h, 3).unwrap(), b"lin");
-    assert_eq!(get_line(&h), Err(ebadf_err()));
-    // at end of file `read` clears both indicators (`clearerr`), and `getLine` reads again
+    assert_eq!(get_line(&h).unwrap(), "e3\n");
     assert_eq!(read(&h, 3).unwrap(), b"");
     assert_eq!(get_line(&h).unwrap(), "");
 }
@@ -2134,10 +2152,11 @@ fn io_fifo_direct_read_after_write_after_read() {
         eprintln!("io_fifo_direct_read_after_write_after_read: no mkfifo, skipped");
         return;
     }
-    // a read-only handle with its error indicator set: its `getLine` shows
     // the modelled `errno` after the direct read (native: EBADF, from the
     // failed `putStr`; the dropped `lseek` is never made natively, review
-    // RIO1-17, the reviewer's FifoErrno)
+    // RIO1-17, the reviewer's FifoErrno), which native's `getLine` on the
+    // read-only handle with its error indicator set reported; since LB-41
+    // that `getLine` reads its line, and the model is read directly
     let xf = p(&d, "x.txt");
     fs::write(&xf, "hi\n").unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -2163,6 +2182,7 @@ fn io_fifo_direct_read_after_write_after_read() {
             r("line", get_line(&h), |t| q(&t)),
             r("putStr 2", put(&h, "ghi\n"), unit),
             r("read 4096", read(&h, 4096), zs),
+            format!("errno: {}", modelled_errno()),
             r("x getLine", get_line(&x), |t| q(&t)),
             r("read 4", read(&h, 4), zs),
             r("flush 2", h.flush(), unit),
@@ -2178,7 +2198,8 @@ fn io_fifo_direct_read_after_write_after_read() {
             r#"line: ok "abc\n""#,
             "putStr 2: ok ()",
             "read 4096: ok 4096 all z true",
-            r#"x getLine: err InvalidArgument(None, 9, "bad file descriptor")"#,
+            r#"errno: InvalidArgument(None, 9, "bad file descriptor")"#,
+            r#"x getLine: ok "hi\n""#,
             "read 4: ok 4 all z true",
             "flush 2: ok ()",
         ]

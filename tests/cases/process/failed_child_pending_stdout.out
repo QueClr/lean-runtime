@@ -1,0 +1,2 @@
+pending 
+exit 255 stdout "" stderr "could not execute external process 'no-such-program-xyz'\n"

@@ -4,7 +4,8 @@ handle whose sticky error flag a failed write set). With this host's NSS (`group
 sss`), `getgrgid_r` reports the missing group as `ENOENT`, which `osGetGroup` turns into `none`
 but leaves in `errno`; `getLine` then decodes `ENOENT` without a file name and native crashes
 (SIGSEGV, LB-03; leanrs review of io-2). Both translators give LB-03's error with the empty file
-name (the expected outcome). With `files` alone, `getgrgid_r` leaves 0. -/
+name (the expected outcome until LB-41). With `files` alone, `getgrgid_r` leaves 0. Since LB-41
+the correct `getLine` reports only its own error, so it reads its line. -/
 open Std.Internal.UV.System
 
 def main (args : List String) : IO Unit := do

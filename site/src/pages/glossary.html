@@ -275,7 +275,8 @@ Without it, a translator's glue writes that constructor itself.</dd>
 <dt id="g-sticky">Sticky indicators</dt>
 <dd>The end-of-file and error flags of a <code>FILE</code>.
 Lean's <code>read</code> and <code>getLine</code> clear both flags when they reach the end of the file.
-An error flag otherwise stays set, so a later call still reports its <code>errno</code>.</dd>
+An error flag otherwise stays set.
+Natively, a later <code>getLine</code> then fails with an old <code>errno</code>; lean-runtime's <code>getLine</code> clears the flag first (LB-41).</dd>
 
 <dt id="g-sync-dependent">Sync dependent</dt>
 <dd>A dependent task (from <code>map</code> or <code>bind</code>) made with <code>sync := true</code>, or at priority <code>LEAN_SYNC_PRIO</code>.

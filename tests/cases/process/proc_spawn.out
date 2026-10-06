@@ -6,16 +6,7 @@ pid positive: true
 killed: 137
 kill after wait error: no such thing (error code: 3, no such process)
 tryWait: (some 0)
-missing piped: 255 "cat: 0 \"through cat\\nsecond line\\n\"\nsh: 7 \"o1\\n\" \"e1\\n\"\nsecond wait error: no such thing (error code: 10, no such process)\ntryWait after wait error: no such thing (error code: 10, no such process)\npid positive: true\nkilled: 137\nkill after wait error: no such thing (error code: 3, no such process)\ntryWait: (some 0)\n" "could not execute external process 'leanrs-no-such-program-xyz'\n"
-cat: 0 "through cat\nsecond line\n"
-sh: 7 "o1\n" "e1\n"
-second wait error: no such thing (error code: 10, no such process)
-tryWait after wait error: no such thing (error code: 10, no such process)
-pid positive: true
-killed: 137
-kill after wait error: no such thing (error code: 3, no such process)
-tryWait: (some 0)
-missing piped: 255 "cat: 0 \"through cat\\nsecond line\\n\"\nsh: 7 \"o1\\n\" \"e1\\n\"\nsecond wait error: no such thing (error code: 10, no such process)\ntryWait after wait error: no such thing (error code: 10, no such process)\npid positive: true\nkilled: 137\nkill after wait error: no such thing (error code: 3, no such process)\ntryWait: (some 0)\n" "could not execute external process 'leanrs-no-such-program-xyz'\n"
+missing piped: 255 "" "could not execute external process 'leanrs-no-such-program-xyz'\n"
 missing inherited: 255
 before child; child line
 second child

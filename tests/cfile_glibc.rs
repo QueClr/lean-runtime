@@ -4,10 +4,11 @@
 //! every step the results (with the `errno` an error reports), `feof` and the
 //! bytes on disk must agree.
 //!
-//! The oracle is glibc with one change, LB-02 (`docs/lean-bugs.md`): before a
-//! read of at least one buffer while output is pending (`__fpending`), it
+//! The oracle is glibc with two changes (`docs/lean-bugs.md`): LB-02, before
+//! a read of at least one buffer while output is pending (`__fpending`), it
 //! calls `fflush`, as the model does, since glibc itself would drop that
-//! output.
+//! output; and LB-41, `getLine` reports only an error of its own call, not
+//! an error indicator an earlier operation set.
 //!
 //! From lean2rr's `runtime/leanrt/src/cfile_tests.rs`. This test calls glibc
 //! through `extern "C"` declarations, which needs `unsafe`; it is test code
@@ -109,6 +110,15 @@ impl Glibc {
         }
     }
     fn get_line(&mut self) -> Result<Vec<u8>, i32> {
+        // LB-41: an error indicator set before the call is not this call's.
+        // glibc has no call that clears it alone (`clearerr` clears end of
+        // file too). With end of file set, `getc` reads nothing more (sticky
+        // end of file), so no new error can come, and the old one is ignored.
+        let earlier = unsafe { ferror(self.f) } != 0;
+        if earlier && unsafe { feof(self.f) } == 0 {
+            unsafe { clearerr(self.f) };
+        }
+        let stale = unsafe { ferror(self.f) } != 0;
         let mut l = Vec::new();
         loop {
             let c = unsafe { getc(self.f) };
@@ -120,7 +130,7 @@ impl Glibc {
                 break;
             }
         }
-        if unsafe { ferror(self.f) } != 0 {
+        if !stale && unsafe { ferror(self.f) } != 0 {
             return Err(c_errno());
         }
         if unsafe { feof(self.f) } != 0 {
