@@ -419,12 +419,25 @@ pub fn os_get_passwd() -> Result<PasswdInfo, IoError> {
     })
 }
 
-/// `osGetGroup gid` (`uv_os_get_group`, the gid cut to a `uid_t`): the group's
-/// name, id and members; `none` for no such group (`UV_ENOENT`); another
-/// error is decoded with the file name `group`, as `system.cpp` does.
+/// `osGetGroup gid` (`uv_os_get_group`): the group's name, id and members;
+/// `none` for no such group (`UV_ENOENT`); another error is decoded with the
+/// file name `group`, as `system.cpp` does.
+///
+/// A gid above `u32::MAX` names no group (a `gid_t` is 32 bits): `none`.
+/// Natively Lean cuts it to a `gid_t` (`uv/system.cpp` 203-206), so
+/// `osGetGroup (2^32)` is `some` of group 0, `root` (LB-45 of
+/// `docs/lean-bugs.md`, which the crate does not copy). `errno` is then
+/// left as a lookup of a missing group leaves it: the crate looks up
+/// `u32::MAX`, `(gid_t) -1`, which no standard Linux setup gives to a group
+/// (`chown`'s "no change"), only for the `errno` its NSS modules leave (0
+/// with `files` alone, `ENOENT` with `sss`).
 pub fn os_get_group(gid: u64) -> Result<Option<GroupInfo>, IoError> {
     super::effect_point();
-    let gid = gid as u32;
+    let Ok(gid) = u32::try_from(gid) else {
+        let missing = nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(u32::MAX));
+        set_errno(missing.map_or_else(|e| e as i32, |_| 0));
+        return Ok(None);
+    };
     // glibc's `getgrgid_r` leaves `errno` at its result
     let found = nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid));
     set_errno(found.as_ref().map_or_else(|e| *e as i32, |_| 0));
@@ -547,21 +560,29 @@ pub fn os_uname() -> Result<UnameInfo, IoError> {
     })
 }
 
-/// The process id of a priority call: Lean's `uint64_t` cut to a C `int`
-/// (`uv_pid_t`). `None` is 0, the calling process. A negative id names no
-/// process: the kernel finds no task for it (`ESRCH`), returned here
-/// without the call (`rustix`'s `Pid` holds positive ids only).
+/// The process id of a priority call: Lean's `UInt64`, whole. `None` is 0,
+/// the calling process. An id outside 0..=`i32::MAX` (a `pid_t` is a C
+/// `int`, and Linux's ids are positive) names no process: `ESRCH`, as the
+/// kernel answers for an id it has no process for, returned here without
+/// the call, with `errno` set as the call sets it (`rustix`'s `Pid` holds
+/// positive ids only).
+///
+/// Natively Lean cuts the id to an `int` (`uv/system.cpp` 371-374 and
+/// 384-385): 2^32 becomes 0, the caller, so `osGetPriority (2^32)` is the
+/// caller's priority and `osSetPriority (2^32) n` renices the caller, and
+/// `2^32 + 5` becomes process 5. The crate does not copy that (LB-45 of
+/// `docs/lean-bugs.md`).
 fn priority_pid(pid: u64) -> Result<Option<rustix::process::Pid>, IoError> {
-    let pid = pid as u32 as i32;
-    if pid < 0 {
-        return Err(uv(ESRCH));
+    match i32::try_from(pid) {
+        Ok(pid) => Ok(rustix::process::Pid::from_raw(pid)),
+        Err(_) => Err(uv(ESRCH)),
     }
-    Ok(rustix::process::Pid::from_raw(pid))
 }
 
-/// `osGetPriority` (`uv_os_getpriority`): `getpriority(PRIO_PROCESS, (int)
-/// pid)`, the nice value (Lean boxes the C `int` sign-extended as an
-/// `Int64`). libuv clears `errno` before the call, so a success leaves 0.
+/// `osGetPriority` (`uv_os_getpriority`): `getpriority(PRIO_PROCESS, pid)`
+/// for a `pid` that a `pid_t` holds (`priority_pid`), the nice value (Lean
+/// boxes the C `int` sign-extended as an `Int64`). libuv clears `errno`
+/// before the call, so a success leaves 0.
 pub fn os_getpriority(pid: u64) -> Result<i64, IoError> {
     let pid = priority_pid(pid)?;
     let p = rustix::process::getpriority_process(pid).map_err(|e| uv(e.raw_os_error()))?;
@@ -569,15 +590,19 @@ pub fn os_getpriority(pid: u64) -> Result<i64, IoError> {
     Ok(i64::from(p))
 }
 
-/// `osSetPriority` (`uv_os_setpriority`): the priority cut to a C `int`; one
-/// outside libuv's `UV_PRIORITY_HIGHEST` (-20) to `UV_PRIORITY_LOW` (19) is
-/// `UV_EINVAL`; then `setpriority(PRIO_PROCESS, (int) pid, priority)`.
+/// `osSetPriority` (`uv_os_setpriority`): a priority outside libuv's
+/// `UV_PRIORITY_HIGHEST` (-20) to `UV_PRIORITY_LOW` (19), whole, is
+/// `UV_EINVAL`; then `setpriority(PRIO_PROCESS, pid, priority)` for a `pid`
+/// that a `pid_t` holds (`priority_pid`). Natively Lean cuts the `Int64`
+/// to an `int` first, so 2^32 + 19 is 19 and accepted (LB-45 of
+/// `docs/lean-bugs.md`, which the crate does not copy); here it is
+/// `UV_EINVAL`, as any other priority out of the range.
 pub fn os_setpriority(pid: u64, priority: i64) -> Result<(), IoError> {
     super::effect_point();
-    let priority = priority as i32;
-    if !(-20..=19).contains(&priority) {
-        return Err(libuv(EINVAL));
-    }
+    let priority = match i32::try_from(priority) {
+        Ok(p) if (-20..=19).contains(&p) => p,
+        _ => return Err(libuv(EINVAL)),
+    };
     let pid = priority_pid(pid)?;
     rustix::process::setpriority_process(pid, priority).map_err(|e| uv(e.raw_os_error()))
 }

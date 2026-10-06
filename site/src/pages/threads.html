@@ -51,7 +51,7 @@ The loop thread exists only after the program's first use of <code>Std.Internal.
     The manager makes them when tasks need them.</li>
   <li><strong>Stacks.</strong> Every thread that the manager makes, and the loop thread, has Lean's stack size: 1 GiB, or <code>LEAN_STACK_SIZE_KB</code> plus 128 KiB.
     The io layer's own helper threads keep std's default size.</li>
-  <li><strong>Dedicated tasks.</strong> A task with a priority above <code>Task.Priority.max</code> gets a thread of its own.</li>
+  <li><strong>Dedicated tasks.</strong> A task with a priority above <code>Task.Priority.max</code> gets a thread of its own, whatever the size of the priority (<a href="lean-bugs.html#lb-39">LB-39</a>).</li>
   <li><strong>One lock</strong> protects the task table and the queues, as in native's task manager.</li>
   <li><strong>Waits.</strong> A pool task that waits in <code>Task.get</code> or <code>IO.wait</code> raises the pool's limit by one while it waits.
     So waiting tasks cannot take every worker and starve the pool.

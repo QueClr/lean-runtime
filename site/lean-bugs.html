@@ -156,6 +156,13 @@ So a NaN, an infinity, <code>-0.0</code> and a negative <code>x</code> lose thei
 It clamps <code>i</code> to the <code>int</code> range and calls <code>scalbn</code>, which gives a zero or an infinity with the sign of <code>x</code>.
 A NaN, an infinity and a zero stay as they are.
 Its rows are <code>float/scaleb*</code> with an exponent outside the C <code>int</code> range.</td></tr>
+<tr id="lb-39"><td>LB-39</td><td>A task priority is cut to 32 bits.
+At 2<sup>32</sup> - 1 the task runs at once inside the spawn, on the spawning thread, as a <code>sync</code> task.
+Then a <code>Task.get</code> in it prints the <code>sync</code> task panic.
+From 2<sup>32</sup> to 2<sup>32</sup> + 8 the task goes to the pool.</td><td>Every priority above 8 gives a dedicated task, whatever its size (<a href="sched.html#hub">sched</a>).
+A glue gives a priority of 2<sup>64</sup> or more as <code>u64::MAX</code>.
+No priority makes a task <code>sync</code>.
+Its case is <code>tasks/big_priority_dedicated</code>.</td></tr>
 <tr id="lb-40"><td>LB-40</td><td><code>IO.Process.output</code> with an input writes all of it before it reads the child's output.
 A child that fills its output pipe first, such as <code>cat</code> with 1 MiB, then waits for good, and so does the program.</td><td>lean-runtime writes the input while it reads both output pipes (<a href="io.html#processes">io</a>).
 A write error still ends <code>output</code> first, as natively.</td></tr>
@@ -172,6 +179,11 @@ lean-runtime always did this.</td></tr>
 <tr><td colspan="3">The io bug hunt found LB-40 to LB-44 on 2026-10-06.
 Batch <code>io-fixes-1</code> fixed LB-40 to LB-43 and recorded LB-44.
 Their cases are in <code>process/</code>, <code>io/</code> and <code>taskio/</code>.</td></tr>
+<tr id="lb-45"><td>LB-45</td><td><code>osGetPriority</code>, <code>osSetPriority</code> and <code>osGetGroup</code> cut the process id, the group id and the priority to 32 bits.
+So pid 2<sup>32</sup> is the calling process, gid 2<sup>32</sup> is the group of <code>root</code>, and priority 2<sup>32</sup> + 19 is 19.</td><td>A pid that a C <code>int</code> cannot hold gives "no such process".
+A gid above 2<sup>32</sup> - 1 gives <code>none</code>.
+A priority outside -20 to 19 gives "invalid argument".
+Its cases are <code>uvsys/uv_system</code> and <code>uvsys/rt_system</code>.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>

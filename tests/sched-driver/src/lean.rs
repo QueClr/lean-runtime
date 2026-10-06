@@ -61,7 +61,9 @@ pub type Var<T> = RefCell<T>;
 pub trait Val: Clone + 'static {}
 impl<T: Clone + 'static> Val for T {}
 
-/// `Task.Priority.default`, `Task.Priority.dedicated`.
+/// `Task.Priority.default`, `Task.Priority.dedicated`. A priority is the
+/// whole `Nat`: one of 2^64 or more is passed as `u64::MAX`, never its low
+/// bits, and every priority above 8 is dedicated (LB-39).
 pub const PRIO_DEFAULT: u64 = 0;
 pub const PRIO_DEDICATED: u64 = 9;
 /// `Task.Priority.max`.

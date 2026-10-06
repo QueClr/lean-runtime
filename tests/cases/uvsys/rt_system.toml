@@ -14,7 +14,11 @@ normalize = [
   '(?m)^uname Linux (aarch64|x86_64) -> uname Linux <machine>',
   '(?m)^priority (-?1?[0-9]|-20) -> priority <p>',
 ]
-deviations = { leanrs = "DV2" }
-# leanrs refuses or runs this differently until it adopts quirks, sched/ and promises (leanrs DV2:
-# tasks run eagerly; setProcessTitle, osGetGroup and promises refused at translation); native's
-# outcome is what `check` accepts (DV2 names no Lean bug).
+deviations = { lean2rr = "LB-45", leanrs = "LB-45; DV2" }
+native = { stdout = "pid true\nppid positive true\ncwd true\nhome false\ntmpdir /tmp\nuname Linux <machine> release nonempty true\nhostname <host>\npasswd <user> uid true home true\ngroup true\nno group true\ngroup 2^32 (some 0)\ngetenv (some (value 1)) (some (value 1))\nenviron has it true\nafter unset none\nempty name: invalid argument (error code: 22, invalid argument)\nNUL: invalid argument (error code: 22, string contains NUL bytes)\n  file: A\u0000B\npriority <p> true\nhrtime monotonic true\nrandom 16\nrusage maxRSS positive true\nexePath true\nmemory true true true\ncpus <n> models <models>\nconstrained memory <n>\nuptime positive true\ntitle ab\ncwd after chdir /\nchdir: no such file or directory (error code: 2)\n  file: /no/such/dir\n", stderr = "", code = "0" }
+# `expected` (the .out, .err and .code files) is the correct outcome, written by hand (LB-45): gid
+# 2^32 names no group (none). Native Lean 4.34.0's outcome is `native`: it cuts the gid to 32
+# bits, so 2^32 is group 0 (`group 2^32 (some 0)`).
+# leanrs: LB-45 as for lean2rr; it also refuses or runs this differently until it adopts quirks,
+# sched/ and promises (leanrs DV2: tasks run eagerly; setProcessTitle, osGetGroup and promises
+# refused at translation).

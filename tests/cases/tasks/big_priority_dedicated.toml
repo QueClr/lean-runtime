@@ -1,0 +1,17 @@
+id = "big_priority_dedicated"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime overflow hunt HO-01 (native/HoPrio.lean, prioCase), judged LB-39 by the coordinator, 2026-10-06: lean.h lean_task_spawn_core and lean_task_map_core take the priority as an `unsigned`"
+streams = "separate"
+deviations = { lean2rr = "LB-39", leanrs = "LB-39" }
+native = { stdout = "asTask 4294967295: finished when the spawn returned: true\nasTask 4294967295: the task saw rescuer\nspawn 4294967295: finished when the spawn returned: true\nspawn 4294967295: the task saw rescuer\nmap 4294967295: finished when the spawn returned: true\nmap 4294967295: the task saw rescuer\nasTask 4294967296: finished when the spawn returned: false\nasTask 4294967296: the task saw main\nspawn 4294967296: finished when the spawn returned: false\nspawn 4294967296: the task saw main\nmap 4294967296: finished when the spawn returned: false\nmap 4294967296: the task saw main\nasTask 18446744073709551616: finished when the spawn returned: false\nasTask 18446744073709551616: the task saw main\nspawn 18446744073709551616: finished when the spawn returned: false\nspawn 18446744073709551616: the task saw main\nmap 18446744073709551616: finished when the spawn returned: false\nmap 18446744073709551616: the task saw main\nbusy asTask 4294967295: the task ran while the worker was busy: true\nbusy asTask 4294967295: the worker was freed by the task\nbusy mapTask 4294967295: the task ran while the worker was busy: true\nbusy mapTask 4294967295: the worker was freed by the task\nbusy bindTask 4294967295: the task ran while the worker was busy: true\nbusy bindTask 4294967295: the worker was freed by the task\nbusy asTask 4294967296: the task ran while the worker was busy: false\nbusy asTask 4294967296: the worker was freed by rescuer\nbusy mapTask 4294967296: the task ran while the worker was busy: false\nbusy mapTask 4294967296: the worker was freed by rescuer\nbusy bindTask 4294967296: the task ran while the worker was busy: false\nbusy bindTask 4294967296: the worker was freed by rescuer\nbusy asTask 18446744073709551616: the task ran while the worker was busy: true\nbusy asTask 18446744073709551616: the worker was freed by the task\nbusy mapTask 18446744073709551616: the task ran while the worker was busy: true\nbusy mapTask 18446744073709551616: the worker was freed by the task\nbusy bindTask 18446744073709551616: the task ran while the worker was busy: true\nbusy bindTask 18446744073709551616: the worker was freed by the task\n", stderr = "`Task.get` called from a `(sync := true)` task\n`Task.get` called from a `(sync := true)` task\n`Task.get` called from a `(sync := true)` task\n", code = "0" }
+# `expected` (the .out, .err and .code files) is the correct outcome, written by
+# hand: every priority above 8 is a dedicated task. Native Lean 4.34.0's outcome
+# is `native`. At 2^32 - 1 (`LEAN_SYNC_PRIO` after the cut to an `unsigned`) each
+# task runs inside its spawn on `main`'s thread: in part 1 it prints the `sync`
+# task panic and gets the rescuer's value a second later; in part 2 it sees the
+# worker busy and frees it, as a dedicated task does. At 2^32 (priority 0 after
+# the cut) the `IO.asTask`, `IO.mapTask` and `IO.bindTask` of part 2 wait in the
+# pool's queue behind `busy` until the rescuer frees the worker. At 2^64 native
+# passes the bits of the big `Nat`'s pointer, shifted right by one, which in
+# practice are above 8 (a dedicated task, by chance).

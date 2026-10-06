@@ -116,7 +116,7 @@ pub trait Glue: Send + Sync {
     /// A task starts running on the calling thread. `own_thread`: natively
     /// on a thread of its own (a worker's pool task, a dedicated task);
     /// otherwise a `sync` task on the current thread (a `sync := true`
-    /// dependent, a task at priority `LEAN_SYNC_PRIO`). The io layer's
+    /// dependent). The io layer's
     /// per-thread state (the current standard streams, the modelled
     /// `errno`) needs nothing here: it is the real thread's, so a pool
     /// worker keeps it from one task to the next, as natively (review
@@ -207,9 +207,12 @@ pub fn finish() {
 /// `lean_task_spawn_core(c, prio, keep_alive)`: `Task.spawn` (`keep_alive`
 /// false) and `IO.asTask` (true). Without a task manager (during module
 /// initialization, `LEAN_NUM_THREADS=0`, after `finish`) the job runs at
-/// once and the task is finished; at priority `LEAN_SYNC_PRIO` it runs at
-/// once as a task on the calling thread; above `Task.Priority.max` on a
-/// thread of its own; otherwise it is queued for the pool.
+/// once and the task is finished; above `Task.Priority.max` it runs on a
+/// thread of its own; otherwise it is queued for the pool. `prio` is
+/// Lean's `Task.Priority`, the whole `Nat`: a glue passes a priority of
+/// 2^64 or more saturated to `u64::MAX`, never its low bits; 2^32 - 1 is a
+/// dedicated priority as any other above 8, never a `sync` task on the
+/// calling thread (LB-39; `common::priority`).
 pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
     let r = task::with_shared(|sh| match sh {
         Some(sh) => task::spawn(sh, job, prio, keep_alive),
@@ -243,7 +246,8 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
 /// `src`'s value), as Lean's `add_dep`; when `src` finishes, a `sync`
 /// dependent runs there and then on the finishing thread, the others are
 /// queued. If `src` has finished already, it is queued now (a `sync` one
-/// runs now, here). Without a task manager, the job runs at once.
+/// runs now, here). Without a task manager, the job runs at once. `prio`
+/// as for `spawn`; only `sync` makes a `sync` dependent.
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId {
     let r = task::with_shared(|sh| match sh {
         Some(sh) => task::depend(sh, src, job, prio, sync, keep_alive),
@@ -367,9 +371,9 @@ extern "C" fn release_live(bits: u64) {
 }
 
 /// Whether the innermost task running on this thread is a `sync` one: a
-/// `sync := true` dependent, or a task at priority `LEAN_SYNC_PRIO`. Native
-/// `Task.get` (and `IO.wait`) of an unfinished task from such a task prints
-/// `GET_IN_SYNC_TASK` as a Lean panic before it waits
+/// `sync := true` dependent (no Lean priority makes a task `sync`, LB-39).
+/// Native `Task.get` (and `IO.wait`) of an unfinished task from such a task
+/// prints `GET_IN_SYNC_TASK` as a Lean panic before it waits
 /// (`task_manager::wait_for`); the glue reproduces it.
 pub fn in_sync_task() -> bool {
     task::in_sync_task()

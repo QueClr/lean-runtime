@@ -100,8 +100,7 @@ const DEDICATED: usize = PRIOS - 1;
 /// `Task.spawn`/`map`/`bind` (`keep_alive = false`): deleted when dropped
 /// before it starts.
 const PURE: u32 = 1 << 0;
-/// Runs on the thread that finishes the task it waits for (`sync := true`,
-/// or priority `LEAN_SYNC_PRIO`).
+/// Runs on the thread that finishes the task it waits for (`sync := true`).
 const SYNC: u32 = 1 << 1;
 /// In its priority's queue.
 const QUEUED: u32 = 1 << 2;
@@ -115,12 +114,10 @@ const EARLY: u32 = 1 << 6;
 /// An unresolved promise: no computation.
 const PROMISE: u32 = 1 << 7;
 /// Runs on the current thread when it begins (a `sync` dependent handed by a
-/// walk, a task at priority `LEAN_SYNC_PRIO`): `thread` is its thread.
+/// walk): `thread` is its thread.
 const INLINE: u32 = 1 << 8;
 /// `IO.checkCanceled` was called in the current run.
 const CHECKED: u32 = 1 << 9;
-/// Priority `LEAN_SYNC_PRIO` (2^32-1): runs as soon as it is enqueued.
-const SYNCPRIO: u32 = 1 << 10;
 /// Handed by a walk of dependents: its own walk is continued by that walk's
 /// loop.
 const FROM_WALK: u32 = 1 << 11;
@@ -659,19 +656,15 @@ impl Sched {
             && e.aux[1] == self.tk.epoch
     }
 
-    /// A new deferred task at priority `prio` (Lean's `Task.Priority`, as
-    /// passed). Whether the caller must run it now, on the current thread
-    /// (priority `LEAN_SYNC_PRIO`, not a dependent: `enqueue_core` runs it at
-    /// once).
-    fn register(&mut self, job: Job, prio: u64, keep_alive: bool, dep: bool) -> (u32, bool) {
+    /// A new deferred task at priority `prio` (Lean's `Task.Priority`, the
+    /// whole value: `common::priority`), queued unless it is a dependent
+    /// (`dep`: `depend` links or queues it).
+    fn register(&mut self, job: Job, prio: u64, keep_alive: bool, dep: bool) -> u32 {
         self.settle_worker();
-        let (p, sp) = priority(prio);
+        let p = priority(prio);
         let mut flags = 0;
         if !keep_alive {
             flags |= PURE;
-        }
-        if sp {
-            flags |= SYNC | SYNCPRIO;
         }
         if let Some(&r) = self.st_ref().running.last() {
             if self.early_now(r) {
@@ -679,22 +672,10 @@ impl Sched {
             }
         }
         let i = self.alloc(Some(job), flags, p as usize);
-        if dep {
-            return (i, false);
+        if !dep {
+            self.enqueue(i);
         }
-        if sp {
-            self.run_here(i);
-            return (i, true);
-        }
-        self.enqueue(i);
-        (i, false)
-    }
-
-    /// Task `i` is to run on the current thread when it begins.
-    fn run_here(&mut self, i: u32) {
-        let th = self.cur_thread();
-        self.ent_mut(i).flags |= INLINE;
-        self.set_thread(i, th);
+        i
     }
 
     /// Put pending task `i` at the end of its priority's queue.
@@ -946,22 +927,17 @@ impl Sched {
     /// `d` (just registered as a dependent) was created depending on `src`
     /// (`sync`: with `sync := true`): if `src` is unfinished, `d` waits for
     /// it and runs or is enqueued when it finishes, as Lean's `add_dep`;
-    /// otherwise it is enqueued now. Whether the caller must run it now
-    /// (priority `LEAN_SYNC_PRIO` and `src` finished).
-    fn depend(&mut self, src: TaskId, d: u32, sync: bool) -> bool {
+    /// otherwise it is enqueued now (a `sync` dependent of a finished task
+    /// is no task: `dependent_runs_now`).
+    fn depend(&mut self, src: TaskId, d: u32, sync: bool) {
         if sync {
             self.ent_mut(d).flags |= SYNC;
         }
         if let Some(s) = self.find(src) {
             self.link(s, d);
-            return false;
-        }
-        if self.ent(d).flags & SYNCPRIO != 0 {
-            self.run_here(d);
-            return true;
+            return;
         }
         self.enqueue(d);
-        false
     }
 
     /// Take pending task `i` off its queue, its source's dependents and the
@@ -1588,11 +1564,11 @@ impl Sched {
     ///   pool worker if that task was a pool task, busy for the whole walk,
     ///   as natively `handle_finished` runs on it (review AR-16).
     ///
-    /// `ON_THREAD` tasks (a `sync` dependent, a task at `LEAN_SYNC_PRIO`)
-    /// and walks of promises and of such tasks run on the thread below them:
-    /// their waits raise no limit, as natively `wait_for` sees a task at
-    /// `LEAN_SYNC_PRIO` (`in_pool` false), so they keep that thread's
-    /// worker.
+    /// `ON_THREAD` tasks (`sync` dependents) and walks of promises and of
+    /// such tasks run on the thread below them: their waits raise no limit,
+    /// as natively `wait_for` sees a `sync` dependent at its internal
+    /// priority `LEAN_SYNC_PRIO` (`in_pool` false), so they keep that
+    /// thread's worker.
     fn holds_worker(&self, st: &CtxState, w: Wait) -> bool {
         let (mut ri, mut wi) = (st.running.len(), st.walks.len());
         let mut innermost = true;
@@ -2585,8 +2561,14 @@ fn walk_above(floor: usize) {
 /// `lean_task_spawn_core(c, prio, keep_alive)`: `Task.spawn` (`keep_alive`
 /// false) and `IO.asTask` (true). Without a task manager (during module
 /// initialization, or `LEAN_NUM_THREADS=0`) the job runs at once and the
-/// task is finished; at priority `LEAN_SYNC_PRIO` it runs at once as a task
-/// on the current thread; otherwise it is deferred.
+/// task is finished; otherwise it is deferred: above `Task.Priority.max`
+/// a dedicated task, else a pool task.
+///
+/// `prio` is Lean's `Task.Priority`, the whole `Nat`: a glue passes a
+/// priority of 2^64 or more saturated to `u64::MAX`, never its low bits.
+/// Every priority above 8 is dedicated, 2^32 - 1 included: no priority
+/// runs the task at once on the spawning thread, as native's cut to an
+/// `unsigned` does (LB-39; `common::priority`).
 pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
     super::ensure_started();
     super::writers_point();
@@ -2594,14 +2576,10 @@ pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
         let _ = job();
         return TaskId::FINISHED;
     }
-    let (i, now, id) = with(|s| {
-        let (i, now) = s.register(job, prio, keep_alive, false);
-        (i, now, s.id_of(i))
-    });
-    if now {
-        run_task(i);
-    }
-    id
+    with(|s| {
+        let i = s.register(job, prio, keep_alive, false);
+        s.id_of(i)
+    })
 }
 
 /// Whether a dependent of `src` is not a task at all: without a task
@@ -2618,19 +2596,17 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
 /// (true): a new task running `job` once `src` has finished (it reads
 /// `src`'s value), as Lean's `add_dep`; when `src` finishes, a `sync`
 /// dependent runs there and then on the finishing thread, the others are
-/// queued. Requires `!dependent_runs_now(src, sync)`.
+/// queued. Requires `!dependent_runs_now(src, sync)`. `prio` as for
+/// `spawn` (the whole value, saturated); only `sync` makes a `sync`
+/// dependent.
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId {
     super::ensure_started();
     super::writers_point();
-    let (i, now, id) = with(|s| {
-        let (i, _) = s.register(job, prio, keep_alive, true);
-        let now = s.depend(src, i, sync);
-        (i, now, s.id_of(i))
-    });
-    if now {
-        run_task(i);
-    }
-    id
+    with(|s| {
+        let i = s.register(job, prio, keep_alive, true);
+        s.depend(src, i, sync);
+        s.id_of(i)
+    })
 }
 
 /// `Task.get`/`IO.wait` (`lean_task_get`): returns once task `id` has
@@ -2811,13 +2787,13 @@ pub fn running_worker() -> Option<u32> {
 }
 
 /// Whether the innermost task running on this thread is a `sync` one: a
-/// `sync := true` dependent, or a task at priority `LEAN_SYNC_PRIO` (native
-/// Lean gives both that priority). Native `Task.get` (and `IO.wait`) of an
-/// unfinished task from such a task prints `GET_IN_SYNC_TASK` as a Lean
-/// panic (which goes on, unless `LEAN_ABORT_ON_PANIC`) before it waits
-/// (`task_manager::wait_for`). The glue reproduces it: when its own slot for
-/// the task is still empty and this is true, it reports that Lean panic,
-/// then calls `wait`.
+/// `sync := true` dependent (native Lean runs it at its internal priority
+/// `LEAN_SYNC_PRIO`; no Lean priority makes a task `sync` here, LB-39).
+/// Native `Task.get` (and `IO.wait`) of an unfinished task from such a task
+/// prints `GET_IN_SYNC_TASK` as a Lean panic (which goes on, unless
+/// `LEAN_ABORT_ON_PANIC`) before it waits (`task_manager::wait_for`). The
+/// glue reproduces it: when its own slot for the task is still empty and
+/// this is true, it reports that Lean panic, then calls `wait`.
 pub fn in_sync_task() -> bool {
     with(|s| {
         s.st_ref()
@@ -3283,20 +3259,4 @@ thread_local! {
 #[inline]
 pub fn manager_running() -> bool {
     MANAGER.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::priority;
-
-    #[test]
-    fn priorities() {
-        assert_eq!(priority(0), (0, false));
-        assert_eq!(priority(8), (8, false));
-        assert_eq!(priority(9), (9, false));
-        assert_eq!(priority(1000), (9, false));
-        assert_eq!(priority(4294967295), (0, true));
-        assert_eq!(priority(4294967297), (1, false));
-        assert_eq!(priority(8589934596), (4, false));
-    }
 }

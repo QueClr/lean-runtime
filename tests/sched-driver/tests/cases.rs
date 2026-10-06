@@ -1136,6 +1136,7 @@ cases!(
     stack_overflow_in_dedicated,
     late_tasks_while_enqueuing,
     get_tid_threads,
+    big_priority_dedicated,
     loop_configure,
     timer_oneshot,
     get_tid_loop_thread,

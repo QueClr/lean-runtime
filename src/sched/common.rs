@@ -33,15 +33,26 @@ pub const PROMISE_DROPPED: &str =
 /// for dedicated tasks (a thread of their own natively).
 pub(crate) const PRIOS: usize = 10;
 
-/// Lean passes `lean_unbox(prio)` as an `unsigned`: the priority modulo
-/// 2^32, where 2^32-1 is `LEAN_SYNC_PRIO` and above 8 is dedicated.
-pub(crate) fn priority(prio: u64) -> (u8, bool) {
-    let p = prio as u32;
-    if p == u32::MAX {
-        (0, true)
-    } else {
-        ((p as u64).min(PRIOS as u64 - 1) as u8, false)
-    }
+/// The queue of a task at Lean priority `prio` (`Task.Priority`, a `Nat`):
+/// 0..=8 as they are, and every priority above `Task.Priority.max` (8)
+/// dedicated (9), as Lean's documentation says ("Tasks with a priority
+/// greater than `Task.Priority.max` are scheduled on dedicated threads",
+/// `Init/Core.lean`). The value is the whole `Nat`: a glue passes a
+/// priority that fits in a `u64` as it is, and a bigger one (a big `Nat`)
+/// saturated to `u64::MAX`, never its low bits; all of them are dedicated.
+///
+/// No priority makes a task `sync`. Lean has no `sync` spawn: `Task.map`
+/// and `Task.bind` take `sync` as an argument of its own, which `depend`
+/// receives. Native Lean passes `lean_unbox(prio)` as an `unsigned`, the
+/// priority modulo 2^32 (`lean_task_spawn_core`, `lean.h`), so natively
+/// 2^32 - 1 is `LEAN_SYNC_PRIO` and runs at once on the spawning thread,
+/// and 2^32 to 2^32 + 8 go to the pool: LB-39 of `docs/lean-bugs.md`,
+/// which the crate does not copy.
+///
+/// Examples: `priority(8)` is 8; `priority(9)`, `priority(2^32 - 1)`,
+/// `priority(2^32 + 4)` and `priority(u64::MAX)` are 9.
+pub(crate) fn priority(prio: u64) -> u8 {
+    prio.min(PRIOS as u64 - 1) as u8
 }
 
 /// `Task.get` and `IO.wait` (`lean_task_get`, `task_manager::wait_for`) once
@@ -131,6 +142,30 @@ mod tests {
         let e: Ref<u8> = Ref::empty();
         e.put(1);
         assert_eq!(e.get(), 1);
+    }
+
+    /// The whole value counts (LB-39), in both modes: 0..=8 as they are,
+    /// everything above dedicated (9), also where native's cut to an
+    /// `unsigned` gives `LEAN_SYNC_PRIO` (2^32 - 1) or a pool priority (2^32
+    /// to 2^32 + 8), and `u64::MAX`, a big `Nat` as the glue passes it.
+    #[test]
+    fn priorities() {
+        for p in 0..=8 {
+            assert_eq!(priority(p), p as u8);
+        }
+        for p in [
+            9,
+            1000,
+            (1 << 32) - 1,
+            1 << 32,
+            (1 << 32) + 1,
+            (1 << 32) + 8,
+            8589934596,
+            1 << 63,
+            u64::MAX,
+        ] {
+            assert_eq!(priority(p), 9, "priority {p}");
+        }
     }
 
     /// glibc's `strerror(EAGAIN)`, the text the single-thread scheduler

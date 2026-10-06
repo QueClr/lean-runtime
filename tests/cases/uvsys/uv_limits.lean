@@ -4,7 +4,8 @@ import Std.Internal.UV.System
 when it is empty, `osTmpdir` the first of `TMPDIR`, `TMP`, `TEMP`,
 `TEMPDIR` that is set, even empty; a value of `PATH_MAX` (4096) bytes or
 more is `ENOBUFS`, and so is a process title of 512 bytes or more;
-priorities outside [-20, 19] (after the cut to an `int`) and `random` of more
+priorities outside [-20, 19] (as a whole `Int64`; natively after a cut to an
+`int`, LB-45, which rejects these values too) and `random` of more
 than 0x7FFFFFFF bytes are rejected at once. `RtUvSysLimits.pipe` runs the program (mode `env`)
 under several environments, then with a long argument (room for a long
 title). -/

@@ -281,6 +281,8 @@ pub const CASES: &[(&str, Case)] = &[
     ),
     // fixes-5: review AR-37
     ("get_tid_threads", (no_init, get_tid_threads)),
+    // fixes-12: HO-01, LB-39
+    ("big_priority_dedicated", (no_init, big_priority_dedicated)),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -4724,5 +4726,200 @@ fn get_tid_threads(_: &[String]) -> u32 {
         "sync dependent of a promise on the resolving thread: {}",
         sp == mt
     ));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-12, HO-01 (LB-39): every priority above `Task.Priority.max` is a
+// dedicated task, whatever its size; the glue passes a big `Nat` saturated to
+// `u64::MAX`.
+
+// def seen (r : Option String) : String :=
+//   match r with
+//   | some s => s
+//   | none => "dropped"
+fn seen(r: Option<String>) -> String {
+    r.unwrap_or_else(|| "dropped".into())
+}
+
+// def rescue (p : IO.Promise String) : IO Unit := do
+//   let _ ← IO.asTask (prio := .dedicated) (do IO.sleep 1000; p.resolve "rescuer")
+fn rescue(p: &Obj<Promise<String>>) {
+    let p = p.clone();
+    let _ = as_task(
+        move || {
+            sleep(1000);
+            p.resolve("rescuer".into());
+        },
+        PRIO_DEDICATED,
+    );
+}
+
+/// `a.toNat!` as a priority, as the glue passes it: a `Nat` that fits in a
+/// `u64` as it is, a bigger one (`18446744073709551616`) saturated.
+fn prio_of(a: &str) -> u64 {
+    a.parse().unwrap_or(u64::MAX)
+}
+
+// def part1 (a : String) : IO Unit := do
+//   let p := a.toNat!
+//   let go ← IO.Promise.new
+//   rescue go
+//   let t ← IO.asTask (prio := p) (return seen (← IO.wait go.result?))
+//   IO.println s!"asTask {a}: finished when the spawn returned: {← IO.hasFinished t}"
+//   go.resolve "main"
+//   match ← IO.wait t with
+//   | .ok s => IO.println s!"asTask {a}: the task saw {s}"
+//   | .error e => IO.println s!"asTask {a}: error {e}"
+//   let go ← IO.Promise.new
+//   rescue go
+//   let t := Task.spawn (prio := p) fun _ => seen go.result?.get
+//   IO.println s!"spawn {a}: finished when the spawn returned: {← IO.hasFinished t}"
+//   go.resolve "main"
+//   IO.println s!"spawn {a}: the task saw {t.get}"
+//   let go ← IO.Promise.new
+//   rescue go
+//   let t := (Task.pure p).map (prio := p) fun _ => seen go.result?.get
+//   IO.println s!"map {a}: finished when the spawn returned: {← IO.hasFinished t}"
+//   go.resolve "main"
+//   IO.println s!"map {a}: the task saw {t.get}"
+fn big_priority_part1(a: &str) {
+    let p = prio_of(a);
+    let go: Obj<Promise<String>> = Obj::new(Promise::new());
+    rescue(&go);
+    let r = go.result_opt();
+    let t = as_task(move || seen(r.get()), p);
+    println(&format!(
+        "asTask {a}: finished when the spawn returned: {}",
+        has_finished(&t)
+    ));
+    go.resolve("main".into());
+    println(&format!("asTask {a}: the task saw {}", t.get()));
+    let go: Obj<Promise<String>> = Obj::new(Promise::new());
+    rescue(&go);
+    let r = go.result_opt();
+    let t = Task::spawn(move || seen(r.get()), p);
+    println(&format!(
+        "spawn {a}: finished when the spawn returned: {}",
+        has_finished(&t)
+    ));
+    go.resolve("main".into());
+    println(&format!("spawn {a}: the task saw {}", t.get()));
+    let go: Obj<Promise<String>> = Obj::new(Promise::new());
+    rescue(&go);
+    let r = go.result_opt();
+    let t = map_task(move |_: u64| seen(r.get()), Task::pure(p), p, false, false);
+    println(&format!(
+        "map {a}: finished when the spawn returned: {}",
+        has_finished(&t)
+    ));
+    go.resolve("main".into());
+    println(&format!("map {a}: the task saw {}", t.get()));
+}
+
+// def busyCase (label : String)
+//     (spawn : IO.Promise Unit → IO.Promise String → BaseIO (Task (Except IO.Error Bool))) :
+//     IO Unit := do
+//   let free ← IO.Promise.new
+//   let started ← IO.Promise.new
+//   let done ← IO.Promise.new
+//   let busy ← IO.asTask (do
+//     started.resolve ()
+//     while !(← IO.hasFinished free.result?) do IO.sleep 10
+//     done.resolve ())
+//   let _ ← IO.wait started.result?
+//   rescue free
+//   let t ← spawn done free
+//   match ← IO.wait t with
+//   | .ok b => IO.println s!"{label}: the task ran while the worker was busy: {b}"
+//   | .error e => IO.println s!"{label}: error {e}"
+//   IO.println s!"{label}: the worker was freed by {seen (← IO.wait free.result?)}"
+//   let _ ← IO.wait busy
+fn big_priority_busy_case(
+    label: &str,
+    spawn: impl FnOnce(Obj<Promise<()>>, Obj<Promise<String>>) -> Task<bool>,
+) {
+    let free: Obj<Promise<String>> = Obj::new(Promise::new());
+    let started: Obj<Promise<()>> = Obj::new(Promise::new());
+    let done: Obj<Promise<()>> = Obj::new(Promise::new());
+    let (f2, s2, d2) = (free.clone(), started.clone(), done.clone());
+    let busy = as_task(
+        move || {
+            s2.resolve(());
+            while !has_finished(&f2.result_opt()) {
+                sleep(10);
+            }
+            d2.resolve(());
+        },
+        PRIO_DEFAULT,
+    );
+    started.result_opt().get();
+    rescue(&free);
+    let t = spawn(done, free.clone());
+    println(&format!(
+        "{label}: the task ran while the worker was busy: {}",
+        t.get()
+    ));
+    println(&format!(
+        "{label}: the worker was freed by {}",
+        seen(free.result_opt().get())
+    ));
+    busy.get();
+}
+
+// def check (done : IO.Promise Unit) (free : IO.Promise String) : IO Bool := do
+//   let ranWhileBusy := !(← IO.hasFinished done.result?)
+//   free.resolve "the task"
+//   return ranWhileBusy
+fn big_priority_check(done: &Obj<Promise<()>>, free: &Obj<Promise<String>>) -> bool {
+    let ran_while_busy = !has_finished(&done.result_opt());
+    free.resolve("the task".into());
+    ran_while_busy
+}
+
+// def part2 (a : String) : IO Unit := do
+//   let p := a.toNat!
+//   busyCase s!"busy asTask {a}" fun done free => IO.asTask (prio := p) (check done free)
+//   busyCase s!"busy mapTask {a}" fun done free =>
+//     IO.mapTask (prio := p) (fun _ => check done free) (Task.pure p)
+//   busyCase s!"busy bindTask {a}" fun done free =>
+//     IO.bindTask (prio := p) (Task.pure p) fun _ => do
+//       let b ← check done free
+//       return Task.pure (.ok b)
+fn big_priority_part2(a: &str) {
+    let p = prio_of(a);
+    big_priority_busy_case(&format!("busy asTask {a}"), |done, free| {
+        as_task(move || big_priority_check(&done, &free), p)
+    });
+    big_priority_busy_case(&format!("busy mapTask {a}"), |done, free| {
+        map_task(
+            move |_: u64| big_priority_check(&done, &free),
+            Task::pure(p),
+            p,
+            false,
+            true,
+        )
+    });
+    big_priority_busy_case(&format!("busy bindTask {a}"), |done, free| {
+        bind_task(
+            Task::pure(p),
+            move |_: u64| Task::pure(big_priority_check(&done, &free)),
+            p,
+            false,
+            true,
+        )
+    });
+}
+
+// def main (args : List String) : IO Unit := do
+//   for a in args do part1 a
+//   for a in args do part2 a
+fn big_priority_dedicated(args: &[String]) -> u32 {
+    for a in args {
+        big_priority_part1(a);
+    }
+    for a in args {
+        big_priority_part2(a);
+    }
     0
 }

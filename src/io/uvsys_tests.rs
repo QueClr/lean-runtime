@@ -332,15 +332,24 @@ fn io_os_get_passwd() {
 }
 
 /// `osGetGroup` (`uv_os_get_group`): the user's group; none for a missing
-/// one; the gid cut to 32 bits (RtSystem).
+/// one (RtSystem); none for a gid above `u32::MAX`, which no group has,
+/// not the group of its low 32 bits as natively (LB-45), with `errno` as a
+/// missing group's lookup leaves it.
 #[test]
 fn io_os_get_group() {
+    use crate::io::error::{errno, set_errno};
     let gid = nix::unistd::Gid::effective().as_raw();
     let g = os_get_group(u64::from(gid)).unwrap().unwrap();
     assert_eq!(g.gid, u64::from(gid));
     assert!(!g.groupname.is_empty());
-    assert_eq!(os_get_group(u64::from(gid) + (1 << 32)).unwrap(), Some(g));
+    set_errno(9);
     assert_eq!(os_get_group(4_000_000).unwrap(), None);
+    let missing = errno();
+    for big in [u64::from(gid) + (1 << 32), 1 << 32, u64::MAX] {
+        set_errno(9);
+        assert_eq!(os_get_group(big).unwrap(), None, "{big}");
+        assert_eq!(errno(), missing, "{big}");
+    }
 }
 
 /// `osHomedir` (`uv_os_homedir`): `HOME` when set, even empty, else the
@@ -490,8 +499,9 @@ fn io_cpu_info() {
 }
 
 /// `osGetPriority` (`uv_os_getpriority`): the nice value of `/proc/self/stat`
-/// for pid 0, the process's pid and a pid whose low 32 bits are 0; lean
-/// (uv_system): `ESRCH` for a missing pid and a negative C `int`.
+/// for pid 0 and the process's pid; lean (uv_system): `ESRCH` for a missing
+/// pid and for every pid a `pid_t` cannot hold, also 2^32 and 2^32 + the
+/// process's pid, which natively are the caller and the process (LB-45).
 #[test]
 fn io_os_getpriority() {
     if child_case().as_deref() == Some("getpriority") {
@@ -499,36 +509,52 @@ fn io_os_getpriority() {
         let after = &stat[stat.rfind(')').unwrap() + 2..];
         let nice: i64 = after.split(' ').nth(16).unwrap().parse().unwrap();
         let own = u64::from(std::process::id());
-        for pid in [0, own, 1 << 32] {
+        for pid in [0, own] {
             assert_eq!(os_getpriority(pid).unwrap(), nice, "{pid}");
+        }
+        for pid in [1 << 32, (1 << 32) + own] {
+            assert_eq!(os_getpriority(pid).unwrap_err(), esrch(), "{pid}");
         }
         return;
     }
     assert_eq!(os_getpriority(i32::MAX as u64).unwrap_err(), esrch());
-    assert_eq!(os_getpriority(u64::from(u32::MAX)).unwrap_err(), esrch());
+    for pid in [1 << 31, u64::from(u32::MAX), 1 << 32, u64::MAX] {
+        assert_eq!(os_getpriority(pid).unwrap_err(), esrch(), "{pid}");
+    }
     // the main thread's nice value is the process's: a child
     ok(child("io_os_getpriority", "getpriority"));
 }
 
 /// `osSetPriority` (`uv_os_setpriority`); lean (uv_system): 20 and -21 are
-/// `EINVAL` before any call, a missing pid `ESRCH`; the priority is a C
-/// `int` (`2^32 + 19` is 19). The change runs in a child.
+/// `EINVAL` before any call, and so is every priority outside -20..=19 as a
+/// whole `Int64` (`2^32 + 19` natively is 19, LB-45); a missing pid, or one
+/// a `pid_t` cannot hold (2^32, natively the caller), is `ESRCH`. The
+/// change runs in a child.
 #[test]
 fn io_os_setpriority() {
     if child_case().as_deref() == Some("setpriority") {
         let now = os_getpriority(0).unwrap();
         os_setpriority(0, now).unwrap();
-        os_setpriority(0, (1 << 32) + 19).unwrap();
+        assert_eq!(os_setpriority(1 << 32, 19).unwrap_err(), esrch());
+        assert_eq!(os_getpriority(0).unwrap(), now, "2^32 is not the caller");
+        os_setpriority(0, 19).unwrap();
         assert_eq!(os_getpriority(0).unwrap(), 19);
         return;
     }
     assert_eq!(os_setpriority(0, 20).unwrap_err(), einval());
     assert_eq!(os_setpriority(0, -21).unwrap_err(), einval());
-    assert_eq!(
-        os_setpriority(0, 4294967296 * 5 - 30).unwrap_err(),
-        einval()
-    );
+    for prio in [
+        (1 << 32) + 19,
+        (1 << 32) - 1,
+        4294967296 * 5 - 30,
+        i64::MAX,
+        i64::MIN,
+        -(1 << 32),
+    ] {
+        assert_eq!(os_setpriority(0, prio).unwrap_err(), einval(), "{prio}");
+    }
     assert_eq!(os_setpriority(i32::MAX as u64, 1).unwrap_err(), esrch());
+    assert_eq!(os_setpriority(u64::MAX, 1).unwrap_err(), esrch());
     ok(child("io_os_setpriority", "setpriority"));
 }
 

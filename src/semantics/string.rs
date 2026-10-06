@@ -10,8 +10,12 @@
 //! - `utf8_next`, `utf8_next_fast` and `utf8_prev` take a position below
 //!   2^63. For a bigger one C computes `p + 1` or `p - 1` with `Nat`
 //!   arithmetic, which the caller does on its own `Nat` instead of calling
-//!   these. (In debug builds they assert the bound; in release builds they
-//!   still return `p + 1` / `p - 1` modulo 2^64 and never panic.)
+//!   these. The bound is a hard precondition: a position at or above 2^63
+//!   (`u64::MAX` among them, the saturated big position of the next item)
+//!   panics, in every build, where they would return `p + 1` / `p - 1` of
+//!   the `u64` (`u64::MAX + 1` wraps to 0). The check is on their cold
+//!   branch past the end only: a position inside the string is below
+//!   `isize::MAX`, so the hot path has none.
 //! - Every other function takes any `u64` and treats a position at or past
 //!   the end as C treats a big one, so the caller passes a big position as
 //!   itself if it fits in a `u64`, or as `u64::MAX`.
@@ -187,19 +191,26 @@ pub fn utf8_get_fast(s: &[u8], pos: u64) -> u32 {
 /// caller computes `p + 1` on its own `Nat`, as C does. The result is at most
 /// 2^63, which Lean's C returns as a big `Nat`.
 ///
+/// # Panics
+///
+/// If `pos` is at or above 2^63 (checked past the end only, where such a
+/// position always is).
+///
 /// Source: lean2rr leanrt `src/string.rs` (`next`), adapted: `pos + 1` past
 /// the end instead of a sentinel; the ASCII test inline and the other lead
 /// bytes out of line, as C's `lean_string_utf8_next_fast`.
 #[inline]
 pub fn utf8_next(s: &[u8], pos: u64) -> u64 {
-    debug_assert!(
-        pos < 1 << 63,
-        "utf8_next: a position at or above 2^63 is the caller's"
-    );
     match s.get(pos as usize) {
         Some(&c) if c < 0x80 => pos + 1,
         Some(&c) => pos + next_step_cold(c),
-        None => pos.wrapping_add(1),
+        None => {
+            assert!(
+                pos < 1 << 63,
+                "utf8_next: a position at or above 2^63 is the caller's"
+            );
+            pos + 1
+        }
     }
 }
 
@@ -209,15 +220,25 @@ pub fn utf8_next(s: &[u8], pos: u64) -> u64 {
 /// before the end (`pos + 1` in the middle of a character). At `pos ==
 /// s.len()` C reads its NUL terminator and returns `pos + 1`, as this does.
 ///
+/// # Panics
+///
+/// If `pos` is at or above 2^63, as `utf8_next` (unreachable through the
+/// proofs, which keep `pos` before the end).
+///
 /// Source: lean2rr leanrt `src/string.rs` (`next_fast`), adapted: the ASCII
 /// test inline and the other lead bytes out of line, as C.
 #[inline]
 pub fn utf8_next_fast(s: &[u8], pos: u64) -> u64 {
-    debug_assert!(pos < 1 << 63, "utf8_next_fast: a position at or above 2^63");
     match s.get(pos as usize) {
         Some(&c) if c < 0x80 => pos + 1,
         Some(&c) => pos + next_step_cold(c),
-        None => pos.wrapping_add(1),
+        None => {
+            assert!(
+                pos < 1 << 63,
+                "utf8_next_fast: a position at or above 2^63 is the caller's"
+            );
+            pos + 1
+        }
     }
 }
 
@@ -228,18 +249,23 @@ pub fn utf8_next_fast(s: &[u8], pos: u64) -> u64 {
 /// `pos` must be below 2^63 (see the module doc): for a bigger one the
 /// caller computes `p - 1` on its own `Nat`, as C does.
 ///
+/// # Panics
+///
+/// If `pos` is at or above 2^63 (checked past the end only, where such a
+/// position always is): `u64::MAX - 1` would be read as an exact position.
+///
 /// Source: lean2rr leanrt `src/string.rs` (`prev`), adapted to search the
 /// prefix with `rposition` (no bounds checks in the loop). C walks back with no
 /// lower bound, relying on byte 0 being a first byte; this stops at 0.
 #[inline]
 pub fn utf8_prev(s: &[u8], pos: u64) -> u64 {
-    debug_assert!(
-        pos < 1 << 63,
-        "utf8_prev: a position at or above 2^63 is the caller's"
-    );
     if pos == 0 {
         0
     } else if pos > s.len() as u64 {
+        assert!(
+            pos < 1 << 63,
+            "utf8_prev: a position at or above 2^63 is the caller's"
+        );
         pos - 1
     } else {
         // The last first byte strictly before `pos`.
@@ -745,6 +771,42 @@ mod tests {
                 assert_eq!(utf8_strlen(v), filter(v), "{v:x?}");
             }
         }
+    }
+
+    /// Past the end, `utf8_next`, `utf8_next_fast` and `utf8_prev` give
+    /// `pos + 1` / `pos - 1` up to the bound, 2^63 - 1 (`utf8_next`'s result
+    /// 2^63 is still exact).
+    #[test]
+    fn next_and_prev_past_the_end_up_to_the_bound() {
+        let s = "a€".as_bytes();
+        assert_eq!(utf8_next(s, 4), 5);
+        assert_eq!(utf8_next_fast(s, 4), 5);
+        for pos in [5, 6, 1 << 40, (1 << 63) - 1] {
+            assert_eq!(utf8_next(s, pos), pos + 1);
+            assert_eq!(utf8_next_fast(s, pos), pos + 1);
+            assert_eq!(utf8_prev(s, pos), pos - 1);
+        }
+    }
+
+    /// A position at or above 2^63 is the caller's (its own `Nat`
+    /// arithmetic): the saturated `u64::MAX` panics instead of wrapping to
+    /// 0, in every build.
+    #[test]
+    #[should_panic(expected = "utf8_next: a position at or above 2^63")]
+    fn next_of_a_saturated_position_panics() {
+        utf8_next(b"abc", u64::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "utf8_next_fast: a position at or above 2^63")]
+    fn next_fast_of_a_big_position_panics() {
+        utf8_next_fast(b"abc", 1 << 63);
+    }
+
+    #[test]
+    #[should_panic(expected = "utf8_prev: a position at or above 2^63")]
+    fn prev_of_a_saturated_position_panics() {
+        utf8_prev(b"abc", u64::MAX);
     }
 
     /// `utf8_strlen_const` runs at compile time.

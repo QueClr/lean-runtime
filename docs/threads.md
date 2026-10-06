@@ -417,8 +417,8 @@ glue's `task_end` is left).
   task manager, which return `TaskId::FINISHED`) and a second call do
   nothing (review RT2-14; before, the call ended the enclosing task).
 - The job may start before `spawn` or `depend` returns (a worker can take
-  it at once; a `LEAN_SYNC_PRIO` spawn or a `sync` dependent of a finished
-  task runs inside the call). The glue stores the id where the job reads
+  it at once; a `sync` dependent whose source finished meanwhile runs
+  inside the call). The glue stores the id where the job reads
   it before it gives the id to anyone: then a job that finds no id has no
   dependent yet, and its call doing nothing is harmless.
 - The walk is the task's own, to its end, also for a `sync` dependent that
@@ -927,7 +927,11 @@ each callback.
   (`lean_init_task_manager_using`, 1102; `lean_task_spawn_core`, 1189).
 - **Special priorities** (`enqueue_core`): above 8, a thread of its own
   (`spawn_dedicated_worker`, 873); `LEAN_SYNC_PRIO` (2^32-1, line 72), at
-  once on the enqueuing thread.
+  once on the enqueuing thread. A Lean priority reaches `enqueue_core` cut
+  to an `unsigned` (`lean_task_spawn_core`, `lean.h`), so 2^32 - 1 is
+  `LEAN_SYNC_PRIO` there: LB-39, which the crate does not copy. Both modes
+  take the whole value (`common::priority`): above 8 is dedicated, and only
+  a `sync` dependent runs on the enqueuing thread.
 - **Waiting.** `wait_for` (1025) blocks on `m_task_finished_cv`. A pool task
   that waits raises `m_max_std_workers` by one meanwhile, and spawns or
   wakes a worker, so the pool cannot starve. A `sync` task that waits prints
@@ -1052,8 +1056,8 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | Pure-task rule | A started pure task runs late (`pick`) | Not needed. A started pure task runs on its worker, and `main` goes on in parallel |
 | Dropped pure task | Deleted if not started (`release`) | The same. A queued one is deleted; a running one finishes and its value is dropped (`deactivate_task`, `run_task`) |
 | `Task.get`, `IO.wait` | A pending task runs inline on the waiter's stack once it is the head a free worker would take; otherwise the context blocks (sched-3) | The thread blocks (`wait_for`). A pool task frees its worker place meanwhile (the pool grows by one) |
-| `sync` dependents, `LEAN_SYNC_PRIO` | Run on the finishing context, newest first | Run on the finishing thread, newest first (`handle_finished`, `enqueue_core`, `run_task`) |
-| Dedicated tasks | A priority-9 queue, always started | A thread each (`spawn_dedicated_worker`) |
+| `sync` dependents | Run on the finishing context, newest first | Run on the finishing thread, newest first (`handle_finished`, `enqueue_core`, `run_task`) |
+| Dedicated tasks (any priority above 8, LB-39) | A priority-9 queue, always started | A thread each (`spawn_dedicated_worker`) |
 | `effect`, `poll`, `ref_read` | Let other contexts go first | No-ops |
 | `sleep_ms` | Blocks the context | `std::thread::sleep` |
 | `IO.getTaskState` | The polling rules (`query`) | Native's answer: queued or waiting is `waiting`; running, or an unresolved promise, is `running` (`get_task_state`, 1085) |

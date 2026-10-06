@@ -1,0 +1,36 @@
+asTask 4294967295: finished when the spawn returned: false
+asTask 4294967295: the task saw main
+spawn 4294967295: finished when the spawn returned: false
+spawn 4294967295: the task saw main
+map 4294967295: finished when the spawn returned: false
+map 4294967295: the task saw main
+asTask 4294967296: finished when the spawn returned: false
+asTask 4294967296: the task saw main
+spawn 4294967296: finished when the spawn returned: false
+spawn 4294967296: the task saw main
+map 4294967296: finished when the spawn returned: false
+map 4294967296: the task saw main
+asTask 18446744073709551616: finished when the spawn returned: false
+asTask 18446744073709551616: the task saw main
+spawn 18446744073709551616: finished when the spawn returned: false
+spawn 18446744073709551616: the task saw main
+map 18446744073709551616: finished when the spawn returned: false
+map 18446744073709551616: the task saw main
+busy asTask 4294967295: the task ran while the worker was busy: true
+busy asTask 4294967295: the worker was freed by the task
+busy mapTask 4294967295: the task ran while the worker was busy: true
+busy mapTask 4294967295: the worker was freed by the task
+busy bindTask 4294967295: the task ran while the worker was busy: true
+busy bindTask 4294967295: the worker was freed by the task
+busy asTask 4294967296: the task ran while the worker was busy: true
+busy asTask 4294967296: the worker was freed by the task
+busy mapTask 4294967296: the task ran while the worker was busy: true
+busy mapTask 4294967296: the worker was freed by the task
+busy bindTask 4294967296: the task ran while the worker was busy: true
+busy bindTask 4294967296: the worker was freed by the task
+busy asTask 18446744073709551616: the task ran while the worker was busy: true
+busy asTask 18446744073709551616: the worker was freed by the task
+busy mapTask 18446744073709551616: the task ran while the worker was busy: true
+busy mapTask 18446744073709551616: the worker was freed by the task
+busy bindTask 18446744073709551616: the task ran while the worker was busy: true
+busy bindTask 18446744073709551616: the worker was freed by the task

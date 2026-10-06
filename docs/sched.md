@@ -113,9 +113,10 @@ context that blocks suspends back to the hub. The hub picks, in this order:
    (a deadlocked native program waits forever too).
 
 **Dependents.** When a task finishes, its dependents are walked from the
-newest, as Lean's `handle_finished` walks them. A `sync` dependent (or one
-at priority `LEAN_SYNC_PRIO`, 2^32-1) runs there and then, on the finishing
-thread. The others are queued at their priority. Example
+newest, as Lean's `handle_finished` walks them. A `sync` dependent runs
+there and then, on the finishing thread. The others are queued at their
+priority: 0 to 8 in the pool's queues, anything above 8 (2^32 - 1 and a
+big priority included, LB-39) as a dedicated task. Example
 (`tasks/sync_dependent_order`, one worker):
 - three `mapTask`s of `b` are made: "async dep", then a sync one, then
   "newest async dep";
@@ -154,7 +155,7 @@ runs on a thread of its own:
   task; its own `wait` (`Wait::Cell`, `Wait::Progress`, `Wait::OnItself`)
   frees the worker, but only when it is the innermost activity;
 - a walk of such a task (`Walk::own`): a pool worker for the whole walk;
-- a `sync` dependent, a task at `LEAN_SYNC_PRIO` (`ON_THREAD`), and a walk
+- a `sync` dependent (`ON_THREAD`), and a walk
   of a promise or of such a task run on the thread below them: their waits,
   endless ones included, keep that thread's worker, and `wait` does not
   count the waiter's worker as free when it decides whether the awaited
@@ -1365,11 +1366,12 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    after it is a panic) and only finishes up, with no wait. The call does
    nothing for an id the scheduler is not running as the innermost task in
    this context (`TaskId::FINISHED` from a job the glue runs itself, a
-   second call; review RT2-14). The job may start before `spawn` or
-   `depend` returns (a `LEAN_SYNC_PRIO` spawn, or a `sync` dependent of a
-   finished task, runs inside the call): the glue stores the id where the
-   job reads it before it gives the id to anyone, so that no dependent
-   exists yet when such a job finds no id and the call does nothing. A
+   second call; review RT2-14). In threads mode the job may start before
+   `spawn` or `depend` returns (a worker takes it at once, or the source
+   of a `sync` dependent finished meanwhile and the dependent runs inside
+   the call): the glue stores the id where the job reads it before it
+   gives the id to anyone, so that no dependent exists yet when such a job
+   finds no id and the call does nothing. A
    chain of `sync` dependents whose jobs
    call it recurses once per link, as natively (review RT2-15): mind
    `main`'s stack. Threads mode has the same call and contract (a
@@ -1378,6 +1380,14 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - `Task.map`/`bind`, `IO.mapTask`/`bindTask`: when
      `dependent_runs_now(src, sync)` is true, apply `f` at once; otherwise
      `depend(src, job, prio, sync, keep_alive)`;
+   - `prio` is Lean's `Task.Priority`, the whole `Nat`. A priority of 2^64
+     or more (a big `Nat`) is passed as `u64::MAX`, saturated, never its
+     low bits. 0 to 8 are the pool's queues, and every priority above 8 is
+     a dedicated task (`common::priority`): native cuts the priority to an
+     `unsigned`, so there 2^32 - 1 is `LEAN_SYNC_PRIO` and runs at once on
+     the spawning thread, and 2^32 to 2^32 + 8 are pool priorities (LB-39
+     of `docs/lean-bugs.md`; case `tasks/big_priority_dedicated`). No
+     priority makes a task `sync`: only `depend`'s `sync` argument does;
    - `Task.get`/`IO.wait`: if the slot holds the value, that; otherwise
      `await_task(id, report)`, then read the slot. `await_task` is the
      rule: in a `sync` task (`in_sync_task()`) it calls `report` with

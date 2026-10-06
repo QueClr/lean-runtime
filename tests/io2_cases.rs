@@ -13,7 +13,7 @@
 //! `argv[0]`, `IO.appPath` and the environment the checker gives it; every
 //! twin's stdout, stderr and exit code must equal the case's expected
 //! outcome: native Lean 4.34.0's, or the correct one where native is wrong
-//! (LB-03, LB-14, LB-15, LB-16, LB-17, LB-40, LB-41, LB-42, LB-44 in
+//! (LB-03, LB-14, LB-15, LB-16, LB-17, LB-40, LB-41, LB-42, LB-44, LB-45 in
 //! `docs/lean-bugs.md`; native's is then in the case's `native` field, or,
 //! for `failed_child_order`, in its comment), or the documented alternative where
 //! LB-17's fix costs a descriptor (LIO2-05, `pipe_null_two_free`).
@@ -1720,6 +1720,10 @@ fn uv_system(_: &[String]) -> R<()> {
             .map(|p| p.to_string()),
     )?;
     try_p(
+        "set priority pid 2^32",
+        uvsys::os_setpriority(4294967296, 19).map(|()| "()".into()),
+    )?;
+    try_p(
         "cpus",
         uvsys::cpu_info().and_then(|c| {
             let stat = read_file("/proc/stat")?;
@@ -2196,6 +2200,13 @@ fn rt_system(_: &[String]) -> R<()> {
     println(&format!(
         "no group {}",
         uvsys::os_get_group(4000000)?.is_none()
+    ))?;
+    println(&format!(
+        "group 2^32 {}",
+        match uvsys::os_get_group(4294967296)? {
+            Some(g) => format!("(some {})", g.gid),
+            None => "none".into(),
+        }
     ))?;
     uvsys::os_setenv(b"L2R_SYS_TEST", b"value 1")?;
     println(&format!(

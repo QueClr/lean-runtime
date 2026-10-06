@@ -77,7 +77,7 @@ pub fn get_pid() -> u32 {
 /// scheduler (feature `sched`) every task runs on `main`'s thread, so the id
 /// is `gettid` plus `sched::tid_offset()`, the number of the thread the
 /// code natively runs on (0 for `main`'s own: in `main`, and in a task that
-/// natively runs there, such as a `LEAN_SYNC_PRIO` one). Tasks on different
+/// natively runs there, such as a `sync` dependent). Tasks on different
 /// native threads get different ids, and tasks on the same native thread
 /// the same id: the pool tasks of one emulated worker, one after the other.
 /// A dedicated task's id is new, even after every earlier task has finished

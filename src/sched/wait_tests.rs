@@ -447,9 +447,9 @@ fn keyed_takes_past_the_inline_places() {
 }
 
 /// The frame: `main`'s outside any task is the same before and after the
-/// task manager starts; a task run on `main`'s stack (a `LEAN_SYNC_PRIO`
-/// task, as a `sync` dependent) runs at a deeper frame, so a store there
-/// is not `modify`'s closing store; the frame is the same again after it.
+/// task manager starts; a task run on `main`'s stack (a `sync` dependent of
+/// a promise `main` resolves) runs at a deeper frame, so a store there is
+/// not `modify`'s closing store; the frame is the same again after it.
 #[test]
 fn a_task_run_inside_modify_has_a_deeper_frame() {
     let before = frame();
@@ -459,14 +459,18 @@ fn a_task_run_inside_modify_has_a_deeper_frame() {
     ref_keyed::take(256);
     let inner = Rc::new(RefCell::new(None));
     let i2 = inner.clone();
-    let _t = spawn(
+    let p = promise_new().unwrap();
+    let _t = depend(
+        p,
         Box::new(move || {
             *i2.borrow_mut() = Some(frame());
             Outcome::Done
         }),
-        u32::MAX as u64,
+        0,
+        true,
         true,
     );
+    assert!(resolve(p, || {}));
     let inner = inner.borrow().expect("the task ran at once");
     assert_ne!(inner, outside);
     assert_eq!(frame(), outside);

@@ -158,6 +158,11 @@ The example needs two workers or more: task 1 keeps its worker while it sleeps.<
 <p><strong>Dependents.</strong> When a task finishes, its dependents are walked from the newest, as Lean's <code>handle_finished</code> walks them.
 A <code>sync</code> dependent runs at once, on the finishing context.
 The others are queued at their priority.</p>
+<p><strong>Priorities.</strong> A task with a priority from 0 to 8 goes to the pool's queue of that priority.
+A task with a priority above 8 is a dedicated task, whatever the size of the priority.
+The glue gives a priority of 2<sup>64</sup> or more as <code>u64::MAX</code>, never as its low bits.
+No priority makes a task <code>sync</code>: only the <code>sync</code> argument of <code>map</code> and <code>bind</code> does.
+Native Lean cuts the priority to 32 bits (<a href="lean-bugs.html#lb-39">LB-39</a>).</p>
 
 <h2 id="states">Task states</h2>
 <figure class="fig">

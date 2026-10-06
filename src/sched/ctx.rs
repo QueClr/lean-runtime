@@ -110,11 +110,11 @@ pub trait Glue {
 
     /// A task starts running. `own_thread`: natively on a thread of its own
     /// (a worker's pool task, a dedicated task); otherwise on the current
-    /// thread (a `sync` dependent, a task at priority `LEAN_SYNC_PRIO`),
-    /// sharing its state. For the glue's own per-task state: the io layer's
-    /// streams and `errno` are the scheduler's (`slots`: a pool task gets
-    /// the set of the emulated worker it occupies, which keeps what the
-    /// task leaves, as natively; review AR-24).
+    /// thread (a `sync` dependent), sharing its state. For the glue's own
+    /// per-task state: the io layer's streams and `errno` are the
+    /// scheduler's (`slots`: a pool task gets the set of the emulated worker
+    /// it occupies, which keeps what the task leaves, as natively; review
+    /// AR-24).
     fn task_begin(&self, _own_thread: bool) {}
 
     /// The task started by the matching `task_begin` has finished (its

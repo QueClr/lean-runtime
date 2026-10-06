@@ -449,31 +449,32 @@ fn tasks_are_deferred_until_needed() {
 fn the_final_run_goes_by_priority() {
     start_test(1);
     let l = log();
-    // Created inside a task (natively on a worker thread), so that no idle
-    // worker wakes for them: Lean's queues alone decide the order.
+    // Created inside a task (`in_task`), so that no idle worker wakes for
+    // them: Lean's queues alone decide the order.
     let l2 = l.clone();
-    spawn(
-        Box::new(move || {
-            spawn(job(&l2, "default 1"), 0, true);
-            spawn(job(&l2, "max"), 8, true);
-            spawn(job(&l2, "prio 3"), 3, true);
-            spawn(job(&l2, "default 2"), 0, true);
-            spawn(job(&l2, "dedicated"), 9, true);
-            // 2^32 + 4 is priority 4 (an `unsigned` in Lean's runtime).
-            spawn(job(&l2, "prio 2^32+4"), (1 << 32) + 4, true);
-            Outcome::Done
-        }),
-        u32::MAX as u64,
-        true,
-    );
+    in_task(move || {
+        spawn(job(&l2, "default 1"), 0, true);
+        spawn(job(&l2, "max"), 8, true);
+        spawn(job(&l2, "prio 3"), 3, true);
+        spawn(job(&l2, "default 2"), 0, true);
+        spawn(job(&l2, "dedicated"), 9, true);
+        // Every priority above 8 is dedicated, whatever its low 32 bits
+        // (LB-39): native's `unsigned` makes 2^32 - 1 `LEAN_SYNC_PRIO` and
+        // 2^32 + 4 priority 4; `u64::MAX` is a big `Nat`, saturated.
+        spawn(job(&l2, "prio 2^32-1"), u64::from(u32::MAX), true);
+        spawn(job(&l2, "prio 2^32+4"), (1 << 32) + 4, true);
+        spawn(job(&l2, "big prio"), u64::MAX, true);
+    });
     assert!(entries(&l).is_empty());
     finish();
     assert_eq!(
         entries(&l),
         [
             "dedicated",
-            "max",
+            "prio 2^32-1",
             "prio 2^32+4",
+            "big prio",
+            "max",
             "prio 3",
             "default 1",
             "default 2"
@@ -481,21 +482,80 @@ fn the_final_run_goes_by_priority() {
     );
 }
 
+/// No priority runs a spawn at once on the spawning thread (LB-39): above
+/// 8, `LEAN_SYNC_PRIO`'s 2^32 - 1 included, it is a dedicated task, which
+/// runs as on a thread of its own, on no pool worker, and is no `sync`
+/// task.
 #[test]
-fn sync_priority_runs_at_once_on_the_current_thread() {
+fn a_big_priority_is_dedicated_never_sync() {
     start_test(4);
-    let th = Rc::new(Cell::new(u64::MAX));
-    let th2 = th.clone();
-    let id = spawn(
+    for prio in [9, u64::from(u32::MAX), 1 << 32, (1 << 32) + 8, u64::MAX] {
+        let seen = Rc::new(Cell::new(None));
+        let seen2 = seen.clone();
+        let id = spawn(
+            Box::new(move || {
+                seen2.set(Some((thread_number(), in_sync_task(), running_worker())));
+                Outcome::Done
+            }),
+            prio,
+            true,
+        );
+        assert!(!is_finished(id), "priority {prio} ran inside spawn");
+        assert_eq!(seen.get(), None);
+        wait(id);
+        let (th, sync, worker) = seen.get().expect("it ran");
+        assert_ne!(th, 0, "priority {prio} ran on main's thread");
+        assert!(!sync, "priority {prio} ran as a sync task");
+        assert_eq!(worker, None, "priority {prio} ran on a pool worker");
+    }
+}
+
+/// `sync` alone makes a dependent run at once on the thread that finishes
+/// its source (here the resolving one, `main`'s), as a `sync` task; its
+/// priority plays no part. A dependent at 2^32 - 1 without `sync` is
+/// queued as a dedicated task (LB-39).
+#[test]
+fn a_sync_dependent_runs_at_once_whatever_its_priority() {
+    start_test(4);
+    for prio in [0, 8, u64::from(u32::MAX), u64::MAX] {
+        let p = promise_new().unwrap();
+        let seen = Rc::new(Cell::new(None));
+        let seen2 = seen.clone();
+        let d = depend(
+            p,
+            Box::new(move || {
+                seen2.set(Some((thread_number(), in_sync_task())));
+                Outcome::Done
+            }),
+            prio,
+            true,
+            true,
+        );
+        assert!(!is_finished(d));
+        assert!(resolve(p, || {}));
+        assert!(is_finished(d), "the sync dependent ran inside resolve");
+        assert_eq!(seen.get(), Some((0, true)), "priority {prio}");
+    }
+    let p = promise_new().unwrap();
+    let seen = Rc::new(Cell::new(None));
+    let seen2 = seen.clone();
+    let d = depend(
+        p,
         Box::new(move || {
-            th2.set(thread_number());
+            seen2.set(Some((thread_number(), in_sync_task(), running_worker())));
             Outcome::Done
         }),
-        u32::MAX as u64,
+        u64::from(u32::MAX),
+        false,
         true,
     );
-    assert!(is_finished(id));
-    assert_eq!(th.get(), 0, "LEAN_SYNC_PRIO runs on main's thread");
+    assert!(resolve(p, || {}));
+    assert!(!is_finished(d), "an async dependent is queued");
+    wait(d);
+    let (th, sync, worker) = seen.get().expect("it ran");
+    assert_ne!(th, 0);
+    assert!(!sync);
+    assert_eq!(worker, None, "a dedicated task is on no pool worker");
 }
 
 #[test]
@@ -613,19 +673,26 @@ fn a_dropped_pure_task_never_runs() {
     assert!(entries(&l).is_empty());
 }
 
-/// Run `f` as a task on `main`'s thread (priority `LEAN_SYNC_PRIO`): the
-/// tasks it creates wake no idle worker (natively it runs on a worker
-/// thread), so the lone worker's pick (`settle_worker`, by elapsed time)
-/// stays out of the test.
+/// Run `f` as a task on `main`'s thread: a `sync` dependent of a promise
+/// that `main` resolves, which runs inside `resolve`, as a `sync` task, on
+/// `main`'s thread as natively. The scheduler wakes no idle worker for an
+/// enqueue by a running task, so the tasks `f` creates wait in their
+/// queues: the helper keeps the lone worker's pick (`settle_worker`, by
+/// elapsed time) out of the test.
 fn in_task(f: impl FnOnce() + 'static) {
-    spawn(
+    let p = promise_new().unwrap();
+    let d = depend(
+        p,
         Box::new(move || {
             f();
             Outcome::Done
         }),
-        u32::MAX as u64,
+        0,
+        true,
         true,
     );
+    assert!(resolve(p, || {}));
+    assert!(is_finished(d), "the sync dependent ran inside resolve");
 }
 
 /// `await_task` (`Task.get` once the glue's slot is empty): in a `sync`
@@ -653,8 +720,8 @@ fn await_task_reports_in_a_sync_task_then_waits() {
 }
 
 /// `IO.getTID` (`io::env::get_tid`): `gettid` plus the number of the thread
-/// a task natively runs on (`tid_offset`): `main`'s id in a `LEAN_SYNC_PRIO`
-/// task, which runs on the calling thread, and another one in a task a
+/// a task natively runs on (`tid_offset`): `main`'s id in a `sync`
+/// dependent that `main` runs (`in_task`), and another one in a task a
 /// worker runs (the first worker's: 1).
 #[cfg(feature = "io")]
 #[test]

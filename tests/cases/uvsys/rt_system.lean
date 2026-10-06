@@ -20,6 +20,8 @@ def main : IO Unit := do
   | some g => IO.println s!"group {((← osGetGroup g).map (·.gid)) == some g}"
   | none => pure ()
   IO.println s!"no group {(← osGetGroup 4000000).isNone}"
+  -- a gid above 2^32 - 1 names no group (LB-45: natively it is cut to 32 bits, so 2^32 is root's)
+  IO.println s!"group 2^32 {(← osGetGroup 4294967296).map (·.gid)}"
   osSetenv "L2R_SYS_TEST" "value 1"
   IO.println s!"getenv {← osGetenv "L2R_SYS_TEST"} {← IO.getEnv "L2R_SYS_TEST"}"
   IO.println s!"environ has it {(← osEnviron).contains ("L2R_SYS_TEST", "value 1")}"

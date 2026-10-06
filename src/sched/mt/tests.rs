@@ -203,31 +203,78 @@ fn queues_go_by_priority_then_first_come() {
     let d = spawn(job(&l, "dedicated"), 9, true);
     wait(d);
     assert_eq!(entries(&l), ["dedicated"]);
+    // and so has every priority above 8, whatever its low 32 bits (LB-39):
+    // natively 2^32 - 1 is `LEAN_SYNC_PRIO` and 2^32 + 4 waits in queue 4
+    for (prio, name) in [
+        (u64::from(u32::MAX), "2^32-1"),
+        ((1 << 32) + 4, "2^32+4"),
+        (u64::MAX, "big"),
+    ] {
+        let d = spawn(job(&l, name), prio, true);
+        wait(d);
+    }
+    assert_eq!(entries(&l), ["dedicated", "2^32-1", "2^32+4", "big"]);
     go.open();
     for id in [c0, b0, a8, m4] {
         wait(id);
     }
     assert_eq!(
         entries(&l),
-        ["dedicated", "blocker", "a8", "m4", "c0", "b0"]
+        [
+            "dedicated",
+            "2^32-1",
+            "2^32+4",
+            "big",
+            "blocker",
+            "a8",
+            "m4",
+            "c0",
+            "b0"
+        ]
     );
     finish();
 }
 
+/// No priority runs a spawn at once on the calling thread (LB-39): 2^32 - 1
+/// and a big priority are dedicated tasks, on a thread of their own (no
+/// pool worker's) and no `sync` tasks. `sync` alone makes a dependent run at once on the thread
+/// that finishes its source (here the resolving one), whatever its
+/// priority.
 #[test]
-fn sync_priority_runs_at_once_on_the_calling_thread() {
+fn only_sync_runs_a_task_on_the_calling_thread() {
     let _s = serial();
     start_test(2);
     let me = thread_number();
-    let seen: Slot<(u64, bool)> = Slot::default();
-    let id = spawn(
-        filling(&seen, || (thread_number(), in_sync_task())),
-        u64::from(u32::MAX),
-        false,
-    );
-    // it ran inside `spawn`, as a task on this thread
-    assert!(is_finished(id));
-    assert_eq!(seen.get(), Some(&(me, true)));
+    for prio in [u64::from(u32::MAX), u64::MAX] {
+        let seen: Slot<(u64, bool, Option<u32>)> = Slot::default();
+        let id = spawn(
+            filling(&seen, || {
+                (thread_number(), in_sync_task(), running_worker())
+            }),
+            prio,
+            false,
+        );
+        wait(id);
+        let &(th, sync, worker) = seen.get().expect("it ran");
+        assert_ne!(th, me, "priority {prio} ran on the calling thread");
+        assert!(!sync, "priority {prio} ran as a sync task");
+        assert_eq!(worker, None, "priority {prio} ran on a pool worker");
+    }
+    for prio in [0, u64::from(u32::MAX)] {
+        let p = promise_new().unwrap();
+        let seen: Slot<(u64, bool)> = Slot::default();
+        let d = depend(
+            p,
+            filling(&seen, || (thread_number(), in_sync_task())),
+            prio,
+            true,
+            false,
+        );
+        assert!(resolve(p, || {}));
+        // it ran inside `resolve`, as a task on this thread
+        assert!(is_finished(d));
+        assert_eq!(seen.get(), Some(&(me, true)), "priority {prio}");
+    }
     assert!(!in_sync_task());
     finish();
 }
@@ -243,16 +290,21 @@ fn await_task_reports_in_a_sync_task_then_waits() {
     let reports = log();
     let pending = spawn(job(&l, "pending"), 0, false);
     let (r, l2) = (reports.clone(), l.clone());
-    let id = spawn(
+    // a `sync` dependent of a promise this thread resolves runs here
+    let p = promise_new().unwrap();
+    let id = depend(
+        p,
         Box::new(move || {
             await_task(TaskId::FINISHED, |m| push(&r, m));
             await_task(pending, |m| push(&r, m));
             push(&l2, "sync");
             Outcome::Done
         }),
-        u64::from(u32::MAX),
+        0,
+        true,
         false,
     );
+    assert!(resolve(p, || {}));
     assert!(is_finished(id));
     assert_eq!(entries(&reports), [GET_IN_SYNC_TASK]);
     assert_eq!(entries(&l), ["pending", "sync"]);
@@ -379,9 +431,12 @@ fn a_bind_task_continues_as_the_task_it_returned() {
     wait(b);
     assert_eq!(out.get(), Some(&42));
     // a sync bind task whose new source has finished runs again at once
+    // (a `sync` dependent of a promise this thread resolves)
     let l = log();
     let l2 = l.clone();
-    let s = spawn(
+    let p2 = promise_new().unwrap();
+    let s = depend(
+        p2,
         Box::new(move || {
             Outcome::Continue(
                 TaskId::FINISHED,
@@ -391,9 +446,11 @@ fn a_bind_task_continues_as_the_task_it_returned() {
                 }),
             )
         }),
-        u64::from(u32::MAX),
+        0,
+        true,
         false,
     );
+    assert!(resolve(p2, || {}));
     assert!(is_finished(s));
     assert_eq!(entries(&l), ["continued"]);
     finish();

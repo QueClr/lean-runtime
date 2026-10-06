@@ -242,7 +242,8 @@ A translator moves its pin only after its own test suite passes.</dd>
 <dd>A yield point at a clock read, a task-state query, <code>IO.checkCanceled</code>, or (in a program with tasks) every 1000th <code>ST.Ref</code> read.</dd>
 
 <dt id="g-priority">Priority</dt>
-<dd>The order in which queued tasks start: Lean's priorities 0 to 8, and dedicated tasks, which natively get a thread of their own.</dd>
+<dd>The order in which queued tasks start: Lean's priorities 0 to 8, and dedicated tasks, which natively get a thread of their own.
+Every priority above 8 gives a dedicated task, whatever its size.</dd>
 
 <dt id="g-proc-title">proc-title</dt>
 <dd>The Cargo feature of the process title's <a href="#g-quirk">native quirk</a>: <code>setProcessTitle</code> writes the title into the arguments' memory.
@@ -305,7 +306,7 @@ An error flag otherwise stays set.
 Natively, a later <code>getLine</code> then fails with an old <code>errno</code>; lean-runtime's <code>getLine</code> clears the flag first (LB-41).</dd>
 
 <dt id="g-sync-dependent">Sync dependent</dt>
-<dd>A dependent task (from <code>map</code> or <code>bind</code>) made with <code>sync := true</code>, or at priority <code>LEAN_SYNC_PRIO</code>.
+<dd>A dependent task (from <code>map</code> or <code>bind</code>) made with <code>sync := true</code>.
 It runs at once on the context that finishes its source, without the queue.</dd>
 
 <dt id="g-threads-mode">Threads mode</dt>

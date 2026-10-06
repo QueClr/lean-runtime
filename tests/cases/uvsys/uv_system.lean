@@ -60,7 +60,9 @@ def main : IO Unit := do
     let avail ← availableMemory
     let c ← constrainedMemory
     return s!"{decide (free > 0)} {decide (total > free)} {decide (avail > 0)} {decide (c == 0 || avail ≤ c || avail ≤ free)}")
-  -- the scheduling priority (nice value): pids and priorities are C ints (their low 32 bits)
+  -- the scheduling priority (nice value): a pid outside 0..2^31-1 names no process, and a priority
+  -- outside [-20, 19] is rejected whole; natively both are cut to a C int first (LB-45: pid 2^32
+  -- is the caller, priority 2^32+19 is 19)
   tryP "priority self" (do return decide ((← osGetPriority 0) == (← osGetPriority (← osGetPid))))
   tryP "priority 2^32" (do return decide ((← osGetPriority 4294967296) == (← osGetPriority 0)))
   tryP "priority missing" (osGetPriority 2147483647)
@@ -71,6 +73,7 @@ def main : IO Unit := do
   tryP "set priority missing" (osSetPriority 2147483647 1)
   tryP "set priority negative pid" (osSetPriority 4294967295 1)
   tryP "set priority 2^32+19" (do osSetPriority 0 4294967315; return (← osGetPriority 0))
+  tryP "set priority pid 2^32" (osSetPriority 4294967296 19)
   tryP "cpus" (do
     let c ← cpuInfo
     let stat ← IO.FS.readFile "/proc/stat"

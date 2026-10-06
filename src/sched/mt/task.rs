@@ -87,8 +87,9 @@ struct Entry {
     flags: u16,
     /// 0..=8 for the pool, `DEDICATED` (`common::priority`).
     prio: u8,
-    /// Runs on the thread that enqueues it (`sync := true`, or priority
-    /// `LEAN_SYNC_PRIO`: native `enqueue_core` runs it there, 793-796).
+    /// Runs on the thread that enqueues it (`sync := true`: native's
+    /// internal priority `LEAN_SYNC_PRIO`, which `enqueue_core` runs there,
+    /// 793-796; no Lean priority gives it here, LB-39).
     sync: bool,
     /// `m_canceled`.
     canceled: bool,
@@ -854,8 +855,8 @@ fn alloc(g: &mut State, job: Option<Job>, flags: u16, prio: u8, sync: bool) -> u
 
 /// `lean_task_spawn_core` with the task manager running (`Some`; `None`:
 /// there is none, and the caller runs the job at once): a new task, enqueued
-/// (`alloc_task`, `enqueue`); at priority `LEAN_SYNC_PRIO` it runs now, on
-/// this thread.
+/// (`alloc_task`, `enqueue`) at the queue of `prio`, the whole value
+/// (`common::priority`: above 8 dedicated, LB-39).
 pub(crate) fn spawn(
     sh: &Arc<Shared>,
     job: Job,
@@ -866,22 +867,18 @@ pub(crate) fn spawn(
     if !g.started {
         return Err(job);
     }
-    let (p, sp) = priority(prio);
     let flags = if keep_alive { 0 } else { PURE };
-    let id = alloc(&mut g, Some(job), flags, p, sp);
-    if sp {
-        g = run_task(sh, g, id, false);
-    } else {
-        enqueue(sh, &mut g, id);
-    }
+    let id = alloc(&mut g, Some(job), flags, priority(prio), false);
+    enqueue(sh, &mut g, id);
     drop(g);
     Ok(TaskId(id))
 }
 
 /// `lean_task_map_core`/`lean_task_bind_core` with the task manager running:
-/// a new task waiting for `src` (`add_dep`); with `sync`, its priority is
-/// `LEAN_SYNC_PRIO`, so once `src` has finished it runs on the thread that
-/// walks `src`'s dependents, or here if `src` has finished already.
+/// a new task waiting for `src` (`add_dep`); with `sync` (natively at
+/// priority `LEAN_SYNC_PRIO`), once `src` has finished it runs on the thread
+/// that walks `src`'s dependents, or here if `src` has finished already.
+/// Only `sync` makes it so: `prio` (the whole value) picks its queue.
 pub(crate) fn depend(
     sh: &Arc<Shared>,
     src: TaskId,
@@ -894,9 +891,8 @@ pub(crate) fn depend(
     if !g.started {
         return Err(job);
     }
-    let (p, sp) = priority(prio);
     let flags = if keep_alive { 0 } else { PURE };
-    let id = alloc(&mut g, Some(job), flags, p, sync || sp);
+    let id = alloc(&mut g, Some(job), flags, priority(prio), sync);
     if let Some(now) = add_dep(sh, &mut g, src, id) {
         g = run_task(sh, g, now, false);
     }
