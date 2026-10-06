@@ -791,11 +791,14 @@ fn shared_mutex_readers(args: &[String]) -> u32 {
 //   let r ← BaseRecursiveMutex.new
 //   r.lock
 //   IO.println s!"main tryLock again: {← r.tryLock}"
+//   let tried ← IO.Promise.new (α := Unit)
 //   let t ← IO.asTask (prio := .dedicated) do
 //     IO.println s!"task tryLock: {← r.tryLock}"
+//     tried.resolve ()
 //     r.lock
 //     IO.println "task has the lock"
 //     r.unlock
+//   let _ ← IO.wait tried.result?
 //   IO.sleep ms.toUInt32
 //   r.unlock
 //   IO.println "main unlocked once"
@@ -808,16 +811,20 @@ fn recursive_mutex(args: &[String]) -> u32 {
     let r = Obj::new(RecursiveMutex::new());
     r.lock();
     println(&format!("main tryLock again: {}", r.try_lock()));
-    let r2 = r.clone();
+    let tried: Obj<Promise<()>> = Obj::new(Promise::new());
+    let (r2, tried2) = (r.clone(), tried.clone());
     let t = as_task(
         move || {
             println(&format!("task tryLock: {}", r2.try_lock()));
+            tried2.resolve(());
             r2.lock();
             println("task has the lock");
             r2.unlock();
         },
         PRIO_DEDICATED,
     );
+    // the task's line comes first, however late its thread starts (AR-44)
+    tried.result_opt().get();
     sleep(ms);
     r.unlock();
     println("main unlocked once");
@@ -1824,11 +1831,14 @@ fn sync_walk_stuck_unrelated_finish(_: &[String]) -> u32 {
 
 // let p ← IO.Promise.new (α := Nat)
 // let r := p.result?
-// let slow ← IO.mapTask (sync := true) (fun _ => do IO.sleep 300; IO.eprintln "slow sync dep done") r
+// let slow ← IO.mapTask (sync := true) (fun _ => do IO.sleep 1000; IO.eprintln "slow sync dep done") r
+// let ready ← IO.Promise.new (α := Unit)
 // let w ← IO.asTask (prio := .dedicated) do
+//   ready.resolve ()
 //   let v ← IO.waitAny [r]
 //   IO.eprintln s!"waitAny woke: {repr v}"
 // let a ← IO.mapTask (fun _ => do IO.sleep 100; IO.eprintln "async dep done") r
+// let _ ← IO.wait ready.result?
 // IO.sleep 100
 // IO.eprintln "resolving"
 // p.resolve 1
@@ -1841,7 +1851,7 @@ fn wait_any_wakes_on_finish(_: &[String]) -> u32 {
     let r = p.result_opt();
     let slow = map_task(
         |_: Option<u64>| {
-            sleep(300);
+            sleep(1000);
             eprintln("slow sync dep done");
         },
         r.clone(),
@@ -1849,9 +1859,11 @@ fn wait_any_wakes_on_finish(_: &[String]) -> u32 {
         true,
         true,
     );
-    let r2 = r.clone();
+    let ready: Obj<Promise<()>> = Obj::new(Promise::new());
+    let (r2, ready2) = (r.clone(), ready.clone());
     let w = as_task(
         move || {
+            ready2.resolve(());
             let v = wait_any(&[r2]);
             eprintln(&format!("waitAny woke: {}", repr_opt(v)));
         },
@@ -1867,6 +1879,9 @@ fn wait_any_wakes_on_finish(_: &[String]) -> u32 {
         false,
         true,
     );
+    // `w` waits in `waitAny` before the resolution, however late its thread
+    // starts (AR-44)
+    ready.result_opt().get();
     sleep(100);
     eprintln("resolving");
     // The walk queues `a` (no wake for `waitAny`), then sleeps in `slow`;
@@ -2120,16 +2135,19 @@ fn sync_walk_mutex_unref_finish(_: &[String]) -> u32 {
 
 // let p ← IO.Promise.new (α := Nat)
 // let r := p.result?
-// let slow ← IO.mapTask (sync := true) (fun _ => do IO.sleep 600; IO.eprintln "slow sync dep done") r
+// let slow ← IO.mapTask (sync := true) (fun _ => do IO.sleep 2000; IO.eprintln "slow sync dep done") r
+// let ready ← IO.Promise.new (α := Unit)
 // let w ← IO.asTask (prio := .dedicated) do
+//   ready.resolve ()
 //   let v ← IO.waitAny [r]
 //   IO.eprintln s!"waitAny woke: {repr v}"
+// let _ ← IO.wait ready.result?
 // IO.sleep 100
 // let _ ← IO.asTask (prio := .dedicated) do
 //   IO.sleep 200
 //   IO.eprintln "unreferenced task finishes"
 // let o ← IO.asTask (prio := .dedicated) do
-//   IO.sleep 400
+//   IO.sleep 1000
 //   IO.eprintln "referenced task finishes"
 // IO.eprintln "resolving"
 // p.resolve 1
@@ -2142,7 +2160,7 @@ fn wait_any_unref_finish(_: &[String]) -> u32 {
     let r = p.result_opt();
     let slow = map_task(
         |_: Option<u64>| {
-            sleep(600);
+            sleep(2000);
             eprintln("slow sync dep done");
         },
         r.clone(),
@@ -2150,13 +2168,19 @@ fn wait_any_unref_finish(_: &[String]) -> u32 {
         true,
         true,
     );
+    let ready: Obj<Promise<()>> = Obj::new(Promise::new());
+    let ready2 = ready.clone();
     let w = as_task(
         move || {
+            ready2.resolve(());
             let v = wait_any(&[r]);
             eprintln(&format!("waitAny woke: {}", repr_opt(v)));
         },
         PRIO_DEDICATED,
     );
+    // `w` waits in `waitAny` before the resolution, however late its thread
+    // starts (AR-44)
+    ready.result_opt().get();
     sleep(100);
     // Unreferenced: its finish notifies nobody.
     drop(as_task(
@@ -2168,7 +2192,7 @@ fn wait_any_unref_finish(_: &[String]) -> u32 {
     ));
     let o = as_task(
         || {
-            sleep(400);
+            sleep(1000);
             eprintln("referenced task finishes");
         },
         PRIO_DEDICATED,

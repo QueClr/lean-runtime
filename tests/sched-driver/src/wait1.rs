@@ -306,6 +306,56 @@ pub fn w1_keyed_constant(args: &[String]) -> u32 {
     0
 }
 
+/// AR-42: W1 on an entry the keyed table keeps in its `Vec`, past its 8
+/// places (AR-40). `main` holds 9 claims (the 8 places, then the `Vec`'s
+/// first entry), then reads constant 2, whose initializer waits for a
+/// promise: its entry is the `Vec`'s second. Three dedicated tasks read the
+/// constant meanwhile and wait on that entry, in turn. A fourth stores the
+/// ninth claim, so the `Vec` moves constant 2's entry into the freed place
+/// (`swap_remove`), then resolves the promise. The store of constant 2
+/// wakes its three waiters in the order they began to wait, and each reads
+/// the value in that order; the initializer runs once.
+pub fn w1_keyed_spilled_waiters(_: &[String]) -> u32 {
+    for s in 10..19 {
+        assert!(!claim(s), "main claims slot {s}");
+    }
+    let go: Obj<Promise<u64>> = Obj::new(Promise::new());
+    let go2 = go.clone();
+    let log = Rc::new(RefCell::new(Vec::<String>::new()));
+    let reader = |name: &'static str| {
+        let log = log.clone();
+        as_task(
+            move || {
+                let v = constant(2, || 0);
+                log.borrow_mut().push(format!("{name} got {v}"));
+            },
+            PRIO_DEDICATED,
+        )
+    };
+    let readers = [reader("reader 1"), reader("reader 2"), reader("reader 3")];
+    let other = as_task(
+        move || {
+            slot_set(18, 0);
+            go.resolve(17);
+        },
+        PRIO_DEDICATED,
+    );
+    let v = constant(2, move || go2.result_opt().get().expect("resolved"));
+    log.borrow_mut().push(format!("main got {v}"));
+    for r in &readers {
+        r.get();
+    }
+    other.get();
+    for s in 10..18 {
+        slot_set(s, 0);
+    }
+    for l in log.borrow().iter() {
+        eprintln(l);
+    }
+    eprintln(&format!("initializer runs {}", INIT_RUNS.with(Cell::get)));
+    0
+}
+
 /// A lean2rr-style thunk cell: `pending`, `busy` (the forcer is not
 /// recorded) or `done`.
 struct BusyThunk {

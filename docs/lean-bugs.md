@@ -429,3 +429,13 @@ Related upstream: #15193, #15194, #15439, PRs #14286 and #14274.
 | Why not | POSIX deems such an exec environment non-conforming; native fails with a catchable `invalid argument (22)`, without crashing or silently losing data |
 | Behaviour | Native in lean2rr and the shared crate. leanrs keeps DV19 for a Rust reason (std opens `/dev/null` first) |
 | Verdict | leanrs-side judge, 2026-10-03 |
+
+### LB-35: a main module named `Init` crashes natively
+
+| Field | Content |
+|---|---|
+| Summary | A program whose file is `Init.lean` (so its main module is `Init`) builds, but crashes with SIGSEGV at the first use of a core constant, for example in `_init_l_Nat_reprFast___closed__0` |
+| Where | Lean/Shell.lean:541-551 and Lean/Util/Path.lean:146-160 (plain `lean` names the main module after the file); Lean/Compiler/NameMangling.lean:156-167 and Lean/Compiler/LCNF/EmitC.lean:1007-1046 (`initialize_Init` for both the main module and its import `Init`) |
+| Why not | Two modules share the name `Init`: the program's and core's, which every module imports. The program's `initialize_Init` replaces core's at static link time, so core's module initializers never run, and constants such as `Nat.reprArray` stay null until the first use dereferences one. `Init` is a reserved name: Lake rejects it as a package name (Lake/CLI/Init.lean:507-510). The same program under any other name, and under `lean --run`, is correct, and a panic in an initializer plays no part. Only a diagnostic is missing |
+| Behaviour | Not modelled. Probes and cases are never named after a core module (`Init`, `Std`, `Lean`, `Lake`; `tests/cases/README.md`, "Rules") |
+| Verdict | lean2rr-side judge (AR-43), 2026-10-05 |

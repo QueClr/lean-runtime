@@ -865,6 +865,18 @@ fn w1_keyed_constant() {
     );
 }
 
+/// Core 3.1, AR-42: three waiters on a keyed entry kept past the table's 8
+/// places, which moves in its `Vec` while they wait, wake at its store in
+/// the order they began to wait (W1).
+#[test]
+fn w1_keyed_spilled_waiters() {
+    w1_ok(
+        "w1_keyed_spilled_waiters",
+        &[],
+        "main got 17\nreader 1 got 17\nreader 2 got 17\nreader 3 got 17\ninitializer runs 1\n",
+    );
+}
+
 /// Core 3.1, lean2rr's `busy` thunk (`wait_running_keyed`): another context
 /// waits for its store; forced by its own closure with no other live
 /// context, or before the task manager runs, it hangs at once.

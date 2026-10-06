@@ -141,6 +141,16 @@ Written in `<id>.toml` for programs and inline for rows:
   created; observe it with an effect instead (for a task, `IO.hasFinished`).
 - **Output is deterministic.** No pids, times or addresses unless `normalize`
   covers them.
+- **The order of events does not depend on when a new thread starts.** A
+  loaded host can start a dedicated thread 100 ms late or more. A task
+  that must be waiting before `main` goes on first resolves a promise that
+  `main` waits for (then `main` sleeps 100 ms, for the task's step from the
+  promise to its wait); a sleep that must end after another ends about a
+  second later (review AR-44).
 - **Expected values come from compiled Lean 4.34.0, never from `#eval`.**
+- **No case or probe is named after a core module** (`Init`, `Std`, `Lean`,
+  `Lake`): plain `lean` names the main module after the file, and a file
+  `Init.lean` replaces core's `Init` and crashes natively (LB-35 of
+  `docs/lean-bugs.md`, "Not bugs").
 - **Every bug or disagreement** either translator finds in runtime behaviour
   becomes a case here, even when the fix lands in a translator.

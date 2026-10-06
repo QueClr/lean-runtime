@@ -259,7 +259,9 @@ fn a_keyed_wait_wakes_at_done_keyed() {
 
 /// AR-40: the same wait for an entry the keyed table keeps in its `Vec`,
 /// past its 8 places: the waiter is recorded there, and `done_keyed` wakes
-/// it.
+/// it. (Several waiters on such an entry wake in order, W1, in
+/// `tests/sched-driver`'s `w1_keyed_spilled_waiters`, AR-42: only `main`'s
+/// context blocks here.)
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_keyed_wait_past_the_inline_places_wakes_at_done_keyed() {

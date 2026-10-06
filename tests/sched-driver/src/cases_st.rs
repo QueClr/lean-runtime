@@ -115,6 +115,7 @@ pub fn lookup(id: &str) -> Option<Case> {
         "w1_gate_self_force" => (no_init, crate::wait1::w1_gate_self_force),
         "w1_static_two_readers" => (no_init, crate::wait1::w1_static_two_readers),
         "w1_keyed_constant" => (no_init, crate::wait1::w1_keyed_constant),
+        "w1_keyed_spilled_waiters" => (no_init, crate::wait1::w1_keyed_spilled_waiters),
         "w1_busy_thunk" => (crate::wait1::w1_busy_init, crate::wait1::w1_busy_thunk),
         "w1_w3_keyed" => (no_init, crate::wait1::w1_w3_keyed),
         "w1_ref_keyed" => (no_init, crate::wait1::w1_ref_keyed),

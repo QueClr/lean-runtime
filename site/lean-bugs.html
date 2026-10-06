@@ -179,6 +179,7 @@ They are recorded so that nobody raises them again.</p>
 <tr id="lb-08"><td>LB-08</td><td>A thunk forced inside its own computation spins forever.</td><td>That <code>Thunk.get</code> diverges by definition, and building such a thunk needs <code>unsafe</code>.</td></tr>
 <tr id="lb-09"><td>LB-09</td><td>A second <code>Handle.rewind</code> can serve glibc's buffered bytes.</td><td>C and POSIX do not require <code>fseek</code> to refresh the buffer; Lean's docs promise a cursor, not fresh data.</td></tr>
 <tr id="lb-10"><td>LB-10</td><td>With descriptor 0, 1 or 2 closed at start, stream operations fail with <code>invalid argument (22)</code>.</td><td>POSIX calls such a start non-conforming; native fails with an error that the program can catch, with no crash or lost data.</td></tr>
+<tr id="lb-35"><td>LB-35</td><td>A program in a file named <code>Init.lean</code> builds, but it crashes at the first use of a core constant.</td><td>The program's module then has the name of core's <code>Init</code>, so its initializer replaces core's. <code>Init</code> is a reserved name. Probes and cases never use a core module's name.</td></tr>
 </tbody></table></div>
 
 <p class="more">Detail: <a href="../docs/lean-bugs.md">docs/lean-bugs.md</a> gives each entry in full: the source lines, the reason, the native repro, the case id, each translator's entry and the verdict.</p>
