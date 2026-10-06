@@ -516,7 +516,15 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   shared with the single-thread scheduler, moved there unchanged); the
   listening watchers are one list, the loop's. So a signal reaches the
   watchers started on any thread, repeating ones first, then in creation
-  order, as libuv's one loop delivers to all its handles.
+  order, as libuv's one loop delivers to all its handles. A handler checks
+  `default`, the flag the loop thread can change, before its byte wakes
+  the loop thread; the reset pair's check after the byte reads only its
+  registration's own flag, which only handlers write (review AR-49,
+  `docs/sched.md`, "Signal delivery"). With the check of `default` after
+  the byte, the loop thread could deliver the signal to a one-shot watcher
+  and stop it before the handler's check, which then killed the process
+  (the twin of `uvloop/signal_stop_in_sync_dependent`, status 138 now and
+  then).
 - **The lock order.** The loop lock first. Under it: a handle's state lock
   and the loop's `data` lock, each held only for plain data (a handle's
   before `data`, never the other way); and, through translator code (a

@@ -11,10 +11,12 @@
 //!
 //! - Each signal's handlers, installed at its first watcher and never taken
 //!   back (signal-hook cannot restore a disposition), run in the order they
-//!   were registered: `flag::register` sets the signal's `arrived` flag,
+//!   were registered ([`handlers`]): the conditional default action first,
+//!   then `flag::register` sets the signal's `arrived` flag, then
 //!   `low_level::pipe::register_raw` writes a byte into the loop's signal
-//!   pipe, then the conditional default action, then, while every listener
-//!   is one-shot, a second `flag::register` that sets the default's flag.
+//!   pipe. While every listener is one-shot, a reset pair follows
+//!   ([`reset_pair`]), on a flag of that registration's own: a second
+//!   conditional default action, then a `flag::register` that sets its flag.
 //! - The pipe is native's own (`io::startup`, made at startup as libuv makes
 //!   it) when the glue opened native's startup descriptors, else one made at
 //!   the first watcher; either way its descriptors live in a static for the
@@ -26,22 +28,45 @@
 //!   the pipe until `EAGAIN`, then takes each signal's `arrived` flag, and
 //!   the loop delivers the signals that came to its watchers of them.
 //!
-//! The conditional default action runs the signal's default action while no
-//! watcher listens (natively libuv restores `SIG_DFL`); for SIGIO, which
-//! signal-hook's table lacks, an exit with status 157 (128 + SIGIO), as a
-//! shell reports the signal's death (RSIOB-06). While every listener of a
-//! signal is one-shot, the second flag makes a second signal take the
-//! default action before the loop has delivered the first, as libuv's
-//! `SA_RESETHAND` (RSIOB-02); it is registered and unregistered
-//! (`low_level::unregister`) as `uv__signal_start` and `uv__signal_stop`
-//! re-register libuv's handler.
+//! The first conditional default action, on the signal's `default` flag,
+//! runs the signal's default action while no watcher listens (natively
+//! libuv restores `SIG_DFL`); for SIGIO, which signal-hook's table lacks, an
+//! exit with status 157 (128 + SIGIO), as a shell reports the signal's
+//! death (RSIOB-06). The check of `default`, the flag the loop can change,
+//! runs before the byte, so the loop's delivery and a `stop` of the last
+//! watcher that follows cannot turn a caught signal into the default
+//! action, as natively the kernel decides the disposition at delivery
+//! (review AR-49: the handler read `default` after its byte, and threads
+//! mode's twin of `uvloop/signal_stop_in_sync_dependent` ended with status
+//! 138 now and then). The reset pair's check runs after the byte, but reads
+//! only its registration's own flag, which only handlers write. While every
+//! listener of a signal is one-shot, the reset pair makes a second signal
+//! take the default action before the loop has delivered the first, as
+//! libuv's `SA_RESETHAND` (RSIOB-02): the first signal passes its check,
+//! then sets its flag. Each one-shot registration gets a pair on a fresh
+//! flag, registered and unregistered (`low_level::unregister`, the check
+//! first) as `uv__signal_start` and `uv__signal_stop` re-register libuv's
+//! handler. So `default` means only "no watcher listens", and a handler
+//! still running from an older registration sets only that registration's
+//! flag, which nothing reads any more. Before, the reset set `default`
+//! itself: when a repeating watcher joined one-shot ones, `register`
+//! cleared `default`, then unregistered the reset, which waited for a
+//! handler between its check and its reset; that handler then set
+//! `default`, and the next signal took the default action although the
+//! repeating watcher listened (AR-49). The fresh flag also makes the fix
+//! independent of that wait, signal-hook's for the handlers that are
+//! running (an internal detail of signal-hook-registry 1.4.8). At the first
+//! one-shot registration only, RSIOB-02 in the narrow window between the
+//! pair's registration and the clearing of `default` relies on that wait:
+//! a handler that started before the registration ends inside it, while
+//! `default` is still set (the main race and the late reset do not).
 //!
 //! Locks: `HOOKED` and a signal's `reset`, each held only around plain data
 //! and signal-hook's registration calls, never across a scheduler's lock or
 //! translator code; `HOOKED` before `reset`. In threads mode both are taken
 //! with `sched::uv`'s loop lock held (every extern holds it).
 
-use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -64,15 +89,109 @@ pub(crate) fn native_signum(n: i32) -> i32 {
 }
 
 /// Per signal, process-wide: the number of watchers listening (and of the
-/// one-shot ones among them), the flag of the conditional default action
-/// (set while none listens, or after a signal while only one-shot ones do),
-/// the reset action that sets it, and the `arrived` flag.
+/// one-shot ones among them), the flag of the first conditional default
+/// action (set while none listens), the reset pair of the current one-shot
+/// registration, and the `arrived` flag.
 struct Hooked {
     listening: AtomicUsize,
     oneshot: AtomicUsize,
     default: Arc<AtomicBool>,
-    reset: Mutex<Option<signal_hook::SigId>>,
+    reset: Mutex<Option<Reset>>,
     arrived: Arc<AtomicBool>,
+}
+
+/// One action of a signal's handler, as signal-hook registers it.
+enum Action {
+    /// The default action while the flag is set:
+    /// `flag::register_conditional_default`, or, for SIGIO,
+    /// `flag::register_conditional_shutdown` with status 157 (RSIOB-06).
+    Default(Arc<AtomicBool>),
+    /// `flag::register`: sets the flag.
+    Set(Arc<AtomicBool>),
+    /// `low_level::pipe::register_raw`: a byte into the loop's signal pipe.
+    Pipe(RawFd),
+}
+
+/// A signal's handlers, installed at its first watcher, in the order they
+/// run (signal-hook runs a signal's actions in registration order): the
+/// default action's check first, so a handler has decided before its byte
+/// wakes the loop (review AR-49); the `arrived` flag before the byte, so a
+/// reader woken by the byte finds it set.
+fn handlers(default: &Arc<AtomicBool>, arrived: &Arc<AtomicBool>, pipe: RawFd) -> [Action; 3] {
+    [
+        Action::Default(default.clone()),
+        Action::Set(arrived.clone()),
+        Action::Pipe(pipe),
+    ]
+}
+
+/// The reset of one one-shot registration (libuv's `SA_RESETHAND`), on that
+/// registration's own flag: the check, then the set, so the first signal is
+/// caught and a second one takes the default action (RSIOB-02).
+fn reset_pair(flag: &Arc<AtomicBool>) -> [Action; 2] {
+    [Action::Default(flag.clone()), Action::Set(flag.clone())]
+}
+
+/// Registers `actions` for `signum`, in their order. On a failure, the ones
+/// registered so far are taken back, but never a pipe's: signal-hook would
+/// close its descriptor (the module comment).
+fn install(signum: i32, actions: &[Action]) -> Result<Vec<signal_hook::SigId>, i32> {
+    use signal_hook::{flag, low_level};
+    let mut ids = Vec::with_capacity(actions.len());
+    let mut undo = Vec::new();
+    for a in actions {
+        let r = match a {
+            Action::Default(f) if signum == SIGIO => {
+                flag::register_conditional_shutdown(signum, 128 + SIGIO, f.clone())
+            }
+            Action::Default(f) => flag::register_conditional_default(signum, f.clone()),
+            Action::Set(f) => flag::register(signum, f.clone()),
+            Action::Pipe(fd) => low_level::pipe::register_raw(signum, *fd),
+        };
+        match r {
+            Ok(id) => {
+                ids.push(id);
+                if !matches!(a, Action::Pipe(_)) {
+                    undo.push(id);
+                }
+            }
+            Err(e) => {
+                for id in undo {
+                    low_level::unregister(id);
+                }
+                return Err(io_err(e));
+            }
+        }
+    }
+    Ok(ids)
+}
+
+/// The reset pair of one one-shot registration: its flag and its two
+/// actions.
+struct Reset {
+    /// The pair's flag (its two actions hold their own references; the
+    /// tests read it here).
+    #[cfg_attr(not(test), allow(dead_code))]
+    flag: Arc<AtomicBool>,
+    ids: Vec<signal_hook::SigId>,
+}
+
+impl Reset {
+    /// A pair on a fresh flag, or none if signal-hook refuses it (the
+    /// handler then has no reset).
+    fn new(signum: i32) -> Option<Reset> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let ids = install(signum, &reset_pair(&flag)).ok()?;
+        Some(Reset { flag, ids })
+    }
+
+    /// Takes the pair back, the check first: a handler that starts between
+    /// the two only sets the flag, which nothing reads any more.
+    fn remove(self) {
+        for id in self.ids {
+            signal_hook::low_level::unregister(id);
+        }
+    }
 }
 
 static HOOKED: Mutex<Vec<(i32, Arc<Hooked>)>> = Mutex::new(Vec::new());
@@ -147,15 +266,8 @@ fn hooked(signum: i32) -> Result<Arc<Hooked>, i32> {
     let pipe = pipe()?;
     let arrived = Arc::new(AtomicBool::new(false));
     let default = Arc::new(AtomicBool::new(true));
-    // The flag before the byte: a reader woken by the byte finds it set.
-    signal_hook::flag::register(signum, arrived.clone()).map_err(io_err)?;
-    signal_hook::low_level::pipe::register_raw(signum, pipe.write().as_raw_fd()).map_err(io_err)?;
-    if signum == SIGIO {
-        signal_hook::flag::register_conditional_shutdown(signum, 128 + SIGIO, default.clone())
-            .map_err(io_err)?;
-    } else {
-        signal_hook::flag::register_conditional_default(signum, default.clone()).map_err(io_err)?;
-    }
+    let write = pipe.write().as_raw_fd();
+    install(signum, &handlers(&default, &arrived, write))?;
     let x = Arc::new(Hooked {
         listening: AtomicUsize::new(0),
         oneshot: AtomicUsize::new(0),
@@ -169,26 +281,27 @@ fn hooked(signum: i32) -> Result<Arc<Hooked>, i32> {
 
 impl Hooked {
     /// libuv's (re)registration of the signal's handler, with
-    /// `SA_RESETHAND` when `oneshot`: the default's flag cleared, and the
-    /// reset action present exactly for a one-shot handler.
+    /// `SA_RESETHAND` when `oneshot`: the last registration's reset pair
+    /// taken back, a pair on a fresh flag exactly for a one-shot handler,
+    /// then the default's flag cleared.
     fn register(&self, signum: i32, oneshot: bool) {
-        self.default.store(false, Ordering::SeqCst);
         let mut r = self.reset.lock().unwrap_or_else(PoisonError::into_inner);
-        if oneshot {
-            if r.is_none() {
-                *r = signal_hook::flag::register(signum, self.default.clone()).ok();
-            }
-        } else if let Some(id) = r.take() {
-            signal_hook::low_level::unregister(id);
+        if let Some(old) = r.take() {
+            old.remove();
         }
+        if oneshot {
+            *r = Reset::new(signum);
+        }
+        self.default.store(false, Ordering::SeqCst);
     }
 
-    /// libuv's `uv__signal_unregister_handler`: the default action.
+    /// libuv's `uv__signal_unregister_handler`: the default action, then the
+    /// reset pair taken back.
     fn unregister(&self) {
         self.default.store(true, Ordering::SeqCst);
         let mut r = self.reset.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(id) = r.take() {
-            signal_hook::low_level::unregister(id);
+        if let Some(old) = r.take() {
+            old.remove();
         }
     }
 }
@@ -269,7 +382,9 @@ pub(crate) fn arrived() -> Vec<i32> {
 
 #[cfg(test)]
 mod tests {
-    use super::native_signum;
+    use super::{handlers, native_signum, reset_pair, Action, Hooked};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, PoisonError};
 
     #[test]
     fn lean_signal_numbers() {
@@ -278,5 +393,129 @@ mod tests {
         for n in [0, 4, 7, 8, 9, 11, 13, 16, 19, 30, 32, -1, 99] {
             assert_eq!(native_signum(n), 0, "{n}");
         }
+    }
+
+    /// AR-49: signal-hook runs a signal's actions in registration order, and
+    /// `hooked` and `Reset::new` register these lists. The default action's
+    /// check comes before the `arrived` flag and the pipe's byte, so a
+    /// handler has decided before it wakes the loop; a reset pair checks its
+    /// flag before it sets it, so the first signal is caught (RSIOB-02).
+    #[test]
+    fn the_default_is_checked_before_the_loop_wakes() {
+        let default = Arc::new(AtomicBool::new(true));
+        let arrived = Arc::new(AtomicBool::new(false));
+        let h = handlers(&default, &arrived, 7);
+        assert!(matches!(&h[0], Action::Default(f) if Arc::ptr_eq(f, &default)));
+        assert!(matches!(&h[1], Action::Set(f) if Arc::ptr_eq(f, &arrived)));
+        assert!(matches!(h[2], Action::Pipe(7)));
+        let flag = Arc::new(AtomicBool::new(false));
+        let r = reset_pair(&flag);
+        assert!(matches!(&r[0], Action::Default(f) if Arc::ptr_eq(f, &flag)));
+        assert!(matches!(&r[1], Action::Set(f) if Arc::ptr_eq(f, &flag)));
+    }
+
+    /// SIGURG: no other test uses it, and its default action is to ignore
+    /// it, so these tests register its actions in the test process.
+    const SIGURG: i32 = 23;
+
+    /// The tests that register SIGURG's actions, one at a time: a signal
+    /// runs every registered pair.
+    static SIGURG_TESTS: Mutex<()> = Mutex::new(());
+
+    /// A signal's state with no handlers of `hooked` (no pipe), for
+    /// `Hooked::register` and `Hooked::unregister` alone.
+    fn hooked_alone() -> Hooked {
+        Hooked {
+            listening: AtomicUsize::new(0),
+            oneshot: AtomicUsize::new(0),
+            default: Arc::new(AtomicBool::new(true)),
+            reset: Mutex::new(None),
+            arrived: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// The flag of the current registration's reset pair.
+    fn reset_flag(h: &Hooked) -> Option<Arc<AtomicBool>> {
+        let r = h.reset.lock().unwrap_or_else(PoisonError::into_inner);
+        r.as_ref().map(|r| r.flag.clone())
+    }
+
+    /// Whether the next signal takes the default action: no watcher
+    /// listens, or the current one-shot registration has had its signal.
+    fn takes_default(h: &Hooked) -> bool {
+        h.default.load(Ordering::SeqCst) || reset_flag(h).is_some_and(|f| f.load(Ordering::SeqCst))
+    }
+
+    /// AR-49: each one-shot registration gets a reset pair on a fresh flag,
+    /// never `default`; a repeating registration and the unregistration
+    /// take it back, so a signal sets only the current flag. The sequence
+    /// is libuv's: the first watcher one-shot, a repeating one joins, it
+    /// stops (only one-shot ones remain), the last one stops, a new first
+    /// one-shot watcher.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn each_oneshot_registration_has_a_fresh_reset_flag() {
+        let _s = SIGURG_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let h = hooked_alone();
+        h.register(SIGURG, true);
+        let r1 = reset_flag(&h).expect("a one-shot registration has a reset pair");
+        assert!(!Arc::ptr_eq(&r1, &h.default));
+        h.register(SIGURG, false);
+        assert!(reset_flag(&h).is_none());
+        signal_hook::low_level::raise(SIGURG).expect("raise");
+        assert!(!r1.load(Ordering::SeqCst), "the first pair was taken back");
+        h.register(SIGURG, true);
+        let r2 = reset_flag(&h).expect("a one-shot registration has a reset pair");
+        assert!(!Arc::ptr_eq(&r2, &r1) && !Arc::ptr_eq(&r2, &h.default));
+        signal_hook::low_level::raise(SIGURG).expect("raise");
+        assert!(r2.load(Ordering::SeqCst));
+        assert!(!r1.load(Ordering::SeqCst));
+        h.unregister();
+        assert!(reset_flag(&h).is_none());
+        assert!(takes_default(&h));
+        h.register(SIGURG, true);
+        let r3 = reset_flag(&h).expect("a one-shot registration has a reset pair");
+        assert!(!Arc::ptr_eq(&r3, &r1) && !Arc::ptr_eq(&r3, &r2));
+        h.unregister();
+    }
+
+    /// AR-49's second race: one-shot watchers listen, and a handler sits
+    /// between its reset pair's check and its reset when a repeating
+    /// watcher joins them (`register(false)`). The pair's take-back waits
+    /// for that handler (signal-hook's wait for running handlers), so its
+    /// reset lands during the registration. It sets only the old
+    /// registration's flag, and the repeating watcher listens. Before, the
+    /// reset set `default` itself after `register` had cleared it, and the
+    /// next signal took the default action although the repeating watcher
+    /// listened. Then, with only one-shot watchers again, a real signal:
+    /// the new pair's flag takes it, so a second one would take the
+    /// default action (RSIOB-02).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_late_reset_leaves_a_new_watcher_listening() {
+        let _s = SIGURG_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let h = hooked_alone();
+        h.register(SIGURG, true);
+        assert!(!takes_default(&h));
+        let old = reset_flag(&h).expect("a one-shot registration has a reset pair");
+        // a repeating watcher joins the one-shot ones
+        h.register(SIGURG, false);
+        // the late handler's reset, done inside the take-back's wait
+        old.store(true, Ordering::SeqCst);
+        assert!(!takes_default(&h), "the repeating watcher listens");
+        signal_hook::low_level::raise(SIGURG).expect("raise");
+        assert!(!takes_default(&h), "no reset with a repeating watcher");
+        // the repeating watcher stops: only one-shot ones remain
+        h.register(SIGURG, true);
+        assert!(!takes_default(&h));
+        signal_hook::low_level::raise(SIGURG).expect("raise");
+        let new = reset_flag(&h).expect("a one-shot registration has a reset pair");
+        assert!(new.load(Ordering::SeqCst));
+        assert!(takes_default(&h));
+        // taken back: a signal sets the flag no more
+        h.unregister();
+        new.store(false, Ordering::SeqCst);
+        signal_hook::low_level::raise(SIGURG).expect("raise");
+        assert!(!new.load(Ordering::SeqCst));
     }
 }

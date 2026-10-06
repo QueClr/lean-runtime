@@ -860,24 +860,55 @@ its own.
 **Signal delivery** uses signal-hook's safe API only (review RSIOB-05):
 - A signal's handlers are installed at its first watcher and never taken
   back (signal-hook cannot restore a disposition). They run in the order
-  they were registered:
-  1. `flag::register` sets the signal's `arrived` flag;
-  2. `low_level::pipe::register_raw` writes a byte into the loop's signal
+  they were registered (`handlers` and `reset_pair` in
+  `src/sched/uv_signals.rs`, the lists that the registration follows):
+  1. the conditional default action (`flag::register_conditional_default`)
+     on the signal's `default` flag, which runs the signal's default action
+     while no watcher listens (natively libuv restores `SIG_DFL` when the
+     last watcher stops): after `stop`, SIGUSR1 ends the program again
+     (status 138), and SIGCHLD is ignored again;
+  2. `flag::register` sets the signal's `arrived` flag;
+  3. `low_level::pipe::register_raw` writes a byte into the loop's signal
      pipe (the flag first, so a reader woken by the byte finds it set);
-  3. the conditional default action (`flag::register_conditional_default`),
-     which runs the signal's default action while no watcher listens
-     (natively libuv restores `SIG_DFL` when the last watcher stops): after
-     `stop`, SIGUSR1 ends the program again (status 138), and SIGCHLD is
-     ignored again;
-  4. while every listener of the signal is one-shot, a second
-     `flag::register` that sets the default's flag at each signal: libuv's
-     `SA_RESETHAND` for one-shot watchers, so a second signal takes the
-     default action before the loop has delivered the first (RSIOB-02, =
-     leanrs's R1). It is registered and unregistered
-     (`low_level::unregister`) as `uv__signal_start` and `uv__signal_stop`
-     re-register libuv's handler: when the first watcher starts, when a
-     repeating one joins one-shot ones, when only one-shot ones remain, and
-     when none is left.
+  4. while every listener of the signal is one-shot, a reset pair on a flag
+     of that registration's own: a second conditional default action on
+     the flag, then a `flag::register` that sets it. That is libuv's
+     `SA_RESETHAND` for one-shot watchers: the first signal passes the
+     check and sets the flag, so a second signal takes the default action
+     before the loop has delivered the first (RSIOB-02, = leanrs's R1).
+     Each registration gets a pair on a fresh flag, registered and
+     unregistered (`low_level::unregister`, the check first) as
+     `uv__signal_start` and `uv__signal_stop` re-register libuv's handler:
+     when the first watcher starts, when a repeating one joins one-shot
+     ones, when only one-shot ones remain, and when none is left.
+- **The check of `default` comes first** (review AR-49). The check that
+  the loop can change, `default`, runs before the handler's byte wakes the
+  loop, as natively the kernel decides the disposition when it delivers
+  the signal and never again. The reset pair's check runs after the byte,
+  but reads only its registration's own flag, which only handlers write.
+  Before the fix the check of `default` came after the byte: the handler's
+  byte woke the loop, the loop delivered the signal to a one-shot watcher,
+  which stopped (the last one, so `default` was set), and the handler then
+  read `default` and killed the process. Threads mode's twin of
+  `uvloop/signal_stop_in_sync_dependent` ended with status 138 now and
+  then; single-thread mode had the same window, since the handler can run
+  on another thread than the loop's. And `default` means only "no watcher
+  listens": the reset used to set `default` itself. When a repeating
+  watcher joined one-shot ones, `register` cleared `default`, then
+  unregistered the reset; `low_level::unregister` waits for the handlers
+  that are running, so a handler between its check and its reset set
+  `default` during that wait, and the repeating watcher listened while the
+  next signal took the default action. Now a late reset sets only its own
+  registration's flag, which nothing reads any more, so the fix does not
+  depend on that wait (an internal detail of signal-hook-registry 1.4.8).
+  Only RSIOB-02 at the first one-shot registration does, in the narrow
+  window between the pair's registration and the clearing of `default`
+  (the module comment). The pipe's action keeps its place, third: it is
+  never unregistered (below), so it cannot move to the end. Unit tests
+  `the_default_is_checked_before_the_loop_wakes` (the lists' order),
+  `each_oneshot_registration_has_a_fresh_reset_flag` and
+  `a_late_reset_leaves_a_new_watcher_listening` (SIGURG's actions in the
+  test process; the last two fail with the reset's flag on `default`).
 - **The signal pipe** is native's own, from `io::startup` (made at startup,
   as libuv makes it in `uv__process_init`), when the glue opened native's
   startup descriptors: a watcher then opens no descriptor, and the pipe's
@@ -925,8 +956,12 @@ Lean bug):
   signal-hook's default action stops the process with SIGSTOP, where
   natively the signal itself stops it (`WSTOPSIG` 19, not 20, 21 or 22),
   and SIGSTOP stops it even in an orphaned process group, where the kernel
-  discards the three. No safe route restores their disposition. No case
-  (a stopped process).
+  discards the three. No safe route restores their disposition. When the
+  process continues, the handler goes on with the `arrived` flag and the
+  byte (the check of `default` comes first, AR-49): a watcher that starts
+  at that moment may also take it, after the stop, where natively the
+  signal does one or the other (the old order had the mirror window, with
+  neither). No case (a stopped process).
 - the reset of a one-shot watcher's handler happens in the handler, where
   the kernel's `SA_RESETHAND` resets the disposition before the handler
   runs: the same outcome for a second signal (case
