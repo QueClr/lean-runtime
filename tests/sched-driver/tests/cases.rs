@@ -55,6 +55,23 @@ fn check_env(id: &str, extra: &[(String, String)]) {
     );
 }
 
+/// An alternative that a case gives one translator (leanrs's DV11 order of
+/// `tasks/promise_nested_free_order`, `alternatives = { alt1 = "leanrs" }`)
+/// is not an outcome the crate's ports may have; one of a case with no
+/// `alternatives` is (`runaway_pure_task_before_io.alt1`, LSCHED-01).
+#[test]
+fn owned_alternative_not_accepted() {
+    let id = "promise_nested_free_order";
+    assert!(case_dir(id).join(format!("{id}.alt1.code")).exists());
+    assert_eq!(
+        alternatives(id),
+        Some(vec![("alt1".to_string(), "leanrs".to_string())])
+    );
+    assert_eq!(expected(id).len(), 1);
+    assert_eq!(alternatives("runaway_pure_task_before_io"), None);
+    assert_eq!(expected("runaway_pure_task_before_io").len(), 2);
+}
+
 /// The glue's lazy start (`sched::start_lazy`, lean2rr's; review RSH2-09):
 /// cases whose first scheduler use is each kind of entry point (a task, a
 /// promise, `Std.Sync` objects, a timer, a signal watcher, the loop's

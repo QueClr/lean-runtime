@@ -146,6 +146,7 @@ So the oracle reads its inputs at run time.</p>
 </ul>
 <p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
 For a translator's own deviation, the expected output stays native's, and the deviation's outcome is also allowed.
+The case's <code>alternatives</code> field can give that outcome to the one translator; then <code>check</code> does not allow it for the other translator.
 When native's outcome is a <a href="lean-bugs.html">Lean bug</a>, the case expects the correct outcome instead.
 It records native's outcome in a <code>native</code> field, which <code>cases.py expect</code> checks.
 <code>check</code> does not accept native's outcome there, so a return of the bug fails.</p>

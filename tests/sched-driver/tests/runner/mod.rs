@@ -11,7 +11,9 @@
 //!   `PATH=/usr/bin:/bin`.
 //!
 //! That is how `scripts/cases.py check` runs a case and what it accepts
-//! (the expected files, then the alternatives `ID.altK.*`), for the fields
+//! with no `--translator` (the expected files, then the alternatives
+//! `ID.altK.*`: those the case's `alternatives` marks `"all"`, or all of
+//! them if it has no `alternatives`), for the fields
 //! these areas use, but for stdin (`cases.py` gives an empty pipe, which
 //! reads as end of file at once, as `/dev/null` does). A case with what this
 //! runner does not implement (`.stdin`, `.files/`, `normalize`) fails here
@@ -245,11 +247,64 @@ pub(crate) fn run_full(
     Outcome { out, err, code }
 }
 
-/// The recorded outcomes: `ID.out/.err/.code`, then `ID.altK.*`.
+/// Case `id`'s `alternatives` table, if it has one, as (`altK`, value)
+/// pairs (`alternatives = { alt1 = "all", alt2 = "leanrs" }`): `"all"` for
+/// an alternative every translator may have, or the translator whose own
+/// deviation it is, which `scripts/cases.py check` accepts only with
+/// `--translator` naming it, and so never here. Another form of the table
+/// fails, so that an owned alternative is never taken for everyone's.
+pub(crate) fn alternatives(id: &str) -> Option<Vec<(String, String)>> {
+    let toml = std::fs::read_to_string(case_dir(id).join(format!("{id}.toml"))).unwrap_or_default();
+    let mut table = None;
+    for line in toml.lines().map(str::trim).filter(|l| !l.starts_with('#')) {
+        let Some(rest) = line
+            .trim_start_matches('[')
+            .trim_start()
+            .strip_prefix("alternatives")
+        else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if !rest.starts_with(['=', '.', ']']) {
+            continue; // another key
+        }
+        let inner = (!line.starts_with('['))
+            .then_some(rest)
+            .and_then(|r| r.strip_prefix('='))
+            .and_then(|r| r.trim_start().strip_prefix('{'))
+            .and_then(|r| r.split_once('}'))
+            .unwrap_or_else(|| {
+                panic!("{id}: this runner reads `alternatives` only as one inline table")
+            })
+            .0;
+        let unquote = |s: &str| s.trim().trim_matches('"').to_string();
+        table = Some(
+            inner
+                .split(',')
+                .filter_map(|e| e.split_once('='))
+                .map(|(k, v)| (unquote(k), unquote(v)))
+                .collect(),
+        );
+    }
+    table
+}
+
+/// The recorded outcomes: `ID.out/.err/.code`, then the `ID.altK.*` that
+/// every translator may have ([`alternatives`]), as `scripts/cases.py
+/// check` without `--translator` accepts.
 pub(crate) fn expected(id: &str) -> Vec<Outcome> {
     let dir = case_dir(id);
+    let table = alternatives(id);
     let mut v = Vec::new();
-    for stem in std::iter::once(id.to_string()).chain((1..10).map(|k| format!("{id}.alt{k}"))) {
+    let alts = (1..10)
+        .map(|k| format!("alt{k}"))
+        .filter(|k| {
+            table
+                .as_ref()
+                .is_none_or(|t| t.iter().any(|(a, o)| a == k && o == "all"))
+        })
+        .map(|k| format!("{id}.{k}"));
+    for stem in std::iter::once(id.to_string()).chain(alts) {
         let Some(code) = read(&dir.join(format!("{stem}.code"))) else {
             continue;
         };

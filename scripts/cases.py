@@ -24,6 +24,16 @@ A requested CASE that no case has is reported as `NO CASE <id>` and fails
 the command.
 
 `check` accepts <id>.out/.err/.code and the alternatives <id>.altK.*.
+A case with an `alternatives` table, `{ alt1 = "all", alt2 = "leanrs" }`,
+lists each of its alternatives there once: "all" is accepted for every
+translator and with no --translator; a translator's name (lean2rr,
+leanrs) makes it that translator's own deviation, accepted only with
+`--translator` naming it, so that it does not excuse the other translator.
+The owner must be a key of `deviations` whose entry names a DVnn. Both
+commands fail a case whose table misses an alternative that has files,
+names one whose three files do not all exist, or breaks these rules (BAD
+ALTERNATIVE). A case with no `alternatives` table has only alternatives
+accepted for every translator.
 
 A Lean bug (`deviations` naming an LB-nn of docs/lean-bugs.md): the
 expected files are the correct outcome, written by hand, and the <id>.toml
@@ -41,7 +51,9 @@ A deviation that names no Lean bug (a translator's or the shared
 runtime's own, native being right: LIO2-nn, DVnn) keeps native's outcome
 in <id>.out/.err/.code and the deviating one as <id>.altK.*, written by
 hand: `expect` keeps the alternatives of a case with `deviations` that is
-not schedule_dependent, and rewrites them otherwise.
+not schedule_dependent, and rewrites them otherwise, but always keeps an
+owned alternative (and records native's other outcomes under other names;
+a case with an `alternatives` table must then list them, as "all").
 
 Each run starts in a new process group; on timeout the runner kills that
 group by its id, never by name. A case's <id>.toml gives `streams`
@@ -56,7 +68,7 @@ a fresh temporary working directory, with stdin, stdout and stderr as pipes,
 inside a memory cap (LEAN_RUNTIME_CASE_MEM, default 4G, through a systemd user
 scope; LEAN_RUNTIME_NO_CAP=1 disables it) and a CPU-time limit.
 """
-import argparse, os, pathlib, re, resource, shlex, shutil, signal, subprocess, sys, tempfile, tomllib
+import argparse, itertools, os, pathlib, re, resource, shlex, shutil, signal, subprocess, sys, tempfile, tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CASES = ROOT / "tests" / "cases"
@@ -105,13 +117,74 @@ def old_form(m):
 OLD_FORM = ("OLD FORM {}: its deviations name a Lean bug; the expected files must be the correct "
             "outcome and native's must be in `native` (tests/cases/README.md)")
 
-def accepted(case):
-    """The outcomes `check` accepts, as (stdout, stderr, code): <id>.out/.err/.code,
-    then the alternatives <id>.altK.* (each one whose .code exists)."""
-    stems = [case.stem] + sorted(p.name[:-len(".code")] for p in case.parent.glob(case.stem + ".alt*.code"))
-    return [((case.parent / (s + ".out")).read_bytes(), (case.parent / (s + ".err")).read_bytes(),
-             (case.parent / (s + ".code")).read_text().strip())
-            for s in stems if (case.parent / (s + ".code")).exists()]
+def outcomes(case):
+    """The recorded outcomes as (alternative, (stdout, stderr, code)):
+    <id>.out/.err/.code with alternative None, then each <id>.altK.* whose
+    .code exists, with alternative "altK"."""
+    alts = sorted(p.name[len(case.stem) + 1:-len(".code")] for p in case.parent.glob(case.stem + ".alt*.code"))
+    return [(k, ((case.parent / (s + ".out")).read_bytes(), (case.parent / (s + ".err")).read_bytes(),
+                 (case.parent / (s + ".code")).read_text().strip()))
+            for k, s in [(None, case.stem)] + [(k, f"{case.stem}.{k}") for k in alts]
+            if (case.parent / (s + ".code")).exists()]
+
+TRANSLATORS = ("lean2rr", "leanrs")  # the owners an alternative can have
+
+def accepted(case, m, translator):
+    """The outcomes `check --translator translator` accepts (translator None:
+    no --translator): the expected files, then the alternatives that the
+    case's `alternatives` marks "all" or gives `translator` (every one, if
+    the case has no `alternatives`)."""
+    table = m.get("alternatives")
+    return [o for k, o in outcomes(case)
+            if k is None or table is None or table.get(k) == "all"
+            or (translator is not None and table.get(k) == translator)]
+
+def alternative_errors(case, m):
+    """What is wrong with the case's `alternatives` table, if it has one
+    (`{ alt1 = "all", alt2 = "leanrs" }`): every alternative with files must
+    have an entry, "all" or one translator, its owner; the owner must be a
+    key of `deviations` whose entry names a DVnn (the translator's own
+    deviation: a Lean bug's or the shared runtime's alternative is
+    "all"); and each entry's .out, .err and .code must exist."""
+    table = m.get("alternatives")
+    if table is None:
+        return []
+    if not isinstance(table, dict) or not all(isinstance(v, str) for v in table.values()):
+        return [f"BAD ALTERNATIVE {case.stem}: `alternatives` must be a table "
+                '{ altK = "all" or one translator }']
+    errors = [f"BAD ALTERNATIVE {case.stem}: {k} has files but no entry in `alternatives` "
+              '("all" or its owner)'
+              for k in sorted({p.name[len(case.stem) + 1:].split(".")[0]
+                               for p in case.parent.glob(case.stem + ".alt*.*")} - set(table))]
+    devs = m.get("deviations", {})
+    for k, owner in table.items():
+        missing = [f"{case.stem}.{k}{ext}" for ext in (".out", ".err", ".code")
+                   if not (case.parent / f"{case.stem}.{k}{ext}").exists()]
+        if not re.fullmatch(r"alt\d+", k):
+            errors.append(f"BAD ALTERNATIVE {case.stem}: `alternatives` names {k}, which is no altK")
+        elif missing:
+            errors.append(f"BAD ALTERNATIVE {case.stem}: `alternatives` names {k}, whose files are "
+                          f"missing: {', '.join(missing)}")
+        if owner == "all":
+            continue
+        if owner not in TRANSLATORS:
+            errors.append(f"BAD ALTERNATIVE {case.stem}: {k} = {owner!r} is neither \"all\" nor one "
+                          f"translator ({', '.join(TRANSLATORS)})")
+        elif owner not in devs:
+            errors.append(f"BAD ALTERNATIVE {case.stem}: {k}'s owner {owner} is not a key of `deviations`")
+        elif not re.search(r"\bDV\d+", str(devs[owner])):
+            errors.append(f"BAD ALTERNATIVE {case.stem}: {k}'s owner {owner} has the deviation "
+                          f"{devs[owner]!r}, which names no DVnn: only a translator's own deviation "
+                          'owns an alternative (others are "all")')
+    return errors
+
+def case_errors(case, m):
+    """What makes the case itself wrong, whatever executable runs it: OLD
+    FORM, BAD ALTERNATIVE, NATIVE EXPECTED (the last only if the others hold)."""
+    errors = ([OLD_FORM.format(case.stem)] if old_form(m) else []) + alternative_errors(case, m)
+    if not errors and native_expected(case, m):
+        errors.append(NATIVE_EXPECTED.format(case.stem))
+    return errors
 
 def native_of(m):
     """The case's `native` field (native Lean's outcome where it has a Lean
@@ -122,10 +195,11 @@ def native_of(m):
     return (n.get("stdout", "").encode(), n.get("stderr", "").encode(), str(n.get("code", "0")))
 
 def native_expected(case, m):
-    """Whether native's wrong outcome (`native`) is among the accepted ones:
-    a half-migrated Lean-bug case, which would let the bug back in."""
+    """Whether native's wrong outcome (`native`) is among the recorded ones
+    (owned alternatives too): a half-migrated Lean-bug case, which would let
+    the bug back in."""
     nat = native_of(m)
-    return nat is not None and nat in accepted(case)
+    return nat is not None and nat in [o for _, o in outcomes(case)]
 
 NATIVE_EXPECTED = ("NATIVE EXPECTED {}: `native` (native's outcome, a Lean bug) equals the expected files "
                    "or an alternative; they must hold the correct outcome")
@@ -227,12 +301,9 @@ def cmd_expect(ns):
         ok = False
     with tempfile.TemporaryDirectory() as d:
         for case in find_cases(ns.cases):
-            if old_form(meta(case)):
-                print(OLD_FORM.format(case.stem))
-                ok = False
-                continue
-            if native_expected(case, meta(case)):
-                print(NATIVE_EXPECTED.format(case.stem))
+            errors = case_errors(case, meta(case))
+            if errors:
+                print("\n".join(errors))
                 ok = False
                 continue
             if meta(case).get("hand_written"):
@@ -263,17 +334,26 @@ def cmd_expect(ns):
             distinct.sort(key=lambda r: -runs.count(r))
             # Alternatives are native's other schedules here; a case with
             # `deviations` keeps its hand-written alternatives (the correct
-            # outcome where native is wrong).
+            # outcome where native is wrong), and every case keeps its owned
+            # ones (a translator's deviation), whose names native's skip.
+            owned = {k for k, v in meta(case).get("alternatives", {}).items() if v != "all"}
             if meta(case).get("schedule_dependent") or not meta(case).get("deviations"):
                 for old in case.parent.glob(case.stem + ".alt*.*"):
-                    old.unlink()
+                    if old.name[len(case.stem) + 1:].split(".")[0] not in owned:
+                        old.unlink()
+            names = (f"alt{k}" for k in itertools.count(1) if f"alt{k}" not in owned)
             for k, (out, err, code) in enumerate(distinct):
-                stem = case.stem if k == 0 else f"{case.stem}.alt{k}"
+                stem = case.stem if k == 0 else f"{case.stem}.{next(names)}"
                 (case.parent / (stem + ".out")).write_bytes(out)
                 (case.parent / (stem + ".err")).write_bytes(err)
                 (case.parent / (stem + ".code")).write_text(code + "\n")
             print(f"recorded {case.stem}: " + ", ".join(
                 f"code {c} x{runs.count((o, e, c))}" for o, e, c in distinct))
+            # an `alternatives` table must list what was recorded or removed
+            errors = alternative_errors(case, meta(case))
+            if errors:
+                print("\n".join(errors))
+                ok = False
     return 0 if ok else 1
 
 def show_diff(stem, got, want):
@@ -299,6 +379,12 @@ def cmd_check(ns):
     for case in find_cases(ns.cases):
         m = meta(case)
         dv = own_deviation(m, ns.translator)
+        # The case's own errors first: they fail it whatever the executable.
+        errors = case_errors(case, m)
+        if errors:
+            print("\n".join(errors))
+            failed += 1
+            continue
         # absolute: each run's working directory is a fresh temporary one
         exe = pathlib.Path(ns.exe_dir).resolve() / case.stem
         if not exe.exists():
@@ -309,15 +395,7 @@ def cmd_check(ns):
                 print(f"MISSING {case.stem}")
                 failed += 1
             continue
-        if old_form(m):
-            print(OLD_FORM.format(case.stem))
-            failed += 1
-            continue
-        if native_expected(case, m):
-            print(NATIVE_EXPECTED.format(case.stem))
-            failed += 1
-            continue
-        allowed = accepted(case)
+        allowed = accepted(case, m, ns.translator)
         if not allowed or not (case.parent / (case.stem + ".code")).exists():
             print(f"NO EXPECTED {case.stem}: {case.stem}.code is missing")
             failed += 1
@@ -346,7 +424,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("expect"); e.add_argument("--runs", type=int, default=5); e.add_argument("cases", nargs="*")
     c = sub.add_parser("check"); c.add_argument("--exe-dir", required=True)
-    c.add_argument("--translator", help="a key of `deviations` (lean2rr, leanrs): its documented non-Lean-bug deviations report DEVIATION, not FAIL")
+    c.add_argument("--translator", help="a key of `deviations` (lean2rr, leanrs): its documented non-Lean-bug deviations report DEVIATION, not FAIL, and the alternatives `alternatives` gives it are accepted")
     c.add_argument("--diff", action="store_true", help="print each failing case's differences")
     c.add_argument("cases", nargs="*")
     ns = ap.parse_args()
