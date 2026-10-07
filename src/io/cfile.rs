@@ -236,6 +236,10 @@ impl CFile {
     /// `fdopen(fd, mode)` with the C mode of a Lean `IO.FS.Mode` (`"r"`, `"w"`,
     /// `"w"`, `"r+"`, `"a"`); the stream holds `fd`, which closes when the
     /// stream is dropped (`fclose`) and no `Handle` keeps a clone of it.
+    /// As glibc's `fdopen` of a descriptor that has `O_APPEND` already, it
+    /// does not seek for `"a"`, and the cached offset starts unknown;
+    /// `Handle::open` moves an `append` descriptor of a regular file to the
+    /// end first (LB-46).
     pub fn fdopen(fd: OwnedFd, mode: FsMode) -> CFile {
         let mut f = CFile::with(
             Fd::Owned(std::sync::Arc::new(std::fs::File::from(fd))),

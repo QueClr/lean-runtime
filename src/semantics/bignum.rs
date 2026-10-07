@@ -99,13 +99,19 @@ pub trait BigNat: Sized {
     /// `mul` and non-power-of-two `pow` (`nat`'s module doc), so a result
     /// close to `MAX_BITS` may be refused although it would fit.
     ///
-    /// lean2rr's GMP backend: its block's limb cap, `i32::MAX` limbs
-    /// (`big.rs` `MAX_LIMBS`, GMP's own `int` sizes), times 64, less a limb
-    /// is a placeholder (the benches' `ColdBig` uses it). The value is set
-    /// when lean2rr adopts the rules, with a margin taken from the sizes
-    /// GMP's `mpz_pow_ui` reallocates to (`mpz/n_pow_ui.c`, its `ralloc`
-    /// estimate and `MPZ_NEWALLOC`; review D3). leanrs's malachite backend
-    /// picks its own.
+    /// lean2rr's GMP backend: `(MAX_LIMBS - 5) * 64` (leanrt `big.rs`
+    /// `MAX_BITS`), where `MAX_LIMBS` is `i32::MAX`, GMP's own `int` limb
+    /// count and the cap of lean2rr's blocks. The 5 limbs are the margin of
+    /// `mpz_pow_ui`, the one operation whose result GMP allocates:
+    /// `mpz_n_pow_ui` (`mpz/n_pow_ui.c`) asks for at most
+    /// `bit_len(a) * e / 64 + 5` limbs (its `ralloc` estimate and the zero
+    /// limbs of the power of two), which stays within `INT_MAX` while
+    /// `bit_len(a) * e`, the size `nat::pow` tests, is at most `MAX_BITS`;
+    /// the operations on blocks need at most `MAX_BITS / 64 + 2` limbs
+    /// (review D3). For a base `2^j`, `nat::pow` tests `j * e + 1` instead
+    /// and builds the result by a shift (`pow2`), a block within the same
+    /// bound. leanrs's malachite backend picks its own (2^39). The
+    /// benches' `ColdBig` keeps an older stand-in, `(i32::MAX - 1) * 64`.
     const MAX_BITS: u64;
 
     /// The value `v`.

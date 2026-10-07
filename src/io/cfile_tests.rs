@@ -512,3 +512,97 @@ fn an_empty_put_sets_no_error_indicator() {
     assert_eq!(f.put(b"x"), Err(EBADF));
     assert!(f.is_err());
 }
+
+/// LB-46: an `append` handle's cursor starts at the end of a regular file,
+/// as `IO.FS.Mode.append` documents and glibc's `fopen(path, "a")` puts it,
+/// so a `truncate` right after the open keeps the content (natively it
+/// empties the file: Lean's `fdopen` does not seek). The cached offset stays
+/// unknown and `ftello` asks the descriptor. With a byte pending, `truncate`
+/// counts it from the end and the flush appends it after a NUL (glibc's
+/// `do_ftell`; LB-49, not a bug). Only a regular file is moved (review
+/// RIO2-01): a character device (`/dev/null`) and a FIFO open and write
+/// with no seek, as natively. A regular file that cannot seek to its end (a
+/// `seq_file` of `/proc`: `EINVAL`) still opens, its cursor at native's 0.
+/// The modelled `errno` is unchanged in each case.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn an_append_open_starts_at_the_end() {
+    use crate::io::error::{errno, set_errno};
+    use crate::io::handle::seek_to_end;
+    use std::os::unix::ffi::OsStrExt;
+    let dir = std::env::temp_dir().join(format!("lean-runtime-lb46-{}", std::process::id()));
+    // a stale directory of an earlier run with the same pid
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let bytes = |p: &std::path::Path| p.as_os_str().as_bytes().to_vec();
+    let fd_of = |p: &[u8]| {
+        rustix::fs::open(
+            std::path::Path::new(std::ffi::OsStr::from_bytes(p)),
+            FsMode::Append.open_flags(),
+            rustix::fs::Mode::from_raw_mode(0o666),
+        )
+    };
+    // case (a) of the hunt: truncate on a fresh append handle
+    let a = dir.join("a");
+    std::fs::write(&a, "keep").unwrap();
+    assert!(seek_to_end(&fd_of(&bytes(&a)).unwrap()));
+    let h = Handle::open(&bytes(&a), FsMode::Append).unwrap();
+    assert_eq!(h.file().offset, POS_BAD);
+    assert_eq!(h.file().ftell(), 4);
+    h.truncate().unwrap();
+    h.put_str(b"+more").unwrap();
+    h.flush().unwrap();
+    assert_eq!(std::fs::read(&a).unwrap(), b"keep+more");
+    drop(h);
+    // case (b): a pending byte, then truncate before the flush
+    let b = dir.join("b");
+    std::fs::write(&b, "keep").unwrap();
+    let h = Handle::open(&bytes(&b), FsMode::Append).unwrap();
+    h.put_str(b"x").unwrap();
+    h.truncate().unwrap();
+    h.flush().unwrap();
+    assert_eq!(std::fs::read(&b).unwrap(), b"keep\0x");
+    drop(h);
+    // a character device: no seek, and the handle works
+    assert!(!seek_to_end(&fd_of(b"/dev/null").unwrap()));
+    set_errno(EBADF);
+    let h = Handle::open(b"/dev/null", FsMode::Append).unwrap();
+    assert_eq!(errno(), EBADF);
+    h.put_str(b"null").unwrap();
+    h.flush().unwrap();
+    assert_eq!(h.file().ftell(), 0);
+    drop(h);
+    // a FIFO: no seek either (natively none; a seek would fail, ESPIPE)
+    let fifo = dir.join("fifo");
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
+    // the read end first (O_RDWR does not wait for a writer)
+    let rd: OwnedFd = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .unwrap()
+        .into();
+    assert!(!seek_to_end(&fd_of(&bytes(&fifo)).unwrap()));
+    set_errno(EBADF);
+    let h = Handle::open(&bytes(&fifo), FsMode::Append).unwrap();
+    assert_eq!(errno(), EBADF);
+    h.put_str(b"fifo").unwrap();
+    h.flush().unwrap();
+    let mut got = [0u8; 4];
+    assert_eq!(rustix::io::read(&rd, &mut got), Ok(4));
+    assert_eq!(&got, b"fifo");
+    drop(h);
+    // a regular file whose seek to the end fails (`seq_lseek`: EINVAL),
+    // opened and dropped with nothing written, where `open(2)` itself may
+    // open it for writing: the cursor stays at native's 0
+    let comm = b"/proc/self/comm";
+    if let Ok(fd) = fd_of(comm) {
+        assert!(seek_to_end(&fd));
+        set_errno(EBADF);
+        let h = Handle::open(comm, FsMode::Append).unwrap();
+        assert_eq!(errno(), EBADF);
+        assert_eq!(h.file().ftell(), 0);
+        drop(h);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

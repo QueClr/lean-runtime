@@ -1,5 +1,6 @@
 //! The io-2 program cases (`tests/cases/{process,temp,uvsys,streams}`, and
-//! `io/temp_file_error`), and those of `tests/cases/{debug,clock,panics}`,
+//! `io/temp_file_error`, `io/dir_entry_update` and
+//! `io/append_starts_at_end`), and those of `tests/cases/{debug,clock,panics}`,
 //! on the crate: each case has a twin here, a Rust function making the same
 //! calls through `lean_runtime` as the case's Lean program makes through
 //! Lean's runtime, with what a translator's glue adds (`IO.println` is one
@@ -13,7 +14,7 @@
 //! `argv[0]`, `IO.appPath` and the environment the checker gives it; every
 //! twin's stdout, stderr and exit code must equal the case's expected
 //! outcome: native Lean 4.34.0's, or the correct one where native is wrong
-//! (LB-03, LB-14, LB-15, LB-16, LB-17, LB-40, LB-41, LB-42, LB-44, LB-45 in
+//! (LB-03, LB-14, LB-15, LB-16, LB-17, LB-40, LB-41, LB-42, LB-44, LB-45, LB-46 in
 //! `docs/lean-bugs.md`; native's is then in the case's `native` field, or,
 //! for `failed_child_order`, in its comment), or the documented alternative where
 //! LB-17's fix costs a descriptor (LIO2-05, `pipe_null_two_free`).
@@ -2558,6 +2559,34 @@ fn dir_entry_update(_: &[String]) -> R<()> {
     lfs::remove_dir(b"d")
 }
 
+/// LB-46 (file-system bug hunt HFS-01): `truncate` right after an `append`
+/// open keeps the content, the cursor being at the end of the file; with a
+/// byte written but not flushed, `truncate` counts it from the end, so the
+/// flush appends it after a NUL (LB-49, not a bug: as natively).
+fn append_starts_at_end(args: &[String]) -> R<()> {
+    let (keep, more, pending) = (&args[0], &args[1], &args[2]);
+    write_file("a.txt", keep)?;
+    let h = Handle::open(b"a.txt", FsMode::Append)?;
+    h.truncate()?;
+    h.put_str(more.as_bytes())?;
+    h.flush()?;
+    drop(h);
+    println(&format!(
+        "truncate after open: {}",
+        quote(&read_file("a.txt")?)
+    ))?;
+    write_file("b.txt", keep)?;
+    let h = Handle::open(b"b.txt", FsMode::Append)?;
+    h.put_str(pending.as_bytes())?;
+    h.truncate()?;
+    h.flush()?;
+    drop(h);
+    println(&format!(
+        "truncate with a pending byte: {}",
+        quote(&read_file("b.txt")?)
+    ))
+}
+
 // ---- the modelled errno (review RIO2-02) ----
 
 /// The case's `probe`: a read handle whose sticky error flag a failed write
@@ -3077,6 +3106,7 @@ const TWINS: &[(&str, Twin)] = &[
     ("title_in_initializer", title_in_initializer),
     ("title_via_loader", title_via_loader),
     ("dir_entry_update", dir_entry_update),
+    ("append_starts_at_end", append_starts_at_end),
     ("errno_after", errno_after),
     ("memory_exact", memory_exact),
     ("temp_long_file", temp_long),

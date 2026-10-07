@@ -12,7 +12,9 @@ behaviour counts as a bug only after a judged verdict:
 Anything not confirmed is followed exactly as native does it. The "Not bugs"
 section records the candidates that failed this bar, so they aren't raised
 again. The "Candidates" section records the suspected bugs that no judge has
-decided yet; until a judge does, they are followed as native.
+decided yet; until a judge does, they are followed as native. The "Lean
+library definitions" section records defects of Lean code that both
+translators compile as written, which the runtime follows too.
 
 Every confirmed bug has:
 - an entry below;
@@ -21,7 +23,9 @@ Every confirmed bug has:
   field (rows and program cases alike), or, where native is also
   nondeterministic, `hand_written = true` (LB-01). `scripts/cases.py
   expect` re-checks native against `native`, and `check` rejects
-  native's wrong outcome (`tests/cases/README.md`).
+  native's wrong outcome (`tests/cases/README.md`). The exception is
+  LB-47, whose error needs a corrupted file system: the native-printed
+  decoding table of `src/io/error_tests.rs` checks it instead.
 
 Each translator also lists it among its intended differences. The owner's
 decision (2026-10-03): these bugs are not reported upstream. They are
@@ -472,6 +476,32 @@ recorded here only; the Upstream field notes what upstream already knows.
 | Upstream | Not reported (owner: record only) |
 | Verdict | Raised by the lean-runtime overflow hunt (finding HO-02). Judged a bug (low) by the coordinator, 2026-10-06 (the three points of the rule): the source lines (Lean 4.34.0's `uv/system.cpp`), why it is wrong (Lean's `UInt64` and `Int64` signatures and their docstrings), and a native repro with wrong values (`HoPrio.lean`, `uvsys/uv_system`, `uvsys/rt_system`) |
 
+### LB-46: `truncate` right after an `append` open empties the file
+
+| Field | Content |
+|---|---|
+| Summary | `IO.FS.Handle.mk path .append` leaves the read/write cursor at 0, not at the end of the file. Writes still go to the end (`O_APPEND`), but `Handle.truncate` cuts the file at the cursor: on a fresh `append` handle it deletes the whole content |
+| Where | `src/runtime/io.cpp` `lean_io_prim_handle_mk` (395-433): `open(fname, flags, 0666)` (417) with `O_WRONLY \| O_CREAT \| O_APPEND` and `O_CLOEXEC` (411, 404), then `fdopen(fd, "a")` (427, 429). glibc 2.39's `fdopen` (`libio/iofdopen.c`) moves the offset to the end only when it adds `O_APPEND` to the descriptor itself; this descriptor has it already, so the offset stays 0. glibc's `fopen(path, "a")` moves it to the end (`_IO_file_open`, `libio/fileops.c`). `lean_io_prim_handle_truncate` (579-591) is `ftruncate(fileno(fp), ftello(fp))` (585); with no output pending, `ftello` is the descriptor's offset |
+| Why it is a bug | `IO.FS.Mode.append`'s documentation (`Init/System/IO.lean` 671-680): "If the file already exists, it is opened, and the read/write cursor is positioned at the end of the file." `Handle.truncate`'s (831-840): "Truncates the handle to its read/write cursor." At the documented cursor, `truncate` keeps the whole file; natively it deletes the content (data loss). The documentation names `fdopen` mode `a` as the means, and glibc gives that mode the documented cursor when it opens the file itself |
+| Native repro | `writeFile "a.txt" "keep"`, `Handle.mk "a.txt" .append`, `truncate`, `putStr "+more"`, `flush`: the file is `"+more"` (correct: `"keep+more"`). Deterministic: the hunt's `HuntFs2.lean` (case (a), native and lean2rr alike) and case `io/append_starts_at_end` (native's outcome in `native`, 5 of 5 native runs). The case's second line, a byte pending before `truncate`, is LB-49 (not a bug) and the same in both |
+| Our behaviour | `Handle::open` moves an `append` descriptor to the end (`lseek(fd, 0, SEEK_END)`) before `fdopen`, as glibc's `_IO_file_open` does, when `fstat` says it is a regular file. The stream's cached offset stays unknown, as glibc leaves it, so `ftello` asks the descriptor and gets the end. Any other descriptor (a character or block device, a FIFO, a terminal) keeps native's cursor, with no seek: some drivers write at the file position and ignore `O_APPEND`, where a seek would change the outcome (`/dev/mtdN` would fail with `ENOSPC`; `/dev/nvram` and `/dev/vcsN` would take 0-byte writes, which glibc and `CFile::syswrite` retry for good; review RIO2-01). Writes are unchanged for every file that honours `O_APPEND` (regular files on disk and network file systems, pseudo files of size 0). A regular file that writes at the position and ignores `O_APPEND` (a sysfs binary attribute) now writes at its end, as after `fopen(path, "a")` (an error there, `EFBIG`). A failed `fstat` or seek is ignored and leaves the modelled `errno` alone, so every open that succeeds natively still succeeds, its cursor at 0, native's, so LB-46 remains in that rare case: `EINVAL` of a `seq_file` of `/proc`, such as `/proc/self/comm` (whose `fopen` glibc would fail), or a revalidation error of a network file system. Both translators open files through `Handle::open` (lean2rr's leanrt `fs::open_file`, leanrs's `io::handle_mk`). Unit test `io::cfile::tests::an_append_open_starts_at_the_end` |
+| Translators | lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV20 (d) |
+| Upstream | Not reported (owner: record only) |
+| Verdict | Raised by the lean-runtime file-system bug hunt (finding HFS-01). Judged a bug (medium, data loss) by the coordinator, 2026-10-07, on the three points of the rule: the source lines (io.cpp 395-433: `open` with `O_APPEND`, then `fdopen` with `"a"`, which does not seek), why it is wrong (the docstrings of `IO.FS.Mode.append` and `truncate`; the content is lost), and a native repro (`HuntFs2.lean` (a), `io/append_starts_at_end`). Fixed in batch io-fixes-2 |
+
+### LB-47: `EBADMSG` is a protocol error or an unknown error, where `IO.Error` documents an inappropriate type
+
+| Field | Content |
+|---|---|
+| Summary | An `EBADMSG` (74), which Linux file systems return for a checksum failure (`EFSBADCRC` in ext4, XFS, Btrfs and F2FS), becomes `protocolError 74 "protocol error"` from a C library call and `otherError 74 "Unknown system error -74"` from a libuv call, where `IO.Error` documents `inappropriateType` |
+| Where | `src/runtime/io.cpp`: `lean_crt_to_uv_err` maps `EBADMSG` to `UV_EPROTO` (238, among the "approximations for `errno` values libuv cannot represent"), which `decode_uv_error_impl` (256-363) classifies as `protocolError`. `lean_decode_uv_error` (369-373) passes libuv's `-74` on unchanged, and no case of `decode_uv_error_impl` names it, so it is `otherError`. The comment `/* LibUV does not map EBADMSG as of version 1.52.1 */` (299) stands above the `inappropriateType` case (`UV_EISDIR`, `UV_ENOTDIR`, 300-306). The libuv decoder serves `metadata` (1143), `symlinkMetadata` (1160), `hardLink` (1241) and `removeFile` (1351), `createTempFile` and `createTempDir` (1259-1343), and every `Std.Internal.UV` call (`src/runtime/uv/`: the event loop, timers, signals, TCP, UDP, DNS, system) |
+| Why it is a bug | `Init/System/IOError.lean` 122-127: `inappropriateType`, "An argument was the wrong type (e.g. a directory when a file was required). This corresponds to the POSIX errors `EISDIR`, `EBADMSG`, and `ENOTDIR`." `protocolError` (75-80) lists `EPROTO`, `EPROTONOSUPPORT` and `EPROTOTYPE` only. Native's own comment (299) places `EBADMSG` with `inappropriateType`. A program that matches the documented class misses the error, and the two paths disagree with each other |
+| Native repro | No program case: the error needs a corrupted file system. The native-printed decoding table (`src/io/error_tests.rs`, row 74: a Lean program that calls `lean_decode_io_error(74, "f")` and `lean_decode_uv_error(-74, "f")`) gives `protocolError` (builder 19) and `otherError` (builder 0); correct: `inappropriateType` with the file name (builder 10) on both paths |
+| Our behaviour | `IoError::decode_uv_error_impl` gives `InappropriateType(file, 74, details)` for `EBADMSG` from either decoder, with native's details: `protocol error` from the C library's path, `Unknown system error -74` from libuv's. The same decoder serves the crate's libuv-path operations: `io::fs`'s `metadata`, `symlinkMetadata`, `hardLink` and `removeFile`, `io::temp`, `io::uvsys`, `net` and `sched::uv`. `crt_to_uv` is unchanged (`EBADMSG` still takes `UV_EPROTO`'s message), and `EPROTO` stays `protocolError`. Row 74 of the table expects the correct class, with native's row in a comment; unit test `io::error::tests::ebadmsg_is_inappropriate_type` |
+| Translators | lean2rr: plan §10, "Runtime"; leanrs: chapter 06, DV15 (h) |
+| Upstream | Not reported (owner: record only) |
+| Verdict | Raised by the lean-runtime file-system bug hunt (finding HFS-02). Judged a bug (low, documentation against code) by the coordinator, 2026-10-07, on the three points of the rule: the source lines (io.cpp 238, 299-306, 369-373), why it is wrong (IOError.lean 125, and native's own comment at 299), and the native-printed table (a program repro needs a corrupted file system). Fixed in batch io-fixes-2 |
+
 ## Limits
 
 Implementation caps where Lean's definition has a value but the runtime
@@ -532,9 +562,10 @@ changed as for any confirmed bug) or to "Not bugs".
 | Upstream | Not reported |
 | Verdict | None yet: needs a judge. Raised by the lean2rr-side semantics bug hunt (finding HS-03), 2026-10-06 |
 
-The candidates of the io bug hunt and of its review (2026-10-06), found by
-reading the source, carry `LBC-nn` ids; a confirmed one gets the next
-`LB-nn`. Each needs a native repro first.
+The candidates of the io bug hunt and of its review (2026-10-06), and of
+the io-fixes-2 review (2026-10-07), found by reading the source, carry
+`LBC-nn` ids; a confirmed one gets the next `LB-nn`. Each needs a native
+repro first.
 
 ### LBC-01: `readDir` returns a short list when `readdir` fails
 
@@ -567,6 +598,37 @@ reading the source, carry `LBC-nn` ids; a confirmed one gets the next
 | Where | `src/runtime/io.cpp` `lean_io_prim_handle_get_line` (645-668): the bytes taken by the `getc_unlocked` loop are in `result`, and the `ferror` branch (659-660) returns the error without them. glibc 2.39's `fgets` (libio/iofgets.c) returns the bytes it read when the error is `EAGAIN` |
 | Observation | On a non-blocking descriptor (a pipe whose writer sends a line in pieces), a `getLine` that reads `hel`, then gets `EAGAIN`, fails, and `hel` is lost: the next `getLine` returns `lo\n`. lean-runtime follows native: `CFile::get_line` returns the error, and the glue drops the bytes appended (io bug hunt, review RIO1-08 of io-fixes-1) |
 | Why not fixed now | Native does the same, and `getLine`'s result has no form for "these bytes, then an error". Returning the bytes (as `fgets` does) or keeping them for the next call would be a new choice, for a judge |
+
+### LBC-05: the libuv path gives `otherError` for the `errno`s that libuv cannot name
+
+| Field | Content |
+|---|---|
+| Where | `src/runtime/io.cpp`: `lean_crt_to_uv_err` (167-252) maps the `errno`s that libuv cannot represent to a nearby code (`ECHILD` to `UV_ESRCH`, `ENOMSG` to `UV_ENODATA`, `ENOLCK` to `UV_EAGAIN`, `ENOSR` to `UV_ENOBUFS`, `EDOM` and `ENOSTR` to `UV_EINVAL`, `EDEADLK` to `UV_EBUSY`, `EIDRM` to `UV_EPIPE`, `EINPROGRESS` to `UV_EISCONN`, `ENETRESET` and `ENOLINK` to `UV_ECONNRESET`, `ETIME` to `UV_ETIMEDOUT`), so the C library's path classifies them. `lean_decode_uv_error` (369-373) passes libuv's code on unchanged, and for these `errno`s it is their own negation, which no case of `decode_uv_error_impl` names: `otherError` with `Unknown system error -e` |
+| Observation | The two paths disagree for these twelve `errno`s, and `IO.Error`'s documentation (`Init/System/IOError.lean`) gives each of them a class (for example `ECHILD` and `ENOMSG`: `noSuchThing`; `ENOLCK` and `ENOSR`: `resourceExhausted`; `EDOM` and `ENOSTR`: `invalidArgument`; `ETIME`: `timeExpired`). lean-runtime follows native (`decode_uv_error`; the native-printed table of `src/io/error_tests.rs`, rows 10, 33, 35, 37, 42, 43, 60, 62, 63, 67, 102 and 115) |
+| Why not fixed now | No native repro: the libuv calls Lean makes (`metadata`, `removeFile`, `hardLink`, temporary files, `Std.Internal.UV`) get none of these from Linux's local file systems; a FUSE or 9p file system could return them. Raised by the io-fixes-2 review (RIO2-03, 2026-10-07) beside LB-47; recorded only |
+
+## Lean library definitions (recorded; followed as native)
+
+Defects that a judge found real in a Lean library definition, Lean code
+that both translators compile as written, and that the runtime cannot
+correct without replacing the definition. Replacing it would be a deviation
+from the definition, so the crate and both translators follow native, and
+the entry records the defect.
+
+### LB-48: `writeFile` and `writeBinFile` succeed when the content cannot be written
+
+| Field | Content |
+|---|---|
+| Status | Recorded, not fixed: a defect of Lean library definitions |
+| Summary | `IO.FS.writeFile` and `IO.FS.writeBinFile` open the file, put the content into the handle's buffer and return without a flush. The buffer is written when the handle is freed, by the finalizer's `fclose`, whose error is dropped. So when that write fails (a full disk, a quota, `EIO`, `/dev/full`), the content, or its part after the last full buffer, is lost, and the call has already succeeded |
+| Where | Lean code, `src/Init/System/IO.lean` 1051-1060: `writeBinFile` is `let h ← Handle.mk fname Mode.write; h.write content`, and `writeFile` the same with `h.putStr content`; neither calls `h.flush`. `src/runtime/io.cpp` `io_handle_finalizer` (95-101): `fclose(static_cast<FILE *>(h));`, its result ignored, after the comment "There is no sensible way to handle errors here" |
+| Why it is a defect | `writeFile`'s docstring (1056): "Write contents of a string to a file at the specified path using UTF-8 encoding." Its type `IO Unit` reports errors, but a content smaller than the buffer is not written during the call, so the call cannot report its failure. The data is lost without an error |
+| Native repro | `writeFile "/dev/full" "x"` returns normally (the hunt's `HuntFs2.lean`: `full: ok`, native and lean2rr alike); the finalizer's `write(2)` fails with `ENOSPC`, and nothing reports it |
+| Our behaviour | Native's: both translators compile `writeFile` and `writeBinFile` from their Lean definitions, so the content stays in the handle's buffer when the call returns. The handle's release (`fclose`: the last clone of its `Handle` dropped) writes it and drops a failure, as natively. A program that writes through its own handle and calls `flush` gets the error |
+| Why it stays | The runtime cannot raise an error from a finalizer: the handle is freed after `writeFile` has returned (native drops the error for this reason, as the finalizer's comment says, and as Rust's `std::fs::File` drops close errors). The defect is that the Lean definitions do not flush; a runtime that replaced them (a flush inside `writeFile`) would deviate from the definitions both translators compile. So the content is written when the handle is released, and an error there is dropped, as natively |
+| Translators | lean2rr: none (follows native); leanrs: none (follows native; its chapter 05 points here) |
+| Upstream | Not reported (owner: record only) |
+| Verdict | Raised by the lean-runtime file-system bug hunt (finding HFS-03). Judged by the coordinator, 2026-10-07: a real defect of the Lean library definitions (IO.lean 1051-1060 do not flush; io.cpp 95-101 drops `fclose`'s error), recorded only: the runtime cannot raise from a finalizer, and replacing the Lean definitions would be a deviation |
 
 ## Not bugs (followed as native)
 
@@ -616,3 +678,13 @@ reading the source, carry `LBC-nn` ids; a confirmed one gets the next
 | Why not | Two modules share the name `Init`: the program's and core's, which every module imports. The program's `initialize_Init` replaces core's at static link time, so core's module initializers never run, and constants such as `Nat.reprArray` stay null until the first use dereferences one. `Init` is a reserved name: Lake rejects it as a package name (Lake/CLI/Init.lean:507-510). The same program under any other name, and under `lean --run`, is correct, and a panic in an initializer plays no part. Only a diagnostic is missing |
 | Behaviour | Not modelled. Probes and cases are never named after a core module (`Init`, `Std`, `Lean`, `Lake`; `tests/cases/README.md`, "Rules") |
 | Verdict | lean2rr-side judge (AR-43), 2026-10-05 |
+
+### LB-49: `truncate` on an `append` handle with output pending leaves a NUL gap
+
+| Field | Content |
+|---|---|
+| Summary | `writeFile "b.txt" "keep"`, `Handle.mk "b.txt" .append`, `putStr "x"`, `truncate`, `flush` leaves `"keep\x00x"`: `ftello` counts the pending byte from the end of the file (5), so `ftruncate` extends the file to 5 bytes with a NUL, and the flush appends `x` after it (`O_APPEND`) |
+| Where | `src/runtime/io.cpp` `lean_io_prim_handle_truncate` (579-591): `ftruncate(fileno(fp), ftello(fp))` (585), with no flush; glibc 2.39's `do_ftell` (`libio/fileops.c`): on an append stream with output pending, it seeks to the end and adds the pending bytes |
+| Why not | It is glibc's behaviour for any C program that does the same. `truncate`'s docstring (`Init/System/IO.lean` 832-838) warns: "This operation does not automatically flush output buffers", and "If unsure, call `IO.FS.Handle.flush` before truncating." The cursor (5) is the documented one, which "includes buffered writes" |
+| Behaviour | Native, exactly; LB-46's fix does not change it. The second line of case `io/append_starts_at_end` checks it |
+| Verdict | Raised with HFS-01 (its part (b)) by the lean-runtime file-system bug hunt. Judged not a bug by the coordinator, 2026-10-07 |

@@ -1,0 +1,10 @@
+id = "append_starts_at_end"
+area = "io"
+lean_version = "4.34.0"
+source = "lean-runtime file-system bug hunt HFS-01 (hunt-fs HuntFs2.lean, its cases (a) and (b)); io-fixes-2"
+streams = "separate"
+deviations = { lean2rr = "LB-46", leanrs = "LB-46" }
+native = { stdout = "truncate after open: \"+more\"\ntruncate with a pending byte: \"keep\\x00x\"\n", stderr = "", code = "0" }
+# `expected` is the correct outcome: the cursor of a fresh `append` handle is at the end of the
+# file, so `truncate` keeps "keep". Native's outcome is `native`: its cursor is at 0, so
+# `truncate` empties the file. The second line is the same in both (LB-49, not a bug).

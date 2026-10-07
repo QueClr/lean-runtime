@@ -131,6 +131,17 @@ So pid 2<sup>32</sup> is the calling process, gid 2<sup>32</sup> is the group of
 A gid above 2<sup>32</sup> - 1 gives <code>none</code>.
 A priority outside -20 to 19 gives "invalid argument".
 Its cases are <code>uvsys/uv_system</code> and <code>uvsys/rt_system</code>.</td></tr>
+<tr id="lb-46"><td>LB-46</td><td>A new <code>append</code> handle has its cursor at 0, not at the end of the file.
+So a <code>truncate</code> right after the open deletes the content of the file.</td><td>For a regular file, the open moves the cursor to the end, as glibc's <code>fopen</code> does for mode <code>a</code> (<a href="io.html#handles">io</a>).
+A device, a FIFO or a terminal keeps native's cursor, because some drivers write at the cursor.
+If the move fails, the cursor stays at 0, as natively.
+Its case is <code>io/append_starts_at_end</code>.</td></tr>
+<tr id="lb-47"><td>LB-47</td><td>The error <code>EBADMSG</code> (a checksum failure of the file system) is <code>protocolError</code> from a C call and <code>otherError</code> from a libuv call.
+Lean's documentation gives <code>inappropriateType</code>.</td><td>It is <code>inappropriateType</code> on both paths, with native's message (<a href="io.html#errors">io</a>).
+It has no case, because it needs a damaged file system.
+The table of native's error decoding checks it.</td></tr>
+<tr><td colspan="3">The file-system bug hunt found LB-46 and LB-47 on 2026-10-07.
+Batch <code>io-fixes-2</code> fixed them.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>
@@ -165,8 +176,25 @@ The value is the same, so only the message is different.</td></tr>
 glibc empties the buffer after the failed write, so no later call reports the error.</td><td>No native repro yet. It is what <code>fwrite</code> does for every C program on glibc.</td></tr>
 <tr id="lbc-03"><td>LBC-03</td><td><code>realPath</code> reports every failure as <code>no such file or directory</code>, also a permission error.</td><td>No native repro yet. The helper's name shows a deliberate choice, and no data is lost.</td></tr>
 <tr id="lbc-04"><td>LBC-04</td><td>A <code>getLine</code> on a non-blocking descriptor that gets <code>EAGAIN</code> in the middle of a line fails, and the bytes that it took are lost.</td><td>Native does the same. glibc's <code>fgets</code> returns those bytes instead.</td></tr>
+<tr id="lbc-05"><td>LBC-05</td><td>A libuv call gives <code>otherError</code> for twelve <code>errno</code> values that libuv cannot name, such as <code>ECHILD</code> and <code>ENOLCK</code>.
+A C call gives them a class.</td><td>No native repro yet. Linux's local file systems do not return them to these calls; FUSE or 9p could.</td></tr>
 <tr><td colspan="3">The io bug hunt and its review found LBC-01 to LBC-04 in the source on 2026-10-06.
+The review of batch <code>io-fixes-2</code> found LBC-05 on 2026-10-07.
 A confirmed one gets the next LB number.</td></tr>
+</tbody></table></div>
+
+<h2 id="library">Lean library definitions: followed as native</h2>
+<p>These are real defects in Lean code that both translators compile as it is written.
+The runtime cannot correct them without a change to the definition.
+That change would be a deviation, so lean-runtime follows native.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Id</th><th>Behaviour</th><th>Why it stays</th></tr></thead>
+<tbody>
+<tr id="lb-48"><td>LB-48</td><td><code>writeFile</code> and <code>writeBinFile</code> do not flush.
+The content goes to the file when the handle is freed, and an error at that time is dropped.
+So on a full disk the content is lost, and the call succeeds.</td><td>A finalizer cannot raise an error, because the call has returned.
+A flush inside <code>writeFile</code> would change the Lean definition.
+A judge recorded it on 2026-10-07.</td></tr>
 </tbody></table></div>
 
 <h2 id="not-bugs">Not bugs: followed as native</h2>
@@ -180,6 +208,9 @@ They are recorded so that nobody raises them again.</p>
 <tr id="lb-09"><td>LB-09</td><td>A second <code>Handle.rewind</code> can serve glibc's buffered bytes.</td><td>C and POSIX do not require <code>fseek</code> to refresh the buffer; Lean's docs promise a cursor, not fresh data.</td></tr>
 <tr id="lb-10"><td>LB-10</td><td>With descriptor 0, 1 or 2 closed at start, stream operations fail with <code>invalid argument (22)</code>.</td><td>POSIX calls such a start non-conforming; native fails with an error that the program can catch, with no crash or lost data.</td></tr>
 <tr id="lb-35"><td>LB-35</td><td>A program in a file named <code>Init.lean</code> builds, but it crashes at the first use of a core constant.</td><td>The program's module then has the name of core's <code>Init</code>, so its initializer replaces core's. <code>Init</code> is a reserved name. Probes and cases never use a core module's name.</td></tr>
+<tr id="lb-49"><td>LB-49</td><td>On an <code>append</code> handle with output in its buffer, <code>truncate</code> counts that output from the end of the file.
+So the file gets NUL bytes before the output.</td><td>glibc does the same for every C program.
+The docstring of <code>truncate</code> says: "If unsure, call <code>IO.FS.Handle.flush</code> before truncating."</td></tr>
 </tbody></table></div>
 
 <p class="more">Detail: <a href="repo:docs/lean-bugs.md">docs/lean-bugs.md</a> gives each entry in full: the source lines, the reason, the native repro, the case id, each translator's entry and the verdict.</p>

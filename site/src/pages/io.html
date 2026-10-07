@@ -100,6 +100,9 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
     A translator keeps the <code>Handle</code> inside its own object and drops it when it frees that object.</li>
   <li>The crate keeps a list of open handles in glibc's order, for the exit.
     The list holds each file by a strong reference, and lets it go when the file's last handle goes away.</li>
+  <li>An <code>append</code> handle on a regular file starts with its cursor at the end of the file, as Lean's documentation says.
+    Natively the cursor starts at 0, so a <code>truncate</code> right after the open deletes the content (<a href="lean-bugs.html#lb-46">LB-46</a>).
+    Other files keep native's cursor, because some device drivers write at the cursor and ignore <code>O_APPEND</code>.</li>
   <li><code>lock</code>, <code>tryLock</code> and <code>unlock</code> wait in <code>flock</code> without the stream's lock, as native does.</li>
   <li>In a program with tasks, a call that would block lets the other tasks run while it waits.
     Examples: a read of an empty pipe, a write into a full one, <code>flock</code>.</li>
@@ -117,6 +120,8 @@ The descriptor's offset is at the end of the read-ahead, not at the position Lea
   <li><code>decode_io_error</code> maps an <code>errno</code> to libuv's code, picks the error class and libuv's message, and keeps the <code>errno</code> as the OS code.
     This is Lean 4.34's decoding in <code>io.cpp</code>.</li>
   <li><code>decode_uv_error</code> does the same for the operations that Lean implements with libuv.</li>
+  <li><strong><a href="lean-bugs.html#lb-47">LB-47</a>.</strong> <code>EBADMSG</code> is <code>inappropriateType</code> on both paths, as Lean's documentation says.
+    Natively it is <code>protocolError</code> from a C call and <code>otherError</code> from a libuv call.</li>
   <li><strong>The <code>errno</code> model.</strong> rustix does not touch libc's <code>errno</code>.
     So the crate keeps its own copy per thread, and sets it as the C call would.
     Natively, a program can see it: a later <code>getLine</code> on a stream with its error indicator set reports that <code>errno</code>.

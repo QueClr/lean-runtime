@@ -3,7 +3,9 @@
 //! Lean's runtime build return (the constructor as lean2rr's kind number, the
 //! stored code, the details). The table was printed by a native Lean program
 //! calling the two C functions (aarch64 Linux); it comes from lean2rr's
-//! `runtime/leanrt/src/fs_tests.rs`.
+//! `runtime/leanrt/src/fs_tests.rs`. A row where native is wrong (a Lean
+//! bug of `docs/lean-bugs.md`) holds the correct outcome, with native's in
+//! a comment above it (`native`): row 74, `EBADMSG` (LB-47).
 
 use super::*;
 
@@ -99,7 +101,9 @@ const NATIVE: &[(i32, u32, u32, &str, u32, u32, &str)] = &[
     (71, 19, 71, "protocol error", 19, 71, "protocol error"),
     (72, 0, 72, "Unknown system error -72", 0, 72, "Unknown system error -72"),
     (73, 0, 73, "Unknown system error -73", 0, 73, "Unknown system error -73"),
-    (74, 19, 74, "protocol error", 0, 74, "Unknown system error -74"),
+    // LB-47: inappropriateType (10, with the file name) on both paths;
+    // native (74, 19, 74, "protocol error", 0, 74, "Unknown system error -74")
+    (74, 10, 74, "protocol error", 10, 74, "Unknown system error -74"),
     (75, 0, 75, "value too large for defined data type", 0, 75, "value too large for defined data type"),
     (76, 0, 76, "Unknown system error -76", 0, 76, "Unknown system error -76"),
     (77, 0, 77, "Unknown system error -77", 0, 77, "Unknown system error -77"),
@@ -220,6 +224,40 @@ fn nameless_errors_do_not_crash() {
     assert_eq!(
         IoError::decode_io_error(EIO, Some(b"f")),
         IoError::HardwareFault(5, "i/o error".into())
+    );
+}
+
+/// LB-47: `EBADMSG` is `inappropriateType` from both decoders, with or
+/// without a file name, and keeps native's details: the C library's path
+/// takes `UV_EPROTO`'s message, the libuv path has none for it.
+#[test]
+fn ebadmsg_is_inappropriate_type() {
+    let proto = || "protocol error".to_owned();
+    let unknown = || "Unknown system error -74".to_owned();
+    assert_eq!(
+        IoError::decode_io_error(EBADMSG, None),
+        IoError::InappropriateType(None, 74, proto())
+    );
+    assert_eq!(
+        IoError::decode_io_error(EBADMSG, Some(b"f")),
+        IoError::InappropriateType(Some("f".into()), 74, proto())
+    );
+    assert_eq!(
+        IoError::decode_uv_error(-EBADMSG, None),
+        IoError::InappropriateType(None, 74, unknown())
+    );
+    assert_eq!(
+        IoError::decode_uv_error(-EBADMSG, Some(b"f")),
+        IoError::InappropriateType(Some("f".into()), 74, unknown())
+    );
+    // `EPROTO` itself stays `protocolError` on both paths
+    assert_eq!(
+        IoError::decode_io_error(EPROTO, None),
+        IoError::ProtocolError(71, proto())
+    );
+    assert_eq!(
+        IoError::decode_uv_error(-EPROTO, Some(b"f")),
+        IoError::ProtocolError(71, proto())
     );
 }
 

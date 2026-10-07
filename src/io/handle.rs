@@ -389,6 +389,41 @@ fn os(e: i32) -> IoError {
     IoError::decode_io_error(e, None)
 }
 
+/// LB-46: the `lseek(fd, 0, SEEK_END)` of glibc's `_IO_file_open` for a
+/// stream opened `"a"`, made on a freshly opened `append` descriptor before
+/// [`CFile::fdopen`], when `fstat` says it is a regular file. The stream's
+/// cached offset stays unknown, as glibc leaves it there ("Don't update the
+/// offset cache though, since the file handle is not active"), so its first
+/// `ftello` asks the descriptor (`SEEK_CUR`) and gets the end. Returns
+/// whether it tried the seek (the descriptor is a regular file).
+///
+/// Any other descriptor (a character or block device, a FIFO, a terminal)
+/// keeps native's cursor, unmoved: some drivers write at the file position
+/// and ignore `O_APPEND`, where a seek to the end would change the outcome
+/// (`/dev/mtdN` would fail with `ENOSPC`; `/dev/nvram` and `/dev/vcsN` would
+/// take 0-byte writes, which glibc and `CFile::syswrite` retry for good;
+/// review RIO2-01). Writes are unchanged for every file that honours
+/// `O_APPEND` (regular files on disk and network file systems, pseudo files
+/// of size 0). A regular file that writes at the position and ignores
+/// `O_APPEND` (a sysfs binary attribute) now writes at its end, as after
+/// `fopen(path, "a")` (an error there, `EFBIG`, not a hang).
+///
+/// A failed `fstat` or seek is ignored and leaves the modelled `errno`
+/// alone, so the open succeeds as natively, and the cursor stays at 0,
+/// native's (LB-46 remains in that rare case): `EINVAL` of a regular file
+/// without an end to seek to (a `seq_file` of `/proc`, such as
+/// `/proc/self/comm`, whose `fopen` glibc would fail), or a revalidation
+/// error of a network file system.
+pub(crate) fn seek_to_end(fd: &OwnedFd) -> bool {
+    let regular = rustix::fs::fstat(fd).is_ok_and(|st| {
+        rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::RegularFile
+    });
+    if regular {
+        let _ = rustix::fs::seek(fd, rustix::fs::SeekFrom::End(0));
+    }
+    regular
+}
+
 /// `_IO_new_file_underflow`'s courtesy flush: reading a line-buffered or
 /// unbuffered stream first writes a line-buffered stdout's pending output.
 /// (Never called with `STDOUT` locked: stdout cannot read.)
@@ -419,6 +454,14 @@ impl Handle {
     /// is `mk_embedded_nul_error`; then `open` with the mode's flags,
     /// `O_CLOEXEC` and permissions `0666`, whose failure is decoded with the
     /// path, and `fdopen` with `"r"`, `"w"`, `"w"`, `"r+"` or `"a"`.
+    ///
+    /// **LB-46** (`docs/lean-bugs.md`): for `append`, the descriptor of a
+    /// regular file is first moved to the end of the file (`seek_to_end`), as
+    /// glibc's `fopen(path, "a")` does (`_IO_file_open`), so the cursor is at
+    /// the end, as `IO.FS.Mode.append` documents. Natively it stays at 0:
+    /// glibc's `fdopen` seeks only when it adds `O_APPEND` itself, and
+    /// Lean's `open` has set it already, so a `truncate` right after the
+    /// open empties the file. Both translators open files here.
     pub fn open(path: &[u8], mode: FsMode) -> Result<Handle, IoError> {
         super::effect_point();
         if path.contains(&0) {
@@ -427,7 +470,12 @@ impl Handle {
         // threads mode: never in a fallback spawn's `cwd` (review RT1-04),
         // and the lock never held across the open's wait (RT2-03)
         match sys::open(path, mode.open_flags()) {
-            Ok(fd) => Ok(Handle::fdopen(fd, mode)),
+            Ok(fd) => {
+                if mode == FsMode::Append {
+                    seek_to_end(&fd);
+                }
+                Ok(Handle::fdopen(fd, mode))
+            }
             Err(e) => Err(IoError::decode_io_error(e, Some(path))),
         }
     }

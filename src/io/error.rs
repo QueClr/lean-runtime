@@ -27,6 +27,14 @@
 //! removed directory). The classes io.cpp asserts to have no file name ignore
 //! one, as its release build does.
 //!
+//! **LB-47** (`docs/lean-bugs.md`): `EBADMSG` (74, a file system's checksum
+//! failure, `EFSBADCRC`) is `inappropriateType`, as `IO.Error`'s
+//! documentation lists it (`Init/System/IOError.lean` 125) and io.cpp's own
+//! comment places it (299), on both paths. Natively the C library's path
+//! makes it `protocolError` (through `UV_EPROTO`) and the libuv path
+//! `otherError` (libuv has no code for it). The details stay native's:
+//! `protocol error`, and `Unknown system error -74`.
+//!
 //! The errno model: natively, C's `errno` is observable in Lean through a
 //! stream's sticky error indicator (a later `getLine` reports whatever
 //! `errno` holds then). lean-runtime's `getLine` reports only its own error
@@ -224,7 +232,8 @@ pub fn set_errno(e: i32) {
 /// Lean 4.34's `lean_crt_to_uv_err` (io.cpp) on Linux: the libuv error code
 /// (negative) of an `errno`. libuv's codes are the negated `errno`s there, so
 /// an `errno` libuv names is itself negated; the ones libuv cannot represent
-/// are approximated by the closest code it can (`EBADMSG` to `UV_EPROTO`, ...);
+/// are approximated by the closest code it can (`EBADMSG` to `UV_EPROTO`, ...,
+/// which gives `EBADMSG` its message; its class is LB-47's);
 /// any other `errno` is negated too, which no case of `decode_uv_error_impl`
 /// names (an `otherError`, "Unknown system error -e"). Lean 4.34 is compiled
 /// against libuv headers of 1.45 or later (`ENODATA` and `ENOMSG` to
@@ -362,12 +371,18 @@ impl IoError {
     /// `decode_uv_error_impl` (io.cpp): the class of the libuv code `uv`, its
     /// `uv_strerror` message, and `os_code` as the error code. A file name is
     /// kept by the classes that take one; `UV_EINTR` and `UV_ENOENT` without
-    /// one get `""` (LB-03).
+    /// one get `""` (LB-03). `EBADMSG` is `inappropriateType` from either
+    /// decoder (LB-47).
     pub fn decode_uv_error_impl(uv: i32, os_code: i32, fname: Option<&[u8]>) -> IoError {
         let details = uv_strerror(uv).into_owned();
         let code = os_code as u32;
         let file = || fname.map(name);
         let named = || fname.map(name).unwrap_or_default();
+        // LB-47: `EBADMSG`, from the C library (classified as `UV_EPROTO`)
+        // or from libuv (its own negation, which no case names)
+        if os_code == EBADMSG && matches!(-uv, EPROTO | EBADMSG) {
+            return IoError::InappropriateType(file(), code, details);
+        }
         match -uv {
             EINTR => IoError::Interrupted(named(), code, details),
             ELOOP | ENAMETOOLONG | EDESTADDRREQ | EBADF | EINVAL | EILSEQ | ENOTCONN | ENOTSOCK

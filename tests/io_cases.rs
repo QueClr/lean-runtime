@@ -1,6 +1,8 @@
 //! The io program cases (`tests/cases/io/*.lean`) on the model: each case
 //! (but `borrow_with_ref_struct`, which tests only what a translator
-//! generates; see its `.toml`) has a twin here, a Rust function making the same calls through
+//! generates, see its `.toml`; and `temp_file_error`, `dir_entry_update` and
+//! `append_starts_at_end`, whose twins are in `tests/io2_cases.rs`) has a
+//! twin here, a Rust function making the same calls through
 //! `lean_runtime::io` as the case's Lean program makes through Lean's
 //! runtime, with the little a translator's glue adds (Init's one module
 //! initializer that reaches the runtime, `IO.stdGenRef`'s 8 random bytes,
