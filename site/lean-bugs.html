@@ -231,8 +231,16 @@ glibc empties the buffer after the failed write, so no later call reports the er
 <tr id="lbc-04"><td>LBC-04</td><td>A <code>getLine</code> on a non-blocking descriptor that gets <code>EAGAIN</code> in the middle of a line fails, and the bytes that it took are lost.</td><td>Native does the same. glibc's <code>fgets</code> returns those bytes instead.</td></tr>
 <tr id="lbc-05"><td>LBC-05</td><td>A libuv call gives <code>otherError</code> for twelve <code>errno</code> values that libuv cannot name, such as <code>ECHILD</code> and <code>ENOLCK</code>.
 A C call gives them a class.</td><td>No native repro yet. Linux's local file systems do not return them to these calls; FUSE or 9p could.</td></tr>
+<tr id="lbc-06"><td>LBC-06</td><td>A program with an <code>initialize</code> constant of function type does not link natively.
+The generated C calls the constant as a C function that it never defines.</td><td>This is in Lean's compiler, not in its runtime, so lean-runtime has no part in it.
+lean2rr keeps the function in the constant's cell and applies it (read in its source, not built).</td></tr>
+<tr id="lbc-07"><td>LBC-07</td><td><code>Child.kill</code> sends <code>SIGKILL</code> (status 137), but its docstring says <code>SIGTERM</code>.</td><td>It is not clear if the docstring or the code is wrong.
+lean-runtime sends <code>SIGKILL</code>, as native does.</td></tr>
+<tr id="lbc-08"><td>LBC-08</td><td>When <code>osEnviron</code> fails, native returns a string as the error, where an <code>IO.Error</code> must be.</td><td>The source shows the bug, but no program can make the call fail on demand.
+In lean-runtime, <code>osEnviron</code> cannot fail.</td></tr>
 <tr><td colspan="3">The io bug hunt and its review found LBC-01 to LBC-04 in the source on 2026-10-06.
 The review of batch <code>io-fixes-2</code> found LBC-05 on 2026-10-07.
+The program-start and system-glue bug hunts found LBC-06 to LBC-08 on 2026-10-07.
 A confirmed one gets the next LB number.</td></tr>
 </tbody></table></div>
 

@@ -241,6 +241,9 @@ def runLibm (fn : String) (a : List Arg) : IO (Option String) := do
   | "Float.pow", [x, y] => retF (Float.pow (← fA x) (← fA y))
   | "Float.round", [x] => retF (Float.round (← fA x))
   | "Float.sin", [x] => retF (Float.sin (← fA x))
+  | "fun x => ((Float.sin x).toBits, (Float.cos x).toBits)", [x] =>
+    let x ← fA x
+    return r ((Float.sin x).toBits, (Float.cos x).toBits)
   | "Float.sinh", [x] => retF (Float.sinh (← fA x))
   | "Float.sqrt", [x] => retF (Float.sqrt (← fA x))
   | "Float.tan", [x] => retF (Float.tan (← fA x))

@@ -1,0 +1,13 @@
+id = "sin_cos_one_operand"
+area = "folding"
+lean_version = "4.34.0"
+source = "review HF-01 (lean2rr-side float bug hunt, 2026-10-07: glibc 2.39's sincos against sin at ±0x1.ad1fb54442d18p+0); lean-runtime batch semantics-5"
+streams = "separate"
+# The case checks that a translation keeps a sine and a cosine of one
+# operand two calls, as natively, and never one sincos call, whose sine is
+# one ulp away from glibc's sin on these inputs (src/semantics/libm.rs's
+# module docs). The expected outcome is native's, recorded natively with
+# scripts/cases.py expect: glibc 2.39's sin and cos on aarch64 Linux.
+# No twin: the case tests what a translator generates (whether its compiler
+# pairs the two calls); the crate's sin and cos are checked by the rows
+# libm/sincos.* and by tests/libm_folding.rs (sin_and_cos_of_one_operand).

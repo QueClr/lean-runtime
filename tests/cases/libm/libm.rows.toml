@@ -1903,6 +1903,26 @@ lean_version = "4.34.0"
 source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each; matches leanrs rt/leanrs_rt/tests/float.rs (float_cos)"
 
 [[row]]
+id = "libm/cos.0x1.ad1fb54442d18p+0"
+area = "libm"
+fn = "Float.cos"
+args = ["1.6762650767948966"]
+bits = { args = ["0x3ffad1fb54442d18"], result = "0xbfbaf33152f68f8b" }
+expected = "-0.105273"
+lean_version = "4.34.0"
+source = "semantics-5: review HF-01 (lean2rr-side float bug hunt, 2026-10-07): glibc 2.39's sincos gives another sine than sin here (...db against ...dc); native calls sin and cos, never sincos (libm.rs module docs)"
+
+[[row]]
+id = "libm/cos.-0x1.ad1fb54442d18p+0"
+area = "libm"
+fn = "Float.cos"
+args = ["(-1.6762650767948966)"]
+bits = { args = ["0xbffad1fb54442d18"], result = "0xbfbaf33152f68f8b" }
+expected = "-0.105273"
+lean_version = "4.34.0"
+source = "semantics-5: review HF-01 (lean2rr-side float bug hunt, 2026-10-07): glibc 2.39's sincos gives another sine than sin here (...db against ...dc); native calls sin and cos, never sincos (libm.rs module docs)"
+
+[[row]]
 id = "libm/cosh.0.7"
 area = "libm"
 fn = "Float.cosh"
@@ -2301,6 +2321,46 @@ bits = { args = ["0x7ff8000000000000"], result = "0x7ff8000000000000" }
 expected = "NaN"
 lean_version = "4.34.0"
 source = "lean-runtime batch 1: the other libm rows, a value, an edge and NaN each; matches leanrs rt/leanrs_rt/tests/float.rs (float_sin)"
+
+[[row]]
+id = "libm/sin.0x1.ad1fb54442d18p+0"
+area = "libm"
+fn = "Float.sin"
+args = ["1.6762650767948966"]
+bits = { args = ["0x3ffad1fb54442d18"], result = "0x3fefd27acee550dc" }
+expected = "0.994443"
+lean_version = "4.34.0"
+source = "semantics-5: review HF-01 (lean2rr-side float bug hunt, 2026-10-07): glibc 2.39's sincos gives another sine than sin here (...db against ...dc); native calls sin and cos, never sincos (libm.rs module docs)"
+
+[[row]]
+id = "libm/sin.-0x1.ad1fb54442d18p+0"
+area = "libm"
+fn = "Float.sin"
+args = ["(-1.6762650767948966)"]
+bits = { args = ["0xbffad1fb54442d18"], result = "0xbfefd27acee550dc" }
+expected = "-0.994443"
+lean_version = "4.34.0"
+source = "semantics-5: review HF-01 (lean2rr-side float bug hunt, 2026-10-07): glibc 2.39's sincos gives another sine than sin here (...db against ...dc); native calls sin and cos, never sincos (libm.rs module docs)"
+
+[[row]]
+id = "libm/sincos.0x1.ad1fb54442d18p+0"
+area = "libm"
+fn = "fun x => ((Float.sin x).toBits, (Float.cos x).toBits)"
+args = ["1.6762650767948966"]
+bits = { args = ["0x3ffad1fb54442d18"] }
+expected = "(4607132368722284764, 13815622200083255179)"
+lean_version = "4.34.0"
+source = "semantics-5: review HF-01 (lean2rr-side float bug hunt, 2026-10-07): a sine and a cosine of one operand computed together are glibc's sin and cos, as natively, not sincos, whose sine here is ...db (libm.rs module docs)"
+
+[[row]]
+id = "libm/sincos.-0x1.ad1fb54442d18p+0"
+area = "libm"
+fn = "fun x => ((Float.sin x).toBits, (Float.cos x).toBits)"
+args = ["(-1.6762650767948966)"]
+bits = { args = ["0xbffad1fb54442d18"] }
+expected = "(13830504405577060572, 13815622200083255179)"
+lean_version = "4.34.0"
+source = "semantics-5: review HF-01 (lean2rr-side float bug hunt, 2026-10-07): a sine and a cosine of one operand computed together are glibc's sin and cos, as natively, not sincos, whose sine here is ...db (libm.rs module docs)"
 
 [[row]]
 id = "libm/sinh.0.7"

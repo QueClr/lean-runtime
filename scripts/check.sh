@@ -124,7 +124,8 @@ for tc in "${TOOLCHAINS[@]}"; do
   echo "== $tc example threads_altstack_reuse"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" run --offline --quiet --features threads,stack-overflow \
     --example threads_altstack_reuse
-  # Constant folding of libm calls happens only in optimized builds.
+  # Constant folding of libm calls, and the pairing of a sine and a cosine
+  # into one sincos call, happen only in optimized builds.
   echo "== $tc release test libm_folding"
   capped "${TEST_TIMEOUT[@]}" cargo +"$tc" test --release --offline --quiet --test libm_folding
   # A driver without cargo builds the dependency-free configuration with

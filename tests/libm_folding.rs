@@ -11,6 +11,10 @@
 //! with `--release`; a debug build ignores it. The operands are 40 per function
 //! drawn over its domain with a fixed seed, plus a few chosen ones
 //! (`35.74477454358792` is leanrs's `exp2` counterexample, review S1-1).
+//!
+//! The last test, `sin_and_cos_of_one_operand`, checks another rewrite of an
+//! optimized build: a sine and a cosine of one operand must stay two calls,
+//! not one `sincos` (review HF-01).
 
 // The operands are written with every digit Lean prints, on purpose.
 #![allow(clippy::excessive_precision)]
@@ -2731,3 +2735,35 @@ binary!(
         (10.0_f32, 0.5_f32)
     ]
 );
+
+/// Review HF-01: a sine and a cosine of one operand, computed together, give
+/// glibc's `sin` and `cos`, as natively. Inlined into one basic block,
+/// `llvm.sin` and `llvm.cos` of one operand can become one call of glibc's
+/// `sincos`, whose sine at ±0x1.ad1fb54442d18p+0 is `...db`, where `sin`
+/// gives `...dc` (`libm.rs`'s module docs); `libm::sin` and `libm::cos` are
+/// never inlined, so the pair stays two calls. The operands are opaque, so
+/// nothing is folded. The pairing happens only in optimized builds, as the
+/// folding does; the test runs in every build. The expected bits are glibc
+/// 2.39's `sin` and `cos` on aarch64 Linux, native's there (the rows of
+/// `tests/cases/libm/` are too), so elsewhere the test is ignored.
+#[test]
+#[cfg_attr(
+    not(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu")),
+    ignore = "the expected bits are glibc 2.39's on aarch64 Linux"
+)]
+fn sin_and_cos_of_one_operand() {
+    let x = black_box(f64::from_bits(0x3ffa_d1fb_5444_2d18));
+    let (s, c) = (libm::sin(x), libm::cos(x));
+    let y = black_box(f64::from_bits(0xbffa_d1fb_5444_2d18));
+    let (t, d) = (libm::sin(y), libm::cos(y));
+    assert_eq!(
+        [s.to_bits(), c.to_bits(), t.to_bits(), d.to_bits()],
+        [
+            0x3fef_d27a_cee5_50dc,
+            0xbfba_f331_52f6_8f8b,
+            0xbfef_d27a_cee5_50dc,
+            0xbfba_f331_52f6_8f8b
+        ],
+        "sin and cos of ±0x1.ad1fb54442d18p+0 computed together must be glibc's sin and cos"
+    );
+}

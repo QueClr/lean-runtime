@@ -609,6 +609,16 @@ fn libm_fns(r: &mut Registry) {
     r.add("Float32.pow", |a| {
         gret(libm::powf(f32a(&a[0]), f32a(&a[1])))
     });
+    // review HF-01: a sine and a cosine of one operand, computed together,
+    // stay glibc's `sin` and `cos` (never one `sincos` call)
+    r.add(
+        "fun x => ((Float.sin x).toBits, (Float.cos x).toBits)",
+        |a| {
+            let x = f64a(&a[0]);
+            let (s, c) = (libm::sin(x), libm::cos(x));
+            format!("({}, {})", float::to_bits(s), float::to_bits(c))
+        },
+    );
 }
 
 fn uint_fns(r: &mut Registry) {

@@ -607,6 +607,36 @@ repro first.
 | Observation | The two paths disagree for these twelve `errno`s, and `IO.Error`'s documentation (`Init/System/IOError.lean`) gives each of them a class (for example `ECHILD` and `ENOMSG`: `noSuchThing`; `ENOLCK` and `ENOSR`: `resourceExhausted`; `EDOM` and `ENOSTR`: `invalidArgument`; `ETIME`: `timeExpired`). lean-runtime follows native (`decode_uv_error`; the native-printed table of `src/io/error_tests.rs`, rows 10, 33, 35, 37, 42, 43, 60, 62, 63, 67, 102 and 115) |
 | Why not fixed now | No native repro: the libuv calls Lean makes (`metadata`, `removeFile`, `hardLink`, temporary files, `Std.Internal.UV`) get none of these from Linux's local file systems; a FUSE or 9p file system could return them. Raised by the io-fixes-2 review (RIO2-03, 2026-10-07) beside LB-47; recorded only |
 
+LBC-06 to LBC-08 come from the lean2rr-side bug hunts of 2026-10-07
+(program start, and the system glue), with the coordinator's notes.
+
+### LBC-06: an `initialize` constant of function type does not link natively
+
+| Field | Content |
+|---|---|
+| Status | Recorded, not judged: a bug candidate in Lean's compiler, not in its runtime (finding HI-OBS-01). The crate has no part in it |
+| Where | Lean 4.34.0's C code generator. For `initialize gFn : Nat → Nat ← pure (· * 3)` and a use `gFn n`, the generated C declares `l_gFn` as a C function of one argument (`LEAN_EXPORT lean_object* l_gFn(lean_object*);`) and calls it at the use, but defines no such function: the value that the initializer computes, a closure, is never connected to the name. The hunt saw the same for a constant of type `IO Unit` (`l_gAct`). The cause is probably `emitDeclInit` (`src/Lean/Compiler/LCNF/EmitC.lean` 986-1005, by reading, not traced): it stores an initializer's result in the constant's global only when the declaration has no parameters (992, `decl.params.isEmpty`), and the declaration of a constant of function type seems to get one (the C signature above), so no branch stores the closure and nothing defines `l_gFn` |
+| Observation | The program elaborates and compiles to C, but `leanc` fails to link it: `ld.lld: error: undefined symbol: l_gFn` (checked again for semantics-5 with a four-line program). So natively no such program builds. lean2rr stores the function in the constant's once-cell and applies it at each use, the program's evident meaning (read in its source; the hunt did not build it) |
+| Why not fixed now | Nothing to fix in the crate. A translator that builds such a program does what native would do if it linked |
+
+### LBC-07: `Child.kill` sends `SIGKILL`, where its docstring says `SIGTERM`
+
+| Field | Content |
+|---|---|
+| Where | `src/runtime/process.cpp` `lean_io_process_child_kill` (392-400): `killpg(pid, SIGKILL)` with `setsid`, else `kill(pid, SIGKILL)` (396). `src/Init/System/IO.lean` 1504, `Child.kill`'s docstring: "Terminates the child process using the `SIGTERM` signal or a platform analogue." |
+| Observation | A killed child ends by signal 9 (status 137 to `wait`), not by signal 15 (143), and it cannot catch the signal to clean up. lean-runtime follows native: `io::process`'s `kill` sends `SIGKILL`, and the process cases expect 137 (finding HSY-01) |
+| Why not fixed now | It is not clear which side is wrong: the docstring or the code. Behaviour unchanged until a judge decides |
+
+### LBC-08: `osEnviron` fails with a `String` where an `IO.Error` must be
+
+| Field | Content |
+|---|---|
+| Status | A native bug by reading the source (coordinator, 2026-10-07, finding HSY-02), in the family of LB-03 (an error path that gives no valid `IO.Error`). It has no native repro, the third point of the rule, so it stays among the candidates. lean-runtime does not reproduce it |
+| Where | `src/runtime/uv/system.cpp` `lean_uv_os_environ` (247-272): when `uv_os_environ` fails, `return lean_io_result_mk_error(lean_mk_string(uv_strerror(result)));` (253). `Std/Internal/UV/System.lean` 170-171: `osEnviron : IO (Array (String × String))`, so the error must be an `IO.Error` |
+| Observation | A `match` on the error, or its `toString`, reads the string object as a constructor of `IO.Error`, which it is not. `uv_os_environ` fails only when its allocation fails, so no program shows it on demand. In the crate the path does not exist: `io::uvsys::os_environ` cannot fail (it reads the environment copy of `io::environ`) |
+| Why not fixed now | Nothing to fix in lean-runtime, where `os_environ` cannot fail. A case would need `uv_os_environ`'s allocation to fail, which no program can cause on demand |
+| Side note | `lean_uv_os_get_passwd` (175-200) tests the uid for the gid too: `gid = passwd.uid != (unsigned long)(-1) ? some : none` (186). On Linux, libuv takes both from `getpwuid_r`, and the uid is never -1 there, so both are always `some`: no effect |
+
 ## Lean library definitions (recorded; followed as native)
 
 Defects that a judge found real in a Lean library definition, Lean code

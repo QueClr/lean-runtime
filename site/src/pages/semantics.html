@@ -123,8 +123,13 @@ So no backend gets a request above its limit, and both translators end the same 
     So <code>exp2</code>, <code>pow</code>, <code>powf</code> and every inexact <code>f32</code> function pass their operands through <code>core::hint::black_box</code>.
     The call then stays a call, also after inlining.</li>
   <li><strong>Exact functions</strong> (<code>fabsf</code>, <code>ceilf</code>, <code>floorf</code>, <code>roundf</code>, <code>sqrtf</code>) fold to glibc's result and need no barrier.</li>
+  <li><strong>Sine and cosine stay two calls.</strong> When LLVM sees a sine and a cosine of the same operand in one block, it can make them one call of glibc's <code>sincos</code>.
+    The sine of <code>sincos</code> can differ from the result of <code>sin</code> in the last bit, for example at 0x1.ad1fb54442d18p+0.
+    Native Lean calls <code>sin</code> and <code>cos</code> separately.
+    So <code>sin</code>, <code>cos</code>, <code>sinf</code> and <code>cosf</code> are never inlined (<code>#[inline(never)]</code>), and each stays a call of its own.</li>
   <li><strong>The check.</strong> <code>tests/libm_folding.rs</code> calls every function on literal operands and on the same operands through <code>black_box</code>, in an optimized build.
-    The two results must be equal, bit for bit.</li>
+    The two results must be equal, bit for bit.
+    It also computes a sine and a cosine of one operand together, and they must be the results of <code>sin</code> and <code>cos</code>.</li>
 </ul>
 <p>The cost of <code>black_box</code> is on the list for the first timing session (<a href="glossary.html#g-o12">O12</a>).</p>
 

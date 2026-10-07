@@ -20,11 +20,56 @@
 //!   `core::hint::black_box`, and the call stays a call after inlining into a
 //!   translator's code. The exact ones (`fabsf`, `ceilf`, `floorf`, `roundf`,
 //!   `sqrtf`) fold to glibc's result and need no barrier.
+//! - `sin`, `cos`, `sinf`, `cosf`: never inlined, so that no sine and
+//!   cosine of one operand become one `sincos` call (below).
 //!
-//! The other `f64` functions are the `f64` methods, which call glibc; LLVM
-//! folds them with the build host's own libm, which on the pinned host is the
-//! same glibc. `tests/libm_folding.rs` checks, in an optimized build, that
-//! every function gives the same bits on constant and on opaque operands.
+//! The other `f64` functions are the `f64` methods: calls of glibc's
+//! functions, or one instruction for the exact ones (`fabs`, `sqrt`, `ceil`,
+//! `floor`, `round`). LLVM folds them on constant operands with the build
+//! host's own libm, which on the pinned host is the same glibc.
+//! `tests/libm_folding.rs` checks, in an optimized build, that every function
+//! gives the same bits on constant and on opaque operands.
+//!
+//! `sin` and `cos` (review HF-01). `f64::sin` and `f64::cos` are the LLVM
+//! intrinsics `llvm.sin` and `llvm.cos`. Inlined, a sine and a cosine of the
+//! same operand in one basic block can become one call of glibc's `sincos`
+//! (`sincosf` for `f32`): on a GNU target, LLVM's instruction selection
+//! makes that pair one node. glibc 2.39's `sincos` does not always give
+//! `sin`'s bits: at x = ±0x1.ad1fb54442d18p+0, `sin` gives
+//! ±0x1.fd27acee550dcp-1 and `sincos`'s sine ±0x1.fd27acee550dbp-1 (the
+//! cosines agree). Native Lean's C calls `sin` and `cos` separately (clang
+//! keeps them calls, since they may set `errno`). So, inlined, `Float.sin x`
+//! could give bits that depend on whether `Float.cos x` is computed next to
+//! it. Here `sin`, `cos`, `sinf` and `cosf` are `#[inline(never)]`: each body
+//! holds one intrinsic, and a call of one of them is not a sine or cosine
+//! that LLVM can pair. LLVM never inlines a `noinline` function, so for
+//! every caller of these four functions this holds through cross-crate
+//! inlining, LTO and the caller's own inlining. Those callers are lean2rr's
+//! prelude, for `Float` and `Float32`, and leanrs's `Float32` functions,
+//! through leanrs_rt's libm. leanrs's generated code calls the `f64` methods
+//! itself, each on a `black_box` operand of its own, which keeps the two
+//! calls apart until it calls these functions instead (planned at its next
+//! pin of lean-runtime). The cost: a call LLVM cannot see into, so it cannot
+//! merge, hoist or delete it, and a direct branch, as the body is a tail call
+//! of glibc's function. That is about native's cost, where `sin` is also an
+//! opaque call, since it may write `errno`. (A `black_box` on the operand
+//! also hides that two calls share it, and `sinf` and `cosf` have one for
+//! constant folding; but there the separation is a side effect, and the
+//! barrier costs a stack slot per call.) No other two of these functions on
+//! one operand become one call: with rustc 1.101's LLVM 23, `sinh` and
+//! `cosh`, `exp` and `exp2`, `exp` and `log`, `sin` and `tan`, `asin` and
+//! `acos`, the three logarithms, and `atan` and `atan2` stay separate calls.
+//!
+//! What builds show, before this change (lean-runtime 1d5d4d3, where `sin`
+//! and `cos` were inlined): lean2rr (dev 393c739) merged the pair in the
+//! program case `folding/sin_cos_one_operand`. It inlines the case's three
+//! functions into `main`'s loop and computes one `sincos` for all three
+//! lines, which all print `sincos`'s sine. In a probe that allocates between
+//! the two calls (`@[noinline] def both x := (Float.sin x, Float.cos x)`),
+//! the calls land in two blocks and stay apart. In the crate's own test
+//! binary, `tests/libm_folding.rs` (`sin_and_cos_of_one_operand`, release
+//! build) got `sincos`'s sine. That test and the case check native's bits at
+//! that x.
 //!
 //! Platform: the rows of `tests/cases/libm/` are glibc 2.39's results on
 //! aarch64 Linux, the host both translators run on. On every target, `cbrt`
@@ -61,9 +106,28 @@ macro_rules! f64_unary {
 
 f64_unary! {
     fabs => abs, acos => acos, acosh => acosh, asin => asin, asinh => asinh, atan => atan,
-    ceil => ceil, cos => cos, cosh => cosh, exp => exp, floor => floor, log => ln,
-    log10 => log10, log2 => log2, round => round, sin => sin, sinh => sinh, sqrt => sqrt,
-    tan => tan, tanh => tanh,
+    ceil => ceil, cosh => cosh, exp => exp, floor => floor, log => ln, log10 => log10,
+    log2 => log2, round => round, sinh => sinh, sqrt => sqrt, tan => tan, tanh => tanh,
+}
+
+/// `Float.sin` (extern `sin`): glibc's `sin`, through `f64::sin`, never
+/// inlined, so that no `cos` of the same operand joins it in one `sincos`
+/// call, whose sine can differ from `sin`'s (module docs, review HF-01).
+///
+/// Source: new (the `f64` method leanrs's generated code calls), out of line.
+#[inline(never)]
+pub fn sin(x: f64) -> f64 {
+    x.sin()
+}
+
+/// `Float.cos` (extern `cos`): glibc's `cos`, through `f64::cos`, never
+/// inlined, so that no `sin` of the same operand joins it in one `sincos`
+/// call (module docs, review HF-01).
+///
+/// Source: new (the `f64` method leanrs's generated code calls), out of line.
+#[inline(never)]
+pub fn cos(x: f64) -> f64 {
+    x.cos()
 }
 
 /// `Float.exp2` (extern `exp2`): glibc's `exp2`, on an operand the compiler
@@ -168,9 +232,29 @@ macro_rules! f32_unary {
 }
 
 f32_unary! {
-    acosf => acos, acoshf => acosh, asinf => asin, asinhf => asinh, atanf => atan, cosf => cos,
+    acosf => acos, acoshf => acosh, asinf => asin, asinhf => asinh, atanf => atan,
     coshf => cosh, expf => exp, exp2f => exp2, logf => ln, log10f => log10, log2f => log2,
-    sinf => sin, sinhf => sinh, tanf => tan, tanhf => tanh,
+    sinhf => sinh, tanf => tan, tanhf => tanh,
+}
+
+/// `Float32.sin` (extern `sinf`): glibc's `sinf`, through `f32::sin` on an
+/// operand the compiler cannot see, never inlined, so that no `cosf` of the
+/// same operand joins it in one `sincosf` call (module docs, review HF-01).
+///
+/// Source: leanrs_rt `src/libm.rs` (`unary!`), adapted: out of line.
+#[inline(never)]
+pub fn sinf(x: f32) -> f32 {
+    black_box(x).sin()
+}
+
+/// `Float32.cos` (extern `cosf`): glibc's `cosf`, through `f32::cos` on an
+/// operand the compiler cannot see, never inlined, so that no `sinf` of the
+/// same operand joins it in one `sincosf` call (module docs, review HF-01).
+///
+/// Source: leanrs_rt `src/libm.rs` (`unary!`), adapted: out of line.
+#[inline(never)]
+pub fn cosf(x: f32) -> f32 {
+    black_box(x).cos()
 }
 
 macro_rules! f32_exact {
