@@ -1,0 +1,9 @@
+id = "loop_spawn_poll"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review of fixes-13, round 4 (the other user's probe compare/shared-runtime/rf13-review-probes/SpawnPoll.lean, calibrated in main, with main's 100 ms sleep of RF13-09 and the dependent's sleep made 300 ms to keep native's order), the coordinator's design, 2026-10-06"
+streams = "separate"
+# The first argument is the length of the calibration's chunks (main's task
+# computes 5 times the steps per 100 ms, the dependent's task 20 times,
+# about 500 ms and 2 s in any build); the second and third are the twin's
+# computations of main's and the dependent's task, in ms.

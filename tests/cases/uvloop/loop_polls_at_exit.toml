@@ -1,0 +1,5 @@
+id = "loop_polls_at_exit"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-03 of fixes-13 (a pre-existing gap: the other user's repro of the same finding), judged by the coordinator, 2026-10-06"
+streams = "separate"

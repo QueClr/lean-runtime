@@ -68,6 +68,20 @@ pub fn lookup(id: &str) -> Option<Case> {
         "signal_reset_usr1_after_repeating_stop" => (no_init, signal_reset_after_repeating_stop),
         "signal_reset_urg_after_repeating_stop" => (no_init, signal_reset_after_repeating_stop),
         "get_tid_loop_thread" => (no_init, get_tid_loop_thread),
+        "loop_blocked_at_exit" => (no_init, loop_blocked_at_exit),
+        "loop_task_at_exit" => (no_init, loop_task_at_exit),
+        "loop_sleep_expired" => (no_init, loop_sleep_expired),
+        "loop_polls_at_exit" => (no_init, loop_polls_at_exit),
+        "loop_sleep_poll_print" => (no_init, loop_sleep_poll_print),
+        "loop_sleep_compute_print" => (no_init, loop_sleep_compute_print),
+        "loop_valve_counts_run" => (no_init, loop_valve_counts_run),
+        "loop_spawn_poll" => (no_init, loop_spawn_poll),
+        "loop_poll_work" => (no_init, loop_poll_work),
+        "loop_spins_on_task" => (no_init, loop_spins_on_task),
+        "loop_cycle" => (no_init, loop_cycle),
+        "loop_sleeps_after_task" => (no_init, loop_sleeps_after_task),
+        "loop_cycle_long" => (no_init, loop_cycle_long),
+        "loop_carried_then_poll" => (no_init, loop_carried_then_poll),
         // tests/cases/io: the cases with tasks
         "lock_blocked" => (no_init, lock_blocked),
         "lock_exit" => (no_init, lock_exit),
@@ -113,6 +127,15 @@ pub fn lookup(id: &str) -> Option<Case> {
         // Probes of our review of sched-3 (RS3).
         "rv3_dedicated_waiter" => (no_init, crate::review::rv3_dedicated_waiter),
         "rv3_chain_wait" => (no_init, crate::review::rv3_chain_wait),
+        // Reviews HL2-01 and RF13-03 (fixes-13).
+        "hl2_bind_continued_waiter" => (no_init, crate::review::hl2_bind_continued_waiter),
+        "rf13_loop_polls_at_exit" => (no_init, crate::review::rf13_loop_polls_at_exit),
+        "rf13_loop_polls_and_spawns" => (no_init, crate::review::rf13_loop_polls_and_spawns),
+        "rf13_loop_sleep_compute_print" => (no_init, crate::review::rf13_loop_sleep_compute_print),
+        "rf13c_valve_counts_run" => (no_init, crate::review::rf13c_valve_counts_run),
+        "rf13c_loop_spawns_and_sleeps" => (no_init, crate::review::rf13c_loop_spawns_and_sleeps),
+        "rf13d_loop_spins_on_task" => (no_init, crate::review::rf13d_loop_spins_on_task),
+        "rf13f_loop_cycle_wait" => (no_init, crate::review::rf13f_loop_cycle_wait),
         "so_rust_thread_overflow" => (no_init, crate::review::so_rust_thread_overflow),
         "so_second_scheduler_thread" => (no_init, crate::review::so_second_scheduler_thread),
         // Not Lean programs: the wait cores where several contexts wait
@@ -621,6 +644,439 @@ fn get_tid_loop_thread(_: &[String]) -> u32 {
     ));
     println(&format!("not main's: {}", x != mt));
     println(&format!("not the pool worker's: {}", x != a));
+    0
+}
+
+// tests/cases/uvloop/loop_blocked_at_exit.lean (review HL2-02): `main`
+// returns while the timer's `sync` dependent sleeps in a loop on the loop
+// context, which the final run leaves suspended.
+fn loop_blocked_at_exit(_: &[String]) -> u32 {
+    let t: UTimer = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            println("dependent runs on the loop");
+            let _ = Handle::stdout().flush();
+            loop {
+                sleep(1000);
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(1000);
+    eprintln("main's stderr line");
+    println("main done");
+    3
+}
+
+// tests/cases/uvloop/loop_task_at_exit.lean (review RF13-01): the
+// timer's `sync` dependent runs the IO task `t` on the loop context's stack
+// (`IO.waitAny`), where `t` sleeps when `main` returns; the final run
+// waits for it, as natively for the pool worker that runs it.
+fn loop_task_at_exit(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let t = as_task(
+                || {
+                    sleep(1000);
+                    println("t done");
+                    let _ = Handle::stdout().flush();
+                },
+                PRIO_DEFAULT,
+            );
+            wait_any(&[t]);
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_sleep_expired.lean (review RF13-02; the twin
+// spins args[1] ms instead of the calibrated computation): the loop
+// context's sleep ends while the final run runs the computing task on
+// `main`'s stack.
+fn loop_sleep_expired(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let len = Ref::new(ms);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(500);
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_sleep_poll_print.lean (review RF13-04; the twin
+// spins args[1] ms instead of the calibrated computation): after the
+// computing task, the loop context's callback reads the clock once, then
+// prints; the final run lets it go on until it ends.
+fn loop_sleep_poll_print(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let len = Ref::new(ms);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_sleep_compute_print.lean (review RF13-04; the
+// twin spins args[1] ms in the task and 10 ms in the dependent instead of
+// the calibrated computations): after the computing task, the loop
+// context's callback computes, then prints; its print's effect point lets
+// `main` go first, and the final run lets it go on until it ends.
+fn loop_sleep_compute_print(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let len = Ref::new(ms);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |r: Option<()>| {
+            sleep(500);
+            spin_ms(10 + u64::from(r.is_none()));
+            println("late true");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_valve_counts_run.lean (review RF13-07; the twin
+// spins args[1] and args[2] ms instead of the calibrated computations):
+// after `main`'s computing task, the loop context's callback starts a
+// computing task, reads the clock, then prints; the time that task runs on
+// `main`'s stack does not count against the loop context's valve.
+fn loop_valve_counts_run(args: &[String]) -> u32 {
+    let main_len = Ref::new(to_nat(&args[1]));
+    let dep_len = Ref::new(to_nat(&args[2]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            sleep(300);
+            let _t = as_task(move || spin_ms(dep_len.get()), PRIO_DEFAULT);
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(main_len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_spawn_poll.lean (fixes-13, round 4; the twin
+// spins args[1] and args[2] ms instead of the calibrated computations):
+// the loop context's callback starts a computing task, reads the clock and
+// prints at once; the final run runs the task once the callback has ended.
+fn loop_spawn_poll(args: &[String]) -> u32 {
+    let main_len = Ref::new(to_nat(&args[1]));
+    let dep_len = Ref::new(to_nat(&args[2]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            sleep(300);
+            let _t = as_task(
+                move || {
+                    spin_ms(dep_len.get());
+                    println("task done");
+                },
+                PRIO_DEFAULT,
+            );
+            let _ = mono_ms_now();
+            println("callback done");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(main_len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_poll_work.lean (fixes-13, round 4; the twin's
+// task spins args[1] ms instead of the calibrated computation; the
+// callback's updates are calibrated as in the program, 25 times the
+// updates per 100 ms instead of 15, so that a 1 s limit surely cuts it):
+// the callback, longer than 1 s and with scheduling points, goes on after
+// `main`'s task for as long as that task took, plus 1 s.
+fn loop_poll_work(args: &[String]) -> u32 {
+    let r = Ref::new(0u64);
+    let rw = r.clone();
+    as_task(move || rw.modify(|v| v), PRIO_DEFAULT).get();
+    let t0 = std::time::Instant::now();
+    let mut updates = 0u64;
+    while t0.elapsed() < std::time::Duration::from_millis(100) {
+        for _ in 0..10000 {
+            r.modify(|v| v + 1);
+        }
+        updates += 10000;
+    }
+    r.set(0);
+    let k = 25 * updates;
+    let len = Ref::new(to_nat(&args[1]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let r2 = r.clone();
+    let _dep = map_task(
+        move |_: Option<()>| {
+            for _ in 0..k {
+                r2.modify(|v| v + 1);
+            }
+            println(&format!("late {}", r2.get() == k));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_spins_on_task.lean (review RF13-10; the twin
+// spins args[1] ms instead of the calibrated computation): the loop
+// context's callback starts a task that sets a flag and spins on it; the
+// task, queued for `STALE`, runs on `main`'s stack, and the callback goes
+// on.
+fn loop_spins_on_task(args: &[String]) -> u32 {
+    let len = Ref::new(to_nat(&args[1]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            let flag = Ref::new(false);
+            let f2 = flag.clone();
+            let _t = as_task(move || f2.set(true), PRIO_DEFAULT);
+            while !flag.get() {
+                let _ = mono_ms_now();
+            }
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_cycle.lean (fixes-13, round 5): the loop
+// context's callback cycles forever, a task it waits for (run on its stack,
+// and waited for as a worker's), then 300 ms of reference updates; the
+// final run counts its time alone over the whole run, so the exit comes
+// about 1 s after `main` returns.
+fn loop_cycle(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let r = Ref::new(0u64);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            println("cycling");
+            let _ = Handle::stdout().flush();
+            loop {
+                let t = as_task(|| sleep(1), PRIO_DEFAULT);
+                wait_any(&[t]);
+                let t0 = mono_ms_now();
+                while mono_ms_now() - t0 < 300 {
+                    r.modify(|v| v + 1);
+                }
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    let _ = Handle::stdout().flush();
+    0
+}
+
+// tests/cases/uvloop/loop_sleeps_after_task.lean (review RF13-12; the twin
+// spins args[1] ms instead of the calibrated computation): after `main`'s
+// task, the loop context's callback prints, sleeps 100 ms and prints; the
+// final run waits for that sleep, which ends within the task's time.
+fn loop_sleeps_after_task(args: &[String]) -> u32 {
+    let len = Ref::new(to_nat(&args[1]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            println("a");
+            sleep(100);
+            println("b");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_cycle_long.lean (review RF13-13): the loop
+// context's callback waits for a 400 ms task in each of 5 cycles, then
+// polls 300 ms; the final run counts the waits for nothing, so the polling
+// uses up the loop context's 1 s during the fourth cycle.
+fn loop_cycle_long(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let r = Ref::new(0u64);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            println("cycling");
+            let _ = Handle::stdout().flush();
+            for _ in 0..5 {
+                let t = as_task(|| sleep(400), PRIO_DEFAULT);
+                wait_any(&[t]);
+                let t0 = mono_ms_now();
+                while mono_ms_now() - t0 < 300 {
+                    r.modify(|v| v + 1);
+                }
+            }
+            println("dep done");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_carried_then_poll.lean (review RF13-14): the loop
+// context's callback waits for a 1.2 s task it carries, then reads the
+// clock and prints; the wait costs the loop context nothing.
+fn loop_carried_then_poll(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let t = as_task(|| sleep(1200), PRIO_DEFAULT);
+            wait_any(&[t]);
+            let _ = mono_ms_now();
+            println("after");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/loop_polls_at_exit.lean (review RF13-03): the loop
+// context reads the clock forever when `main` returns.
+fn loop_polls_at_exit(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            println("dependent polls the clock");
+            let _ = Handle::stdout().flush();
+            loop {
+                mono_ms_now();
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(300);
+    println("main done");
+    let _ = Handle::stdout().flush();
     0
 }
 

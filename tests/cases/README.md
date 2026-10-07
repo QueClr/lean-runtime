@@ -148,6 +148,10 @@ Written in `<id>.toml` for programs and inline for rows:
   `main` waits for (then `main` sleeps 100 ms, for the task's step from the
   promise to its wait); a sleep that must end after another ends about a
   second later (review AR-44).
+- **A busy loop of a given duration is calibrated in `main`.** `scripts/cases.py
+  expect` records native from an unoptimized C build, about 18 times slower
+  than `-O3` and than the translators' builds, so such a case counts the
+  steps per 100 ms first (`uvloop/loop_sleep_expired`).
 - **Expected values come from compiled Lean 4.34.0, never from `#eval`.**
 - **No case or probe is named after a core module** (`Init`, `Std`, `Lean`,
   `Lake`): plain `lean` names the main module after the file, and a file

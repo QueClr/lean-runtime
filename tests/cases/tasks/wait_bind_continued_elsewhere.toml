@@ -1,0 +1,5 @@
+id = "wait_bind_continued_elsewhere"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime liveness hunt HL2-01 (hunt-live/hl2_01/BindWaitAny.lean), judged a hang by the coordinator, 2026-10-06; fixes-13"
+streams = "separate"

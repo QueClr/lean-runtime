@@ -1,0 +1,5 @@
+id = "loop_task_at_exit"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-01 of fixes-13 (review-fixes-13/probes/LoopTaskAtExit.lean, its sleep made 1 s), judged by the coordinator, 2026-10-06"
+streams = "separate"

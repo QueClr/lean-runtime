@@ -1550,8 +1550,10 @@ fn during_modify<R: Send + Sync + 'static>(
     );
     r.modify(|v| {
         taken.open();
-        // the other thread's operation now waits for this store
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        // the other thread's operation now waits for this store: long
+        // enough for that thread to reach its operation under load too (5
+        // ms flaked once at a load of about 31)
+        std::thread::sleep(std::time::Duration::from_millis(100));
         v + 1
     });
     wait(other);

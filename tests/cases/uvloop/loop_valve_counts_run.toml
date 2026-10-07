@@ -1,0 +1,9 @@
+id = "loop_valve_counts_run"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-07 of fixes-13 (review-fixes-13/probes/ValveCountsRun.lean, with computations that have no scheduling point, calibrated in main), judged by the coordinator, 2026-10-06"
+streams = "separate"
+# The first argument is the length of the calibration's chunks (main's task
+# computes 10 times the steps per 100 ms, the dependent's 15 times, about
+# 1 s and 1.5 s in any build); the second and third are the twin's
+# computations of main's and the dependent's task, in ms.

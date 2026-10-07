@@ -801,6 +801,401 @@ fn signal_fds(_: &[String]) -> u32 {
     0
 }
 
+/// tests/cases/uvloop/loop_blocked_at_exit.lean (review HL2-02): `main`
+/// returns while the timer's `sync` dependent sleeps in a loop on the loop
+/// thread, which `finish` does not wait for, as natively.
+fn loop_blocked_at_exit(_: &[String]) -> u32 {
+    let t: UTimer = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            println("dependent runs on the loop");
+            let _ = Handle::stdout().flush();
+            loop {
+                sleep(1000);
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(1000);
+    eprintln("main's stderr line");
+    println("main done");
+    3
+}
+
+/// tests/cases/uvloop/loop_task_at_exit.lean (review RF13-01): the IO task
+/// the loop thread waits for runs on a pool worker, which `finish` joins.
+fn loop_task_at_exit(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let t = as_task(
+                || {
+                    sleep(1000);
+                    println("t done");
+                    let _ = Handle::stdout().flush();
+                },
+                PRIO_DEFAULT,
+            );
+            sched::wait_any(&[t.0.live()]);
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_sleep_expired.lean (review RF13-02; the twin
+/// spins args[1] ms): the loop thread prints while a worker computes.
+fn loop_sleep_expired(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(500);
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_sleep_poll_print.lean (review RF13-04; the
+/// twin spins args[1] ms): the loop thread reads the clock, then prints,
+/// while a worker computes.
+fn loop_sleep_poll_print(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_sleep_compute_print.lean (review RF13-04; the
+/// twin spins args[1] ms in the task and 10 ms in the dependent): the loop
+/// thread computes, then prints, while a worker computes.
+fn loop_sleep_compute_print(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |r: Option<()>| {
+            sleep(500);
+            spin_ms(10 + u64::from(r.is_none()));
+            println("late true");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_valve_counts_run.lean (review RF13-07; the twin
+/// spins args[1] and args[2] ms): the loop thread starts a computing task,
+/// reads the clock, then prints, while a worker computes.
+fn loop_valve_counts_run(args: &[String]) -> u32 {
+    let (main_ms, dep_ms) = (to_nat(&args[1]), to_nat(&args[2]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            sleep(300);
+            let _t = as_task(move || spin_ms(dep_ms), PRIO_DEFAULT);
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(main_ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_spawn_poll.lean (fixes-13, round 4; the twin
+/// spins args[1] and args[2] ms): the loop thread starts a computing task,
+/// reads the clock and prints at once, while workers compute.
+fn loop_spawn_poll(args: &[String]) -> u32 {
+    let (main_ms, dep_ms) = (to_nat(&args[1]), to_nat(&args[2]));
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            sleep(300);
+            let _t = as_task(
+                move || {
+                    spin_ms(dep_ms);
+                    println("task done");
+                },
+                PRIO_DEFAULT,
+            );
+            let _ = mono_ms_now();
+            println("callback done");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(main_ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_poll_work.lean (fixes-13, round 4; the twin's
+/// task spins args[1] ms; the callback's updates are calibrated as in the
+/// program): the loop thread prints while a worker computes.
+fn loop_poll_work(args: &[String]) -> u32 {
+    let main_ms = to_nat(&args[1]);
+    let r = Arc::new(sched::Ref::new(0u64));
+    let rw = r.clone();
+    as_task(move || rw.modify(|v| v), PRIO_DEFAULT).get();
+    let t0 = Instant::now();
+    let mut updates = 0u64;
+    while t0.elapsed() < Duration::from_millis(100) {
+        for _ in 0..10000 {
+            r.modify(|v| v + 1);
+        }
+        updates += 10000;
+    }
+    r.set(0);
+    let k = 15 * updates;
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let r2 = r.clone();
+    let _dep = map_task(
+        move |_: Option<()>| {
+            for _ in 0..k {
+                r2.modify(|v| v + 1);
+            }
+            println(&format!("late {}", r2.get() == k));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(main_ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_spins_on_task.lean (review RF13-10; the twin
+/// spins args[1] ms): the loop thread starts a task that sets a flag and
+/// spins on it, while a worker computes.
+fn loop_spins_on_task(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            let flag = Arc::new(sched::Ref::new(false));
+            let f2 = flag.clone();
+            let _t = as_task(move || f2.set(true), PRIO_DEFAULT);
+            while !flag.get() {
+                let _ = mono_ms_now();
+            }
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_cycle.lean (fixes-13, round 5): the loop thread
+/// cycles forever, a task it waits for, then 300 ms of reference updates;
+/// `finish` does not wait for it.
+fn loop_cycle(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let r = Arc::new(sched::Ref::new(0u64));
+    let _dep = map_task(
+        move |_: Option<()>| {
+            println("cycling");
+            let _ = Handle::stdout().flush();
+            loop {
+                let t = as_task(|| sleep(1), PRIO_DEFAULT);
+                sched::wait_any(&[t.0.live()]);
+                let t0 = mono_ms_now();
+                while mono_ms_now() - t0 < 300 {
+                    r.modify(|v| v + 1);
+                }
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    let _ = Handle::stdout().flush();
+    0
+}
+
+/// tests/cases/uvloop/loop_sleeps_after_task.lean (review RF13-12; the twin
+/// spins args[1] ms): the loop thread prints twice around a sleep while a
+/// worker computes.
+fn loop_sleeps_after_task(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            println("a");
+            sleep(100);
+            println("b");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_cycle_long.lean (review RF13-13): the loop
+/// thread waits for a 400 ms task in each of 5 cycles; `finish` waits for
+/// the workers only.
+fn loop_cycle_long(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let r = Arc::new(sched::Ref::new(0u64));
+    let _dep = map_task(
+        move |_: Option<()>| {
+            println("cycling");
+            let _ = Handle::stdout().flush();
+            for _ in 0..5 {
+                let t = as_task(|| sleep(400), PRIO_DEFAULT);
+                sched::wait_any(&[t.0.live()]);
+                let t0 = mono_ms_now();
+                while mono_ms_now() - t0 < 300 {
+                    r.modify(|v| v + 1);
+                }
+            }
+            println("dep done");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_carried_then_poll.lean (review RF13-14): the
+/// loop thread waits for a 1.2 s task a worker runs, then prints; `finish`
+/// waits for the worker.
+fn loop_carried_then_poll(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let t = as_task(|| sleep(1200), PRIO_DEFAULT);
+            sched::wait_any(&[t.0.live()]);
+            let _ = mono_ms_now();
+            println("after");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(100);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/loop_polls_at_exit.lean (review RF13-03): the loop
+/// thread reads the clock forever; `finish` does not wait for it.
+fn loop_polls_at_exit(_: &[String]) -> u32 {
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            println("dependent polls the clock");
+            let _ = Handle::stdout().flush();
+            loop {
+                mono_ms_now();
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(300);
+    println("main done");
+    let _ = Handle::stdout().flush();
+    0
+}
+
 fn exit_listening(_: &[String]) -> u32 {
     let s: USignal = Signal::new(10, true);
     let p = uv_ok(s.next(UvPromise::new));
@@ -1632,6 +2027,20 @@ const TWINS: &[(&str, Twin)] = &[
     ("signal_order", signal_order),
     ("signal_fds", signal_fds),
     ("exit_listening", exit_listening),
+    ("loop_blocked_at_exit", loop_blocked_at_exit),
+    ("loop_task_at_exit", loop_task_at_exit),
+    ("loop_sleep_expired", loop_sleep_expired),
+    ("loop_polls_at_exit", loop_polls_at_exit),
+    ("loop_sleep_poll_print", loop_sleep_poll_print),
+    ("loop_sleep_compute_print", loop_sleep_compute_print),
+    ("loop_valve_counts_run", loop_valve_counts_run),
+    ("loop_spawn_poll", loop_spawn_poll),
+    ("loop_poll_work", loop_poll_work),
+    ("loop_spins_on_task", loop_spins_on_task),
+    ("loop_cycle", loop_cycle),
+    ("loop_sleeps_after_task", loop_sleeps_after_task),
+    ("loop_cycle_long", loop_cycle_long),
+    ("loop_carried_then_poll", loop_carried_then_poll),
     ("signal_sigio_default", signal_sigio_default),
     ("timer_stop_in_sync_dependent", lb20_probe),
     ("timer_cancel_in_sync_dependent", lb20_probe),

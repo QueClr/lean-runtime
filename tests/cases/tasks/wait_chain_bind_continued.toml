@@ -1,0 +1,5 @@
+id = "wait_chain_bind_continued"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime liveness hunt HL2-03 (src/sched/task.rs may_run_awaited at 1d5d4d3), judged by the coordinator, 2026-10-06; fixes-13"
+streams = "separate"

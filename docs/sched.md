@@ -220,6 +220,33 @@ now, as a native worker would run it (`tasks/wait_any_pure_stalled`: a
 dependent queued by a walk that then stalls; review RS2-09; the rule is in
 the next section).
 
+**A bind task that continues as another task** (review HL2-01, fixes-13).
+A bind task whose function returns an unfinished task stops running and
+waits for that task (`bind_wait`). Natively `add_dep` puts it behind that
+task, and the worker that runs that task runs the bind task afterwards, so
+its waiters wake when it finishes. Here the bind task is pending again,
+and a pure one without IO need runs only when a waiter needs it. So its
+waiters look again at once: the contexts blocked on it while it ran
+(`Wait::Cell`, also through a dependent of it) and every `IO.waitAny`.
+`wait` then runs the new chain from its deepest end, under the rule of the
+next section; `IO.waitAny` starts a started pure task at its root on a
+context of its own. Before the fix nobody woke them. The context that ran
+the bind task went on without it, and with a sleeper or a watched
+descriptor the hub never ran the new task by itself (its last resort), so
+the program hung where native ends. Case `tasks/wait_bind_continued_elsewhere`
+(four workers; `IO.waitAny` starts the bind task `s` on a context of its
+own, where `s` waits 300 ms for an IO task and then returns a
+`Task.spawn`; `main` waits for `s` meanwhile, and a dedicated ticker sleeps
+in a loop): native prints three lines; before the fix the scheduler hung in
+`IO.wait s`. The driver's program `hl2_bind_continued_waiter` does the same
+with a timer that ends the hang after 3 s (before the fix: "the timer came
+first: true"). In the shapes found, an `IO.waitAny` waiter was woken anyway
+(the bind task's context ended, or the new task was enqueued); the wake-up
+at `bind_wait` covers a shape where neither happens. Threads mode has no
+such gap: its workers run
+every queued task, the new source included, and the source's walk queues
+the bind task again.
+
 ### What a waiter or a poller runs on its own stack (sched-3)
 
 Natively a waiter's thread sleeps, and a free worker takes the queue's
@@ -248,10 +275,32 @@ AR-10, corrected; `src/sched/task.rs`):
   (`pick`), the task runs on the waiter's stack, as any started task does
   (fixes-8, below). `may_run_awaited`
   also says yes for a pending task in no queue that waits for nothing
-  (`QUEUED` clear): the state of a task handed to a context that is about
-  to begin it, between `hand` and `begin`. On one thread no other context
-  observes that state, so this branch only keeps sched-2's behaviour (the
-  task runs) should it ever be reached (review AR-15).
+  (`QUEUED` and `WAITING` clear): the state of a task handed to a context
+  that is about to begin it, between `hand` and `begin`. On one thread no
+  other context observes that state, so this branch only keeps sched-2's
+  behaviour (the task runs) should it ever be reached (review AR-15). It
+  says no for a task that waits for its source (`WAITING`): that task runs
+  once the walk of its source's dependents queues it, or runs it, a `sync`
+  one (review HL2-03, fixes-13). The chain that `wait` keeps across its
+  steps can go stale: when the source of its deepest task has started and
+  continued as another task since (a bind task run on the waiter's stack,
+  or on another context), that task waits again for a task the chain no
+  longer holds, and `wait` builds the chain again from the awaited task.
+  Before the fix `may_run_awaited` took such a task, waiting in no queue,
+  for a handed one, and ran it before its source had finished, without
+  the cancellation and the `EARLY` mark the walk passes on, and its unlink
+  took the IO need from its source's chain. Case
+  `tasks/wait_chain_bind_continued` (`main` waits for `u`, a dependent of
+  `s2`, a `sync` dependent of the pure bind task `r`, whose function
+  returns a `Task.spawn`): native prints `3`, nothing on stderr; before the
+  fix `s2` ran right after `r`'s function, and its `Task.get` of `r` printed
+  "`Task.get` called from a `(sync := true)` task" on stderr (unit test
+  `a_kept_chain_runs_no_dependent_of_a_bind_task_that_continued`). A chain built
+  in the same step whose deepest task waits for a pending task is a cycle
+  (a bind task that waits for a task that depends on it): no task of it
+  ever finishes, and `wait` waits forever, as natively (before, it ran a
+  task of the cycle; the unit test `review2_need_cycle_counts` now expects
+  the cycle's tasks never to run).
 - **`IO.waitAny`** runs a task of its list on its own stack only when that
   task is the only unfinished one of the list (every listed task names it:
   none has finished, also not one whose walk has not notified yet, which
@@ -358,7 +407,179 @@ threads waited for, 984-985):
 3. then it waits until every dedicated task has run to completion, tasks
    enqueued meanwhile included (a pool task enqueued now, LB-13's corrected
    run below, starts with a fresh set, dropped at its end), and no context
-   but `main`'s is left.
+   but `main`'s and the event loop's is left. The event loop's context is
+   not waited for (reviews HL2-02 and RF13-01 to RF13-14, fixes-13):
+   natively libuv's loop thread is detached, and `~task_manager` joins
+   only the standard workers and waits only for the dedicated threads.
+   - **Unless it carries a thread's task.** A pool or dedicated task run on
+     its stack (`IO.waitAny` or `Task.get` in a callback runs the task a
+     free worker would start), or the walk of such a task's dependents, is
+     natively on a standard worker or a dedicated thread, which
+     `~task_manager` joins or waits for. So the loop context is waited for
+     while it carries one (`loop_carries_thread`), as a worker context is.
+     A `sync` dependent and the walk of a promise run on the loop thread
+     natively, and do not count. Case `uvloop/loop_task_at_exit` (a
+     timer's `sync` dependent waits with `IO.waitAny` for an IO task that
+     sleeps 1 s; `main` returns at 100 ms): native prints "main done", then
+     "t done"; with the first version of this fix "t done" was lost
+     (RF13-01).
+   - **It can go on: it runs alone, for the final run's task time plus
+     1 s.** A sleep or a descriptor wait of the loop context that has
+     ended by now ends first (the final run wakes the due sleepers and
+     looks at the descriptors), as natively the loop thread wakes at its
+     deadline while the final run runs a task. Case
+     `uvloop/loop_sleep_expired` (a `sync` dependent sleeps 500 ms, then
+     prints; `main` returns about 100 ms after the timer starts and leaves
+     a task that computes for about 1.5 s without a scheduling point,
+     calibrated in `main`): native prints "main done", then "late"; with
+     the first version "late" was lost (RF13-02). Then `main` waits
+     (`Wait::FinalLoop`) while the loop context runs alone, until it waits
+     or ends, or until its budget ends: over the whole final run, the loop
+     context's time may reach the time the final run has spent on tasks
+     (running them, waiting while other contexts ran them, and the worker
+     contexts it starts) plus 1 s (`LOOP_VALVE`). The loop context's time
+     is its time alone. The time `main` waits for a task it carries
+     (`Final::WaitLoop`) counts for nothing: that wait is never cut
+     (RF13-01), earns the loop context no time (review RF13-13: before,
+     those waits earned it more, and `uvloop/loop_cycle_long` below ran all
+     its cycles) and costs it none (review RF13-14: the sixth version
+     charged it, so a wait longer than 1 s used up the budget, and
+     `uvloop/loop_carried_then_poll` below lost its line). Natively the loop thread runs alongside the
+     workers, so it gets as much time as the final run's tasks take; the
+     1 s is grace. The budget is never reset: a callback that waits now and
+     then (its own task, say) would otherwise keep the exit for good
+     (`uvloop/loop_cycle`, below). Meanwhile its polling
+     points find nothing else able to run and start no queued task, so it
+     runs at full speed, and a task it enqueues runs after it, as natively
+     a worker takes the task while the loop thread goes on (an enqueue does
+     not wake `main`; another context's wait or end does): when it waits,
+     when its budget ends, or once the task has been queued for 5 ms
+     (`STALE`, by then a native worker runs it). At a polling point `main`
+     then wakes, runs the queued task (its time adds to the budget) and
+     lets the loop context go on again, so a callback that spins on what
+     such a task does goes on (review RF13-10: the fourth version made it
+     wait for the whole budget). Only polling points (clock and reference
+     reads, task-state queries) make that check, not effect points
+     (`effect_slow`) or zero sleeps (`zero_sleep`). When the budget ends, `main`'s deadline
+     makes it able to run at the loop context's next polling or effect
+     point, and `finish` returns, leaving the loop context suspended. So a
+     callback that ends within its budget prints what it prints natively,
+     and one that polls forever keeps the exit about as long as the final
+     run's tasks took, plus 1 s, after they end (the budget counts all
+     their time, also time before it could run), where native exits when
+     the workers end; unless it keeps enqueueing tasks that `main` runs,
+     which natively keep the workers, and so the exit, going too (each
+     one's run adds to the budget; a task the callback waits for, run on
+     its stack, does not). A callback that keeps running past native's
+     exit time can print extra lines, among them the "`Task.get` called
+     from a `(sync := true)` task" warning of each `IO.wait` it makes (the
+     driver's program `rf13f_loop_cycle_wait`: `uvloop/loop_cycle` with
+     `IO.wait`, which natively prints the warning once). The limits of
+     this rule:
+     - a callback that waits back to back on tasks it starts, run on its
+       stack, never reaches a budget decision: each wait counts for
+       nothing, and it is never left able to run. Natively a program that
+       loops so forever hangs in some runs and exits early in others;
+       here, for an endless loop of that shape, the exit never comes on
+       its own (the driver's program `rf13g_back_to_back_waits` ends only
+       because its callback stops after 3 s);
+     - a callback blocked on a wait with no deadline whose event no
+       remaining task brings (a descriptor without a timeout, say) is left
+       suspended, even if natively the event would come while the workers
+       still run; a lock or promise a remaining task settles is not such a
+       case (the final run runs that task first, and the callback goes on);
+     - the exit can stretch to about twice the final run's task time plus
+       1 s: the budget also counts the final run's waits while other
+       contexts run, during which the loop context may run too;
+     - only polling points make the check for a task queued 5 ms ago
+       (above).
+
+     The cases, each recorded
+     natively and calibrated in `main` where a duration matters:
+     - `uvloop/loop_sleep_poll_print` and `loop_sleep_compute_print` (as
+       `loop_sleep_expired`, with one clock read, or about 10 ms of
+       computation, before the print): "main done", then "late"; the second
+       version stopped the callback at its first polling or effect point
+       and lost the line (RF13-04);
+     - `uvloop/loop_valve_counts_run` (after `main`'s 1 s task the
+       callback starts a 1.5 s task, reads the clock and prints): "main
+       done", then "late"; the third version counted the wall clock of the
+       callback's task, run on `main`'s stack, against its 1 s (RF13-07);
+     - `uvloop/loop_spawn_poll` (the callback starts a 2 s task that
+       prints, reads the clock, then prints): "main done", "callback
+       done", "task done"; before, the task ran at the clock read, so its
+       line came first, or the callback was cut after it;
+     - `uvloop/loop_poll_work` (a callback that updates a reference for
+       about 1.5 s, its reads scheduling points here, while `main` leaves
+       a 4 s task; the updates are calibrated on the same reference,
+       shared with a task first, since natively a shared one is slower):
+       "main done", then "late true"; a 1 s limit cut it, slowed further
+       by switches to `main` at each scheduling point;
+     - `uvloop/loop_spins_on_task` (after `main`'s 1 s task the callback
+       starts a task that sets a flag and spins on the flag): "main done",
+       then "late", written by hand (natively the flag's `set` is lost now
+       and then, LB-01, and the loop thread spins until the exit); the
+       fourth version lost the line (RF13-10; the driver's program
+       `rf13d_loop_spins_on_task` exits at about 1.1 s, 3.1 s before);
+     - `uvloop/loop_cycle` (a callback prints a line, then cycles forever:
+       a task that sleeps 1 ms, which it waits for with `IO.waitAny`, then 300 ms of
+       reference updates; `main` sleeps 100 ms and prints a line): both
+       lines, as natively, here at about 1.1 s where native exits at
+       0.1 s; the versions before the fifth reset the budget at each of
+       its waits, and the exit never came (the other user's review);
+     - `uvloop/loop_cycle_long` (5 cycles of a 400 ms task, waited for
+       with `IO.waitAny`, then 300 ms of reference updates, then "dep
+       done"): "cycling", "main done", as natively, here at about 2.6 s
+       (during the fourth cycle's polling, which alone uses up the 1 s)
+       where native exits at 0.4 s (after the first task's worker ends);
+       the fifth version ran all 5 cycles (3.5 s, "dep done"), and an
+       endless version never ended (RF13-13);
+     - `uvloop/loop_carried_then_poll` (the callback waits with
+       `IO.waitAny` for a 1.2 s task, reads the clock, then prints):
+       "main done", then "after"; the sixth version charged the wait and
+       lost the line (RF13-14). Its expected files are written by hand:
+       native prints the same lines, but now and then crashes at the exit
+       after them;
+     - `uvloop/loop_polls_at_exit` (a `sync` dependent prints a line, then
+       reads the clock forever; `main` sleeps 300 ms and prints a line):
+       native prints both lines and exits at once; here the same comes
+       about 1 s later (1.3 s); before fixes-13, the final run and the loop
+       context let each other go first forever (RF13-03).
+
+     The driver's programs: `rf13_loop_polls_at_exit` (a callback that
+     polls for 2 s; the exit at about 1.1 s, without its line),
+     `rf13_loop_polls_and_spawns` (the same with an IO task started in
+     each round: the tasks' time extends the budget, and here the callback
+     reaches its end, 3.3 s; natively the outcome varies, RF13-06),
+     `rf13c_loop_spawns_and_sleeps` (a task and a 1 ms sleep in each round,
+     for 3 s: the callback waits every round, so its budget starts afresh
+     and it runs to its end, as natively, RF13-08), `rf13c_valve_counts_run`
+     and `rf13_loop_sleep_compute_print`. The unit test
+     `the_final_run_lets_a_loop_context_able_to_run_go_on` checks that a
+     timer's callback whose loop context an effect point started runs in
+     `finish`.
+   - **It waits in a callback** (a `sync` dependent of a timer's promise that
+     sleeps, or waits for a promise or a lock): `finish` returns and leaves
+     it suspended, unless the wait ends by itself (a sleep, a descriptor
+     wait with a timeout) within the time the final run's tasks took that
+     the loop context has not used yet, without the 1 s of grace: then
+     `main` waits until then (`Wait::FinalLoop`), the wait counts as the
+     loop context's time, and the loop context goes on, as natively the
+     loop thread wakes alongside the workers (review RF13-12). Case
+     `uvloop/loop_sleeps_after_task` (a callback sleeps 300 ms, prints
+     "a", sleeps 100 ms, prints "b", while `main` leaves a task of about
+     1.5 s, calibrated): "main done", "a", "b"; the fifth version lost "b".
+     Before fixes-13 the final run waited for it, for good
+     when the callback waited forever. Case `uvloop/loop_blocked_at_exit` (a
+     `sync` dependent of a one-shot timer's promise prints a line, then
+     sleeps in a loop; `main` sleeps 1 s, prints a line on stderr and one
+     on stdout, and returns 3): native prints the three lines and exits
+     with status 3; before, the scheduler hung (HL2-02).
+
+   The glue's flush and exit come after, as before: `main`'s buffered line
+   is written, and the status is `main`'s. A loop context that waits
+   while it holds a stream's lock (a write to a full pipe) is waited for
+   by the exit's flush, as any context ("Stream locks").
 
 It does not wait for a task whose dependency never finishes (an unresolved
 promise, a cycle), as natively.
@@ -1180,7 +1401,13 @@ dependent subscribes again only on `some`: LB-33),
 `kill`, a child, to the program: one-shot, repeating, `cancel`, an unknown
 number, and status 138 after `stop`), `signal_stale`,
 `signal_stale_deferred`, `signal_oneshot_twice`, `signal_cancel_restart`,
-`signal_order`, `signal_fds`, `exit_listening`, `signal_sigio_default`,
+`signal_order`, `signal_fds`, `exit_listening`, `loop_blocked_at_exit`,
+`loop_task_at_exit`, `loop_sleep_expired`, `loop_sleep_poll_print`,
+`loop_sleep_compute_print`, `loop_valve_counts_run`, `loop_spawn_poll`,
+`loop_poll_work`, `loop_spins_on_task`, `loop_cycle`, `loop_cycle_long`,
+`loop_sleeps_after_task`, `loop_carried_then_poll`, `loop_polls_at_exit`
+("Exit"),
+`signal_sigio_default`,
 and the Lean-bug cases above. A case whose native program computes while a
 signal or a timer comes (`timer_due_stop`, `signal_cancel_restart`) takes
 two arguments: the native busy loop's length (about 1 or 2 s natively), and

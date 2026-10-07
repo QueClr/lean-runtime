@@ -1,0 +1,11 @@
+id = "loop_poll_work"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review of fixes-13, round 4 (the other user's probe compare/shared-runtime/rf13-review-probes/PollWork.lean, calibrated in main, with main's 100 ms sleep of RF13-09), the coordinator's design, 2026-10-06"
+streams = "separate"
+# The first argument is the length of the calibration's chunks (main's task
+# computes 40 times the steps per 100 ms, about 4 s, and the callback makes
+# 15 times the updates per 100 ms, about 1.5 s, in any build); the second
+# is the twin's main task, in ms (the twins calibrate their callback's
+# updates as the program does; the single-thread driver's makes 25 times
+# as many, so that a 1 s limit surely cuts it).

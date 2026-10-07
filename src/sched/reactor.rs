@@ -242,6 +242,11 @@ impl Reactor {
         !self.regs.is_empty()
     }
 
+    /// The loop context, while it runs (`finish` does not wait for it).
+    pub(crate) fn loop_ctx(&self) -> Option<CtxId> {
+        self.loop_ctx
+    }
+
     /// A callback is due and no loop context runs.
     pub(crate) fn wants_loop(&self) -> bool {
         !self.due.is_empty() && self.loop_ctx.is_none()

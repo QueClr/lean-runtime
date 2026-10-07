@@ -1,0 +1,5 @@
+id = "loop_blocked_at_exit"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime liveness hunt HL2-02 (hunt-live/hl2_02/LoopBlockedAtExit.lean), judged a hang at exit by the coordinator, 2026-10-06; fixes-13"
+streams = "separate"

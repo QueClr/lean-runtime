@@ -1,0 +1,5 @@
+id = "loop_cycle_long"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-13 of fixes-13 (review-fixes-13/probes/LoopCycleLong.lean), judged by the coordinator, 2026-10-07"
+streams = "separate"

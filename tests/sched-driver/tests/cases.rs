@@ -792,6 +792,150 @@ fn rv3_chain_wait() {
     assert_eq!(err_of(&got), "");
 }
 
+/// Review HL2-01 (fixes-13), with a pending timer: `main` blocks on a pure
+/// bind task while it runs on a context of its own, and the task continues
+/// as a new pure task. `main` looks again at once and runs it; before the
+/// fix it went on only after the timer (3 s), which keeps the hub from its
+/// last resort until then.
+#[test]
+fn hl2_bind_continued_waiter() {
+    let got = run_with(
+        "hl2_bind_continued_waiter",
+        &[],
+        &[("LEAN_NUM_THREADS".into(), "4".into())],
+        Some(20),
+        false,
+    );
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(
+        out_of(&got),
+        "waitAny: 7\ns: 42, the timer came first: false\n"
+    );
+    assert_eq!(err_of(&got), "");
+}
+
+/// Review RF13-03 (fixes-13), the reviewer's probe: the loop context polls
+/// for 2 s when `main` returns at 100 ms; the exit does not wait for its
+/// callback to end ("dep done" never comes), as natively, but comes when
+/// the loop context's budget ends: the final run's task time (none) plus
+/// 1 s, at about 1.1 s.
+#[test]
+fn rf13_loop_polls_at_exit() {
+    let t0 = Instant::now();
+    let got = run_with("rf13_loop_polls_at_exit", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "main done\n");
+    assert_eq!(err_of(&got), "");
+    // the callback reads the clock for 2 s: the exit came before, after
+    // `main`'s 100 ms and the budget's 1 s
+    assert!(
+        t0.elapsed() < Duration::from_millis(1800),
+        "{:?}",
+        t0.elapsed()
+    );
+}
+
+/// Review RF13-06 (fixes-13), the reviewer's probe: as above, with an IO
+/// task started in each round of the callback. Each task the final run
+/// runs adds its time to the loop context's budget, as natively the
+/// workers keep running them while the loop thread goes on, so the
+/// callback may reach its end (2 s) and print; natively both outcomes
+/// occur (LoopPollsAndSpawns.lean, 3 runs: "dep done" at 2.2 s, an exit at
+/// 0.1 s without it, and a crash). Here it took 3.3 s with the line. The
+/// exit ends either way.
+#[test]
+fn rf13_loop_polls_and_spawns() {
+    let t0 = Instant::now();
+    let got = run_with("rf13_loop_polls_and_spawns", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    let out = out_of(&got);
+    let rest = out.strip_prefix("main done\n").unwrap_or("?");
+    assert!(
+        rest.is_empty() || (rest.starts_with("dep done after ") && rest.ends_with(" rounds\n")),
+        "stdout {out:?}"
+    );
+    assert_eq!(err_of(&got), "");
+    assert!(t0.elapsed() < Duration::from_secs(15), "{:?}", t0.elapsed());
+}
+
+/// Review RF13-04 (fixes-13), the reviewer's probe: after the final run's
+/// computing task, the loop context's callback computes 10 ms, then prints;
+/// the print's effect point lets `main` go first, and the final run lets
+/// the loop context go on again until the callback ends.
+#[test]
+fn rf13_loop_sleep_compute_print() {
+    let got = run_with("rf13_loop_sleep_compute_print", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "main done\nlate\n");
+    assert_eq!(err_of(&got), "");
+}
+
+/// Review RF13-07 (fixes-13), the reviewer's probe: the loop context's
+/// callback starts a 1.5 s task, reads the clock and prints; it goes on
+/// alone, and the final run runs the task after it: "late" comes, as
+/// natively.
+#[test]
+fn rf13c_valve_counts_run() {
+    let got = run_with("rf13c_valve_counts_run", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "main done\nlate\n");
+    assert_eq!(err_of(&got), "");
+}
+
+/// Review RF13-08 (fixes-13), the reviewer's probe: a callback that starts
+/// a task and sleeps in each round, for 3 s, keeps the exit until it ends,
+/// as natively (the workers keep running its tasks). It printed "dep done
+/// after 1 rounds" (1 for any positive count).
+#[test]
+fn rf13c_loop_spawns_and_sleeps() {
+    let t0 = Instant::now();
+    let got = run_with("rf13c_loop_spawns_and_sleeps", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "main done\ndep done after 1 rounds\n");
+    assert_eq!(err_of(&got), "");
+    assert!(t0.elapsed() >= Duration::from_millis(3000));
+}
+
+/// Review RF13-10 (fixes-13), the reviewer's probe: a callback that spins
+/// on a flag a task it started sets goes on once that task has waited
+/// `STALE`: "late" comes, and the exit at about 1.1 s (natively the same;
+/// the task waited for `main`'s whole deadline before, 3.1 s, and the line
+/// was lost).
+#[test]
+fn rf13d_loop_spins_on_task() {
+    let t0 = Instant::now();
+    let got = run_with("rf13d_loop_spins_on_task", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "main done\nlate\n");
+    assert_eq!(err_of(&got), "");
+    assert!(
+        t0.elapsed() < Duration::from_millis(2500),
+        "{:?}",
+        t0.elapsed()
+    );
+}
+
+/// The other user's review of round 5 (fixes-13): a callback that waits
+/// with `IO.wait` in each cycle reports the `sync` task warning once per
+/// cycle; natively one line, here a few more before the exit (a documented
+/// limit). The exit comes, and stderr holds only those lines.
+#[test]
+fn rf13f_loop_cycle_wait() {
+    let t0 = Instant::now();
+    let got = run_with("rf13f_loop_cycle_wait", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "cycling\nmain done\n");
+    let err = err_of(&got);
+    let n = err.lines().count();
+    assert!(n >= 1, "stderr {err:?}");
+    assert!(
+        err.lines()
+            .all(|l| l == "`Task.get` called from a `(sync := true)` task"),
+        "stderr {err:?}"
+    );
+    assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
+}
+
 /// `tasks/sync_walk_keeps_worker` with 20 workers: `b` runs at once on
 /// another worker while the walk's `sync` dependent sleeps, as natively
 /// (10 of 10: "B ran", "D done", "main done"; review AR-16).
@@ -1137,9 +1281,26 @@ cases!(
     late_tasks_while_enqueuing,
     get_tid_threads,
     big_priority_dedicated,
+    // fixes-13: HL2-01, HL2-03
+    wait_bind_continued_elsewhere,
+    wait_chain_bind_continued,
     loop_configure,
     timer_oneshot,
     get_tid_loop_thread,
+    loop_blocked_at_exit,
+    loop_task_at_exit,
+    loop_sleep_expired,
+    loop_polls_at_exit,
+    loop_sleep_poll_print,
+    loop_sleep_compute_print,
+    loop_valve_counts_run,
+    loop_spawn_poll,
+    loop_poll_work,
+    loop_spins_on_task,
+    loop_cycle,
+    loop_sleeps_after_task,
+    loop_cycle_long,
+    loop_carried_then_poll,
     timer_repeating,
     timer_cancel_reset,
     signal_usr1,

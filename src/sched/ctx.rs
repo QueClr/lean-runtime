@@ -172,6 +172,15 @@ pub(crate) enum Wait {
     /// `main` has returned and waits for the remaining tasks: woken when a
     /// context ends, a task finishes or is queued.
     FinalRun,
+    /// `main` has returned, nothing is left but the event loop's context,
+    /// and the final run lets it go on alone until it waits or ends, or
+    /// until the deadline (its budget, `task::final_next`; reviews RF13-03
+    /// to RF13-07): woken when another context blocks or ends, and at the
+    /// deadline, as a sleeper. Not by an enqueue: the loop context goes on
+    /// at once, as natively the loop thread does while a worker takes the
+    /// task; but a task queued for `STALE` wakes it at the loop context's
+    /// next polling point (`task::poll_check`, review RF13-10).
+    FinalLoop(Instant),
     /// Whoever hands it a synchronization object or a value wakes it
     /// (`sync`, the glue's thunks).
     Sync,
@@ -195,7 +204,7 @@ impl Wait {
     /// When a sleeper's wait ends by itself.
     pub(crate) fn deadline(self) -> Option<Instant> {
         match self {
-            Wait::Sleep(d) | Wait::Io(Some(d)) => Some(d),
+            Wait::Sleep(d) | Wait::Io(Some(d)) | Wait::FinalLoop(d) => Some(d),
             _ => None,
         }
     }
@@ -565,8 +574,30 @@ impl Sched {
         match w {
             Wait::Cell(i, g) => self.cx.cell_waiters.entry((i, g)).or_default().push(c),
             Wait::Progress | Wait::Any | Wait::FinalRun => self.cx.progress_waiters.push(c),
-            Wait::Sleep(d) | Wait::Io(Some(d)) => self.cx.sleepers.push((d, c)),
+            Wait::Sleep(d) | Wait::Io(Some(d)) | Wait::FinalLoop(d) => {
+                self.cx.sleepers.push((d, c))
+            }
             _ => {}
+        }
+        if c != MAIN {
+            self.wake_final_loop();
+        }
+    }
+
+    /// Whether `main` lets the event loop's context go on alone in the
+    /// final run (`Wait::FinalLoop`): its polling points start no queued
+    /// task then (`task::poll_check`), so that it runs on at once, as
+    /// natively the loop thread does while a worker takes the task.
+    pub(crate) fn main_in_final_loop(&self) -> bool {
+        let m = &self.cx.ctxs[MAIN];
+        m.status == Status::Blocked && matches!(m.wait, Wait::FinalLoop(_))
+    }
+
+    /// A context other than `main`'s blocked or ended: if `main` lets the
+    /// loop context go on alone (`Wait::FinalLoop`), it looks again.
+    fn wake_final_loop(&mut self) {
+        if self.main_in_final_loop() {
+            self.wake(MAIN);
         }
     }
 
@@ -677,6 +708,7 @@ impl Sched {
         self.cx.workers -= 1;
         self.refresh_holds(c);
         self.wake_progress();
+        self.wake_final_loop();
     }
 
     /// The hub's next step (lean2rr's `schedule`).
@@ -826,6 +858,9 @@ fn hub() {
         match with(|s| s.hub_step()) {
             HubStep::Main => return,
             HubStep::Resume(n, bounds) => {
+                // the final run's budget for the loop context counts another
+                // context's run during its step as work (`task::final_next`)
+                let other = with(|s| s.loop_step_other(n)).then(Instant::now);
                 let g = glue();
                 // the context's standard streams and `errno` in, `main`'s
                 // aside (`slots`, review AR-24); back after it, also when a
@@ -850,6 +885,10 @@ fn hub() {
                 hub_hook(|| g.switched(n, MAIN));
                 #[cfg(feature = "io")]
                 slots.leave(ended);
+                if let Some(t) = other {
+                    let d = t.elapsed();
+                    with(|s| s.add_loop_other(d));
+                }
             }
             HubStep::Idle(d) => super::reactor::idle(d),
         }

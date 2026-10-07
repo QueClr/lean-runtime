@@ -392,6 +392,23 @@ pub(crate) struct Tasks {
     pub(crate) notify_seq: u64,
     /// The final run has ended the standard workers (`Final::EndWorkers`).
     workers_ended: bool,
+    /// The event loop context's budget in the final run (`final_next`;
+    /// reviews RF13-03 to RF13-07, and the other user's review of round
+    /// 4): over the whole final run, the time spent on tasks (`Final::Run`,
+    /// `Final::Wait`, and the other contexts that run during a
+    /// `Final::Yield` or `Final::WaitLoop` step: natively the loop thread
+    /// runs alongside the workers meanwhile), and the loop context's time
+    /// (`Final::Yield`; a `Final::WaitLoop` step for a task it carries
+    /// counts for nothing, reviews RF13-13, RF13-14). Never reset: a
+    /// callback that waits now and then would otherwise keep the exit for
+    /// good.
+    loop_work: Duration,
+    loop_used: Duration,
+    /// A `Final::Yield` or `Final::WaitLoop` step is in progress, and the
+    /// time the hub has spent in it on contexts other than the loop context
+    /// (`loop_step_other`): work, not the loop context's.
+    loop_step: bool,
+    loop_others: Duration,
 }
 
 /// How long a native worker takes to pick up a task after the enqueue that
@@ -407,6 +424,12 @@ pub(crate) const WORKER_LATENCY: Duration = LATENCY_COLD;
 /// How many answers of `IO.getTaskState` without time passing make a polling
 /// loop (`query`).
 const POLL_QUERIES: u32 = 1000;
+
+/// The grace the final run gives the event loop's context on top of the
+/// time its tasks took (`final_next`; reviews RF13-03 to RF13-07): a
+/// callback that never waits (it polls forever) keeps the exit that long
+/// after the tasks have ended.
+const LOOP_VALVE: Duration = Duration::from_secs(1);
 
 impl Tasks {
     pub(crate) fn new() -> Tasks {
@@ -437,6 +460,10 @@ impl Tasks {
             open_walks: Vec::new(),
             notify_seq: 0,
             workers_ended: false,
+            loop_work: Duration::ZERO,
+            loop_used: Duration::ZERO,
+            loop_step: false,
+            loop_others: Duration::ZERO,
         }
     }
 }
@@ -506,6 +533,21 @@ enum Final {
     /// (`slots::end_workers`, `Glue::workers_end`; review AR-34).
     EndWorkers,
     Wait,
+    /// Only the event loop's context is left, and it carries a task that
+    /// natively runs on a thread of its own (`loop_carries_thread`): `main`
+    /// waits for it as for a worker (review RF13-01), and the time counts
+    /// for nothing: it earns the loop context no time (review RF13-13: a
+    /// callback that waits for each task it starts and polls between kept
+    /// the exit for as many cycles as it ran) and costs it none (review
+    /// RF13-14: a wait longer than its budget left nothing for what the
+    /// callback does after it). A callback that only waits, back to back,
+    /// thus never reaches a budget decision (docs/sched.md, "Exit").
+    WaitLoop,
+    /// Only the event loop's context is left, and it can go on: it runs
+    /// alone (`main` waits, `Wait::FinalLoop`) until it waits or ends, or
+    /// until this deadline, the end of its budget; then the final run looks
+    /// again (reviews HL2-02, RF13-03 to RF13-07).
+    Yield(Instant),
     Done,
 }
 
@@ -1155,6 +1197,22 @@ impl Sched {
     /// unfinished task `src`: it stops running and waits for `src` (keeping
     /// its priority and flags), then runs `job`. A job to drop if the task
     /// was deleted meanwhile (natively it is freed, `run_task`).
+    ///
+    /// Its waiters look again (review HL2-01): one that blocked on `i`
+    /// while it ran (`Wait::Cell`, also through a dependent of `i`), and
+    /// every `IO.waitAny` (`Wait::Any`). Natively `add_dep` puts `i` behind
+    /// `src`, and the worker that runs `src` runs `i` then, so the waiters
+    /// wake when `i` finishes. Here `i` is pending again, and a pure `i`
+    /// without IO need runs only when a waiter needs it: `wait` runs the
+    /// chain from its deepest end on the waiter's stack, under its rule
+    /// (`may_run_awaited`; until then it blocks on the deepest task, which
+    /// wakes it when a worker starts it, `pick`, or when it finishes), and
+    /// `IO.waitAny` starts a started pure task at the chain's root on a
+    /// context of its own. Before the fix
+    /// nobody woke them: the context that ran `i` went on without it, and
+    /// with a sleeper or a watched descriptor the hub never ran a started
+    /// `src` by itself (`last_resort`), so the program hung where native
+    /// ends.
     fn bind_wait(&mut self, i: u32, src: TaskId, job: Job) -> Option<Job> {
         if self.st_ref().running.last() == Some(&i) {
             self.st().running.pop();
@@ -1166,6 +1224,11 @@ impl Sched {
             self.free_entry(i);
             if w {
                 self.worker_idle();
+            }
+            // the context no longer runs it: the final run looks again
+            // (on the loop context it waited for it, review RF13-01)
+            if self.cx.blocked > 0 {
+                self.wake_progress();
             }
             return Some(job);
         }
@@ -1179,6 +1242,11 @@ impl Sched {
         }
         if self.tk.worker == i {
             self.worker_idle();
+        }
+        if self.cx.blocked > 0 {
+            let g = self.ent(i).gen;
+            self.wake_cell((i, g));
+            self.wake_progress();
         }
         None
     }
@@ -1718,11 +1786,21 @@ impl Sched {
     /// not `IO.waitAny`). Running any other task here would run an unawaited
     /// task on the waiter's stack, which then could not go on until that task
     /// ends: a hang where it blocks on something only the waiter provides
-    /// (reviews AR-9, AR-10).
+    /// (reviews AR-9, AR-10). A task that waits for its source (`WAITING`)
+    /// never may (review HL2-03).
     fn may_run_awaited(&mut self, i: u32, spare: bool) -> bool {
         let f = self.ent(i).flags;
         if f & PICKED != 0 || !self.tk.started {
             return true;
+        }
+        if f & WAITING != 0 {
+            // It waits for its source: it runs once the walk of its
+            // source's dependents queues it (or runs it, a `sync` one),
+            // never before (review HL2-03). `wait`'s cached chain could
+            // reach this with a dependent whose source had continued as
+            // another task (`bind_wait`): it ran before its source had
+            // finished, and a `sync` one reported `GET_IN_SYNC_TASK`.
+            return false;
         }
         if f & QUEUED == 0 {
             // In no queue and waiting for nothing: a task handed to a
@@ -2025,7 +2103,9 @@ impl Sched {
             self.hand(i);
             return WaitStep::Run(i);
         }
-        if chain.is_none() {
+        // The chain is built in this step, not kept from an earlier one.
+        let fresh = chain.is_none();
+        if fresh {
             // The pending tasks `i` waits for, transitively (bounded: a bind
             // task waiting for a task that depends on it is a cycle), up to
             // one that is running, or has finished while its walk has not
@@ -2067,6 +2147,24 @@ impl Sched {
             }
             if let Some(w) = self.source_wait(d) {
                 return w;
+            }
+            if self.ent(d).flags & WAITING != 0 {
+                // `d` waits for a pending task the chain no longer holds
+                // (review HL2-03). In a chain kept from an earlier step,
+                // its source has started and continued as another task
+                // since (`bind_wait`: a bind task run here or on another
+                // context, now waiting again): the chain is stale, and is
+                // built again from `i`. In a chain built in this step only
+                // a cycle gives this state (the build stops when it comes
+                // back to `i`, or after as many links as there are
+                // entries): a bind task waiting for a task that depends on
+                // it, which no task ever finishes, a wait forever, as
+                // natively.
+                if fresh {
+                    return WaitStep::Hang;
+                }
+                *chain = None;
+                return WaitStep::Again;
             }
             if !self.may_run_awaited(d, true) {
                 return WaitStep::Block(Wait::Cell(d, g));
@@ -2176,7 +2274,11 @@ impl Sched {
     /// once no standard worker is left never does (LB-13). When only tasks
     /// waiting for others remain (an unresolved promise, a cycle), it is
     /// done: Lean's workers stop when the queue is empty and leave such tasks
-    /// behind.
+    /// behind. The event loop's context is not waited for, unless a pool or
+    /// dedicated task runs on its stack (`loop_carries_thread`): it runs
+    /// alone while it can go on, for the time the final run's tasks took
+    /// plus `LOOP_VALVE`, and stays suspended once it waits or that budget
+    /// ends (reviews HL2-02, RF13-01 to RF13-07).
     fn final_next(&mut self) -> Final {
         // Natively `~task_manager` joins the standard workers once the queue
         // is empty and their tasks have ended, and only then waits for the
@@ -2194,10 +2296,122 @@ impl Sched {
             self.hand(i);
             return Final::Run(i);
         }
-        if !self.has_queued() && self.cx.workers == 0 {
-            return Final::Done;
+        if self.has_queued() {
+            return Final::Wait;
         }
-        Final::Wait
+        // The event loop's context is not waited for (review HL2-02):
+        // natively libuv's loop thread is detached, and `~task_manager`
+        // joins only the standard workers and waits only for the dedicated
+        // threads (object.cpp 972-988). One that waits in a callback (a
+        // `sync` dependent of a timer's promise that sleeps or waits) stays
+        // suspended when `finish` returns; before the fix the final run
+        // waited for it, for good when it waited forever.
+        let lp = self
+            .ev
+            .loop_ctx()
+            .filter(|&c| self.cx.ctxs[c].status != Status::Dead);
+        if lp.is_some() {
+            // A sleep or a descriptor wait of the loop context that has
+            // ended by now can go on (review RF13-02): natively the loop
+            // thread wakes at its deadline while the final run runs a task.
+            let now = Instant::now();
+            self.promote_sleepers(now);
+            self.ev_check(now, true);
+        }
+        // But a pool or dedicated task run on its stack (`IO.waitAny` or
+        // `Task.get` in a callback runs the task a free worker would start)
+        // is natively on a standard worker or a dedicated thread, which
+        // `~task_manager` joins or waits for: the loop context is waited
+        // for then, as a worker context is (review RF13-01).
+        // That wait is a `Final::WaitLoop` step: its time counts for
+        // nothing (reviews RF13-13, RF13-14).
+        let detached = lp.filter(|&c| !self.loop_carries_thread(c));
+        if self.cx.workers > u32::from(detached.is_some()) {
+            return if lp.is_some() && self.cx.workers == 1 {
+                Final::WaitLoop
+            } else {
+                Final::Wait
+            };
+        }
+        let Some(c) = detached else {
+            return Final::Done;
+        };
+        let x = &self.cx.ctxs[c];
+        if x.status != Status::Runnable {
+            // It waits. A wait that ends by itself within the time the
+            // final run's tasks took that the loop context has not used
+            // (no grace) is waited for, as natively the loop thread wakes
+            // then alongside the workers (review RF13-12); any other wait
+            // leaves it suspended.
+            let credit = self.tk.loop_work.saturating_sub(self.tk.loop_used);
+            return match x.wait.deadline() {
+                Some(d) if x.status == Status::Blocked && d <= Instant::now() + credit => {
+                    Final::Yield(d)
+                }
+                _ => Final::Done,
+            };
+        }
+        // It can go on: it runs alone (`main` waits, so its polling points
+        // let nothing else run), as natively the loop thread runs alongside
+        // the workers, until its total time alone in the final run reaches
+        // the final run's total task time plus `LOOP_VALVE` (reviews
+        // RF13-04, RF13-07: a callback that ends prints what it prints
+        // natively). Then `finish` returns: a callback that polls forever,
+        // or waits now and then, keeps the exit about as long as the tasks
+        // took, plus 1 s, after they end; unless it keeps enqueueing tasks,
+        // which natively keep the workers, and so the exit, going too (each
+        // task's run adds to its budget).
+        let budget = self.tk.loop_work + LOOP_VALVE;
+        match budget.checked_sub(self.tk.loop_used) {
+            Some(left) if !left.is_zero() => Final::Yield(Instant::now() + left),
+            _ => Final::Done,
+        }
+    }
+
+    /// A step of the final run that let the loop context go on alone
+    /// (`Final::Yield`) has ended after `ran`: the time the hub spent on
+    /// other contexts meanwhile (worker contexts the loop context started:
+    /// `IO.waitAny`, the polling threshold) is work, the rest the loop
+    /// context's.
+    fn after_loop_yield(&mut self, ran: Duration) {
+        let others = std::mem::take(&mut self.tk.loop_others);
+        self.tk.loop_step = false;
+        self.tk.loop_used += ran.saturating_sub(others);
+        self.tk.loop_work += others;
+    }
+
+    /// A step of the final run that waited for the task the loop context
+    /// carries (`Final::WaitLoop`) has ended: its time counts for nothing,
+    /// but the time the hub spent on other contexts meanwhile is work
+    /// (reviews RF13-13, RF13-14).
+    fn after_loop_wait(&mut self) {
+        let others = std::mem::take(&mut self.tk.loop_others);
+        self.tk.loop_step = false;
+        self.tk.loop_work += others;
+    }
+
+    /// Whether the hub's resumption of context `n` is work during a
+    /// `Final::Yield` step: any context but the loop context's.
+    pub(crate) fn loop_step_other(&self, n: CtxId) -> bool {
+        self.tk.loop_step && !self.is_loop_ctx(n)
+    }
+
+    /// The hub ran another context for `d` during a `Final::Yield` step.
+    pub(crate) fn add_loop_other(&mut self, d: Duration) {
+        self.tk.loop_others += d;
+    }
+
+    /// Whether the loop context `c` carries the activity of a task that
+    /// natively runs on a thread of its own (review RF13-01): a pool or
+    /// dedicated task run on its stack (not `ON_THREAD`: a `sync` dependent
+    /// runs on the loop thread natively), or the walk of such a task's
+    /// dependents (`Walk::own`).
+    fn loop_carries_thread(&self, c: CtxId) -> bool {
+        let st = &self.cx.ctxs[c].st;
+        st.running
+            .iter()
+            .any(|&r| self.ent(r).flags & ON_THREAD == 0)
+            || st.walks.iter().any(|w| w.own.is_some())
     }
 
     /// No pool task is queued, started without running yet, or running (an
@@ -2960,11 +3174,13 @@ pub fn option_get_or_block<T>(opt: Option<T>, report: impl FnOnce(&'static str))
 /// queued tasks, and it joins them. Here the started pure tasks, the pending
 /// IO tasks and the pure tasks still referenced run, in the order Lean's
 /// task manager would start them, and the call returns once no task is
-/// queued or running and no context but `main`'s is left: tasks enqueued
-/// meanwhile run too, also a pool task enqueued once no native standard
-/// worker would be left, which native Lean never runs (LB-13 in
-/// docs/lean-bugs.md). Dedicated tasks run to completion. A task whose
-/// dependency never finishes (an unresolved promise) is not waited for.
+/// queued or running and no context but `main`'s and the event loop's is
+/// left: tasks enqueued meanwhile run too, also a pool task enqueued once no
+/// native standard worker would be left, which native Lean never runs (LB-13
+/// in docs/lean-bugs.md). Dedicated tasks run to completion. A task whose
+/// dependency never finishes (an unresolved promise) is not waited for, nor
+/// is the event loop's context once it waits in a callback: natively
+/// libuv's loop thread is detached (review HL2-02).
 /// Dropped pure tasks were deleted (`release`) and never run. Only then does the glue flush the standard streams and exit
 /// (decisions Q5 refinement A): a runaway task keeps the process alive, and
 /// its buffered output is never flushed, as natively.
@@ -3009,10 +3225,29 @@ fn finish_tasks() {
     }
     with(|s| s.shutdown());
     loop {
+        let t0 = Instant::now();
         match with(|s| s.final_next()) {
-            Final::Run(i) => run_task(i),
+            // the time the final run spends on tasks: the event loop's
+            // context's budget (`final_next`)
+            Final::Run(i) => {
+                run_task(i);
+                with(|s| s.tk.loop_work += t0.elapsed());
+            }
             Final::EndWorkers => end_workers(),
-            Final::Wait => block(Wait::FinalRun),
+            Final::Wait => {
+                block(Wait::FinalRun);
+                with(|s| s.tk.loop_work += t0.elapsed());
+            }
+            Final::WaitLoop => {
+                with(|s| s.tk.loop_step = true);
+                block(Wait::FinalRun);
+                with(|s| s.after_loop_wait());
+            }
+            Final::Yield(deadline) => {
+                with(|s| s.tk.loop_step = true);
+                block(Wait::FinalLoop(deadline));
+                with(|s| s.after_loop_yield(t0.elapsed()));
+            }
             Final::Done => return,
         }
     }
@@ -3066,7 +3301,24 @@ extern "C" fn poll_check() {
         s.promote_sleepers(now);
         s.ev_check(now, false);
         s.ev_start_loop();
-        if s.cx.runnable.is_empty() {
+        // While the final run lets the loop context go on alone
+        // (`Wait::FinalLoop`), it starts no queued task here: natively the
+        // loop thread goes on while a worker takes the task, so a task the
+        // callback starts runs after it if it reaches its next polling point
+        // soon. One queued `STALE` ago or more, a worker would be running
+        // by now: `main` wakes and runs it (its time adds to the loop
+        // context's budget), then lets the loop context go on again, so a
+        // callback that spins on what such a task does goes on (review
+        // RF13-10: before, it waited for `main`'s whole deadline).
+        if s.cx.runnable.is_empty() && s.main_in_final_loop() {
+            if now
+                .checked_sub(STALE)
+                .and_then(|t| s.startable(Gate::Before(t)))
+                .is_some()
+            {
+                s.wake(MAIN);
+            }
+        } else if s.cx.runnable.is_empty() {
             if let Some((e, g)) = s.startable(Gate::Any) {
                 s.start_worker(e, g);
             } else if let Some((e, g)) = s.needed_picked() {

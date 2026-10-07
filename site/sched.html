@@ -341,12 +341,42 @@ Otherwise the entries wait for that context's next free or settle point, and deb
 <ol>
   <li><code>main</code> returns.</li>
   <li><code>finish</code> sets Lean's shutdown flag and runs the remaining tasks.
-    It waits until no task is queued or running, and no context but <code>main</code>'s is left.</li>
+    It waits until no task is queued or running, and no context but <code>main</code>'s is left.
+    The loop context is the exception (below).</li>
   <li>The glue flushes the streams (<a href="io.html#exit">io's exit order</a>) and exits.</li>
 </ol>
 <p>So a runaway task keeps the process alive, as natively.
-Dedicated tasks run to completion, as natively.
+Pool and dedicated tasks run to completion, as natively, also when they run on the loop context's stack.
 A task whose dependency never finishes, such as an unresolved promise, is not waited for.</p>
+<p>The <a href="#loop">loop context</a> is not waited for, because natively libuv's loop thread is detached.</p>
+<ul>
+  <li>A pool or dedicated task can run on the loop context's stack, for example a task that a callback waits for with <code>IO.waitAny</code>.
+    Natively that task runs on a worker thread, and the exit waits for it.
+    So <code>finish</code> waits for the loop context while such a task runs on it.
+    That wait does not count against the loop context's own time.</li>
+  <li>When the loop context can go on, it runs alone.
+    Natively the loop thread runs alongside the workers, so it gets as much time as the final run's tasks took, plus 1 s.
+    A task that it starts runs after it: when it waits, when its time ends, or once the task has waited 5 ms.</li>
+  <li>When it waits in a callback, for example in a <code>sync</code> dependent that sleeps, <code>finish</code> returns and leaves it suspended.
+    A sleep that ends within the tasks' time that it has not used is waited for.</li>
+  <li>When its time ends, <code>finish</code> returns too.
+    For example, a callback that reads the clock forever keeps the exit about as long as the tasks took, plus 1 s, after they end.
+    Native exits when the workers end.</li>
+</ul>
+<p>So a callback that ends in that time prints what it prints natively.
+A callback that keeps running past native's exit time can print extra lines, for example the warning of <code>Task.get</code> in a <code>sync</code> task.</p>
+<p>The rule has limits:</p>
+<ul>
+  <li>A callback that waits back to back on tasks that it starts never reaches the end of its time.
+    Natively an endless loop of that kind hangs in some runs and exits early in others.
+    Here the exit never comes on its own.</li>
+  <li>A callback that waits with no deadline for an event that no remaining task brings, for example a descriptor without a timeout, stays suspended.
+    This is so even if the event would come natively while the workers run.</li>
+  <li>The exit can take about twice the time of the final run's tasks, plus 1 s.</li>
+  <li>Only polling points let a waiting task run before the callback ends.</li>
+</ul>
+<p>Apart from the first limit, the exit always ends, unless the loop context keeps starting tasks that the final run runs.
+Natively such tasks keep the workers, and so the exit, going too.</p>
 <p>A pool task enqueued after <code>main</code> returns also runs.
 Natively it is lost once no pool worker is left (<a href="lean-bugs.html#lb-13">LB-13</a>).</p>
 <p><code>IO.Process.exit</code>, also from a task, exits at once: no task is waited for.</p>

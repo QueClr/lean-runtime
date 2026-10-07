@@ -1,0 +1,15 @@
+id = "loop_spins_on_task"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-10 of fixes-13 (review-fixes-13/probes/LoopSpinsOnTask.lean, main's task calibrated in main), judged by the coordinator, 2026-10-07"
+streams = "separate"
+deviations = { lean2rr = "LB-01", leanrs = "LB-01" }
+hand_written = true
+# Native Lean 4.34.0 is wrong here and nondeterministic: the flag task's
+# `set` is lost now and then (LB-01), and the loop thread spins until the
+# exit ("late" missing in 1 of 3 runs of the probe). So `scripts/cases.py
+# expect` cannot record this case: the expected files ("main done", "late",
+# empty stderr, code 0) were written by hand, and are the correct result.
+# The first argument is the length of the calibration's chunks (main's task
+# computes 10 times the steps per 100 ms, about 1 s in any build); the
+# second is the twin's computation, in ms.

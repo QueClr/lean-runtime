@@ -1,0 +1,12 @@
+id = "loop_carried_then_poll"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-14 of fixes-13 (review-fixes-13/probes/CarriedThenPoll.lean), judged by the coordinator, 2026-10-07"
+streams = "separate"
+hand_written = true
+# Native Lean 4.34.0 prints both lines in every run, but now and then
+# crashes at the exit after them (SIGSEGV, status 139: 1 of 6 runs by hand,
+# and cases.py expect saw two outcomes in 5 runs; not judged as a Lean bug
+# yet). So `scripts/cases.py expect` cannot record this case: the expected
+# files ("main done", "after", empty stderr, code 0) were written by hand,
+# as native's lines with its usual status.

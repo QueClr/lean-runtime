@@ -1,0 +1,5 @@
+id = "loop_cycle"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review of fixes-13, round 4 (the other user's probe compare/shared-runtime/rf13-review-probes/LoopCycle.lean), judged by the coordinator, 2026-10-07"
+streams = "separate"

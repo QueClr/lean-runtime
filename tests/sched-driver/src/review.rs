@@ -1129,3 +1129,301 @@ pub fn rv3_chain_wait(_: &[String]) -> u32 {
     println("main done");
     0
 }
+
+// Review HL2-01 (fixes-13): the regression program, with a pending timer
+// instead of the hunter's sleeping ticker; `tests/cases.rs` checks its
+// output.
+
+/// `main` waits for the pure bind task `s` while `s` runs on a context of
+/// its own (`IO.waitAny` started it) and waits for a promise; `main`
+/// resolves the promise, then waits for `s`, which continues as a new pure
+/// task (`bind_wait`). Its waiter looks again then and runs the new task
+/// and `s` on its stack. Before the fix nothing woke it: the timer kept the
+/// hub from its last resort, and only after the timer (3 s) did the hub run
+/// the started task, and `main` went on. The line says whether the timer
+/// came first.
+pub fn hl2_bind_continued_waiter(_: &[String]) -> u32 {
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    let timer = sched::timer_start(
+        std::time::Instant::now() + std::time::Duration::from_secs(3),
+        Rc::new(move || f2.set(true)),
+    );
+    let p: Promise<u64> = Promise::new();
+    let r = p.result_opt();
+    let s = bind_task(
+        Task::pure(0u64),
+        move |j: u64| {
+            let v = r.get().unwrap_or(0);
+            Task::spawn(move || j + v + 41, PRIO_DEFAULT)
+        },
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let fast = Task::spawn(|| 7u64, PRIO_DEFAULT);
+    // both start on contexts of their own; `s` waits for the promise there
+    println(&format!("waitAny: {}", wait_any(&[s.clone(), fast])));
+    // `s` can go on, but `main` waits for it first, while it runs
+    p.resolve(1);
+    let v = s.get();
+    println(&format!("s: {v}, the timer came first: {}", fired.get()));
+    sched::timer_stop(timer);
+    0
+}
+
+/// Review RF13-03 (fixes-13), the reviewer's probe: a timer's `sync`
+/// dependent reads the clock for 2 s on the loop context when `main`
+/// returns at 100 ms. The final run lets it go on alone for its budget,
+/// the time the final run's tasks took (none) plus 1 s: the exit comes
+/// then, without "dep done", where natively it comes at `main`'s end.
+/// Before, the final run and the loop context let each other go first
+/// until the callback had ended.
+pub fn rf13_loop_polls_at_exit(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let s = std::time::Instant::now();
+            let mut n = 0u64;
+            while s.elapsed() < std::time::Duration::from_millis(2000) {
+                mono_ms_now();
+                n += 1;
+            }
+            println(&format!("dep done after {n} polls"));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    println("main done");
+    0
+}
+
+/// Review RF13-06 (fixes-13), the reviewer's probe: as above, but the
+/// callback also starts an IO task in each round. The final run runs them
+/// when the loop context's budget ends, and their time adds to its budget,
+/// as natively the workers keep running them while the loop thread goes
+/// on: the callback may reach its end and print "dep done".
+pub fn rf13_loop_polls_and_spawns(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let s = std::time::Instant::now();
+            let mut n = 0u64;
+            while s.elapsed() < std::time::Duration::from_millis(2000) {
+                let _t = as_task(|| (), PRIO_DEFAULT);
+                mono_ms_now();
+                n += 1;
+            }
+            println(&format!("dep done after {n} rounds"));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    println("main done");
+    0
+}
+
+/// Review RF13-04 (fixes-13), the reviewer's probe (with `main`'s sleep
+/// made 100 ms, RF13-09): the loop context's sleep (300 ms) ends while the
+/// final run computes for 1 s; the callback
+/// then computes 10 ms with no scheduling point and prints, so its print's
+/// effect point lets `main` go first. The final run lets it go on until
+/// the callback ends: "late" comes, as natively. The first version of
+/// RF13-03's fix stopped it at that effect point.
+pub fn rf13_loop_sleep_compute_print(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let spin = |ms: u64| {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_millis(ms) {
+            std::hint::spin_loop();
+        }
+    };
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            sleep(300);
+            spin(10);
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    let _w = as_task(move || spin(1000), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// Review RF13-07 (fixes-13), the reviewer's probe: the loop context's
+/// sleep ends while the final run computes for 1 s; its callback then
+/// starts a 1.5 s task, reads the clock and prints. The loop context goes
+/// on alone (its clock read lets nothing else run), so "late" comes, then
+/// the final run runs the task, as natively. Before, the valve's wall
+/// clock ran during that task and stopped the callback at its clock read
+/// (RF13-07).
+pub fn rf13c_valve_counts_run(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let spin = |ms: u64| {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_millis(ms) {
+            std::hint::spin_loop();
+        }
+    };
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            sleep(300);
+            let _t2 = as_task(move || spin(1500), PRIO_DEFAULT);
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    let _w = as_task(move || spin(1000), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// Review RF13-08 (fixes-13), the reviewer's probe: the loop context's
+/// callback starts a 5 ms task and sleeps 1 ms in each round, for 3 s. It
+/// waits in every round, so its budget starts afresh each time, and the
+/// exit comes after the callback, as natively (SpawnsAndSleeps.lean runs
+/// its full 3 s natively too: the workers keep running its tasks).
+pub fn rf13c_loop_spawns_and_sleeps(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let spin = |ms: u64| {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_millis(ms) {
+            std::hint::spin_loop();
+        }
+    };
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            let s = std::time::Instant::now();
+            let mut n = 0u64;
+            while s.elapsed() < std::time::Duration::from_millis(3000) {
+                let _t = as_task(move || spin(5), PRIO_DEFAULT);
+                sleep(1);
+                n += 1;
+            }
+            println(&format!("dep done after {} rounds", u64::from(n > 0)));
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    println("main done");
+    0
+}
+
+/// Review RF13-10 (fixes-13), the reviewer's probe: after `main`'s 1 s
+/// task, the loop context's callback starts a task that sets a flag, spins
+/// on the flag (reading the clock), reads the clock and prints. While the
+/// loop context runs alone, a task queued for `STALE` makes `main` wake and
+/// run it, so the callback goes on: "late" at about 1.1 s, as natively.
+/// Before, the task waited for `main`'s whole deadline, and the line was
+/// lost.
+pub fn rf13d_loop_spins_on_task(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let spin = |ms: u64| {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_millis(ms) {
+            std::hint::spin_loop();
+        }
+    };
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            sleep(300);
+            let flag = Ref::new(false);
+            let f2 = flag.clone();
+            let _t = as_task(move || f2.set(true), PRIO_DEFAULT);
+            while !flag.get() {
+                mono_ms_now();
+            }
+            let _ = mono_ms_now();
+            println("late");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    let _w = as_task(move || spin(1000), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// The other user's review of round 5 (fixes-13): `uvloop/loop_cycle` with
+/// `IO.wait` instead of `IO.waitAny`. Each cycle's wait, from a `sync`
+/// dependent, reports "`Task.get` called from a `(sync := true)` task";
+/// natively the exit comes during the first cycle (one line), here after
+/// the loop context's budget, so a few more lines come: a documented limit
+/// (docs/sched.md, "Exit"). The test checks the lines and that the exit
+/// comes.
+pub fn rf13f_loop_cycle_wait(_: &[String]) -> u32 {
+    use lean_runtime::sched::uv::Timer;
+    let t: Timer<UvPromise<()>> = Timer::new(10, false);
+    let p = t.next(UvPromise::new);
+    let r = Ref::new(0u64);
+    let _dep = map_task(
+        move |_: Option<()>| {
+            println("cycling");
+            let _ = Handle::stdout().flush();
+            loop {
+                let t = as_task(|| sleep(1), PRIO_DEFAULT);
+                t.get();
+                let t0 = mono_ms_now();
+                while mono_ms_now() - t0 < 300 {
+                    r.modify(|v| v + 1);
+                }
+            }
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(t);
+    sleep(100);
+    println("main done");
+    let _ = Handle::stdout().flush();
+    0
+}

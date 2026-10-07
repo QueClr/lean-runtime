@@ -1,0 +1,9 @@
+id = "loop_sleep_compute_print"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime review RF13-04 of fixes-13 (the other user's probe compare/shared-runtime/rf13-review-probes/SleepCompute.lean, calibrated in main as RF13-05 asks), judged by the coordinator, 2026-10-06"
+streams = "separate"
+# The first argument is the length of the calibration's chunks (the task
+# computes 15 times the steps per 100 ms, the dependent a tenth of them,
+# about 1.5 s and 10 ms in any build); the second is the twin's task
+# computation, in ms (the twin's dependent computes 10 ms).

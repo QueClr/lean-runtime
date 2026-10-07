@@ -1296,12 +1296,20 @@ fn review2_need_cycle_counts() {
     let io = depend(d, job(&l, "io"), 0, false, true);
     need_ok();
     // x0 and d run on a worker context; d now waits for s (after a stall,
-    // `main` runs them in `wait` instead).
-    let _ = sleep_or_stall(50);
+    // the final run runs them instead).
+    let late = sleep_or_stall(50);
     need_ok();
-    wait(io);
-    need_ok();
+    if !late {
+        assert_eq!(entries(&l), ["x0", "d"]);
+    }
+    // d waits for s and s for d: neither ever finishes, so neither does
+    // the IO task, as natively (a `wait(io)` waits forever; review HL2-03:
+    // before, `wait` ran s, waiting in no queue, before d had finished).
+    // The final run leaves them.
+    assert!(!is_finished(d) && !is_finished(s) && !is_finished(io));
     finish();
+    need_ok();
+    assert_eq!(entries(&l), ["x0", "d"]);
 }
 
 #[test]
@@ -2066,6 +2074,124 @@ fn a_chain_root_the_worker_starts_in_the_waiters_look_runs_there() {
     need_ok();
     assert!(timer_stop(timer));
     finish();
+}
+
+// --- Reviews HL2-01 to HL2-03 (fixes-13). HL2-01 needs a bind task that
+// blocks on a context of its own while `main` waits for it, which these
+// tests cannot make (no context suspends here): its regression tests are
+// the case `tasks/wait_bind_continued_elsewhere` and the driver's program
+// `hl2_bind_continued_waiter` (tests/sched-driver). So are HL2-02's and
+// RF13-01..03's (a loop context that waits, carries a task or polls in a
+// callback): `uvloop/loop_blocked_at_exit`, `loop_task_at_exit`,
+// `loop_sleep_expired`, `loop_polls_at_exit` and the driver's program
+// `rf13_loop_polls_at_exit`.
+
+/// Review HL2-03 (`tasks/wait_chain_bind_continued`): `main` waits for
+/// `u`, a dependent of `s2`, a `sync` dependent of the pure bind task `r`.
+/// `wait` builds the chain `s2`, `r`, runs `r` on `main`'s stack, and `r`
+/// continues as `t2` (`bind_wait`): `s2` waits again for a task that the
+/// kept chain no longer holds. Before the fix `may_run_awaited` let `s2`
+/// run there (in no queue) before `r` had finished: its `Task.get` of `r`
+/// reported `GET_IN_SYNC_TASK`, and ran `t2` and `r` inside it. Now the
+/// chain is built again (`t2`, `r`), and `s2` runs in `r`'s walk, once `r`
+/// has finished. A pending timer keeps the hub from its last resort: with
+/// only `may_run_awaited`'s half of the fix, `main` blocks on `s2` until
+/// the timer has run (then the hub runs the started `t2`).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_kept_chain_runs_no_dependent_of_a_bind_task_that_continued() {
+    start_test(4);
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    let timer = timer_start(
+        std::time::Instant::now() + std::time::Duration::from_secs(2),
+        Rc::new(move || f2.set(true)),
+    );
+    let l = log();
+    let reports: Rc<RefCell<Vec<String>>> = Rc::default();
+    let l1 = l.clone();
+    let r = spawn(
+        Box::new(move || {
+            l1.borrow_mut().push("r".into());
+            let t2 = spawn(job(&l1, "t2"), 0, false);
+            let l3 = l1.clone();
+            Outcome::Continue(
+                t2,
+                Box::new(move || {
+                    l3.borrow_mut().push("r copies t2".into());
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+    );
+    let (l2, rep) = (l.clone(), reports.clone());
+    let s2 = depend(
+        r,
+        Box::new(move || {
+            l2.borrow_mut()
+                .push(format!("s2: r finished {}", is_finished(r)));
+            // `Task.map`'s function reads `r`'s value: the glue's
+            // `Task.get` waits only while its slot is empty
+            if !is_finished(r) {
+                await_task(r, |m| rep.borrow_mut().push(m.to_owned()));
+            }
+            Outcome::Done
+        }),
+        0,
+        true,
+        false,
+    );
+    let u = depend(s2, job(&l, "u"), 0, false, false);
+    need_ok();
+    wait(u);
+    need_ok();
+    assert!(
+        reports.borrow().is_empty(),
+        "s2 ran as a sync task before r had finished: {:?}",
+        reports.borrow()
+    );
+    assert_eq!(
+        entries(&l),
+        ["r", "t2", "r copies t2", "s2: r finished true", "u"]
+    );
+    assert!(!fired.get(), "main waited until the timer had run");
+    assert!(timer_stop(timer));
+    finish();
+}
+
+/// Review HL2-02: the final run does not wait for the event loop's context
+/// once it waits in a callback (natively libuv's loop thread is detached;
+/// the case `uvloop/loop_blocked_at_exit` checks it), but one that can go
+/// on runs alone first, as before the fix (its budget, the final run's
+/// task time plus 1 s, bounds it: reviews RF13-03 to RF13-07): here a
+/// timer is due when `main` returns, and an effect point has started its
+/// loop context, which has not run yet. Its callback runs in `finish`.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn the_final_run_lets_a_loop_context_able_to_run_go_on() {
+    start_test(2);
+    let n = Rc::new(Cell::new(0));
+    let n2 = n.clone();
+    timer_start(
+        std::time::Instant::now() + std::time::Duration::from_millis(1),
+        Rc::new(move || n2.set(n2.get() + 1)),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    // the effect point starts the loop context for the due timer, and lets
+    // it go first only once it has been able to run for 5 ms (`STALE`)
+    effect();
+    let lp = with(|s| s.ev.loop_ctx().map(|c| s.cx.ctxs[c].status));
+    assert_eq!(
+        lp,
+        Some(ctx::Status::Runnable),
+        "the loop context waits to run"
+    );
+    assert_eq!(n.get(), 0);
+    finish();
+    assert_eq!(n.get(), 1, "the loop context ran in the final run");
+    assert!(with(|s| s.ev.loop_ctx().is_none()), "and ended");
 }
 
 // --- Review AR-27 (fixes-3): the per-task bookkeeping.

@@ -283,6 +283,15 @@ pub const CASES: &[(&str, Case)] = &[
     ("get_tid_threads", (no_init, get_tid_threads)),
     // fixes-12: HO-01, LB-39
     ("big_priority_dedicated", (no_init, big_priority_dedicated)),
+    // fixes-13: HL2-01, HL2-03
+    (
+        "wait_bind_continued_elsewhere",
+        (no_init, wait_bind_continued_elsewhere),
+    ),
+    (
+        "wait_chain_bind_continued",
+        (no_init, wait_chain_bind_continued),
+    ),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -4921,5 +4930,86 @@ fn big_priority_dedicated(args: &[String]) -> u32 {
     for a in args {
         big_priority_part2(a);
     }
+    0
+}
+
+// def slowGet (y : Task (Except IO.Error Unit)) (k : Nat) : Nat :=
+//   match y.get with
+//   | .ok _ => k + 1
+//   | .error _ => k
+//
+// def main (args : List String) : IO Unit := do
+//   let k := args.length
+//   let done ← IO.mkRef false
+//   let ticker ← IO.asTask (prio := .dedicated) do
+//     while !(← done.get) do IO.sleep 50
+//   let y ← IO.asTask (IO.sleep 300)
+//   let s : Task Nat := (Task.pure k).bind fun j =>
+//     let n := slowGet y j
+//     Task.spawn fun _ => n + 41
+//   let fast : Task Nat := Task.spawn fun _ => k + 7
+//   let _ ← IO.waitAny [s, fast]
+//   IO.println "waitAny returned"
+//   (← IO.getStdout).flush
+//   let v ← IO.wait s
+//   IO.println s!"s: {v}"
+//   done.set true
+//   let _ ← IO.wait ticker
+//   IO.println "done"
+fn wait_bind_continued_elsewhere(args: &[String]) -> u32 {
+    let k = args.len() as u64;
+    let done = Ref::new(false);
+    let d2 = done.clone();
+    let ticker = as_task(
+        move || {
+            while !d2.get() {
+                sleep(50);
+            }
+        },
+        PRIO_DEDICATED,
+    );
+    let y = as_task(|| sleep(300), PRIO_DEFAULT);
+    let s = bind_task(
+        Task::pure(k),
+        move |j: u64| {
+            // slowGet: `y` never fails here
+            y.get();
+            let n = j + 1;
+            Task::spawn(move || n + 41, PRIO_DEFAULT)
+        },
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let fast = Task::spawn(move || k + 7, PRIO_DEFAULT);
+    let _ = wait_any(&[s.clone(), fast]);
+    println("waitAny returned");
+    let _ = Handle::stdout().flush();
+    let v = s.get();
+    println(&format!("s: {v}"));
+    done.set(true);
+    ticker.get();
+    println("done");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let k := args.length
+//   let r : Task Nat := (Task.pure k).bind fun j => Task.spawn fun _ => j + 1
+//   let s2 : Task Nat := r.map (sync := true) fun x => x + 1
+//   let u : Task Nat := s2.map fun x => x + 1
+//   IO.println s!"{u.get}"
+fn wait_chain_bind_continued(args: &[String]) -> u32 {
+    let k = args.len() as u64;
+    let r = bind_task(
+        Task::pure(k),
+        |j: u64| Task::spawn(move || j + 1, PRIO_DEFAULT),
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let s2 = map_task(|x: u64| x + 1, r, PRIO_DEFAULT, true, false);
+    let u = map_task(|x: u64| x + 1, s2, PRIO_DEFAULT, false, false);
+    println(&format!("{}", u.get()));
     0
 }
