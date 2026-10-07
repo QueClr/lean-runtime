@@ -1,0 +1,14 @@
+id = "pool_limit_wrap"
+area = "tasks"
+lean_version = "4.34.0"
+source = "LB-52 (docs/lean-bugs.md; the threads-mode bug hunt's HMT-02, its WrapNum.lean; coordinator, 2026-10-07)"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { lean2rr = "LB-52", leanrs = "LB-52; DV27" }
+native = { stdout = "a: waiting for b\nmain: resolving p\n", stderr = "", code = "timeout" }
+# `expected` (the .out, .err and .code files) is the correct outcome, written
+# by hand: `a` gets 42, as with any other limit (4294967294, 4). Native Lean
+# 4.34.0's outcome is `native`, a hang: `wait_for`'s raise wraps the
+# `unsigned` limit to 0 (object.cpp 1037), so the worker loop's throttle (858)
+# keeps every worker from taking `b` once `p` is resolved. The .env sets
+# LEAN_NUM_THREADS; the hang is bounded at 3 s.

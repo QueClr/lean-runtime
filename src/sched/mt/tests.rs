@@ -1859,6 +1859,201 @@ fn rt1_02a_a_continue_after_finish_runs_at_once() {
     );
 }
 
+/// Hunt HMT-01: a bind task whose function returned the task itself waits
+/// for itself, so for good, as natively (`add_dep(t, t)` puts `t` in its
+/// own list of dependents): its continuation never runs, and its state stays
+/// `waiting`. Before the fix it was queued again, and its continuation ran
+/// with no value to read. One worker: `x`, made once `t`'s function has
+/// returned and `t` is no longer running, runs after whatever that run
+/// queued, so `x`'s end shows whether `t` ran again (review RF15-A04: a
+/// wait for `t` to leave `running` alone passed while `t` was still queued
+/// before its first run, and `x`, queued then, could run before `t` was
+/// queued again). `keep_alive`: an IO task, or a pure one (the variant of
+/// RF15-A04).
+fn a_self_bind_waits_for_good(keep_alive: bool) {
+    let _s = serial();
+    start_test(1);
+    let p = promise_new().unwrap();
+    let me: Slot<TaskId> = Slot::default();
+    let reran = Arc::new(AtomicBool::new(false));
+    let returned = Arc::new(AtomicBool::new(false));
+    let (me2, reran2, returned2) = (me.clone(), reran.clone(), returned.clone());
+    let t = depend(
+        p,
+        Box::new(move || {
+            let own = *me2.get().expect("stored before p resolves");
+            returned2.store(true, Ordering::SeqCst);
+            Outcome::Continue(
+                own,
+                Box::new(move || {
+                    reran2.store(true, Ordering::SeqCst);
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+        keep_alive,
+    );
+    me.set(t).unwrap();
+    assert!(resolve(p, || {}));
+    until(|| returned.load(Ordering::SeqCst) && state(t) != TaskState::Running);
+    let x = spawn(Box::new(|| Outcome::Done), 0, true);
+    wait(x);
+    assert!(!reran.load(Ordering::SeqCst), "the continuation ran");
+    assert_eq!(state(t), TaskState::Waiting);
+    // the translator's last reference: an IO task stays, as `release`
+    // keeps every IO task until it has run (marked unreferenced); a pure
+    // one stays by `release`'s held rule, marked deleted: a dependent in
+    // the table, itself, holds it
+    release(t);
+    assert_eq!(state(t), TaskState::Waiting);
+    finish();
+}
+
+#[test]
+fn hmt_01_a_bind_task_that_continues_as_itself_waits_for_good() {
+    a_self_bind_waits_for_good(true);
+}
+
+#[test]
+fn hmt_01_a_pure_bind_task_that_continues_as_itself_waits_for_good() {
+    a_self_bind_waits_for_good(false);
+}
+
+/// Hunt HMT-03: without a task manager a bind task's function runs at once,
+/// and so does its continuation when the task it continues as has
+/// finished: after `finish` (through the table since review RF15-A02, as
+/// `add_dep` runs it then, RT1-02), and with `LEAN_NUM_THREADS=0`, where
+/// no task manager ever ran (`run_at_once`). Before the fix the
+/// continuation was dropped, and the glue's slot left empty for an id that
+/// answers finished.
+#[test]
+fn hmt_03_without_a_task_manager_a_bind_task_continues_at_once() {
+    let _s = serial();
+    for workers in [1, 0] {
+        start_test(workers);
+        finish();
+        let l = log();
+        let l2 = l.clone();
+        let id = depend(
+            TaskId::FINISHED,
+            Box::new(move || {
+                Outcome::Continue(
+                    TaskId::FINISHED,
+                    Box::new(move || {
+                        push(&l2, "continued");
+                        Outcome::Done
+                    }),
+                )
+            }),
+            0,
+            false,
+            true,
+        );
+        assert!(is_finished(id), "{workers} workers");
+        assert_eq!(entries(&l), ["continued"], "{workers} workers");
+    }
+}
+
+/// Review RF15-A02: after `finish` a task's job runs at once, and a bind
+/// task's `Continue` to a task that has not finished (here a promise
+/// unresolved then) waits for it, as RT1-02's `add_dep` makes it: the id
+/// answers unfinished, and the continuation runs when the promise is
+/// resolved, on the resolving thread, and reads its value. Before the fix
+/// the continuation ran at once, before `spawn` or `depend` returned, and
+/// read the promise's empty slot. Both calls, each with its own promise.
+#[test]
+fn rf15_a02_after_finish_a_continue_to_an_unfinished_task_waits() {
+    let _s = serial();
+    let sh = start_test(1);
+    let promises = [promise_new().unwrap(), promise_new().unwrap()];
+    finish();
+    for (k, p) in promises.into_iter().enumerate() {
+        let value: Slot<u32> = Slot::default();
+        let seen: Slot<Option<u32>> = Slot::default();
+        let (v2, s2) = (value.clone(), seen.clone());
+        let job: Job = Box::new(move || {
+            Outcome::Continue(
+                p,
+                Box::new(move || {
+                    let _ = s2.set(v2.get().copied());
+                    Outcome::Done
+                }),
+            )
+        });
+        let id = if k == 0 {
+            spawn(job, 0, true)
+        } else {
+            depend(TaskId::FINISHED, job, 0, false, true)
+        };
+        assert_eq!(seen.get(), None, "{k}: the continuation ran at once");
+        assert!(!is_finished(id), "{k}");
+        assert_eq!(state(id), TaskState::Waiting, "{k}");
+        let v3 = value.clone();
+        assert!(resolve(p, move || {
+            let _ = v3.set(7);
+        }));
+        assert_eq!(seen.get(), Some(&Some(7)), "{k}");
+        assert!(is_finished(id), "{k}");
+    }
+    assert_eq!(table_len(&sh), 0);
+    assert_eq!(live_workers(&sh), 0);
+}
+
+/// Hunt HMT-04: a pure bind task released while it runs, which a dependent
+/// still holds (`release`: it runs on as a started one), continues as an
+/// unreleased one when its function returns `Continue`, so its dependent
+/// gets its value. Before the fix its entry was removed and its
+/// continuation dropped, and the dependent waited for good. (No translator
+/// releases a task that a dependent's job still holds; the crate's rule
+/// covers it.)
+#[test]
+fn hmt_04_a_held_released_bind_task_continues() {
+    let _s = serial();
+    start_test(2);
+    let p = promise_new().unwrap();
+    let out: Slot<u32> = Slot::default();
+    let (started, go) = (Gate::default(), Gate::default());
+    let (s2, g2, o2) = (started.clone(), go.clone(), out.clone());
+    let b = spawn(
+        Box::new(move || {
+            s2.open();
+            g2.wait();
+            Outcome::Continue(
+                p,
+                Box::new(move || {
+                    let _ = o2.set(42);
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+    );
+    let seen: Slot<u32> = Slot::default();
+    let o3 = out.clone();
+    let d = depend(
+        b,
+        filling(&seen, move || o3.get().copied().unwrap_or(0)),
+        0,
+        false,
+        true,
+    );
+    started.wait();
+    release(b);
+    go.open();
+    until(|| state(b) != TaskState::Running);
+    assert!(resolve(p, || {}));
+    let t0 = std::time::Instant::now();
+    while !is_finished(d) && t0.elapsed() < std::time::Duration::from_secs(5) {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(is_finished(d), "the dependent waits for good");
+    assert_eq!(seen.get(), Some(&42));
+    finish();
+}
+
 /// Counts the threads the manager makes (`thread_start`).
 struct CountingGlue(Arc<AtomicUsize>);
 

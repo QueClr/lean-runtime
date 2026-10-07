@@ -132,6 +132,10 @@ pub(crate) struct State {
     started: bool,
     /// `m_shutting_down`: `finish` has begun.
     shutting_down: bool,
+    /// A task manager has run (`start` with workers): from then on, tasks
+    /// made without one go through the table (`without_manager`, review
+    /// RF15-C06).
+    ever_started: bool,
     glue: Option<Arc<dyn Glue>>,
     /// The stack size of the threads made from now on (`lthread`'s).
     stack_size: usize,
@@ -212,6 +216,7 @@ impl Shared {
         Shared {
             st: Mutex::new(State {
                 started: false,
+                ever_started: false,
                 shutting_down: false,
                 glue: None,
                 stack_size: crate::sched::thread_stack_size(),
@@ -382,6 +387,18 @@ impl Drop for AbortOnUnwind {
         );
         std::process::abort();
     }
+}
+
+/// A job and its continuations, run at once where no task manager ever ran
+/// (`mt::run_at_once`): a Rust panic in them aborts, as in a job the crate
+/// runs as a task (docs/threads.md, 1.4; review RF15-C06).
+pub(crate) fn run_job_at_once(job: Job) {
+    let guard = AbortOnUnwind("a task's job");
+    let mut out = job();
+    while let Outcome::Continue(_, k) = out {
+        out = k();
+    }
+    std::mem::forget(guard);
 }
 
 /// Run a glue hook outside the lock (a panic in it aborts).
@@ -580,17 +597,19 @@ fn enqueue(sh: &Arc<Shared>, g: &mut State, id: u64) {
 /// has not finished; otherwise it is enqueued now. `Some(d)` when the
 /// caller must run it now, on its thread: a `sync` task, or any task once
 /// `finish` is over, when there is no task manager and tasks run at once
-/// (a bind task's `Continue` then; review RT1-02).
+/// (a bind task's `Continue` then; review RT1-02). A bind task whose
+/// function returned the task itself (`src` is `d`) waits for itself, so
+/// for good, as natively, where `add_dep(t, t)` puts `t` in its own list
+/// of dependents (hunt HMT-01: it was queued again, and its continuation
+/// ran with no value to read).
 fn add_dep(sh: &Arc<Shared>, g: &mut State, src: TaskId, d: u64) -> Option<u64> {
-    if src.0 != d {
-        if let Some(s) = g.tasks.get_mut(&src.0) {
-            s.deps.push(d);
-            g.tasks
-                .get_mut(&d)
-                .expect("lean-runtime: a dependent not in the table")
-                .flags |= WAITING;
-            return None;
-        }
+    if let Some(s) = g.tasks.get_mut(&src.0) {
+        s.deps.push(d);
+        g.tasks
+            .get_mut(&d)
+            .expect("lean-runtime: a dependent not in the table")
+            .flags |= WAITING;
+        return None;
     }
     if !g.started || g.tasks.get(&d).is_some_and(|e| e.sync) {
         return Some(d);
@@ -769,7 +788,7 @@ fn run_one<'a>(
             None => (task_end(sh, g, own), None),
         },
         Outcome::Continue(src, k) => {
-            let Some(e) = g.tasks.get_mut(&id) else {
+            let Some(e) = g.tasks.get(&id) else {
                 // a job that ended its task (`end_running_task`) returned
                 // `Continue`: the glue's error; an abort with the message,
                 // as a panic on a thread the crate made (review RT2-16)
@@ -778,10 +797,15 @@ fn run_one<'a>(
                 ));
                 unreachable!("AbortOnUnwind's drop aborts");
             };
+            // a released task that a dependent still holds runs on as a
+            // started one (`release`): it continues as an unreleased one,
+            // so its dependents get its value (hunt HMT-04)
+            let held = e.deps.iter().any(|d| g.tasks.contains_key(d));
+            let e = g.tasks.get_mut(&id).expect("found above");
             e.flags &= !RUNNING;
             e.cancel_flag = None;
             let mut again = None;
-            if e.flags & DELETED != 0 {
+            if e.flags & DELETED != 0 && !held {
                 // released meanwhile: freed, its continuation dropped
                 // outside the lock (`run_task`, 905-912), under a guard: a
                 // panic in a translator's destructor there aborts (RT1-01)
@@ -810,6 +834,7 @@ pub(crate) fn configure(sh: &Arc<Shared>, glue: Arc<dyn Glue>, workers: u32, sta
     g.limit = workers;
     g.stack_size = stack_size;
     g.started = workers > 0;
+    g.ever_started |= g.started;
     sh.started.store(g.started, Ordering::Relaxed);
     // the limit may have risen
     sh.queue_cv.notify_all();
@@ -853,10 +878,41 @@ fn alloc(g: &mut State, job: Option<Job>, flags: u16, prio: u8, sync: bool) -> u
     id
 }
 
-/// `lean_task_spawn_core` with the task manager running (`Some`; `None`:
-/// there is none, and the caller runs the job at once): a new task, enqueued
-/// (`alloc_task`, `enqueue`) at the queue of `prio`, the whole value
-/// (`common::priority`: above 8 dedicated, LB-39).
+/// Whether `spawn` and `depend` leave the job to their caller, which runs
+/// it at once (`mt::run_at_once`): no task manager ever ran
+/// (`LEAN_NUM_THREADS=0`), so every task has finished (no promise can
+/// exist: `promise_new` needs the manager). Once one has run
+/// (`ever_started`: after `finish`, and after a later `start_with` with no
+/// workers, review RF15-C06) the table can still hold unfinished tasks
+/// (an unresolved promise, a task waiting for one): a task made then runs
+/// at once here too, but through the table, so that a bind task's
+/// `Continue` to such a task waits for it, as RT1-02's `add_dep` makes it
+/// (review RF15-A02: the continuation ran at once and read an empty slot).
+fn without_manager(g: &State) -> bool {
+    !g.started && !g.ever_started
+}
+
+/// The id `spawn` and `depend` return for task `id`, made after `finish`
+/// and run at once as far as it could: `TaskId::FINISHED` once it has
+/// finished, as a task run at once without a task manager is (the glue's
+/// fast path); its own id while it waits (a bind task whose `Continue`
+/// names a task that has not finished, a dependent of such a task).
+fn after_finish_id(g: &State, id: u64) -> TaskId {
+    if g.tasks.contains_key(&id) {
+        TaskId(id)
+    } else {
+        TaskId::FINISHED
+    }
+}
+
+/// `lean_task_spawn_core` with a task manager's state (`Err(job)`: no task
+/// manager ever ran, `without_manager`, and the caller runs the job at
+/// once): a new task, enqueued (`alloc_task`, `enqueue`) at the queue of
+/// `prio`, the whole value (`common::priority`: above 8 dedicated, LB-39).
+/// After `finish` it runs at once here, on the calling thread (`run_task`,
+/// RT1-02); a bind task's `Continue` then waits for a task that has not
+/// finished (`add_dep`), and its id names an unfinished task until then
+/// (`after_finish_id`).
 pub(crate) fn spawn(
     sh: &Arc<Shared>,
     job: Job,
@@ -864,21 +920,27 @@ pub(crate) fn spawn(
     keep_alive: bool,
 ) -> Result<TaskId, Job> {
     let mut g = sh.lock();
-    if !g.started {
+    if without_manager(&g) {
         return Err(job);
     }
     let flags = if keep_alive { 0 } else { PURE };
     let id = alloc(&mut g, Some(job), flags, priority(prio), false);
-    enqueue(sh, &mut g, id);
-    drop(g);
-    Ok(TaskId(id))
+    if g.started {
+        enqueue(sh, &mut g, id);
+        return Ok(TaskId(id));
+    }
+    let g = run_task(sh, g, id, false);
+    Ok(after_finish_id(&g, id))
 }
 
-/// `lean_task_map_core`/`lean_task_bind_core` with the task manager running:
-/// a new task waiting for `src` (`add_dep`); with `sync` (natively at
-/// priority `LEAN_SYNC_PRIO`), once `src` has finished it runs on the thread
-/// that walks `src`'s dependents, or here if `src` has finished already.
-/// Only `sync` makes it so: `prio` (the whole value) picks its queue.
+/// `lean_task_map_core`/`lean_task_bind_core` with a task manager's state
+/// (`Err(job)` as for `spawn`): a new task waiting for `src` (`add_dep`);
+/// with `sync` (natively at priority `LEAN_SYNC_PRIO`), once `src` has
+/// finished it runs on the thread that walks `src`'s dependents, or here if
+/// `src` has finished already. Only `sync` makes it so: `prio` (the whole
+/// value) picks its queue. After `finish` every task runs at once once its
+/// source has finished (`add_dep`, RT1-02): here, or on the thread that
+/// resolves its source (review RF15-A02).
 pub(crate) fn depend(
     sh: &Arc<Shared>,
     src: TaskId,
@@ -888,16 +950,19 @@ pub(crate) fn depend(
     keep_alive: bool,
 ) -> Result<TaskId, Job> {
     let mut g = sh.lock();
-    if !g.started {
+    if without_manager(&g) {
         return Err(job);
     }
+    let started = g.started;
     let flags = if keep_alive { 0 } else { PURE };
     let id = alloc(&mut g, Some(job), flags, priority(prio), sync);
     if let Some(now) = add_dep(sh, &mut g, src, id) {
         g = run_task(sh, g, now, false);
     }
-    drop(g);
-    Ok(TaskId(id))
+    if started {
+        return Ok(TaskId(id));
+    }
+    Ok(after_finish_id(&g, id))
 }
 
 pub(crate) fn dependent_runs_now(sh: &Arc<Shared>, src: TaskId, sync: bool) -> bool {

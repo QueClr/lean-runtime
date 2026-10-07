@@ -128,7 +128,8 @@ stream and UDP code over non-blocking sockets, on the scheduler's event
 loop, or in threads mode on `sched::uv`'s loop thread), `DNS` (glibc's
 `getaddrinfo` and `getnameinfo` through dns-lookup, on two helper threads)
 and `Std.Net.interfaceAddresses`. The cases of `tests/cases/net` pass
-through the driver; eight native bugs are not reproduced (LB-21 to LB-28).
+through the driver; ten native bugs are not reproduced (LB-21 to LB-28,
+LB-50 and LB-51).
 Its second batch, net-2, holds no `Weak` reference: the loop's callbacks
 hold a socket's number in the registry of open sockets, so only
 the program's handles and the pending operations keep a socket open

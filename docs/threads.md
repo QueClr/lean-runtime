@@ -125,8 +125,37 @@ LSCHED-01), net-1, net-2, fixes-1 and the io batches (AR-1 to AR-20).
   unfinished task (`deactivate_task`, 1152-1160). There `sched::mt` gives
   safe answers: a promise resolved then (a translator's value dropped at
   the exit) runs its dependents at once on the resolving thread, a bind
-  task's `Continue` then runs at once, and no thread is made (review
-  RT1-02).
+  task's `Continue` to a finished task then runs at once, and no thread is made (review
+  RT1-02). After `finish`, `spawn` and `depend` run a task at once
+  through the table, as RT1-02's `add_dep` does: a bind task's `Continue`
+  to a task that has not finished (a promise unresolved then, a task that
+  waits for one) waits for it, its id answers unfinished until then, and
+  its continuation runs on the thread that finishes that task (review
+  RF15-A02: the continuation ran at once and read an empty slot). Such a
+  task runs as a task, with a frame of its own, as RT1-02's do:
+  `IO.checkCanceled` in it answers true (the shutdown flag), and a `sync`
+  one is a `sync` task for `Task.get`'s report. Natively, with no task
+  manager, the function runs inline in its caller with no task
+  (`lean_task_spawn_core` 1190, `lean_task_bind_core` 1275), so there
+  `IO.checkCanceled` answers for the caller (false on the loop thread);
+  only code that runs after `finish` (a loop callback during the exit)
+  can see the difference. A task
+  that finished at once gives `TaskId::FINISHED`, as before. Where no
+  task manager ever ran (before `start`, `LEAN_NUM_THREADS=0`) every task
+  has finished, and a bind task's continuations run at once
+  (`run_at_once`; hunt HMT-03: the continuation was dropped, and the
+  glue's slot left empty).
+- A bind task whose function returns the task itself waits for itself, so
+  for good, as natively (`add_dep(t, t)`, 1009-1023, puts `t` in its own
+  list of dependents; hunt HMT-01: it was queued again, and its
+  continuation ran with no value to read). A pure task released while it
+  runs that a dependent still holds (`release`: it runs on as a started
+  one, marked deleted and canceled) continues when its function returns
+  `Continue`, as an unreleased task does, so its dependents get its value.
+  It keeps its deletion, so its finish notifies no waiter, and its cancel,
+  which its dependents inherit (hunt HMT-04; no translator releases such a
+  task). The single-thread scheduler follows the same rule (review
+  RF15-A01).
 - A Rust panic in a job, a glue hook, or the destructor of a value the
   crate drops on a thread it made (a task's continuation, the glue)
   aborts the process, on any thread (1.4; review RT1-01).
@@ -907,9 +936,9 @@ each callback.
   behind a feature of its own. lean2rr does not support threads mode for
   now (owner); later it would need atomic Reussir boxes.
 - **Native bugs are not copied.** LB-13 (a late pool task never runs),
-  LB-01 (a lost `set`, through `get` or `modify`) and LB-18 (a `swap`
-  returning its own argument) stay fixed. Refs follow Lean 4.35 in both
-  modes (3.1).
+  LB-01 (a lost `set`, through `get` or `modify`), LB-18 (a `swap`
+  returning its own argument) and LB-52 (the pool's limit wrapped to 0)
+  stay fixed. Refs follow Lean 4.35 in both modes (3.1).
 - **The crate needs no `unsafe` for threads mode.** It uses std's threads,
   locks, condition variables and atomics; its `sched::uv` (T2) also uses
   rustix (`poll`, the eventfd) and signal-hook (the signal watchers), the
@@ -938,6 +967,10 @@ each callback.
   `LEAN_NUM_THREADS`, else `hardware_concurrency` (`get_lean_num_threads`,
   1111); 0 means no task manager, and tasks run at once
   (`lean_init_task_manager_using`, 1102; `lean_task_spawn_core`, 1189).
+  A wait in a pool task raises the maximum by one (`wait_for`,
+  1025-1047); natively the `unsigned` wraps to 0 at 2^32 - 1 workers, so
+  no worker takes a task again (LB-52, case `tasks/pool_limit_wrap`), and
+  the crate's maximum saturates instead.
 - **Special priorities** (`enqueue_core`): above 8, a thread of its own
   (`spawn_dedicated_worker`, 873); `LEAN_SYNC_PRIO` (2^32-1, line 72), at
   once on the enqueuing thread. A Lean priority reaches `enqueue_core` cut
@@ -962,7 +995,8 @@ each callback.
   1169: `keep_alive`).
 - **Exit.** `~task_manager` (972) sets `m_shutting_down`, joins the standard
   workers, then waits for the dedicated ones. During shutdown
-  `spawn_worker` returns at once (831-833): LB-13.
+  `spawn_worker` returns at once (831-833), at an enqueue and at a wait's
+  raise of the limit alike: LB-13.
 - **Values that cross threads.** An object starts single-threaded (`m_rc >
   0`, a plain count). `lean_mark_mt` (663) walks an object graph and negates
   each count; a negative count is updated atomically (`lean.h`:

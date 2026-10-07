@@ -229,6 +229,9 @@ pub const CASES: &[(&str, Case)] = &[
     ),
     ("late_wait_dedicated", (no_init, late_wait_dedicated)),
     ("late_wait_pool", (no_init, late_wait_pool)),
+    // fixes-15: LB-13's busy worker (leanrs's repro), LB-52 (HMT-02)
+    ("late_wait_busy_worker", (no_init, late_wait_busy_worker)),
+    ("pool_limit_wrap", (no_init, pool_limit_wrap)),
     ("late_pool_child_runs", (no_init, late_pool_child_runs)),
     (
         "late_dedicated_child_runs",
@@ -2351,6 +2354,113 @@ fn late_wait_pool(args: &[String]) -> u32 {
         PRIO_DEFAULT,
     );
     eprintln("main returns");
+    0
+}
+
+// let started ← IO.Promise.new (α := Unit)
+// let _ ← IO.asTask (do
+//   started.resolve ()
+//   while !(← IO.checkCanceled) do
+//     IO.sleep 10
+//   let done : Task (Except IO.Error Unit) := Task.pure (.ok ())
+//   let d ← IO.mapTask (sync := true) (fun _ => do
+//       let first ← IO.checkCanceled
+//       IO.eprintln s!"caller {first}"
+//       let c ← IO.asTask (do IO.eprintln s!"created {← IO.checkCanceled}")
+//       let p ← IO.Promise.new (α := Unit)
+//       let rel ← IO.mapTask (sync := true)
+//         (fun _ => do IO.eprintln s!"released {← IO.checkCanceled}") p.result!
+//       p.resolve ()
+//       let _ ← IO.wait rel
+//       let _ ← IO.wait c
+//       pure ()) done
+//   let _ ← IO.wait d
+//   pure ())
+// let _ ← IO.wait started.result!
+// IO.eprintln "main done"
+fn late_wait_busy_worker(_args: &[String]) -> u32 {
+    let started: Obj<Promise<()>> = Obj::new(Promise::new());
+    let started2 = started.clone();
+    let _ = as_task(
+        move || {
+            started2.resolve(());
+            drop(started2);
+            while !check_canceled() {
+                sleep(10);
+            }
+            let done = Task::pure(());
+            let d = map_task(
+                |()| {
+                    let first = check_canceled();
+                    eprintln(&format!("caller {first}"));
+                    let c = as_task(
+                        || eprintln(&format!("created {}", check_canceled())),
+                        PRIO_DEFAULT,
+                    );
+                    let p: Promise<()> = Promise::new();
+                    let rel = map_task(
+                        |()| eprintln(&format!("released {}", check_canceled())),
+                        p.result_bang(),
+                        PRIO_DEFAULT,
+                        true,
+                        true,
+                    );
+                    p.resolve(());
+                    drop(p);
+                    rel.get();
+                    drop(rel);
+                    c.get();
+                },
+                done,
+                PRIO_DEFAULT,
+                true,
+                true,
+            );
+            d.get();
+        },
+        PRIO_DEFAULT,
+    );
+    started.result_bang().get();
+    eprintln("main done");
+    0
+}
+
+// def main : IO Unit := do
+//   let p ← IO.Promise.new (α := Nat)
+//   let b := p.result?.map (fun o => o.getD 0)
+//   let a ← IO.asTask (do
+//     IO.println "a: waiting for b"
+//     (← IO.getStdout).flush
+//     return b.get)
+//   IO.sleep 300
+//   IO.println "main: resolving p"
+//   (← IO.getStdout).flush
+//   p.resolve 42
+//   match ← IO.wait a with
+//   | .ok v => IO.println s!"a got {v}"
+//   | .error e => IO.println s!"error {e}"
+fn pool_limit_wrap(_args: &[String]) -> u32 {
+    let p: Promise<u64> = Promise::new();
+    let b = map_task(
+        |o: Option<u64>| o.unwrap_or(0),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        false,
+        false,
+    );
+    let a = as_task(
+        move || {
+            println("a: waiting for b");
+            let _ = Handle::stdout().flush();
+            b.get()
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(300);
+    println("main: resolving p");
+    let _ = Handle::stdout().flush();
+    p.resolve(42);
+    println(&format!("a got {}", a.get()));
     0
 }
 

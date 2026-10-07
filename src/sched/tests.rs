@@ -2851,6 +2851,70 @@ fn a_dependent_run_at_once_checks_its_callers_cancel() {
     finish();
 }
 
+/// Review AR-53: after `main` returned, the function of a dependent that
+/// `depend` runs at once is its caller's code for the shutdown flag too: once
+/// the caller (a task queued when `main` returned) has seen the flag, so has
+/// the function, and a task it creates then, or a promise's dependent it
+/// releases, could only start after the flag was set, and sees it at once.
+/// One worker, which the caller holds, so no check here starts a task on a
+/// context of its own; the promise's dependent is a `sync` one, run inside
+/// the resolve.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_dependent_run_at_once_is_late_once_its_caller_checked() {
+    start_test(1);
+    let l = log();
+    let l2 = l.clone();
+    let p = promise_new().unwrap();
+    spawn(
+        Box::new(move || {
+            let l3 = l2.clone();
+            depend(
+                TaskId::FINISHED,
+                Box::new(move || {
+                    let first = check_canceled();
+                    l3.borrow_mut().push(format!("caller {first}"));
+                    let l4 = l3.clone();
+                    spawn(
+                        Box::new(move || {
+                            let seen = check_canceled();
+                            l4.borrow_mut().push(format!("created {seen}"));
+                            Outcome::Done
+                        }),
+                        0,
+                        true,
+                    );
+                    let l5 = l3.clone();
+                    depend(
+                        p,
+                        Box::new(move || {
+                            let seen = check_canceled();
+                            l5.borrow_mut().push(format!("released {seen}"));
+                            Outcome::Done
+                        }),
+                        0,
+                        true,
+                        true,
+                    );
+                    resolve(p, || {});
+                    Outcome::Done
+                }),
+                0,
+                true,
+                true,
+            );
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    finish();
+    assert_eq!(
+        entries(&l),
+        ["caller false", "released true", "created true"]
+    );
+}
+
 /// Review RF14-04: a `sync` bind task whose function returned a task that
 /// has finished runs on at once on the thread of its first run, not on the
 /// thread below it now: here its source's, a pool task run on `main`'s
@@ -2884,6 +2948,252 @@ fn a_sync_bind_task_runs_on_on_the_thread_of_its_first_run() {
     assert_eq!(t.len(), 2, "{t:?}");
     assert_ne!(t[0], 0, "the bind task ran on its source's thread");
     assert_eq!(t[1], t[0], "and its continuation on the same");
+    finish();
+}
+
+/// Review RF15-A01 (threads mode's hunt HMT-04, here in the single-thread
+/// scheduler): a pure bind task released while it runs, which a dependent
+/// still holds (`deactivate`'s held rule: it runs on as a started one,
+/// deleted and canceled), continues as an unreleased one when its function
+/// returns `Continue`: its continuation runs once the task it continues as
+/// has finished, and its dependent gets its value and inherits its cancel.
+/// Before the fix `bind_wait` freed its entry with the dependent still
+/// linked (the debug assertion of `free_entry`) and dropped the
+/// continuation. One worker; everything runs on `main`'s stack (`wait` of
+/// the dependent): the bind task `b`, then `x`, which it continues as, then
+/// `b`'s continuation, then the dependent.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hmt_04_a_held_released_bind_task_continues() {
+    start_test(1);
+    let l = log();
+    let me: Rc<Cell<Option<TaskId>>> = Rc::new(Cell::new(None));
+    let next: Rc<Cell<Option<TaskId>>> = Rc::new(Cell::new(None));
+    let out = Rc::new(Cell::new(0u32));
+    let (me2, next2, out2, l2) = (me.clone(), next.clone(), out.clone(), l.clone());
+    let b = spawn(
+        Box::new(move || {
+            // the translator's last reference goes while it runs
+            release(me2.get().unwrap());
+            l2.borrow_mut().push("b".to_string());
+            Outcome::Continue(
+                next2.get().unwrap(),
+                Box::new(move || {
+                    out2.set(42);
+                    l2.borrow_mut().push("k".to_string());
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+    );
+    me.set(Some(b));
+    let (out3, l3) = (out.clone(), l.clone());
+    let d = depend(
+        b,
+        Box::new(move || {
+            let canceled = check_canceled();
+            l3.borrow_mut().push(format!("d {} {canceled}", out3.get()));
+            Outcome::Done
+        }),
+        0,
+        false,
+        true,
+    );
+    let x = spawn(job(&l, "x"), 0, true);
+    next.set(Some(x));
+    wait(d);
+    assert_eq!(entries(&l), ["b", "x", "k", "d 42 true"]);
+    finish();
+}
+
+/// `switch_is_event_loop` is false outside the hub's `switched` (lean2rr's
+/// glue asks inside it, hunt HST-01; the loop's switches are the drivers'
+/// to show).
+#[test]
+fn switch_is_event_loop_is_false_outside_switched() {
+    start_test(1);
+    assert!(!switch_is_event_loop());
+    finish();
+}
+
+/// A glue that logs each task's end (`task_end`) and suspends nothing.
+struct EndLog(Log);
+
+impl Glue for EndLog {
+    fn suspend(&self, _: Suspend<'_>) {
+        panic!("the crate's unit tests never suspend a context");
+    }
+    fn task_end(&self, own_thread: bool) {
+        self.0.borrow_mut().push(format!("task_end {own_thread}"));
+    }
+}
+
+/// Hunt HST-04: a deleted bind task's continuation is dropped before the
+/// glue's `task_end`, while the task's emulated thread is still the running
+/// one: natively `run_task` frees a deleted task on the worker's thread, so
+/// the code its drop runs (a promise's resolution and its `sync`
+/// dependents) sees that thread's state, such as the worker's current
+/// streams, which a glue gives back at `task_end`. Before, the drop came
+/// after `task_end`. The pure bind task releases itself while it runs (its
+/// translator's last reference), then returns `Continue`; `finish` runs it.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_deleted_bind_tasks_continuation_is_dropped_before_task_end() {
+    struct OnDrop(Log);
+    impl Drop for OnDrop {
+        fn drop(&mut self) {
+            self.0.borrow_mut().push("continuation dropped".to_string());
+        }
+    }
+    let l = log();
+    start_with(Rc::new(EndLog(l.clone())), 1, 1 << 20);
+    let p = promise_new().unwrap();
+    let me: Rc<Cell<Option<TaskId>>> = Rc::new(Cell::new(None));
+    let (me2, l2) = (me.clone(), l.clone());
+    let b = spawn(
+        Box::new(move || {
+            release(me2.get().unwrap());
+            let keep = OnDrop(l2);
+            Outcome::Continue(
+                p,
+                Box::new(move || {
+                    let _keep = &keep;
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+    );
+    me.set(Some(b));
+    finish();
+    let seen = entries(&l);
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert_eq!(seen[0], "continuation dropped", "{seen:?}");
+    assert!(seen[1].starts_with("task_end"), "{seen:?}");
+}
+
+/// Review RF15-C01: a panic in a deleted bind task's
+/// continuation's drop, caught on `main`, must still give the glue its
+/// `task_end` (RS1S-12: "Either way the glue hears of the task's end").
+/// Before the fix the guard was forgotten before the drop (since HST-04's
+/// reorder), and the log was `["begin true"]`.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_panic_in_a_deleted_continuations_drop_ends_the_task() {
+    struct BeginEnd(Log);
+    impl Glue for BeginEnd {
+        fn suspend(&self, _: Suspend<'_>) {
+            panic!("the crate's unit tests never suspend a context");
+        }
+        fn task_begin(&self, own: bool) {
+            self.0.borrow_mut().push(format!("begin {own}"));
+        }
+        fn task_end(&self, own: bool) {
+            self.0.borrow_mut().push(format!("end {own}"));
+        }
+    }
+    struct Boom;
+    impl Drop for Boom {
+        fn drop(&mut self) {
+            panic!("boom in a continuation's drop");
+        }
+    }
+    let l = log();
+    start_with(Rc::new(BeginEnd(l.clone())), 1, 1 << 20);
+    let p = promise_new().unwrap();
+    let me: Rc<Cell<Option<TaskId>>> = Rc::new(Cell::new(None));
+    let me2 = me.clone();
+    let b = spawn(
+        Box::new(move || {
+            release(me2.get().unwrap());
+            let boom = Boom;
+            Outcome::Continue(
+                p,
+                Box::new(move || {
+                    let _b = &boom;
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+    );
+    me.set(Some(b));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wait(b)));
+    assert!(r.is_err(), "the drop's panic reaches main");
+    assert_eq!(entries(&l), ["begin true", "end true"]);
+}
+
+/// Review RF15-C02: a `sync` dependent that a promise's walk
+/// runs on `main`'s stack, for a promise `main` resolved, runs on `main`'s
+/// thread natively (`LEAN_SYNC_PRIO`, `enqueue_core` runs it there), as a
+/// `FAST` dependent does: a task it queues is an enqueue by `main`'s thread,
+/// which natively starts the idle worker.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_sync_dependent_on_mains_thread_wakes_the_idle_worker() {
+    start_test(1);
+    let p = promise_new().unwrap();
+    let seen = Rc::new(Cell::new((false, false)));
+    let s2 = seen.clone();
+    let _d = depend(
+        p,
+        Box::new(move || {
+            let in_sync = in_sync_task();
+            let _x = spawn(Box::new(|| Outcome::Done), 0, true);
+            s2.set((in_sync, with(|s| s.lone_worker_for_test().0)));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    resolve(p, || {});
+    let (in_sync, woken) = seen.get();
+    assert!(in_sync, "the dependent ran as a sync task");
+    assert!(woken, "the enqueue did not wake the idle worker");
+    finish();
+}
+
+/// Review RF15-A03: a dependent that `depend` runs at once on `main`
+/// (`FAST`) is `main`'s own code for the lone worker's rules too. A task it
+/// queues wakes the idle worker, as an enqueue by `main` does (`enqueue`);
+/// a task its `wait` runs on `main`'s stack is the lone worker's, which
+/// then picks the next task (`end`). Before the fix both rules read the raw
+/// stack of running tasks, where the dependent counted as a task: the
+/// worker was not woken, and it picked nothing after `x`. The woken
+/// worker's wake-up is held off (`hold_wake_for_test`), so that it never
+/// takes `x` itself: on the first, slow run of a fresh build its latency
+/// (90 µs) passed before the `wait`, and the check passed without the fix
+/// too.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_dependent_run_at_once_on_main_is_mains_code_for_the_lone_worker() {
+    start_test(1);
+    let seen = Rc::new(Cell::new((false, false)));
+    let s2 = seen.clone();
+    depend(
+        TaskId::FINISHED,
+        Box::new(move || {
+            let x = spawn(Box::new(|| Outcome::Done), 0, true);
+            let woken = with(|s| s.lone_worker_for_test().0);
+            with(|s| s.hold_wake_for_test());
+            let y = spawn(Box::new(|| Outcome::Done), 0, true);
+            wait(x);
+            let picked = with(|s| s.lone_worker_for_test().1 == Some(y));
+            s2.set((woken, picked));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    let (woken, picked) = seen.get();
+    assert!(woken, "the enqueue did not wake the idle worker");
+    assert!(picked, "the worker that ran x did not pick y");
     finish();
 }
 

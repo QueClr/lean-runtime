@@ -718,8 +718,17 @@ pub(crate) enum JoinAt {
     /// is a thread, so the pipe drains without the context, and skipping
     /// never hangs (RFX1-03's shape).
     End,
-    /// The exit (`IO.Process.exit`, an internal panic, `forceExit`).
+    /// The exit (`IO.Process.exit`, an internal panic): it waits for every
+    /// writer of the context, those of a skip window too (`skip_writers`):
+    /// natively their streams are still open, and the exit's flush writes
+    /// their bytes.
     Exit,
+    /// `IO.Process.forceExit` (`_Exit`): as `Exit`, but a writer of a skip
+    /// window is not waited for: natively its stream's free had not come
+    /// yet, and `_Exit` discards the stream's buffer (hunt HCO-02: a
+    /// `sync` dependent of a deferred promise that forced the exit waited
+    /// for that writer, for good if no one read the pipe).
+    ForceExit,
 }
 
 /// Wait until the writer threads of the calling context ([`hand_off`]) have
@@ -771,7 +780,7 @@ extern "C" fn join_own_writers_slow(at: JoinAt) {
         let w = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
         // an exit waits for every writer of the context: natively a stream
         // whose free had not come yet is open then, and the exit's flush
-        // writes its bytes
+        // writes its bytes (`_Exit` discards them: `ForceExit` skips them)
         if !w
             .iter()
             .any(|w| w.owner == me && (at == JoinAt::Exit || !skipped(w.id)))
@@ -943,15 +952,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn hand_off_writes_and_closes_without_blocking_the_dropper() {
-        let (r, fd) = pipe_fd();
-        // fill the pipe
-        let b = fd.borrow().unwrap();
-        rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::NONBLOCK).unwrap();
-        let mut filled = 0;
-        while let Ok(n) = rustix::io::write(b, &[b'x'; 4096]) {
-            filled += n;
-        }
-        rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::empty()).unwrap();
+        let (r, fd, filled) = full_pipe();
         hand_off(vec![b'y'; 100], fd);
         // the drop's thread goes on at once; the reader drains, the writer
         // finishes
@@ -959,6 +960,59 @@ mod tests {
         assert_eq!(got.len(), filled + 100);
         assert!(got.ends_with(&[b'y'; 100]));
         join_own_writers(JoinAt::Exit);
+    }
+
+    /// Hunt HCO-02: `forceExit` (`_Exit`) does not wait for a writer in a
+    /// skip window (natively its stream's free had not come yet, and
+    /// `_Exit` discards the stream's buffer); `exit`, which natively flushes
+    /// that open stream, does. `forceExit` still waits for a writer outside
+    /// the window (review RF15-A06), here one handed off after it, inside a
+    /// no-suspend scope (where a writers point waits for nothing, but an
+    /// exit does). The skipped writer's reader drains once told, or after
+    /// 5 s, so a wait shows as a writer that has ended, not as a hang; the
+    /// other's drains after 30 ms. In a child process (`ran_in_child`):
+    /// the writers run for tens of milliseconds.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn force_exit_passes_over_a_skipped_writer() {
+        if ran_in_child("io::coop::tests::force_exit_passes_over_a_skipped_writer") {
+            return;
+        }
+        let (r, fd, filled) = full_pipe();
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let reader = std::thread::spawn(move || {
+            let _ = wait.recv_timeout(Duration::from_secs(5));
+            read_all(r)
+        });
+        let lo = writer_mark();
+        hand_off(vec![b'y'; 100], fd);
+        let hi = writer_mark();
+        let (r2, fd2, filled2) = full_pipe();
+        let outside = writer_mark();
+        hand_off(vec![b'z'; 100], fd2);
+        let reader2 = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            read_all(r2)
+        });
+        let (skipped_ran, outside_ran) = {
+            let _skip = skip_writers(lo, hi);
+            let _scope = crate::sched::no_suspend();
+            join_own_writers(JoinAt::ForceExit);
+            (writer_runs(lo), writer_runs(outside))
+        };
+        // (the reader has stopped waiting if the 5 s passed)
+        let _ = go.send(());
+        let got = reader.join().unwrap();
+        assert_eq!(got.len(), filled + 100);
+        assert!(got.ends_with(&[b'y'; 100]));
+        assert_eq!(reader2.join().unwrap().len(), filled2 + 100);
+        join_own_writers(JoinAt::Exit);
+        assert!(!own_writers());
+        assert!(skipped_ran, "forceExit waited for the skipped writer");
+        assert!(
+            !outside_ran,
+            "forceExit did not wait for the writer outside the window"
+        );
     }
 
     /// Whether a writer of the calling context runs.
@@ -969,6 +1023,15 @@ mod tests {
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .any(|w| w.owner == me)
+    }
+
+    /// Whether writer `id` runs.
+    fn writer_runs(id: u64) -> bool {
+        WRITERS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|w| w.id == id)
     }
 
     /// Runs test `name` in a child process, and checks that it passed: true
@@ -1092,14 +1155,7 @@ mod tests {
             ),
         ];
         for (what, wait) in waits {
-            let (r, fd) = pipe_fd();
-            let b = fd.borrow().unwrap();
-            rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::NONBLOCK).unwrap();
-            let mut filled = 0;
-            while let Ok(n) = rustix::io::write(b, &[b'x'; 4096]) {
-                filled += n;
-            }
-            rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::empty()).unwrap();
+            let (r, fd, filled) = full_pipe();
             hand_off(vec![b'y'; 100], fd);
             {
                 let _scope = crate::sched::no_suspend();

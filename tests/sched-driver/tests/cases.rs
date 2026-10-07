@@ -1283,6 +1283,9 @@ cases!(
     late_dependent_of_dedicated,
     late_wait_dedicated,
     late_wait_pool,
+    // fixes-15: LB-13's busy worker, LB-52
+    late_wait_busy_worker,
+    pool_limit_wrap,
     late_pool_child_runs,
     late_dedicated_child_runs,
     main_waits_dedicated_child,
@@ -1406,6 +1409,9 @@ cases!(
     shutdown_during_connect,
     shutdown_after_queued_write,
     shutdown_after_connect,
+    // tests/cases/net (fixes-15: the networking hunt's LB-50, LB-51)
+    shutdown_during_slow_connect,
+    wait_readable_eof,
     // tests/cases/net (net-threads)
     clients_in_tasks,
     socket_across_tasks,

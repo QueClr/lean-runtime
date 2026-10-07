@@ -1,0 +1,8 @@
+the peer shut down, nothing sent
+waitReadable: ok false
+recv? 16: ok none
+the peer sent hello, then shut down
+waitReadable: ok true
+recv? 16: ok some some "hello"
+waitReadable: ok false
+recv? 16: ok none

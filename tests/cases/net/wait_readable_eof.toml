@@ -1,0 +1,12 @@
+id = "wait_readable_eof"
+area = "net"
+lean_version = "4.34.0"
+source = "the networking hunt, HN-03; the line \"waitReadable at end of file\" of case tcp_errors, moved here"
+streams = "separate"
+deviations = { lean2rr = "LB-51", leanrs = "LB-51; DV2" }
+native = { stdout = "the peer shut down, nothing sent\nwaitReadable: ok true\nrecv? 16: ok none\nthe peer sent hello, then shut down\nwaitReadable: ok true\nrecv? 16: ok some some \"hello\"\nwaitReadable: ok true\nrecv? 16: ok none\n", stderr = "", code = "0" }
+# `expected` is the correct outcome (LB-51: the docstring's `false` once
+# the socket is closed with nothing to read); native's, `native`, is `true`
+# at the end of the stream as well. With bytes unread, the end of the
+# stream behind them, both give `true`.
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

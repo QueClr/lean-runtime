@@ -15,7 +15,10 @@
 //! count of socket callbacks, the loop lock's waiters). Loopback only.
 
 use super::tcp::TcpSocket;
-use super::tests::{bind_again, bound_outside_ephemeral, fd_open_to, socket_inode};
+use super::tests::{
+    bind_again, bound_outside_ephemeral, fd_open_to, full_listener, full_listener_on, received,
+    socket_inode,
+};
 use super::udp::UdpSocket;
 use super::*;
 use crate::sched::mt::test_serial;
@@ -63,12 +66,18 @@ type Received = Result<Option<(Vec<u8>, usize)>, IoError>;
 /// A receive's `done` that reports the bytes read.
 fn bytes_reporter(tx: Sender<Seen>) -> impl FnOnce(Received) + Send {
     move |r| {
-        let shown = match r {
-            Ok(Some((v, _))) => format!("some {}", String::from_utf8_lossy(&v)),
-            Ok(None) => "none".into(),
-            Err(e) => format!("{e:?}"),
-        };
-        let _ = tx.send((shown, uv::on_loop_thread()));
+        let _ = tx.send((received(r), uv::on_loop_thread()));
+    }
+}
+
+/// A `done` closure that reports its result after `tag`, so that the
+/// operations of one socket can share a channel, which keeps their order.
+fn tagged<T: std::fmt::Debug>(
+    tag: &'static str,
+    tx: Sender<Seen>,
+) -> impl FnOnce(Result<T, IoError>) + Send {
+    move |r| {
+        let _ = tx.send((format!("{tag} {r:?}"), uv::on_loop_thread()));
     }
 }
 
@@ -704,5 +713,196 @@ fn mt_no_callback_after_finish_within_an_iteration() {
             "recv starts (finish returned: false)",
             "recv returns (finish returned: true)"
         ]
+    );
+}
+
+/// LB-50 (hunt HN-01, HN-02) in threads mode: a `shutdown` requested while
+/// the connect is really in progress (its SYN dropped by a full accept
+/// queue) leaves the connect pending on the loop thread; once the
+/// connection exists, the connect resolves `ok` there, then the shutdown,
+/// which sends FIN.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn mt_a_shutdown_during_a_slow_connect_waits_for_the_connection() {
+    let _s = test_serial();
+    let (l, _queue) = full_listener();
+    let addr = l.local_addr().unwrap();
+    let c = TcpSocket::new().unwrap();
+    let (ctx, crx) = channel();
+    c.connect(addr, reporter::<()>(ctx)).unwrap();
+    let (stx, srx) = channel();
+    c.shutdown(reporter::<()>(stx)).unwrap();
+    // the shutdown's feed runs on the loop thread meanwhile
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        crx.try_recv().is_err(),
+        "the connect waits for the connection"
+    );
+    assert!(
+        srx.try_recv().is_err(),
+        "the shutdown waits for the connect"
+    );
+    // free the queue: the SYN sent again is taken
+    for _ in 0..2 {
+        drop(l.accept().unwrap());
+    }
+    assert_eq!(crx.recv_timeout(LONG).unwrap(), ("Ok(())".into(), true));
+    assert_eq!(srx.recv_timeout(LONG).unwrap(), ("Ok(())".into(), true));
+    let (mut peer, _) = l.accept().unwrap();
+    peer.set_read_timeout(Some(LONG)).unwrap();
+    assert_eq!(peer.read(&mut [0; 8]).unwrap(), 0, "the shutdown sent FIN");
+    assert_eq!(c.peer_name().unwrap(), addr);
+}
+
+/// LB-50's failure path in threads mode (review RF15-B01): the connect
+/// stays pending while the SYN is dropped; then the listener and its queue
+/// go away, so the SYN sent again gets a reset. On the loop thread the
+/// connect resolves with `ECONNREFUSED`, then the shutdown queued behind it
+/// with `ECANCELED` (LB-28). The listener's port is outside the ephemeral
+/// range, so no parallel test's bind to port 0 can take it once closed.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn mt_a_slow_connect_that_fails_fails_the_shutdown_behind_it() {
+    let _s = test_serial();
+    let ((l, queue), addr) = bound_outside_ephemeral(full_listener_on);
+    let c = TcpSocket::new().unwrap();
+    let (tx, rx) = channel();
+    c.connect(addr, tagged::<()>("connect", tx.clone()))
+        .unwrap();
+    c.shutdown(tagged::<()>("shutdown", tx)).unwrap();
+    // the shutdown's feed runs on the loop thread meanwhile
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        rx.try_recv().is_err(),
+        "the connect waits for the connection"
+    );
+    // close the listener: the SYN sent again gets a reset
+    drop(queue);
+    drop(l);
+    assert_eq!(
+        rx.recv_timeout(LONG).unwrap(),
+        (format!("connect {:?}", with_code(UV_ECONNREFUSED)), true)
+    );
+    assert_eq!(
+        rx.recv_timeout(LONG).unwrap(),
+        (format!("shutdown {:?}", with_code(UV_ECANCELED)), true)
+    );
+    assert!(c.peer_name().is_err(), "no connection");
+}
+
+/// LB-50 with a receive pending, in threads mode (review RF15-B01): a
+/// `recv?` started while the slow connect is pending, then a `shutdown`.
+/// Once the connection exists, the connect resolves `ok` on the loop
+/// thread, the shutdown sends FIN and resolves `ok`, the receive gets the
+/// peer's bytes, and the peer reads the end of the stream.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn mt_a_receive_pending_during_a_slow_connect_gets_the_bytes() {
+    let _s = test_serial();
+    let (l, _queue) = full_listener();
+    let addr = l.local_addr().unwrap();
+    let c = TcpSocket::new().unwrap();
+    let (tx, rx) = channel();
+    c.connect(addr, tagged::<()>("connect", tx.clone()))
+        .unwrap();
+    let rtx = tx.clone();
+    c.recv(
+        || Vec::with_capacity(16),
+        move |r: Received| {
+            let _ = rtx.send((format!("recv {}", received(r)), uv::on_loop_thread()));
+        },
+    )
+    .unwrap();
+    c.shutdown(tagged::<()>("shutdown", tx)).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        rx.try_recv().is_err(),
+        "the connect waits for the connection"
+    );
+    // free the queue: the SYN sent again is taken
+    for _ in 0..2 {
+        drop(l.accept().unwrap());
+    }
+    let (mut peer, _) = l.accept().unwrap();
+    peer.write_all(b"hi").unwrap();
+    for want in ["connect Ok(())", "shutdown Ok(())", "recv some hi"] {
+        assert_eq!(rx.recv_timeout(LONG).unwrap(), (want.into(), true));
+    }
+    peer.set_read_timeout(Some(LONG)).unwrap();
+    assert_eq!(peer.read(&mut [0; 8]).unwrap(), 0, "the shutdown sent FIN");
+}
+
+/// LB-51 (hunt HN-03) in threads mode: `waitReadable` is `true` with bytes
+/// unread (the end of the stream behind them), `false` at the end of the
+/// stream with nothing left, and consumes nothing.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn mt_wait_readable_is_false_at_the_end_of_the_stream() {
+    let _s = test_serial();
+    let (c, mut peer) = pair();
+    peer.write_all(b"hi").unwrap();
+    peer.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(wait_readable_of(&c), ("Ok(true)".into(), true));
+    assert_eq!(recv_of(&c), ("some hi".into(), true));
+    assert_eq!(wait_readable_of(&c), ("Ok(false)".into(), true));
+    assert_eq!(wait_readable_of(&c), ("Ok(false)".into(), true));
+    assert_eq!(recv_of(&c), ("none".into(), true));
+}
+
+/// `waitReadable` on `c`, waited for: its outcome's text, and whether it
+/// resolved on the loop thread.
+fn wait_readable_of(c: &TcpSocket) -> Seen {
+    let (tx, rx) = channel();
+    c.wait_readable(reporter::<bool>(tx)).unwrap();
+    rx.recv_timeout(LONG).unwrap()
+}
+
+/// `recv? 16` on `c`, waited for, as [`wait_readable_of`].
+fn recv_of(c: &TcpSocket) -> Seen {
+    let (tx, rx) = channel();
+    c.recv(|| Vec::with_capacity(16), bytes_reporter(tx))
+        .unwrap();
+    rx.recv_timeout(LONG).unwrap()
+}
+
+/// LB-51 in threads mode (review RF15-B02): after `recv?` has given
+/// `none` (the peer's shutdown, nothing sent), `waitReadable` gives
+/// `false`, as often as asked, and `recv?` still gives `none`.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn mt_wait_readable_after_recv_gave_none_is_false() {
+    let _s = test_serial();
+    let (c, peer) = pair();
+    peer.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(recv_of(&c), ("none".into(), true));
+    assert_eq!(wait_readable_of(&c), ("Ok(false)".into(), true));
+    assert_eq!(recv_of(&c), ("none".into(), true));
+    assert_eq!(wait_readable_of(&c), ("Ok(false)".into(), true));
+}
+
+/// LB-51 in threads mode (review RF15-B02): a reset is not the end of the
+/// stream. The peer closes with bytes it has not read, so its kernel sends
+/// a reset: `waitReadable` gives `true` (the pending error, as natively),
+/// again `true` (it consumes nothing), and `recv?` then fails with
+/// `ECONNRESET`.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn mt_wait_readable_is_true_after_a_reset() {
+    let _s = test_serial();
+    let (c, peer) = pair();
+    let (tx, rx) = channel();
+    c.send(vec![b"unread".to_vec()], reporter::<()>(tx))
+        .unwrap();
+    assert_eq!(rx.recv_timeout(LONG).unwrap(), ("Ok(())".into(), true));
+    // the bytes reach the peer's receive queue; closed with them unread,
+    // its socket sends a reset
+    std::thread::sleep(Duration::from_millis(50));
+    drop(peer);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(wait_readable_of(&c), ("Ok(true)".into(), true));
+    assert_eq!(wait_readable_of(&c), ("Ok(true)".into(), true));
+    assert_eq!(
+        recv_of(&c),
+        (received(Err(uv_error(-crate::io::error::ECONNRESET))), true)
     );
 }

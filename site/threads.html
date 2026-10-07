@@ -134,6 +134,7 @@ The loop thread exists only after the program's first use of <code>Std.Internal.
   <li><strong>One lock</strong> protects the task table and the queues, as in native's task manager.</li>
   <li><strong>Waits.</strong> A pool task that waits in <code>Task.get</code> or <code>IO.wait</code> raises the pool's limit by one while it waits.
     So waiting tasks cannot take every worker and starve the pool.
+    The raised limit stops at its maximum, where native's limit wraps to 0 (<a href="lean-bugs.html#lb-52">LB-52</a>).
     <code>IO.waitAny</code> keeps its worker, as natively.</li>
   <li><strong>Dependents.</strong> A <a href="glossary.html#g-sync-dependent">sync dependent</a> runs on the thread that finishes its source.
     The other dependents go to the queue.
@@ -214,7 +215,7 @@ Each socket has a lock of its own, which only the holder of the loop lock takes.
 
 <h2 id="differences">Known differences</h2>
 <ul>
-  <li><strong>Native bugs are not copied.</strong> LB-01, LB-13, LB-18 and LB-32 stay fixed, as in the single-thread scheduler.
+  <li><strong>Native bugs are not copied.</strong> LB-01, LB-13, LB-18, LB-32 and LB-52 stay fixed, as in the single-thread scheduler.
     So do the loop's LB-19, LB-20, LB-33 and LB-34 (<a href="lean-bugs.html">Lean bugs</a>).</li>
   <li><strong>After the exit's wait</strong> there is no task manager, as natively.
     A few native calls then use a null manager.

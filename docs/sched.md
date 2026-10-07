@@ -249,6 +249,19 @@ such gap: its workers run
 every queued task, the new source included, and the source's walk queues
 the bind task again.
 
+A pure bind task released while it runs that a dependent still holds
+(`release` marks it deleted and canceled, and it runs on as a started
+one) continues when its function returns `Continue`, as an unreleased
+task does: it waits for the new task, then runs its continuation, and its
+dependents get its value. It keeps its deletion, so its finish notifies no
+waiter, and its cancel, which its dependents inherit. Both modes follow
+this rule (review RF15-A01; threads mode's hunt HMT-04). Before the fix
+the single-thread scheduler freed such a task at `bind_wait` (a debug
+build failed the assertion of `free_entry`), dropped its continuation, and
+left its dependents linked to the freed entry, which a later task could
+reuse. No translator releases a task that a dependent's job still holds.
+Unit test `hmt_04_a_held_released_bind_task_continues`, in each mode.
+
 ### What a waiter or a poller runs on its own stack (sched-3)
 
 Natively a waiter's thread sleeps, and a free worker takes the queue's
@@ -1539,8 +1552,25 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    }
    ```
    The optional hooks, for the glue's own per-thread and per-task state:
-   - `switched(from, to)`: the running context changes;
-   - `task_begin` and `task_end`: a task begins and ends.
+   - `switched(from, to)`: the running context changes. Inside it,
+     `sched::switch_is_event_loop()` says whether the side that is not
+     `MAIN` is the event loop's context: that context ends when no
+     callback is due and a new one, on any free id, runs the next
+     callbacks, while natively libuv's loop is one thread, so a glue keeps
+     one record of its per-thread state for the loop, as the hub does for
+     the io layer's (`slots`; lean2rr's hunt HST-01: a stream that one
+     callback's `sync` dependent set was gone for a later callback);
+   - `task_begin` and `task_end`: a task begins and ends. A deleted bind
+     task's continuation is dropped before its `task_end`, while the
+     task's emulated thread still runs (natively `run_task` frees a deleted
+     task on its worker's thread; hunt HST-04). A limit: during that drop
+     the pool's accounting no longer counts the task's worker (`in_use`,
+     `loop_carries_thread`), where natively the worker is busy in
+     `free_task`; so a drop that resolves a promise whose `sync` dependent
+     waits for a queued pool task can start that task on a context of its
+     own at `LEAN_NUM_THREADS=1`, where natively the program hangs, and in
+     the final run on the loop context's stack `final_next` may end while
+     the drop waits (review RF15-C04; older than HST-04).
 
    The io layer's per-thread state, the current standard streams
    (`IO.setStdout` & co.) and the modelled `errno`, is the scheduler's (with
@@ -1712,22 +1742,38 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      seen it): it is the caller's code, so `in_sync_task` answers for the
      caller, and a `Task.get` in it prints that panic only where the caller
      is a `sync` task (review RF14-03; the task is marked `FAST`). So do
-     `IO.checkCanceled` (the caller's flag) and the worker it holds while
-     it waits: a pool caller's wait in it frees the caller's worker, as
+     `IO.checkCanceled` (the caller's flag), whether a task it creates or
+     a promise it resolves after `main` returned could have started before
+     the shutdown flag was set (the caller's `EARLY` emulation: once the
+     caller has seen the flag, so has the function, review AR-53), and the
+     worker it holds while it waits: a pool caller's wait in it frees the
+     caller's worker, as
      native `wait_for` does for the pool task the function natively runs
      in (with one worker, a wait for a queued task runs that task; the
      driver's program `rf14_fast_pool_caller_waits`, which hung before; unit
-     test `a_dependent_run_at_once_checks_its_callers_cancel`). The
-     signature and the result are unchanged: the id of the task, whose job
-     has run: for a map, it has finished, its value already in the glue's
-     slot; for a bind whose function returned an unfinished task, it waits
-     for that task. So `depend` runs translator code: the glue holds no
+     test `a_dependent_run_at_once_checks_its_callers_cancel`). So do the
+     lone worker's rules: a task the function queues on `main` wakes the
+     idle worker, as an enqueue by `main` does, and a task its wait runs on
+     the stack of a context whose own code called `depend` (`main`'s, a
+     loop callback's) is the lone worker's, which picks the next task when
+     it ends (review RF15-A03; unit test
+     `a_dependent_run_at_once_on_main_is_mains_code_for_the_lone_worker`).
+     The rules ask whether the code runs on the context's own thread (the
+     innermost running task's thread depth is 0, `on_own_thread`), so a
+     `sync` dependent of a promise `main` resolves, which natively runs on
+     `main`'s thread, counts as `main`'s code too (review RF15-C02; unit
+     test `a_sync_dependent_on_mains_thread_wakes_the_idle_worker`).
+     The signature and the result are unchanged: the id of the task, whose
+     job has run: for a map, it has finished, its value already in the
+     glue's slot; for a bind whose function returned an unfinished task, it
+     waits for that task. So `depend` runs translator code: the glue holds no
      borrow across it that the job could need. Likewise a `sync` bind task whose function returned a task that
      has finished by the time the bind task waits for it (the writers point
      at the job's end) runs on at once, on the thread of its first run
      (review RF14-04), instead of being queued. Unit tests
      `depend_runs_a_sync_dependent_of_a_finished_source_at_once`,
      `a_dependent_run_at_once_waits_as_its_caller`,
+     `a_dependent_run_at_once_is_late_once_its_caller_checked`,
      `a_sync_bind_task_whose_task_has_finished_runs_on_at_once` and
      `a_sync_bind_task_runs_on_on_the_thread_of_its_first_run`; the
      driver's program `rf14_depend_fast_path` (`process/handoff_then_sync_map`
@@ -2142,7 +2188,13 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
     - so a drain's end now lets other contexts run whenever its context
       has a writer that runs: `DrainScope`'s outermost drop, and lean2rr's
       drained hook, switch then (they could already switch in
-      `run_deferred`);
+      `run_deferred`). Glue state that lives across such a drop must be
+      each context's own (moved in `Glue::switched`) or read before it: a
+      primitive that records its outcome in a slot of the glue, then
+      releases its arguments, can switch in that release when a handle's
+      last reference goes, and the program read another context's outcome
+      (lean2rr's hunt HCO-01: its last-error slot, now exchanged at each
+      switch);
     - it waits for nothing inside a no-suspend scope (a drain nested in an
       outer one: the outer drain's end waits), while the context holds a
       stream lock, or while a panic unwinds; the next writers point waits
@@ -2161,7 +2213,9 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
     drain handed off after the entry (ids from its mark up to the walk's
     start), and runs it with those skipped by every writers point, its
     `sync` dependents' included (`io::coop::skip_writers`; an exit, which
-    natively flushes the still open stream, waits for them). Then
+    natively flushes the still open stream, waits for them, and
+    `forceExit`, natively `_Exit`, which discards that stream's buffer,
+    does not: hunt HCO-02). Then
     `after_drain` waits for the rest. The list is moved out before any
     wait, so no entry is queued at a switch (R6). Case
     `process/deferred_resolve_before_handoff` (one free drops `#[stdin,
@@ -2184,6 +2238,25 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
     native's mirror: `#[stdin, p]` then behaves as natively `#[p, stdin]`
     does. That is the translator's own free order (leanrs: its DV11), not
     the crate's.
+
+    **What `forceExit` in a skip window still shows** (review RF15-A05).
+    `forceExit` does not wait for a writer of a skip window, but bytes of
+    that stream can still reach the output, where native `_Exit` discards
+    its whole buffer: natively the stream's free had not come yet, so none
+    of its bytes were written. Here the drop came during the drain: its
+    `flush_nowait` wrote what the descriptor took without blocking, and
+    the writer thread writes the rest until `std::process::exit` ends the
+    process. So the output can hold some or all of those bytes. This
+    difference remains.
+
+    **Parked option** (review RF15-A05). A full emulation holds the bytes
+    of every hand-off made after a deferred entry's mark, the drop's
+    non-blocking flush included, until that entry's resolution ends: a
+    `forceExit` inside the resolution then discards them, as `_Exit` does,
+    and the end of the resolution writes them otherwise. It changes the
+    drop path of every stream that a drain with deferred entries drops,
+    for a difference that only a program that forces the exit from a
+    deferred resolution (its `sync` dependents included) can see. Parked.
 
     Cases (recorded natively): `process/handoff_then_sync_map` (the
     hand-off, then `IO.mapTask (sync := true)` over a task that finishes

@@ -105,7 +105,8 @@ pub trait Glue {
     /// swaps itself, with the feature `io` (`slots`, review AR-24): the glue
     /// must not swap `io::streams` too. Runs on `main`'s stack, before `to`
     /// runs or after `from` has stopped: it must not block or yield. A panic
-    /// in it aborts the process.
+    /// in it aborts the process. [`switch_is_event_loop`] says whether the
+    /// side that is not `MAIN` is the event loop's context.
     fn switched(&self, _from: CtxId, _to: CtxId) {}
 
     /// A task starts running. `own_thread`: natively on a thread of its own
@@ -819,6 +820,22 @@ thread_local! {
     /// block or yield now (`switch_away`), since the code runs on `main`'s
     /// stack whatever context is about to run (docs/sched.md, S4).
     static IN_HUB_HOOK: Cell<bool> = const { Cell::new(false) };
+    /// While the hub runs `switched`: the context it switches to or from
+    /// (the side that is not `MAIN`) is the event loop's
+    /// ([`switch_is_event_loop`]).
+    static SWITCH_LOOP: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Inside [`Glue::switched`]: whether the context that is not [`MAIN`] (every
+/// switch goes through `main`'s context) is the event loop's, the one that
+/// natively is libuv's loop thread. The loop's context ends when no
+/// callback is due and a new one starts for the next callbacks, on any free
+/// id, so a glue that keeps per-thread state of its own (lean2rr's current
+/// standard streams) keeps one record for the loop and gives it to the next
+/// loop context, as the scheduler does with the io layer's (`slots`;
+/// lean2rr's hunt HST-01). False outside `switched`.
+pub fn switch_is_event_loop() -> bool {
+    SWITCH_LOOP.with(Cell::get)
 }
 
 /// The two ways to leave a context, `block` and `yield_now`, start here.
@@ -833,7 +850,7 @@ fn not_in_hub_hook() {
 /// aborts the process, after Rust's message: unwinding the hub with a
 /// context half switched would leave `main` blocked for good (review
 /// RS1S-12 of sched-1).
-fn hub_hook(f: impl FnOnce()) {
+fn hub_hook(event_loop: bool, f: impl FnOnce()) {
     struct Abort;
     impl Drop for Abort {
         fn drop(&mut self) {
@@ -845,9 +862,11 @@ fn hub_hook(f: impl FnOnce()) {
         }
     }
     IN_HUB_HOOK.with(|h| h.set(true));
+    SWITCH_LOOP.with(|h| h.set(event_loop));
     let abort = Abort;
     f();
     std::mem::forget(abort);
+    SWITCH_LOOP.with(|h| h.set(false));
     IN_HUB_HOOK.with(|h| h.set(false));
 }
 
@@ -862,13 +881,15 @@ fn hub() {
                 // context's run during its step as work (`task::final_next`)
                 let other = with(|s| s.loop_step_other(n)).then(Instant::now);
                 let g = glue();
+                // whether `n` is the event loop's, once for both switches (it
+                // may end there, which clears the loop's context)
+                let event_loop = with(|s| s.is_loop_ctx(n));
                 // the context's standard streams and `errno` in, `main`'s
                 // aside (`slots`, review AR-24); back after it, also when a
                 // panic unwinds from it
                 #[cfg(feature = "io")]
-                let slots =
-                    super::slots::ContextSlots::enter(n.0 as usize, with(|s| s.is_loop_ctx(n)));
-                hub_hook(|| g.switched(MAIN, n));
+                let slots = super::slots::ContextSlots::enter(n.0 as usize, event_loop);
+                hub_hook(event_loop, || g.switched(MAIN, n));
                 // From here until `resume` returns, `n` is the running
                 // context (S2). A Rust panic in it unwinds to its base, and
                 // corosensei resumes it here, on `main`'s stack: the guard
@@ -882,7 +903,7 @@ fn hub() {
                 publish(None);
                 let ended = matches!(r, Some(CoroutineResult::Return(())));
                 with(|s| s.after_resume(n, &mut co.0, ended));
-                hub_hook(|| g.switched(n, MAIN));
+                hub_hook(event_loop, || g.switched(n, MAIN));
                 #[cfg(feature = "io")]
                 slots.leave(ended);
                 if let Some(t) = other {

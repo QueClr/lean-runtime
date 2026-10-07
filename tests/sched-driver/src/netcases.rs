@@ -46,6 +46,11 @@ pub const CASES: &[(&str, Case)] = &[
     ("shutdown_during_connect", (no_init, shutdown_connect)),
     ("shutdown_after_queued_write", (no_init, shutdown_connect)),
     ("shutdown_after_connect", (no_init, shutdown_connect)),
+    (
+        "shutdown_during_slow_connect",
+        (no_init, shutdown_during_slow_connect),
+    ),
+    ("wait_readable_eof", (no_init, wait_readable_eof)),
     ("clients_in_tasks", (no_init, clients_in_tasks)),
     ("socket_across_tasks", (no_init, socket_across_tasks)),
     (
@@ -445,10 +450,6 @@ fn tcp_errors(args: &[String]) -> u32 {
         });
         try_io("send after shutdown", || {
             tcp_send(&sc, vec![vec![1]]).map(|_| String::new())
-        });
-        try_io("waitReadable at end of file", || {
-            let p = tcp_wait_readable(&c)?;
-            Ok(then(&p, |b| b.to_string()))
         });
         try_io("recv? at end of file", || {
             let p = tcp_recv(&c, 100)?;
@@ -1304,6 +1305,147 @@ fn shutdown_connect(args: &[String]) -> u32 {
             ));
         }
         say("done");
+        Ok(())
+    })())
+}
+
+// ---------------------------------------------------------------------------
+// shutdown_during_slow_connect (the networking hunt's HN-01 and HN-02; LB-50)
+
+/// `st p`: `pending`, or the promise's outcome.
+fn st<T: Val>(p: &P<T>) -> String {
+    if is_resolved(p) {
+        match wait(p) {
+            Some(Ok(_)) => "ok".into(),
+            Some(Err(e)) => format!("error: {}", error_text(&e)),
+            None => "dropped".into(),
+        }
+    } else {
+        "pending".into()
+    }
+}
+
+/// `recvRes r` of this case.
+fn slow_recv_res(r: Option<R<Option<Vec<u8>>>>) -> String {
+    match r {
+        None => "dropped".into(),
+        Some(Ok(None)) => "none (end of stream)".into(),
+        Some(Ok(Some(b))) => format!("some {} bytes", b.len()),
+        Some(Err(e)) => format!("error: {}", error_text(&e)),
+    }
+}
+
+fn shutdown_during_slow_connect(_: &[String]) -> u32 {
+    run((|| {
+        let lo = std::net::Ipv4Addr::new(127, 0, 0, 1);
+        let srv = new_tcp();
+        srv.bind(at4(lo, 0))?;
+        srv.listen(1)?;
+        let port = srv.sock_name()?.port();
+        let addr = at4(lo, port);
+        // the loop accepts c1; c2 and c3 fill the kernel's accept queue
+        let mut cs = Vec::new();
+        for _ in 0..3 {
+            let c = new_tcp();
+            get(tcp_connect(&c, addr)?)?;
+            sleep(100);
+            cs.push(c);
+        }
+        // c4's SYN is dropped: its connect stays in progress
+        let c4 = new_tcp();
+        let pc = tcp_connect(&c4, addr)?;
+        sleep(200);
+        println(&format!("connect before shutdown: {}", st(&pc)));
+        let ps = tcp_shutdown(&c4)?;
+        sleep(300);
+        println(&format!("connect after shutdown: {}", st(&pc)));
+        println(&format!("shutdown: {}", st(&ps)));
+        // free the queue: the three connections are accepted and dropped
+        for _ in 0..3 {
+            let _ = get(tcp_accept(&srv)?)?;
+        }
+        // the fourth connection, looked for up to 5 s, and kept
+        let mut fourth = None;
+        for _ in 0..50 {
+            match srv.try_accept() {
+                Ok(Some(s)) => {
+                    fourth = Some(s);
+                    break;
+                }
+                _ => sleep(100),
+            }
+        }
+        drop(srv);
+        match &fourth {
+            None => println("server: no fourth connection"),
+            Some(_) => println("server: a fourth connection arrived"),
+        }
+        match c4.peer_name() {
+            Ok(a) => println(&format!(
+                "c4 getPeerName: ok, port matches {}",
+                a.port() == port
+            )),
+            Err(e) => println(&format!("c4 getPeerName: {}", error_text(&e))),
+        }
+        drop(c4);
+        println(&format!("connect at the end: {}", st(&pc)));
+        drop(pc);
+        println(&format!("shutdown at the end: {}", st(&ps)));
+        drop(ps);
+        if let Some(s4) = fourth {
+            let p = tcp_recv(&s4, 16)?;
+            drop(s4);
+            println(&format!("server recv?: {}", wait_for(&p, slow_recv_res)));
+        }
+        println(&format!("clients kept: {}", cs.len()));
+        Ok(())
+    })())
+}
+
+// ---------------------------------------------------------------------------
+// wait_readable_eof (the networking hunt's HN-03; LB-51)
+
+fn show_wait(r: Option<R<bool>>) -> String {
+    match r {
+        None => "dropped".into(),
+        Some(Ok(b)) => format!("ok {b}"),
+        Some(Err(e)) => format!("error {}", error_text(&e)),
+    }
+}
+
+/// `waitR c`.
+fn wait_r(c: &TcpSocket) -> R<()> {
+    let r = wait(&tcp_wait_readable(c)?);
+    println(&format!("waitReadable: {}", show_wait(r)));
+    Ok(())
+}
+
+fn wait_readable_eof(_: &[String]) -> u32 {
+    run((|| {
+        // the peer shuts down its side without sending anything
+        println("the peer shut down, nothing sent");
+        let (s, c, peer) = pair()?;
+        drop(s);
+        let ps = tcp_shutdown(&peer)?;
+        drop(peer);
+        let _ = wait(&ps);
+        drop(ps);
+        wait_r(&c)?;
+        recv_n(&c, 16)?;
+        drop(c);
+        // the peer sends "hello", then shuts down its side
+        println("the peer sent hello, then shut down");
+        let (s2, d, peer2) = pair()?;
+        drop(s2);
+        let _ = wait(&tcp_send(&peer2, vec![b"hello".to_vec()])?);
+        let ps2 = tcp_shutdown(&peer2)?;
+        drop(peer2);
+        let _ = wait(&ps2);
+        drop(ps2);
+        wait_r(&d)?;
+        recv_n(&d, 16)?;
+        wait_r(&d)?;
+        recv_n(&d, 16)?;
         Ok(())
     })())
 }

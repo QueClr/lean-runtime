@@ -1,0 +1,9 @@
+connect before shutdown: pending
+connect after shutdown: pending
+shutdown: pending
+server: a fourth connection arrived
+c4 getPeerName: ok, port matches true
+connect at the end: ok
+shutdown at the end: ok
+server recv?: none (end of stream)
+clients kept: 3

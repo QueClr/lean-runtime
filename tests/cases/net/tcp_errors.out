@@ -38,7 +38,6 @@ shutdown, then ok
 the client read 33554432 bytes, then end of file
 shutdown after it: invalid argument (error code: 107, socket is not connected)
 send after shutdown: resource vanished (error code: 32, broken pipe)
-waitReadable at end of file: ok, then true
 recv? at end of file: ok, then none
 recv? at end of file again: ok, then none
 send to the half-closed peer: ok, then ok

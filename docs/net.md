@@ -53,7 +53,8 @@ promise. Here:
   `sendmmsg`, the socket options. Where libuv's loop thread makes them,
   a callback on the scheduler's loop context does: reads, the rest of a
   write, `accept4`, `shutdown(2)` after the queued writes, `SO_ERROR`
-  after a connect.
+  after a connect (and `getpeername` when it is 0: a socket still in the
+  handshake keeps its connect pending, LB-50).
 - **libuv's io watcher** is a `sched::watch` of the socket's descriptor
   (the watch holds a clone of the socket's `Rc<OwnedFd>` until it ends, and
   the socket's number, not the socket: "Ownership" below),
@@ -214,8 +215,8 @@ Example (the state the unit test
 ## What a program sees
 
 TCP (cases `tcp_echo`, `tcp_errors`, `tcp_v6`, `keepalive_zero_delay`,
-`recv_zero_*`, `accept_parallel*`, `shutdown_*`; from several tasks,
-`clients_in_tasks` and `socket_across_tasks`):
+`recv_zero_*`, `wait_readable_eof`, `accept_parallel*`, `shutdown_*`; from
+several tasks, `clients_in_tasks` and `socket_across_tasks`):
 - A new socket has no descriptor until `bind`, `connect` or `listen`: then
   `getPeerName`, `getSockName` and `send` fail with `EBADF`, `recv?`,
   `waitReadable` and `shutdown` with `ENOTCONN`; `noDelay` and `keepAlive`
@@ -230,6 +231,12 @@ TCP (cases `tcp_echo`, `tcp_errors`, `tcp_v6`, `keepalive_zero_delay`,
   at a time: a second fails with `EALREADY` ("connection already in
   progress (error code: 114)"); a `shutdown` after one has finished fails
   with `ENOTCONN`.
+- `connect` resolves once the connection exists or has failed, also when
+  the handshake takes long (a SYN dropped by a full accept queue and sent
+  again about 1 s later: natively a `shutdown` made meanwhile resolves the
+  connect `ok` at once, LB-50). A `send` made meanwhile waits for it, as
+  libuv queues it; a `shutdown` made meanwhile waits for it too (natively
+  it never happens, LB-28).
 - `connect` to a closed port resolves with `ECONNREFUSED`; a second
   `connect` on that socket fails with `ECONNABORTED`. A second `connect` on
   a socket whose first connect succeeded succeeds (the kernel's answer), a
@@ -238,8 +245,9 @@ TCP (cases `tcp_echo`, `tcp_errors`, `tcp_v6`, `keepalive_zero_delay`,
   file (as often as asked), or an error. `recv? 0` waits until the socket
   is readable, then fails with `ENOBUFS` while bytes are unread (nothing is
   consumed), and gives `none` at the end of the stream (LB-26).
-  `waitReadable` resolves
-  `true` once the socket is readable, end of file included.
+  `waitReadable` waits until the socket is readable, then resolves `true`
+  while bytes are unread (nothing is consumed) and `false` at the end of
+  the stream (LB-51; natively `true` there too).
 - `accept` resolves at once with a connection the loop already accepted
   (libuv accepts one as it arrives, even with no `accept` pending), else
   with the next one; on a socket that is not listening it stays pending.
@@ -322,6 +330,8 @@ expected outcome is the correct one, native's in its `native` field):
 | LB-26 | `recv? 0` at the end of the stream fails with `ENOBUFS` | `none`, as the docstring says (with bytes unread: `ENOBUFS`, as natively) | `recv_zero_eof`, `recv_zero_data_eof` |
 | LB-27 | A DNS lookup finishing after `main` returned crashes the exit (SIGSEGV, about 2 runs in 5: `lean_promise_resolve` on the finalized task manager) | The exit waits for the lookup, as natively, and drops its answer; exit with `main`'s status | `dns_pending_at_exit` (`hand_written`) |
 | LB-28 | A `shutdown` requested while the `connect` is pending, with no write queued, never happens: the promise never resolves, no FIN, the socket is kept | The shutdown happens once the connect succeeds (behind any queued write); it fails with `ECANCELED` if the connect fails | `shutdown_during_connect` (controls `shutdown_after_queued_write`, `shutdown_after_connect`) |
+| LB-50 | A `shutdown` while the `connect` is still in the handshake (SYN_SENT) resolves the connect `ok` at once: its feed reads `SO_ERROR` 0 | The connect stays pending until the connection exists (`getpeername` succeeds) or fails; the shutdown then sends FIN (before the fix it aborted the attempt, hunt HN-01) | `shutdown_during_slow_connect` |
+| LB-51 | `waitReadable` at the end of the stream resolves `true` (no buffer is `UV_ENOBUFS` before any read) | `false`, as the docstring says (with bytes unread: `true`, as natively) | `wait_readable_eof` |
 
 Each spot is marked `LEAN-BUG LB-nn` in the source.
 

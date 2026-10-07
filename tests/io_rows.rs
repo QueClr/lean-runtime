@@ -276,7 +276,10 @@ fn report(lines: &[String]) -> ! {
 
 /// The decoder against Lean's `lean_decode_io_error` for every `errno` of the
 /// probe (0 to 140 and four larger codes), without and with a path. The probe
-/// skips 2 and 4 without a path, where native crashes (LB-03).
+/// skips 2 and 4 without a path, where native crashes (LB-03). Row 74,
+/// `EBADMSG`, is the corrected class, not the probe's native one (LB-47:
+/// native gives `protocolError`, where IOError.lean places it with
+/// `inappropriateType`; `src/io/error_tests.rs` row 74 does the same).
 #[test]
 fn io_error_classes() {
     let text = data("errno.txt");
@@ -285,6 +288,22 @@ fn io_error_classes() {
         let (e, rest) = line.split_once(": ").unwrap();
         let (none, some) = rest.split_once(" | ").unwrap();
         let e: i32 = e.parse().unwrap();
+        let (none, some) = if e == 74 {
+            assert_eq!(
+                (none, some),
+                (
+                    r#"ProtocolError(74, "protocol error")"#,
+                    r#"ProtocolError(74, "protocol error")"#
+                ),
+                "the probe's native row 74"
+            );
+            (
+                r#"InappropriateType(None, 74, "protocol error")"#,
+                r#"InappropriateType(Some("p"), 74, "protocol error")"#,
+            )
+        } else {
+            (none, some)
+        };
         if none != "-" {
             assert_eq!(desc(&IoError::decode_io_error(e, None)), none, "errno {e}");
         }

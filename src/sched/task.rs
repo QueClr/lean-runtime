@@ -691,9 +691,57 @@ impl Sched {
         self.find(id).map(|i| self.ent(i).queued_at)
     }
 
+    /// The lone worker (tests): whether it is waking up (`wake`), and the
+    /// task it picked (`worker`), if any.
+    #[cfg(test)]
+    pub(crate) fn lone_worker_for_test(&self) -> (bool, Option<TaskId>) {
+        let w = self.tk.worker;
+        (self.tk.wake.is_some(), (w != NONE).then(|| self.id_of(w)))
+    }
+
+    /// The worker waking up, if any, takes another hour to wake (tests): it
+    /// picks no task by itself meanwhile (`settle_worker`).
+    #[cfg(test)]
+    pub(crate) fn hold_wake_for_test(&mut self) {
+        if self.tk.wake.is_some() {
+            self.tk.wake = Some(Instant::now() + Duration::from_secs(3600));
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn age_ticks_for_test(&mut self, d: Duration) {
         self.tk.tick0 = self.tk.tick0.checked_sub(d).expect("a clock that old");
+    }
+
+    /// The innermost running task whose code is running: dependents that
+    /// `depend` runs at once (`FAST`) are passed over, as they are the
+    /// caller's code (Lean's fast path, review RF14-03). Its flags answer
+    /// for them: its cancel, its `sync`, and whether it could still be
+    /// running before Lean's shutdown flag was set (review AR-53: a fast
+    /// dependent's own `CHECKED` is clear, so a task it created after its
+    /// caller saw the flag was early). `None` while the context's own code
+    /// runs (`main`'s, a loop callback's), fast dependents of it included.
+    fn caller(&self) -> Option<u32> {
+        self.st_ref()
+            .running
+            .iter()
+            .rev()
+            .copied()
+            .find(|&r| self.ent(r).flags & FAST == 0)
+    }
+
+    /// Whether the code running now is on the context's own thread (`main`'s
+    /// thread for `main`'s context): no task runs, or the innermost one runs
+    /// on that thread (thread depth 0, `Entry::aux`): a dependent that
+    /// `depend` runs at once (`FAST`), a `sync` dependent of a walk that
+    /// code made (a promise it resolved). For the lone worker's rules
+    /// (`enqueue`, `end`): natively such code runs on that thread, not on a
+    /// worker's (reviews RF15-A03, RF15-C02).
+    fn on_own_thread(&self) -> bool {
+        self.st_ref()
+            .running
+            .last()
+            .is_none_or(|&r| self.ent(r).aux[0] == 0)
     }
 
     /// Whether running task `i` could still be running before Lean's
@@ -716,10 +764,8 @@ impl Sched {
         if !keep_alive {
             flags |= PURE;
         }
-        if let Some(&r) = self.st_ref().running.last() {
-            if self.early_now(r) {
-                flags |= EARLY;
-            }
+        if self.tk.shutting_down && self.caller().is_some_and(|r| self.early_now(r)) {
+            flags |= EARLY;
         }
         let i = self.alloc(Some(job), flags, p as usize);
         if !dep {
@@ -745,13 +791,16 @@ impl Sched {
         t.queued[p] += 1;
         t.elig[p] += u32::from(elig);
         // An enqueue by `main` wakes the idle worker (if one is free: tasks
-        // the scheduler started on contexts of their own hold workers).
+        // the scheduler started on contexts of their own hold workers). A
+        // dependent that `depend` runs at once on `main` (`FAST`) and a
+        // `sync` dependent of a promise `main` resolves run on `main`'s
+        // thread (`on_own_thread`, reviews RF15-A03, RF15-C02).
         if t.started
             && !t.shutting_down
             && t.worker == NONE
             && t.wake.is_none()
             && self.cx.cur == MAIN
-            && self.st_ref().running.is_empty()
+            && self.on_own_thread()
             && self.pool_in_use() < self.cx.pool_limit
         {
             self.tk.wake = Some(now);
@@ -1180,11 +1229,16 @@ impl Sched {
         let e = self.ent_mut(i);
         e.flags = FINISHED | (flags & !STATE);
         let base = flags & FROM_WALK == 0;
-        // The worker that ran it picks the next task once the walk is over.
+        // The worker that ran it picks the next task once the walk is over:
+        // the lone worker's task, or one the context's own code ran on its
+        // stack (after the pop, no task below it, or one on the context's
+        // own thread: a dependent that `depend` ran at once, `FAST`, or a
+        // `sync` dependent of that code's walk, `on_own_thread`, reviews
+        // RF15-A03, RF15-C02; such a task itself runs `ON_THREAD`).
         let t = &self.tk;
         let worker = t.worker == i
             || (t.worker == NONE
-                && self.st_ref().running.is_empty()
+                && self.on_own_thread()
                 && t.started
                 && !t.shutting_down
                 && flags & ON_THREAD == 0);
@@ -1218,7 +1272,14 @@ impl Sched {
     /// The running bind task `i` has run its function, which returned the
     /// unfinished task `src`: it stops running and waits for `src` (keeping
     /// its priority and flags), then runs `job`. A job to drop if the task
-    /// was deleted meanwhile (natively it is freed, `run_task`).
+    /// was deleted meanwhile (natively it is freed, `run_task`). A deleted
+    /// task that a dependent still holds (`deactivate`'s held rule: it runs
+    /// on as a started one) continues as an unreleased one, so its
+    /// dependents get its value; it keeps `DELETED` (its finish notifies no
+    /// waiter) and `CANCELED` (its dependents inherit the cancel), as in
+    /// threads mode (review RF15-A01, threads mode's hunt HMT-04: it was
+    /// freed with its dependents still linked, which waited for good on an
+    /// entry a later task could reuse).
     ///
     /// Its waiters look again (review HL2-01): one that blocked on `i`
     /// while it ran (`Wait::Cell`, also through a dependent of `i`), and
@@ -1246,7 +1307,7 @@ impl Sched {
             self.st().running.pop();
             self.refresh_holds(self.cx.cur);
         }
-        if self.ent(i).flags & DELETED != 0 {
+        if self.ent(i).flags & DELETED != 0 && self.ent(i).head_dep == NONE {
             let w = self.tk.worker == i;
             self.ent_mut(i).flags = 0;
             self.free_entry(i);
@@ -1303,10 +1364,7 @@ impl Sched {
     /// dependents are to be walked on the resolving thread, and its waiters
     /// wake as a finished task's do (`end`).
     fn resolve_promise(&mut self, i: u32) {
-        let early = match self.st_ref().running.last() {
-            Some(&r) => self.early_now(r),
-            None => false,
-        };
+        let early = self.tk.shutting_down && self.caller().is_some_and(|r| self.early_now(r));
         let gen = self.ent(i).gen;
         let canceled = self.ent(i).flags & CANCELED != 0;
         let e = self.ent_mut(i);
@@ -2504,15 +2562,7 @@ impl Sched {
     }
 
     fn check_canceled_now(&mut self) -> bool {
-        // a dependent `depend` runs at once is the caller's code (`FAST`,
-        // review RF14-03): the caller's flags answer
-        let st = self.st_ref();
-        let Some(&i) = st
-            .running
-            .iter()
-            .rev()
-            .find(|&&r| self.ent(r).flags & FAST == 0)
-        else {
+        let Some(i) = self.caller() else {
             return false;
         };
         let late = if self.tk.shutting_down {
@@ -2595,20 +2645,28 @@ fn run_task_once(i: u32) -> bool {
         }
         Outcome::Continue(t2, k) => with(|s| s.bind_wait(i, t2, k)),
     };
-    std::mem::forget(guard);
-    if let Some(g) = &g {
-        g.task_end(own);
-    }
-    match next {
+    let again = match next {
         BindNext::Drop(job) => {
             // a deleted bind task's continuation, dropped outside the
-            // scheduler's state and after the glue's `task_end`
+            // scheduler's state and before the glue's `task_end`: natively
+            // `run_task` frees a deleted task on the worker's thread, so the
+            // code its drop runs (a promise's resolution, its `sync`
+            // dependents) sees that thread's state, such as the worker's
+            // current streams, which `task_end` gives back (hunt HST-04;
+            // threads mode drops it there too)
             drop(job);
             false
         }
         BindNext::Wait => false,
         BindNext::RunNow => true,
+    };
+    // after the continuation's drop: a panic in it unwinds through the
+    // guard, which ends the task for the glue (review RF15-C01)
+    std::mem::forget(guard);
+    if let Some(g) = &g {
+        g.task_end(own);
     }
+    again
 }
 
 /// The emulated pool worker a running task occupies (`Sched::enter_worker`),
@@ -3137,25 +3195,19 @@ pub fn running_worker() -> Option<u32> {
     with(|s| s.cx.ctxs[s.cx.cur].worker)
 }
 
-/// Whether the innermost task running on this thread is a `sync` one: a
-/// `sync := true` dependent (native Lean runs it at its internal priority
-/// `LEAN_SYNC_PRIO`; no Lean priority makes a task `sync` here, LB-39).
+/// Whether the task whose code runs on this thread is a `sync` one: the
+/// innermost running task, passing over the dependents that `depend` ran
+/// at once, which are its code (`Sched::caller`, review RF14-03). A `sync`
+/// task is a `sync := true` dependent (native Lean runs it at its internal
+/// priority `LEAN_SYNC_PRIO`; no Lean priority makes a task `sync` here,
+/// LB-39).
 /// Native `Task.get` (and `IO.wait`) of an unfinished task from such a task
 /// prints `GET_IN_SYNC_TASK` as a Lean panic (which goes on, unless
 /// `LEAN_ABORT_ON_PANIC`) before it waits (`task_manager::wait_for`). The
 /// glue reproduces it: when its own slot for the task is still empty and
 /// this is true, it reports that Lean panic, then calls `wait`.
 pub fn in_sync_task() -> bool {
-    with(|s| {
-        // a dependent `depend` runs at once is the caller's code (`FAST`)
-        s.st_ref()
-            .running
-            .iter()
-            .rev()
-            .map(|&i| s.ent(i).flags)
-            .find(|f| f & FAST == 0)
-            .is_some_and(|f| f & SYNC != 0)
-    })
+    with(|s| s.caller().is_some_and(|i| s.ent(i).flags & SYNC != 0))
 }
 
 /// The thread the running code is on, as the scheduler tells threads apart

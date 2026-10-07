@@ -207,7 +207,11 @@ pub fn finish() {
 /// `lean_task_spawn_core(c, prio, keep_alive)`: `Task.spawn` (`keep_alive`
 /// false) and `IO.asTask` (true). Without a task manager (during module
 /// initialization, `LEAN_NUM_THREADS=0`, after `finish`) the job runs at
-/// once and the task is finished; above `Task.Priority.max` it runs on a
+/// once and the task is finished, unless it is a bind task whose function
+/// returned a task that has not finished (after `finish`: a promise
+/// unresolved then, a task waiting for one): it waits for that task, and
+/// its continuation runs once that task has finished (review RF15-A02);
+/// above `Task.Priority.max` it runs on a
 /// thread of its own; otherwise it is queued for the pool. `prio` is
 /// Lean's `Task.Priority`, the whole `Nat`: a glue passes a priority of
 /// 2^64 or more saturated to `u64::MAX`, never its low bits; 2^32 - 1 is a
@@ -220,11 +224,21 @@ pub fn spawn(job: Job, prio: u64, keep_alive: bool) -> TaskId {
     });
     match r {
         Ok(id) => id,
-        Err(job) => {
-            let _ = job();
-            TaskId::FINISHED
-        }
+        Err(job) => run_at_once(job),
     }
+}
+
+/// A job when no task manager has run (before `start`, or
+/// `LEAN_NUM_THREADS=0`): it runs at once, and so do a bind task's
+/// continuations (hunt HMT-03: the continuation was dropped, and the glue's
+/// slot left empty), since every task has finished then (no promise can
+/// exist without the manager), so the task each one continues as has.
+/// After `finish` a task can still be unfinished: `task::spawn` and
+/// `task::depend` run the job at once through the table then, where a
+/// `Continue` waits for such a task (review RF15-A02).
+fn run_at_once(job: Job) -> TaskId {
+    task::run_job_at_once(job);
+    TaskId::FINISHED
 }
 
 /// Whether a dependent of `src` is not a task at all: without a task
@@ -246,8 +260,10 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
 /// `src`'s value), as Lean's `add_dep`; when `src` finishes, a `sync`
 /// dependent runs there and then on the finishing thread, the others are
 /// queued. If `src` has finished already, it is queued now (a `sync` one
-/// runs now, here). Without a task manager, the job runs at once. `prio`
-/// as for `spawn`; only `sync` makes a `sync` dependent.
+/// runs now, here). Without a task manager, the job runs at once (after
+/// `finish`, once `src` has finished: here, or on the thread that resolves
+/// it; and a bind task's `Continue` as for `spawn`). `prio` as for
+/// `spawn`; only `sync` makes a `sync` dependent.
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId {
     let r = task::with_shared(|sh| match sh {
         Some(sh) => task::depend(sh, src, job, prio, sync, keep_alive),
@@ -255,10 +271,7 @@ pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) ->
     });
     match r {
         Ok(id) => id,
-        Err(job) => {
-            let _ = job();
-            TaskId::FINISHED
-        }
+        Err(job) => run_at_once(job),
     }
 }
 

@@ -59,7 +59,9 @@ mod uv_signals;
 mod wait;
 
 pub use common::{await_task, thread_create_failed};
-pub use ctx::{running_stack, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN};
+pub use ctx::{
+    running_stack, switch_is_event_loop, CtxId, Glue, StackBounds, Suspend, Yielder, MAIN,
+};
 pub use drain::{
     defer, deferred_pending, run_deferred, Deferred, DrainScope, RESOLVE_IN_NO_SUSPEND,
 };

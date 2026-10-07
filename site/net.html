@@ -125,7 +125,7 @@ For example, <code>localhost</code> with an empty service gives 127.0.0.1 three 
 </ul>
 
 <h2 id="bugs">Native bugs it does not copy</h2>
-<p>Eight native bugs are recorded as <a href="lean-bugs.html">Lean bugs</a> LB-21 to LB-28.
+<p>Ten native bugs are recorded as <a href="lean-bugs.html">Lean bugs</a>: LB-21 to LB-28, LB-50 and LB-51.
 Each has a case that expects the correct result.</p>
 <ul>
   <li>A second <code>accept</code> keeps the native event loop locked (LB-21).</li>
@@ -135,6 +135,8 @@ Each has a case that expects the correct result.</p>
   <li><code>recv? 0</code> at the end of the stream gives an error, not <code>none</code> (LB-26).</li>
   <li>A name lookup that ends during the exit can crash native (LB-27).</li>
   <li>A <code>shutdown</code> during a <code>connect</code> never happens natively (LB-28).</li>
+  <li>A <code>shutdown</code> during a slow <code>connect</code> makes the connect succeed before the connection exists (LB-50).</li>
+  <li><code>waitReadable</code> at the end of the stream gives <code>true</code>, not <code>false</code> (LB-51).</li>
 </ul>
 
 <h2 id="limits">Limits</h2>

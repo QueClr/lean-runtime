@@ -658,3 +658,349 @@ fn a_socket_dropped_with_a_feed_due_closes_at_once() {
     assert_eq!(callbacks_run(), before, "no callback of the socket ran");
     sched::finish();
 }
+
+/// A listener with a backlog of 1 (plain `listen(2)`: the crate's listener
+/// would accept the connections itself), and the two connections that fill
+/// its accept queue (Linux keeps up to one more than the backlog), so that
+/// the kernel drops the next SYN; its client sends it again about 1 s later.
+///
+/// Needs Linux 4.9 or later, which drops a SYN that comes while the accept
+/// queue is full; an accept queue of backlog + 1 connections; the first
+/// SYN sent again after about 1 s (the initial retransmission timeout); and
+/// at least one SYN sent again within the test's window
+/// (`net.ipv4.tcp_syn_retries` of 2 or more; Linux's default is 6).
+pub(super) fn full_listener() -> (std::net::TcpListener, [std::net::TcpStream; 2]) {
+    full_listener_on(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+        .expect("a loopback listener")
+}
+
+/// [`full_listener`] bound to `addr`, or `None` if the bind fails (the
+/// port is in use).
+pub(super) fn full_listener_on(
+    addr: SocketAddr,
+) -> Option<(std::net::TcpListener, [std::net::TcpStream; 2])> {
+    use rustix::net::{AddressFamily, SocketType};
+    let fd = rustix::net::socket(AddressFamily::INET, SocketType::STREAM, None).unwrap();
+    rustix::net::bind(&fd, &addr).ok()?;
+    rustix::net::listen(&fd, 1).unwrap();
+    let l = std::net::TcpListener::from(fd);
+    let a = l.local_addr().unwrap();
+    let queue = [
+        std::net::TcpStream::connect(a).unwrap(),
+        std::net::TcpStream::connect(a).unwrap(),
+    ];
+    Some((l, queue))
+}
+
+/// LB-50 (hunt HN-01, HN-02): a `shutdown` requested while the connect is
+/// really in progress (its SYN dropped by a full accept queue) leaves the
+/// connect pending: the shutdown's feed finds `SO_ERROR` 0 and no peer.
+/// Once the connection exists, the connect resolves `ok`, then the
+/// shutdown, which sends FIN: the peer reads the end of the stream (before
+/// the fix, the early `ok` shut the socket in SYN_SENT, which aborted the
+/// attempt).
+#[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[cfg_attr(miri, ignore)]
+fn a_shutdown_during_a_slow_connect_waits_for_the_connection() {
+    let _watch = watchdog("a_shutdown_during_a_slow_connect_waits_for_the_connection");
+    use std::cell::RefCell;
+    use std::io::Read;
+    start_loop();
+    let (l, _queue) = full_listener();
+    let addr = l.local_addr().unwrap();
+    let seen: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (s1, s2) = (seen.clone(), seen.clone());
+    let c = TcpSocket::new().unwrap();
+    let pc = sched::promise_new().unwrap();
+    c.connect(addr, move |r| {
+        s1.borrow_mut().push(format!("connect {r:?}"));
+        sched::resolve(pc, || {});
+    })
+    .unwrap();
+    let ps = sched::promise_new().unwrap();
+    c.shutdown(move |r| {
+        s2.borrow_mut().push(format!("shutdown {r:?}"));
+        sched::resolve(ps, || {});
+    })
+    .unwrap();
+    // the shutdown's feed runs on the loop meanwhile
+    sched::sleep_ms(300);
+    assert!(seen.borrow().is_empty(), "{:?}", seen.borrow());
+    // free the queue: the SYN sent again is taken
+    for _ in 0..2 {
+        drop(l.accept().unwrap());
+    }
+    sched::wait(ps);
+    assert_eq!(*seen.borrow(), ["connect Ok(())", "shutdown Ok(())"]);
+    let (mut peer, _) = l.accept().unwrap();
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    assert_eq!(peer.read(&mut [0; 8]).unwrap(), 0, "the shutdown sent FIN");
+    assert_eq!(c.peer_name().unwrap(), addr);
+    drop(c);
+    sched::finish();
+}
+
+/// LB-50's failure path (review RF15-B01): the connect stays pending while
+/// the SYN is dropped; then the listener and its queue go away, so the SYN
+/// sent again gets a reset. The connect resolves with `ECONNREFUSED`, then
+/// the shutdown queued behind it with `ECANCELED` (LB-28), and the socket
+/// has no peer. The listener's port is outside the ephemeral range, so no
+/// parallel test's bind to port 0 can take it once it is closed.
+#[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[cfg_attr(miri, ignore)]
+fn a_slow_connect_that_fails_fails_the_shutdown_behind_it() {
+    let _watch = watchdog("a_slow_connect_that_fails_fails_the_shutdown_behind_it");
+    use std::cell::RefCell;
+    start_loop();
+    let ((l, queue), addr) = bound_outside_ephemeral(full_listener_on);
+    let seen: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (s1, s2) = (seen.clone(), seen.clone());
+    let c = TcpSocket::new().unwrap();
+    c.connect(addr, move |r| {
+        s1.borrow_mut().push(format!("connect {r:?}"))
+    })
+    .unwrap();
+    let ps = sched::promise_new().unwrap();
+    c.shutdown(move |r| {
+        s2.borrow_mut().push(format!("shutdown {r:?}"));
+        sched::resolve(ps, || {});
+    })
+    .unwrap();
+    // the shutdown's feed runs on the loop meanwhile
+    sched::sleep_ms(300);
+    assert!(seen.borrow().is_empty(), "{:?}", seen.borrow());
+    // close the listener: the SYN sent again gets a reset
+    drop(queue);
+    drop(l);
+    sched::wait(ps);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            format!("connect {:?}", with_code(UV_ECONNREFUSED)),
+            format!("shutdown {:?}", with_code(UV_ECANCELED)),
+        ]
+    );
+    assert!(c.peer_name().is_err(), "no connection");
+    drop(c);
+    sched::finish();
+}
+
+/// LB-50 with a receive pending (review RF15-B01): a `recv?` started while
+/// the slow connect is pending, then a `shutdown`. Once the connection
+/// exists, the connect resolves `ok`, the shutdown sends FIN and resolves
+/// `ok`, the receive gets the peer's bytes, and the peer reads the end of
+/// the stream.
+#[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[cfg_attr(miri, ignore)]
+fn a_receive_pending_during_a_slow_connect_gets_the_bytes() {
+    let _watch = watchdog("a_receive_pending_during_a_slow_connect_gets_the_bytes");
+    use std::cell::RefCell;
+    use std::io::{Read, Write};
+    start_loop();
+    let (l, _queue) = full_listener();
+    let addr = l.local_addr().unwrap();
+    let seen: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (s1, s2, s3) = (seen.clone(), seen.clone(), seen.clone());
+    let c = TcpSocket::new().unwrap();
+    c.connect(addr, move |r| {
+        s1.borrow_mut().push(format!("connect {r:?}"))
+    })
+    .unwrap();
+    let pr = sched::promise_new().unwrap();
+    c.recv(
+        || Vec::with_capacity(16),
+        move |r| {
+            s3.borrow_mut().push(format!("recv {}", received(r)));
+            sched::resolve(pr, || {});
+        },
+    )
+    .unwrap();
+    c.shutdown(move |r| s2.borrow_mut().push(format!("shutdown {r:?}")))
+        .unwrap();
+    sched::sleep_ms(300);
+    assert!(seen.borrow().is_empty(), "{:?}", seen.borrow());
+    // free the queue: the SYN sent again is taken (the kernel ends the
+    // handshake; the loop does not run during these plain calls)
+    for _ in 0..2 {
+        drop(l.accept().unwrap());
+    }
+    let (mut peer, _) = l.accept().unwrap();
+    peer.write_all(b"hi").unwrap();
+    sched::wait(pr);
+    assert_eq!(
+        *seen.borrow(),
+        ["connect Ok(())", "shutdown Ok(())", "recv some hi"]
+    );
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    assert_eq!(peer.read(&mut [0; 8]).unwrap(), 0, "the shutdown sent FIN");
+    drop(c);
+    sched::finish();
+}
+
+/// A connected pair on the single-thread scheduler's loop: a `TcpSocket`
+/// client and the peer's plain stream.
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+fn connected_pair() -> (TcpSocket, std::net::TcpStream) {
+    let l =
+        std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let c = TcpSocket::new().unwrap();
+    let p = sched::promise_new().unwrap();
+    c.connect(l.local_addr().unwrap(), move |r| {
+        r.unwrap();
+        sched::resolve(p, || {});
+    })
+    .unwrap();
+    let (peer, _) = l.accept().unwrap();
+    sched::wait(p);
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    (c, peer)
+}
+
+/// Aborts the test binary, naming the test, if the guard lives 20 s: a
+/// regression of what the test checks would leave its `sched::wait`
+/// waiting for good, where the threads-mode twins time out (review
+/// RF15-C03).
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+struct Watchdog {
+    /// Dropped with the guard: the watcher then ends.
+    _done: std::sync::mpsc::Sender<()>,
+}
+
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+fn watchdog(name: &'static str) -> Watchdog {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+            rx.recv_timeout(std::time::Duration::from_secs(20))
+        {
+            eprintln!("{name}: still waiting after 20 s; aborting");
+            std::process::abort();
+        }
+    });
+    Watchdog { _done: tx }
+}
+
+/// `waitReadable` on `c`, waited for: its outcome's text.
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+fn wait_readable_of(c: &TcpSocket) -> String {
+    use std::cell::RefCell;
+    let seen: Rc<RefCell<String>> = Rc::default();
+    let p = sched::promise_new().unwrap();
+    let s = seen.clone();
+    c.wait_readable(move |r| {
+        *s.borrow_mut() = format!("{r:?}");
+        sched::resolve(p, || {});
+    })
+    .unwrap();
+    sched::wait(p);
+    seen.take()
+}
+
+/// `recv? 16` on `c`, waited for: `some <bytes>`, `none`, or the error.
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+fn recv_of(c: &TcpSocket) -> String {
+    use std::cell::RefCell;
+    let seen: Rc<RefCell<String>> = Rc::default();
+    let p = sched::promise_new().unwrap();
+    let s = seen.clone();
+    c.recv(
+        || Vec::with_capacity(16),
+        move |r| {
+            *s.borrow_mut() = received(r);
+            sched::resolve(p, || {});
+        },
+    )
+    .unwrap();
+    sched::wait(p);
+    seen.take()
+}
+
+/// A TCP receive's outcome as the tests of both modes show it.
+pub(super) fn received(r: Result<Option<(Vec<u8>, usize)>, IoError>) -> String {
+    match r {
+        Ok(Some((v, _))) => format!("some {}", String::from_utf8_lossy(&v)),
+        Ok(None) => "none".into(),
+        Err(e) => format!("{e:?}"),
+    }
+}
+
+/// LB-51 (hunt HN-03): `waitReadable` is `true` with bytes unread (the end
+/// of the stream behind them), `false` at the end of the stream with
+/// nothing left (natively `true` there too), and consumes nothing.
+#[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[cfg_attr(miri, ignore)]
+fn wait_readable_is_false_at_the_end_of_the_stream() {
+    let _watch = watchdog("wait_readable_is_false_at_the_end_of_the_stream");
+    use std::io::Write;
+    start_loop();
+    let (c, mut peer) = connected_pair();
+    peer.write_all(b"hi").unwrap();
+    peer.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(wait_readable_of(&c), "Ok(true)");
+    assert_eq!(recv_of(&c), "some hi");
+    assert_eq!(wait_readable_of(&c), "Ok(false)");
+    assert_eq!(wait_readable_of(&c), "Ok(false)");
+    assert_eq!(recv_of(&c), "none");
+    drop(c);
+    sched::finish();
+}
+
+/// LB-51 (review RF15-B02): after `recv?` has given `none` (the peer's
+/// shutdown, nothing sent), `waitReadable` gives `false`, as often as
+/// asked, and `recv?` still gives `none`.
+#[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[cfg_attr(miri, ignore)]
+fn wait_readable_after_recv_gave_none_is_false() {
+    let _watch = watchdog("wait_readable_after_recv_gave_none_is_false");
+    start_loop();
+    let (c, peer) = connected_pair();
+    peer.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(recv_of(&c), "none");
+    assert_eq!(wait_readable_of(&c), "Ok(false)");
+    assert_eq!(recv_of(&c), "none");
+    assert_eq!(wait_readable_of(&c), "Ok(false)");
+    drop(c);
+    sched::finish();
+}
+
+/// LB-51 (review RF15-B02): a reset is not the end of the stream. The
+/// peer closes with bytes it has not read, so its kernel sends a reset:
+/// `waitReadable` gives `true` (the pending error, as natively), again
+/// `true` (it consumes nothing), and `recv?` then fails with
+/// `ECONNRESET`.
+#[test]
+#[cfg(not(all(feature = "threads", not(feature = "sched"))))]
+#[cfg_attr(miri, ignore)]
+fn wait_readable_is_true_after_a_reset() {
+    let _watch = watchdog("wait_readable_is_true_after_a_reset");
+    start_loop();
+    let (c, peer) = connected_pair();
+    let p = sched::promise_new().unwrap();
+    c.send(vec![b"unread".to_vec()], move |r| {
+        r.unwrap();
+        sched::resolve(p, || {});
+    })
+    .unwrap();
+    sched::wait(p);
+    // the bytes reach the peer's receive queue; closed with them unread,
+    // its socket sends a reset
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    drop(peer);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(wait_readable_of(&c), "Ok(true)");
+    assert_eq!(wait_readable_of(&c), "Ok(true)");
+    assert_eq!(
+        recv_of(&c),
+        received(Err(uv_error(-crate::io::error::ECONNRESET)))
+    );
+    drop(c);
+    sched::finish();
+}

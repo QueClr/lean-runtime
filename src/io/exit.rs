@@ -214,10 +214,18 @@ pub fn exit(code: i32) -> ! {
 /// its drop's `fclose` wrote those bytes before any `_Exit`, while the
 /// program's other threads ran, so while the scheduler runs other contexts
 /// the join lets them run (a task may be the one that drains the pipe). No
-/// other buffer is flushed, and other contexts' writers are not waited for.
+/// other buffer is flushed, and other contexts' writers are not waited for;
+/// nor are the writers of the streams whose free natively had not come yet
+/// (a deferred promise resolution's skip window, review RF14-07: `_Exit`
+/// discards their buffers; hunt HCO-02). Bytes of such a stream can still
+/// reach the output, where `_Exit` writes none: its drop, during the
+/// drain, wrote what the descriptor took without blocking (`flush_nowait`),
+/// and its writer thread writes the rest until `std::process::exit` ends
+/// the process. That difference remains (review RF15-A05; docs/sched.md
+/// has the parked option of a full emulation).
 pub fn force_exit(code: i32) -> ! {
     #[cfg(feature = "sched")]
-    super::coop::join_own_writers(super::coop::JoinAt::Exit);
+    super::coop::join_own_writers(super::coop::JoinAt::ForceExit);
     EXITING_WITHOUT_FLUSH.store(true, Ordering::SeqCst);
     std::process::exit(code)
 }

@@ -1,0 +1,31 @@
+id = "shutdown_during_slow_connect"
+area = "net"
+lean_version = "4.34.0"
+source = "the networking hunt's repro of HN-01 and HN-02 (ShutdownSynSent), with the fourth connection kept and its end of stream read"
+streams = "separate"
+deviations = { lean2rr = "LB-50; LB-28", leanrs = "LB-50; DV2" }
+native = { stdout = "connect before shutdown: pending\nconnect after shutdown: ok\nshutdown: pending\nserver: a fourth connection arrived\nc4 getPeerName: ok, port matches true\nconnect at the end: ok\nshutdown at the end: pending\nserver recv?: pending\nclients kept: 3\n", stderr = "", code = "0" }
+# `expected` is the correct outcome (LB-50, and LB-28 behind it): the
+# connect stays pending while the kernel retransmits the dropped SYN, then
+# resolves `ok`; the shutdown queued behind it then sends FIN and resolves
+# `ok`, and the server reads the end of the stream. Native's, `native`, is
+# the connect resolved `ok` by the shutdown's feed about 0.5 s before the
+# connection exists, and a shutdown that never happens (LB-28; the
+# server's read is bounded at 2 s, so a native run takes about 3.4 s).
+# Before the LB-50 fix the crate gave a third outcome (HN-01): the early
+# `ok` ran LB-28's shutdown on the socket in SYN_SENT, which Linux takes as
+# a disconnect, so the attempt was aborted, the shutdown resolved `ok`, the
+# server saw no fourth connection and `getPeerName` failed with ENOTCONN.
+# The server keeps the fourth connection (the hunt's repro dropped it):
+# closed, it sends FIN, and once both FINs are acknowledged c4's socket is in
+# TCP's CLOSE state (TIME_WAIT is a separate kernel object), where
+# `getPeerName` fails with ENOTCONN. So with the fix that repro would
+# print ENOTCONN, a correct outcome but no check that c4 is connected.
+# lean2rr's deviations name LB-28 too: "shutdown at the end: ok" and "server
+# recv?: none (end of stream)" come from LB-28's fix (natively that shutdown
+# never happens).
+# Needs Linux 4.9 or later, which drops a SYN that comes while the accept queue
+# is full; an accept queue of backlog + 1 connections; the first SYN sent again
+# after about 1 s; and at least one SYN sent again within the program's window
+# (net.ipv4.tcp_syn_retries of 2 or more; Linux's default is 6).
+# leanrs DV2: networking (Std.Internal.UV TCP, UDP, DNS; Std.Net) refused at translation

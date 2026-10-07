@@ -9,8 +9,9 @@ a time (`EALREADY`); `connect` again once connected; `waitReadable` and
 not read, then done) and `send` after it; end of file twice; a refused
 connect, then `ECONNABORTED`; IPv4 to IPv6; buffers with empty ones in one
 `send`; an `accept` of a connection the loop already took. A delay of 0 is
-case `keepalive_zero_delay`, a size of 0 case `recv_zero`. The address and
-the message come from argv. -/
+case `keepalive_zero_delay`, a size of 0 case `recv_zero`, `waitReadable` at
+end of file case `wait_readable_eof`. The address and the message come from
+argv. -/
 open Std.Internal.UV Std.Net
 
 def tryIO (name : String) (act : IO String) : IO Unit := do
@@ -122,7 +123,6 @@ def main (args : List String) : IO Unit := do
   IO.println s!"the client read {← IO.ofExcept (← IO.wait reader)} bytes, then end of file"
   tryIO "shutdown after it" do let _ ← sc.shutdown; return ""
   tryIO "send after shutdown" do let _ ← sc.send #[.mk #[1]]; return ""
-  tryIO "waitReadable at end of file" do let p ← c.waitReadable; wait p toString
   tryIO "recv? at end of file" do let p ← c.recv? 100; wait p bytes
   tryIO "recv? at end of file again" do let p ← c.recv? 100; wait p bytes
   tryIO "send to the half-closed peer" do let p ← c.send #[String.toUTF8 "late"]; wait p unit

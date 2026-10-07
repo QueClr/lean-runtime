@@ -36,6 +36,7 @@ While a <code>modify</code> holds the ref, <code>get</code>, <code>take</code>, 
 <tr id="lb-02"><td>LB-02</td><td>After output on a handle, a read of a whole buffer or more makes glibc drop the pending output.</td><td>It writes the pending bytes first, then reads.</td></tr>
 <tr id="lb-03"><td>LB-03</td><td>An error without a file name (<code>getCurrentDir</code> after its directory was removed) crashes with SIGSEGV instead of raising an <code>IO.Error</code>.</td><td>It raises the <code>IO.Error</code>, with the file name <code>""</code>.</td></tr>
 <tr id="lb-13"><td>LB-13</td><td>After <code>main</code> returns, a pool task enqueued when no pool worker is left never runs.
+It also never runs when every pool worker waits for it.
 Its effects are lost, and a wait on it hangs.</td><td>The task runs, and a wait on it returns (<a href="sched.html#exit">sched</a>).
 Both judges confirmed it on 2026-10-03.
 Its cases are <code>tasks/late_*</code>, with three controls that follow native.</td></tr>
@@ -68,7 +69,7 @@ After that, no loop callback runs, and every wait on the network hangs.</td><td>
 With unread bytes, it keeps native's error.</td></tr>
 <tr id="lb-27"><td>LB-27</td><td>A name lookup that ends while the process exits can crash it (SIGSEGV), in about two runs of five.</td><td>The lookup's result is dropped, and the process exits normally.</td></tr>
 <tr id="lb-28"><td>LB-28</td><td>A <code>shutdown</code> made while the <code>connect</code> is still pending, with nothing to write, never happens.
-Its promise never resolves, and the peer never reads the end of the stream.</td><td>The shutdown happens when the connect succeeds.
+Its promise never resolves, and the peer never reads the end of the stream.</td><td>The shutdown happens when the connect succeeds, after the connection exists (LB-50).
 If the connect fails, the shutdown fails with <code>operation canceled</code>.</td></tr>
 <tr><td colspan="3">The lean2rr-side judge confirmed LB-21 to LB-28 on 2026-10-04, in batch <code>net-1</code>.
 Their cases are in <code>net/</code> (<a href="net.html#bugs">net</a>).</td></tr>
@@ -142,6 +143,23 @@ It has no case, because it needs a damaged file system.
 The table of native's error decoding checks it.</td></tr>
 <tr><td colspan="3">The file-system bug hunt found LB-46 and LB-47 on 2026-10-07.
 Batch <code>io-fixes-2</code> fixed them.</td></tr>
+<tr id="lb-50"><td>LB-50</td><td>A <code>shutdown</code> made while the <code>connect</code> is still in the TCP handshake makes the connect resolve <code>ok</code> at once.
+The connection does not exist yet, and it may never exist.</td><td>The connect stays pending until the connection exists or fails.
+When the connection exists, the shutdown sends FIN (<a href="net.html#bugs">net</a>).
+When the connect fails, the shutdown fails with <code>operation canceled</code>.
+Its case is <code>net/shutdown_during_slow_connect</code>.</td></tr>
+<tr id="lb-51"><td>LB-51</td><td><code>waitReadable</code> at the end of the stream gives <code>true</code>.
+Lean's documentation gives <code>false</code> when the socket closes before data comes.</td><td>At the end of the stream, with no byte left to read, <code>waitReadable</code> gives <code>false</code>.
+With unread bytes, it gives <code>true</code>, as natively.
+Its case is <code>net/wait_readable_eof</code>.</td></tr>
+<tr><td colspan="3">The networking bug hunt found LB-50 and LB-51 on 2026-10-07.
+Batch <code>fixes-15</code> fixed them.</td></tr>
+<tr id="lb-52"><td>LB-52</td><td>With <code>LEAN_NUM_THREADS</code> set to 2<sup>32</sup> - 1 (or -1), a wait in a pool task can hang.
+The wait adds one to the worker limit, and the limit wraps to 0.
+Then no worker takes a task.</td><td>The limit stops at its maximum, and the program gives its result (<a href="threads.html#pool">threads mode</a>).
+Its case is <code>tasks/pool_limit_wrap</code>.</td></tr>
+<tr><td colspan="3">The threads-mode bug hunt found LB-52 on 2026-10-07.
+It was the candidate LBC-09 first.</td></tr>
 </tbody></table></div>
 
 <h2 id="limits">Lifted limits</h2>
@@ -188,7 +206,7 @@ In lean-runtime, <code>osEnviron</code> cannot fail.</td></tr>
 <tr><td colspan="3">The io bug hunt and its review found LBC-01 to LBC-04 in the source on 2026-10-06.
 The review of batch <code>io-fixes-2</code> found LBC-05 on 2026-10-07.
 The program-start and system-glue bug hunts found LBC-06 to LBC-08 on 2026-10-07.
-A confirmed one gets the next LB number.</td></tr>
+A confirmed one gets the next LB number: LBC-09 is now LB-52.</td></tr>
 </tbody></table></div>
 
 <h2 id="library">Lean library definitions: followed as native</h2>

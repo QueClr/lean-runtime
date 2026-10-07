@@ -1,0 +1,17 @@
+id = "late_wait_busy_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "LB-13 (docs/lean-bugs.md), the trigger of a busy worker: leanrs's repro (native hangs 3 of 3 at LEAN_NUM_THREADS=1), made deterministic; coordinator, 2026-10-07"
+streams = "separate"
+expect = { hang = 3 }
+deviations = { lean2rr = "LB-13", leanrs = "LB-13; DV27 (c)" }
+native = { stdout = "", stderr = "main done\ncaller true\nreleased true\n", code = "timeout" }
+# `expected` (the .out, .err and .code files) is the correct outcome, written
+# by hand: the task made during the shutdown gets a worker at the wait, runs,
+# and the wait returns. Native Lean 4.34.0's outcome is `native`, a hang:
+# `wait_for`'s raise (object.cpp 1036-1043) calls `spawn_worker`, which
+# returns at once once `m_shutting_down` is set (831-833), and the only
+# worker is the waiter's. In leanrs's repro the flags were racy natively
+# (the task could run before `main` returned); here `main` waits until the
+# task has started and the task polls `IO.checkCanceled` until `main` has
+# returned, so each flag is `true` natively and in both translators.

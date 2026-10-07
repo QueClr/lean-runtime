@@ -24,9 +24,13 @@
 //!   `EALREADY`; `cancelRecv` drops the pending one without resolving it;
 //! - a `send` writes at once what the socket takes and queues the rest, in
 //!   order; its promise resolves on the loop once all of it is written;
+//! - a `connect` resolves once the connection exists or has failed (LB-50);
+//!   a `send` made meanwhile waits for it, as libuv queues it, and so does a
+//!   `shutdown` (LB-28);
 //! - `shutdown` stops further sends at once (`EPIPE`), and shuts the write
 //!   side once the queued writes are done; the peer then reads end of file
-//!   (`recv?` gives `none`, `waitReadable` `true`).
+//!   (`recv?` gives `none`, and so does `recv? 0`, LB-26; `waitReadable`
+//!   gives `false`, LB-51).
 
 use super::mode::{Cell, Shared, SocketId};
 use super::{
@@ -555,7 +559,7 @@ impl Loop<'_> {
             let t = self.0.borrow();
             if t.connect.is_some() {
                 drop(t);
-                self.stream_connect();
+                self.stream_connect(ev);
                 return;
             }
             if t.fd.is_none() {
@@ -609,12 +613,16 @@ impl Loop<'_> {
             let (req, _) = t.read.as_mut().expect("checked");
             let zero_buf = match req {
                 ReadReq::Recv(op) => op.target().len() == 0,
-                ReadReq::Wait(_) => false,
+                ReadReq::Wait(_) => true,
             };
             // the allocation callback: Lean's buffer (its capacity), or none
-            // for `waitReadable`; a buffer of 0 bytes is `UV_ENOBUFS`
+            // for `waitReadable`; a buffer of 0 bytes is `UV_ENOBUFS`, and
+            // so is no buffer, natively even at the end of the stream
+            // (LEAN-BUG LB-51: `waitReadable` is `true` there, where its
+            // docstring and Lean's `UV_EOF` branch say `false`; here it is
+            // decided as LB-26's `recv? 0`)
             let (outcome, full) = match req {
-                ReadReq::Wait(_) => (ReadOutcome::NoBufs, false),
+                ReadReq::Wait(_) => (zero_size_outcome(&fd), false),
                 ReadReq::Recv(op) => {
                     let target = op.target();
                     let buflen = target.len();
@@ -714,8 +722,8 @@ impl Loop<'_> {
     }
 
     /// `uv__stream_connect`: the outcome of a connect (the delayed error, or
-    /// `SO_ERROR`).
-    fn stream_connect(&self) {
+    /// `SO_ERROR`), on the watcher's events `ev` (a feed's: `Ev::FEED`).
+    fn stream_connect(&self, ev: Ev) {
         let (req, error) = {
             let mut t = self.0.borrow_mut();
             let error = if t.delayed_error != 0 {
@@ -731,6 +739,23 @@ impl Loop<'_> {
                 }
             };
             if error == UV_EINPROGRESS {
+                return;
+            }
+            // LEAN-BUG LB-50: a call made while the connect is pending,
+            // natively a `shutdown`'s feed (`uv_shutdown`, `uv__io_feed`),
+            // finds no outcome yet: `SO_ERROR` is 0 while the handshake
+            // goes on (SYN_SENT), and libuv takes that as success. Here the
+            // connect stays pending, `POLLOUT` still watched, until the
+            // socket is connected (`getpeername`) or fails, which a watch
+            // event then tells (hunt HN-02; HN-01: with the early success,
+            // the shutdown queued behind it, LB-28, aborted the attempt).
+            // In SYN_SENT the kernel reports no event without an error, so
+            // a hang-up with `SO_ERROR` 0 is a closed socket (TCP's CLOSE
+            // state, which `getpeername` answers with `ENOTCONN` too, and
+            // which nothing here reaches during a connect): it takes
+            // native's outcome, since waiting would watch a hang-up that
+            // stays reported for good
+            if error == 0 && !ev.hup && !connected(&t) {
                 return;
             }
             let req = t.connect.take().expect("a connect");
@@ -758,7 +783,8 @@ impl Loop<'_> {
             // queued and never reaches `uv__drain`, so a shutdown requested
             // while the connect was pending never happens (no FIN, the
             // promise never resolves, the socket is kept). Here it happens
-            // now, as it does behind a queued write.
+            // now, as it does behind a queued write: the socket is
+            // connected (LB-50), so `shutdown(SHUT_WR)` sends FIN.
             let go = {
                 let t = self.0.borrow();
                 t.shutdown.is_some() && t.write_queue.is_empty()
@@ -944,9 +970,9 @@ impl TcpSocket {
     }
 
     /// `Socket.waitReadable` (`lean_uv_tcp_wait_readable`): `done` gets
-    /// `true` once the socket is readable, end of file included (libuv's
-    /// read callback reports `UV_ENOBUFS` for Lean's empty buffer, so the
-    /// end of file is never read here).
+    /// `true` once the socket is readable with bytes unread (or an error
+    /// pending), and `false` at the end of the stream with nothing left to
+    /// read, nothing consumed either way (LB-51; `zero_size_outcome`).
     pub fn wait_readable(
         &self,
         done: impl FnOnce(Result<bool, IoError>) + MaybeSend + 'static,
@@ -1214,10 +1240,23 @@ impl Tcp {
     }
 }
 
-/// `recv? 0` once the socket is readable. libuv calls back with
-/// `UV_ENOBUFS` for Lean's buffer of 0 bytes without reading.
+/// Whether a socket whose `SO_ERROR` is 0 has a peer: during the handshake
+/// (SYN_SENT) `getpeername` fails with `ENOTCONN` (LB-50). No descriptor
+/// counts as connected: the connect's own path reports `EBADF` then.
+fn connected(t: &Tcp) -> bool {
+    match t.fd() {
+        Some(fd) => !matches!(rustix::net::getpeername(fd), Err(Errno::NOTCONN)),
+        None => true,
+    }
+}
+
+/// `recv? 0` and `waitReadable` once the socket is readable. libuv calls
+/// back with `UV_ENOBUFS` for Lean's buffer of 0 bytes, or no buffer,
+/// without reading.
 /// LEAN-BUG LB-26: at the end of the stream with no data left, Lean's
-/// docstring says the result is `none`, where native gives `ENOBUFS`. So,
+/// docstring says the result is `none`, where native gives `ENOBUFS`
+/// (LEAN-BUG LB-51: `waitReadable`'s says `false`, where native gives
+/// `true`; `finish_read` turns `Eof` into `false`). So,
 /// without consuming anything (a pending socket error stays for the next
 /// receive): unread bytes (`FIONREAD`) are `ENOBUFS`, as natively; else the
 /// peer's shutdown (`POLLRDHUP` or `POLLHUP`) without `POLLERR` is the end
