@@ -126,9 +126,12 @@ impl Mutex {
         self.lock_as(me());
     }
 
-    /// `lean_io_basemutex_try_lock`.
+    /// `lean_io_basemutex_try_lock`. A writers point first, as its blocking
+    /// counterpart (review HR-03): the context's handed-off streams end
+    /// before it reads the lock's state.
     pub fn try_lock(&self) -> bool {
         super::ensure_started();
+        super::writers_point();
         let who = me();
         let mut m = self.st.borrow_mut();
         if m.owner.is_none() {
@@ -265,9 +268,12 @@ impl RecursiveMutex {
         block_sync();
     }
 
-    /// `lean_io_baserecmutex_try_lock`.
+    /// `lean_io_baserecmutex_try_lock`. A writers point first, as its blocking
+    /// counterpart (review HR-03): the context's handed-off streams end
+    /// before it reads the lock's state.
     pub fn try_lock(&self) -> bool {
         super::ensure_started();
+        super::writers_point();
         let who = me();
         let mut m = self.st.borrow_mut();
         match m.owner {
@@ -370,9 +376,12 @@ impl SharedMutex {
         }
     }
 
-    /// `lean_io_basesharedmutex_try_write`.
+    /// `lean_io_basesharedmutex_try_write`. A writers point first, as its blocking
+    /// counterpart (review HR-03): the context's handed-off streams end
+    /// before it reads the lock's state.
     pub fn try_write(&self) -> bool {
         super::ensure_started();
+        super::writers_point();
         let mut m = self.st.borrow_mut();
         if !m.write_entered && m.readers == 0 {
             m.write_entered = true;
@@ -415,9 +424,12 @@ impl SharedMutex {
         }
     }
 
-    /// `lean_io_basesharedmutex_try_read`.
+    /// `lean_io_basesharedmutex_try_read`. A writers point first, as its blocking
+    /// counterpart (review HR-03): the context's handed-off streams end
+    /// before it reads the lock's state.
     pub fn try_read(&self) -> bool {
         super::ensure_started();
+        super::writers_point();
         let mut m = self.st.borrow_mut();
         if !m.write_entered && m.readers != u32::MAX {
             m.readers += 1;

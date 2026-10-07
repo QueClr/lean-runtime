@@ -1,0 +1,8 @@
+id = "timer_effect_order"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HU-01 (hunt-uv/p1/TimerEffectOrder.lean and p2/TimerMisc.lean's S4, with a promise for the sleeper's start and a calibrated computation), judged by the coordinator, confirmed in leanrs's single-thread mode, 2026-10-07"
+streams = "separate"
+# The first argument is the length of the calibration's chunks (each phase
+# computes 5 times the rounds per 100 ms, about 0.5 s in any build); the
+# second is the twin's computation of each phase, in ms.

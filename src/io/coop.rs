@@ -585,9 +585,7 @@ fn write_then_close(bytes: &[u8], fd: Fd) {
 /// reader is a task of this program, the blocked thread cannot run it, and
 /// the program waits for good (review RFX1-11).
 pub(crate) fn hand_off(bytes: Vec<u8>, fd: Fd) {
-    use std::sync::atomic::AtomicU64;
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let id = NEXT_WRITER.fetch_add(1, Ordering::Relaxed);
     {
         // registered before the thread starts, so its removal comes after
         let mut w = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
@@ -632,6 +630,65 @@ pub(crate) fn hand_off(bytes: Vec<u8>, fd: Fd) {
         if let Some((b, fd)) = taken {
             write_then_close(&b, fd);
         }
+    }
+}
+
+/// The id of the next hand-off, process-wide: a writer whose id is below a
+/// mark (`writer_mark`) was handed off before the mark was read.
+static NEXT_WRITER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The writers handed off from now on have ids from this one up: the
+/// watermark a deferred promise resolution records (`sched::defer`, review
+/// RF14-07). One relaxed load.
+pub(crate) fn writer_mark() -> u64 {
+    NEXT_WRITER.load(Ordering::Relaxed)
+}
+
+thread_local! {
+    /// The windows of writer ids that the writers points of this thread
+    /// skip (`skip_writers`): while a deferred promise resolution runs, the
+    /// streams its drain dropped after the promise (review RF14-07).
+    static SKIP: RefCell<Vec<(u64, u64)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Whether writer `id` is in a window that this thread's writers points
+/// skip (`SKIP`).
+fn skipped(id: u64) -> bool {
+    SKIP.try_with(|k| k.borrow().iter().any(|&(lo, hi)| lo <= id && id < hi))
+        .unwrap_or(false)
+}
+
+/// While the guard lives, this thread's writers points do not wait for the
+/// writers with ids in `lo..hi` (review RF14-07): a drain's deferred
+/// promise resolution runs after the drain, but natively it ran inside it,
+/// when the free reached the promise, before the `fclose` of a stream the
+/// free dropped later (`lean_del_core` frees in its order), so neither the
+/// resolution nor its `sync` dependents wait for such a stream's writer.
+/// The ids in the window are the running context's own hand-offs (made in
+/// its drain, where nothing else runs), so other contexts that run
+/// meanwhile, which wait only for their own writers, are not affected.
+/// `None` for an empty window.
+pub(crate) fn skip_writers(lo: u64, hi: u64) -> Option<SkipWriters> {
+    if lo >= hi {
+        return None;
+    }
+    SKIP.try_with(|k| k.borrow_mut().push((lo, hi))).ok()?;
+    Some(SkipWriters(lo, hi))
+}
+
+/// See [`skip_writers`]: its drop ends the window (by value: windows of
+/// other contexts may lie above it).
+pub(crate) struct SkipWriters(u64, u64);
+
+impl Drop for SkipWriters {
+    fn drop(&mut self) {
+        let w = (self.0, self.1);
+        let _ = SKIP.try_with(|k| {
+            let mut k = k.borrow_mut();
+            if let Some(i) = k.iter().rposition(|&x| x == w) {
+                k.remove(i);
+            }
+        });
     }
 }
 
@@ -712,7 +769,13 @@ extern "C" fn join_own_writers_slow(at: JoinAt) {
     let mut nap = FLOCK_FIRST;
     loop {
         let w = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
-        if !w.iter().any(|w| w.owner == me) {
+        // an exit waits for every writer of the context: natively a stream
+        // whose free had not come yet is open then, and the exit's flush
+        // writes its bytes
+        if !w
+            .iter()
+            .any(|w| w.owner == me && (at == JoinAt::Exit || !skipped(w.id)))
+        {
             return;
         }
         if sched::io_cooperative() {
@@ -896,6 +959,161 @@ mod tests {
         assert_eq!(got.len(), filled + 100);
         assert!(got.ends_with(&[b'y'; 100]));
         join_own_writers(JoinAt::Exit);
+    }
+
+    /// Whether a writer of the calling context runs.
+    fn own_writers() -> bool {
+        let me = me();
+        WRITERS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|w| w.owner == me)
+    }
+
+    /// Runs test `name` in a child process, and checks that it passed: true
+    /// in the parent, which then returns, false in the child, which runs
+    /// the test's body. For the tests whose writers run for tens of
+    /// milliseconds: the count of running writers is process-wide, so
+    /// another test's writers points would take their slow path meanwhile
+    /// (and build the scheduler's state of a test that checks it is not
+    /// built).
+    fn ran_in_child(name: &str) -> bool {
+        const CHILD: &str = "LEAN_RUNTIME_TEST_IN_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            return false;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && text.contains("1 passed"),
+            "{text}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        true
+    }
+
+    /// A pipe filled to capacity (its writes would block), and the bytes in
+    /// it.
+    fn full_pipe() -> (std::fs::File, Fd, usize) {
+        let (r, fd) = pipe_fd();
+        let b = fd.borrow().unwrap();
+        rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::NONBLOCK).unwrap();
+        let mut filled = 0;
+        while let Ok(n) = rustix::io::write(b, &[b'x'; 4096]) {
+            filled += n;
+        }
+        rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::empty()).unwrap();
+        (r, fd, filled)
+    }
+
+    /// Review RF14-07 (fixes-14): a drain's deferred promise resolution
+    /// waits only for the writers of the streams the drain handed off before
+    /// it. With the promise dropped first, it runs while the stream's writer
+    /// still writes, as natively the free resolves the promise before the
+    /// stream's `fclose`; with the stream dropped first, it waits for the
+    /// writer, as natively the `fclose` blocks first (a program whose
+    /// promise is what the stream's reader waits for deadlocks, natively
+    /// too). The drain's end waits for the rest. In a child process
+    /// (`ran_in_child`).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn deferred_resolutions_wait_only_for_the_writers_handed_off_before_them() {
+        use crate::sched::{defer, Deferred, DrainScope};
+        use std::rc::Rc;
+        if ran_in_child(
+            "io::coop::tests::deferred_resolutions_wait_only_for_the_writers_handed_off_before_them",
+        ) {
+            return;
+        }
+        for promise_first in [true, false] {
+            let (r, fd, filled) = full_pipe();
+            let reader = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                read_all(r)
+            });
+            let seen = Rc::new(Cell::new(None));
+            let s2 = seen.clone();
+            let entry = Deferred::Call(Box::new(move || s2.set(Some(own_writers()))));
+            {
+                let _drain = DrainScope::enter();
+                if promise_first {
+                    defer(entry);
+                    hand_off(vec![b'y'; 100], fd);
+                } else {
+                    hand_off(vec![b'y'; 100], fd);
+                    defer(entry);
+                }
+            }
+            assert_eq!(
+                seen.get(),
+                Some(promise_first),
+                "promise first: {promise_first}: the writer ran during the resolution"
+            );
+            assert!(!own_writers(), "the drain's end waited for the writer");
+            assert_eq!(reader.join().unwrap().len(), filled + 100);
+        }
+    }
+
+    /// Reviews HR-01..03 (fixes-14): the drain-end hook
+    /// (`sched::after_drain`) waits for the context's handed-off writer, as
+    /// natively the drop's `fclose` had returned; inside a no-suspend scope
+    /// (an outer drain) it waits for nothing, and with no writer it returns
+    /// at once. `Std.Sync`'s try functions wait for it too, as their
+    /// blocking counterparts (HR-03; before, they did not).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn the_drain_end_hook_and_the_try_locks_wait_for_the_writer() {
+        use crate::sched::sync::{Mutex as M, RecursiveMutex, SharedMutex};
+        if ran_in_child("io::coop::tests::the_drain_end_hook_and_the_try_locks_wait_for_the_writer")
+        {
+            return;
+        }
+        crate::sched::after_drain();
+        type Wait = Box<dyn Fn()>;
+        let waits: Vec<(&str, Wait)> = vec![
+            ("after_drain", Box::new(crate::sched::after_drain)),
+            ("Mutex::try_lock", Box::new(|| assert!(M::new().try_lock()))),
+            (
+                "RecursiveMutex::try_lock",
+                Box::new(|| assert!(RecursiveMutex::new().try_lock())),
+            ),
+            (
+                "SharedMutex::try_write",
+                Box::new(|| assert!(SharedMutex::new().try_write())),
+            ),
+            (
+                "SharedMutex::try_read",
+                Box::new(|| assert!(SharedMutex::new().try_read())),
+            ),
+        ];
+        for (what, wait) in waits {
+            let (r, fd) = pipe_fd();
+            let b = fd.borrow().unwrap();
+            rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::NONBLOCK).unwrap();
+            let mut filled = 0;
+            while let Ok(n) = rustix::io::write(b, &[b'x'; 4096]) {
+                filled += n;
+            }
+            rustix::fs::fcntl_setfl(b, rustix::fs::OFlags::empty()).unwrap();
+            hand_off(vec![b'y'; 100], fd);
+            {
+                let _scope = crate::sched::no_suspend();
+                crate::sched::after_drain();
+                assert!(own_writers(), "{what}: waited inside a no-suspend scope");
+            }
+            let reader = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(30));
+                read_all(r)
+            });
+            wait();
+            assert!(!own_writers(), "{what}: returned before the writer ended");
+            assert_eq!(reader.join().unwrap().len(), filled + 100, "{what}");
+        }
     }
 
     /// leanrs's condition on AR-8: where no writer thread can start, the

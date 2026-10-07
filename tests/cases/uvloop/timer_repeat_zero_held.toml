@@ -1,0 +1,6 @@
+id = "timer_repeat_zero_held"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HU-02 (hunt-uv/p2/TimerMisc.lean's S1, with the stop as a control), judged by the coordinator, confirmed in every leanrs mode, 2026-10-07"
+streams = "separate"
+# The argument is the timers' timeout (0).

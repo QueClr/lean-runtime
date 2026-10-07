@@ -1,0 +1,17 @@
+id = "timer_fresh_next_twice"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HU-03 (hunt-uv/p2/TimerMisc.lean's S2 and S3), judged by the coordinator, confirmed in leanrs's single-thread mode, 2026-10-07"
+streams = "separate"
+# The argument is the timers' period in ms (1000).
+deviations = { lean_runtime = "LSCHED-04" }
+alternatives = { alt1 = "all", alt2 = "all", alt3 = "all" }
+# Both lines are races, natively too (review RF14-02; docs/sched.md, "Known
+# differences from native", LSCHED-04): the second extern usually takes the
+# loop's lock before the loop wakes for the 0th tick (the expected files,
+# native's in 5 of 5 runs), but a slower one lets the tick go first, in the
+# single-thread scheduler when it comes more than `LOOP_LATENCY` (1 ms)
+# after the tick's deadline. The two races are independent, so each line's
+# other outcome, alone or with the other's, is accepted: `alt1` (both),
+# `alt2` (the first line's only), `alt3` (the second line's only), written
+# by hand.

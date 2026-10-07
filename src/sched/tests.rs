@@ -2166,8 +2166,11 @@ fn a_kept_chain_runs_no_dependent_of_a_bind_task_that_continued() {
 /// the case `uvloop/loop_blocked_at_exit` checks it), but one that can go
 /// on runs alone first, as before the fix (its budget, the final run's
 /// task time plus 1 s, bounds it: reviews RF13-03 to RF13-07): here a
-/// timer is due when `main` returns, and an effect point has started its
-/// loop context, which has not run yet. Its callback runs in `finish`.
+/// timer is due when `main` returns, and a look has started its loop
+/// context, which has not run yet. Its callback runs in `finish`. (The look
+/// is made by hand, as a hub step makes it while another context goes
+/// first: since review HU-01 an effect point runs a due timer's callback at
+/// once.)
 #[test]
 #[cfg_attr(miri, ignore)]
 fn the_final_run_lets_a_loop_context_able_to_run_go_on() {
@@ -2179,9 +2182,11 @@ fn the_final_run_lets_a_loop_context_able_to_run_go_on() {
         Rc::new(move || n2.set(n2.get() + 1)),
     );
     std::thread::sleep(std::time::Duration::from_millis(5));
-    // the effect point starts the loop context for the due timer, and lets
-    // it go first only once it has been able to run for 5 ms (`STALE`)
-    effect();
+    // a look starts the loop context for the due timer
+    with(|s| {
+        s.ev_check(std::time::Instant::now(), true);
+        s.ev_start_loop();
+    });
     let lp = with(|s| s.ev.loop_ctx().map(|c| s.cx.ctxs[c].status));
     assert_eq!(
         lp,
@@ -2679,4 +2684,248 @@ fn a_late_pool_task_drops_its_streams_at_its_end() {
         flag.get(),
         "the late pool task's stdout was dropped at its end"
     );
+}
+
+/// Review HR-02 (fixes-14): `depend` with a source that has finished by the
+/// time the dependent is made (the glue asked `dependent_runs_now` before
+/// `depend`'s writers point let it finish) runs a `sync` dependent at once,
+/// inside the call, as Lean's fast path does (the function applied in the
+/// caller: no `sync` task, review RF14-03); an async one is queued. Before
+/// the fix the `sync` one was queued too.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn depend_runs_a_sync_dependent_of_a_finished_source_at_once() {
+    start_test(1);
+    let ran = Rc::new(Cell::new(None));
+    let r2 = ran.clone();
+    let id = depend(
+        TaskId::FINISHED,
+        Box::new(move || {
+            r2.set(Some(in_sync_task()));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    assert_eq!(
+        ran.get(),
+        Some(false),
+        "ran inside depend, as the caller's code"
+    );
+    assert!(is_finished(id));
+    let l = log();
+    let id2 = depend(TaskId::FINISHED, job(&l, "async"), 0, false, true);
+    assert!(entries(&l).is_empty());
+    assert!(!is_finished(id2));
+    finish();
+    assert_eq!(entries(&l), ["async"]);
+}
+
+/// Review HR-02's bind half: a `sync` bind task whose function returned a
+/// task that has finished by the time the bind task waits for it (the
+/// writers point at the job's end let it finish after the glue's check)
+/// runs on at once on the same thread, as `add_dep`'s `enqueue_core` runs
+/// a `LEAN_SYNC_PRIO` task; an async bind task is queued. Before the fix
+/// the `sync` one was queued.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_sync_bind_task_whose_task_has_finished_runs_on_at_once() {
+    start_test(1);
+    let p = promise_new().unwrap();
+    let ran = Rc::new(Cell::new(None));
+    let r2 = ran.clone();
+    let b = depend(
+        p,
+        Box::new(move || {
+            Outcome::Continue(
+                TaskId::FINISHED,
+                Box::new(move || {
+                    r2.set(Some(in_sync_task()));
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        true,
+        true,
+    );
+    let l = log();
+    let l2 = l.clone();
+    let a = depend(
+        p,
+        Box::new(move || {
+            Outcome::Continue(
+                TaskId::FINISHED,
+                Box::new(move || {
+                    l2.borrow_mut().push("async continuation".into());
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        false,
+        true,
+    );
+    resolve(p, || {});
+    // the bind task ran in the promise's walk, and its continuation right
+    // after it, on the same thread
+    assert_eq!(ran.get(), Some(true));
+    assert!(is_finished(b));
+    assert!(!is_finished(a));
+    finish();
+    assert_eq!(entries(&l), ["async continuation"]);
+}
+
+/// Review RF14-03: the function of a `sync` dependent that `depend` runs at
+/// once is the caller's code, as in Lean's fast path: a wait in it for an
+/// unfinished task reports no `GET_IN_SYNC_TASK` when the caller is no
+/// `sync` task (here `main`), and reports it when the caller is one (here a
+/// promise's `sync` dependent), as natively `wait_for` sees the caller's
+/// task.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_dependent_run_at_once_waits_as_its_caller() {
+    start_test(1);
+    let reports = Rc::new(RefCell::new(Vec::new()));
+    let job_waiting = |reports: &Rc<RefCell<Vec<String>>>| -> Job {
+        let reports = reports.clone();
+        Box::new(move || {
+            let other = spawn(Box::new(|| Outcome::Done), 0, true);
+            await_task(other, |m| reports.borrow_mut().push(m.to_string()));
+            Outcome::Done
+        })
+    };
+    let id = depend(TaskId::FINISHED, job_waiting(&reports), 0, true, true);
+    assert!(is_finished(id));
+    assert!(reports.borrow().is_empty(), "{:?}", reports.borrow());
+    let p = promise_new().unwrap();
+    let r2 = reports.clone();
+    let _d = depend(
+        p,
+        Box::new(move || {
+            depend(TaskId::FINISHED, job_waiting(&r2), 0, true, true);
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    resolve(p, || {});
+    assert_eq!(*reports.borrow(), [GET_IN_SYNC_TASK.to_string()]);
+    finish();
+}
+
+/// Review RF14-03's gap: the function of a dependent that `depend` runs at
+/// once is the caller's code, so `IO.checkCanceled` answers with the
+/// caller's flag: here a pool task that canceled itself.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_dependent_run_at_once_checks_its_callers_cancel() {
+    start_test(1);
+    let me = Rc::new(Cell::new(TaskId::FINISHED));
+    let seen = Rc::new(Cell::new(None));
+    let (m2, s2) = (me.clone(), seen.clone());
+    let t = spawn(
+        Box::new(move || {
+            cancel(m2.get());
+            let s3 = s2.clone();
+            depend(
+                TaskId::FINISHED,
+                Box::new(move || {
+                    s3.set(Some(check_canceled()));
+                    Outcome::Done
+                }),
+                0,
+                true,
+                true,
+            );
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    me.set(t);
+    wait(t);
+    assert_eq!(seen.get(), Some(true), "the caller's cancel");
+    finish();
+}
+
+/// Review RF14-04: a `sync` bind task whose function returned a task that
+/// has finished runs on at once on the thread of its first run, not on the
+/// thread below it now: here its source's, a pool task run on `main`'s
+/// stack, whose walk ran the bind task.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_sync_bind_task_runs_on_on_the_thread_of_its_first_run() {
+    start_test(1);
+    let threads = Rc::new(RefCell::new(Vec::new()));
+    let src = spawn(Box::new(|| Outcome::Done), 0, true);
+    let t2 = threads.clone();
+    let _b = depend(
+        src,
+        Box::new(move || {
+            t2.borrow_mut().push(thread_number());
+            let t3 = t2.clone();
+            Outcome::Continue(
+                TaskId::FINISHED,
+                Box::new(move || {
+                    t3.borrow_mut().push(thread_number());
+                    Outcome::Done
+                }),
+            )
+        }),
+        0,
+        true,
+        true,
+    );
+    wait(src);
+    let t = threads.borrow().clone();
+    assert_eq!(t.len(), 2, "{t:?}");
+    assert_ne!(t[0], 0, "the bind task ran on its source's thread");
+    assert_eq!(t[1], t[0], "and its continuation on the same");
+    finish();
+}
+
+/// Review AR-52 (fixes-14): with no event loop context alive, a timer that
+/// comes due while the final run runs a task on `main`'s stack fires after
+/// the task, as natively the loop thread fires it alongside the workers.
+/// Before the fix the final run never looked at the timers then.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn the_final_run_fires_a_timer_that_came_due_during_a_task() {
+    start_test(1);
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    timer_start(
+        std::time::Instant::now() + std::time::Duration::from_millis(30),
+        Rc::new(move || f2.set(true)),
+    );
+    let _t = spawn(
+        Box::new(|| {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    finish();
+    assert!(fired.get(), "the timer due during the task did not fire");
+}
+
+/// Review HU-01 (fixes-14): at an effect point, a timer due by now goes
+/// first, as a due sleeper does: its callback runs before the effect point
+/// returns. Before the fix the loop context started at the effect point
+/// had been able to run for less than `STALE`, so the output came first.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn an_effect_point_lets_a_due_timer_go_first() {
+    start_test(1);
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    timer_start(std::time::Instant::now(), Rc::new(move || f2.set(true)));
+    std::thread::sleep(std::time::Duration::from_millis(1));
+    effect();
+    assert!(fired.get(), "the due timer did not go first");
+    finish();
 }

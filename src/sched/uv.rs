@@ -87,7 +87,7 @@ pub fn loop_alive() -> bool {
 // ---------------------------------------------------------------------------
 // Timers
 
-struct TimerState<P> {
+struct TimerState<P: LoopPromise> {
     timeout: u64,
     repeating: bool,
     state: State,
@@ -99,6 +99,12 @@ struct TimerState<P> {
     /// whether the timer was stopped or started again during its promise's
     /// `sync` dependents.
     starts: u64,
+    /// The loop's reference to a running repeating timer with timeout 0
+    /// after its tick (review HU-02): libuv does not start it again (repeat
+    /// 0 is no repeat), so no armed callback holds it, but natively the
+    /// loop keeps it (`lean_inc(obj)` at the start) until `stop`. A cycle,
+    /// broken by `stop`.
+    held: Option<Timer<P>>,
 }
 
 /// `Std.Internal.UV.Timer` (`lean_uv_timer_object`): a translator keeps one
@@ -137,19 +143,22 @@ impl<P: LoopPromise> Timer<P> {
             promise: None,
             armed: None,
             starts: 0,
+            held: None,
         })))
     }
 
-    /// Start the loop's timer: due `after` ms from now, then every `repeat`
-    /// ms if `repeat` is not 0 (`uv_timer_start`). A deadline past the
-    /// clock's range never comes (libuv clamps it to `UINT64_MAX`).
-    fn arm(&self, st: &mut TimerState<P>, after: u64, repeat: u64) {
+    /// Start the loop's timer: due `after` ms from `from` (an extern's
+    /// clock read, or the loop's time for the next period), then every
+    /// `repeat` ms if `repeat` is not 0 (`uv_timer_start`, which counts
+    /// from `loop->time`). A deadline past the clock's range never comes
+    /// (libuv clamps it to `UINT64_MAX`).
+    fn arm(&self, st: &mut TimerState<P>, from: Instant, after: u64, repeat: u64) {
         if let Some(id) = st.armed.take() {
             timer_stop(id);
         }
         st.starts += 1;
         let start = st.starts;
-        let Some(deadline) = Instant::now().checked_add(Duration::from_millis(after)) else {
+        let Some(deadline) = from.checked_add(Duration::from_millis(after)) else {
             return;
         };
         let me = self.clone();
@@ -168,9 +177,17 @@ impl<P: LoopPromise> Timer<P> {
         st.armed = None;
         if st.repeating {
             // libuv starts the next period (`uv_timer_again`) before it calls
-            // back; a repeat of 0 does not repeat
-            if repeat != 0 && st.state == State::Running {
-                self.arm(&mut st, repeat, repeat);
+            // back, from the loop's time (`loop->time` of the iteration, the
+            // look that found the timer due: review HU-06, as threads mode
+            // does); a repeat of 0 does not repeat, but the loop keeps the
+            // running timer until `stop` (review HU-02)
+            if st.state == State::Running {
+                if repeat != 0 {
+                    let from = super::reactor::loop_time().unwrap_or_else(Instant::now);
+                    self.arm(&mut st, from, repeat, repeat);
+                } else if st.held.is_none() {
+                    st.held = Some(self.clone());
+                }
             }
             let p = st.promise.clone().filter(|p| !p.is_resolved());
             drop(st);
@@ -215,7 +232,7 @@ impl<P: LoopPromise> Timer<P> {
                 } else {
                     (st.timeout, 0)
                 };
-                self.arm(&mut st, after, repeat);
+                self.arm(&mut st, Instant::now(), after, repeat);
                 p
             }
             (State::Running, true) => {
@@ -243,7 +260,7 @@ impl<P: LoopPromise> Timer<P> {
         if st.state == State::Running {
             let t = st.timeout;
             let repeat = if st.repeating { t } else { 0 };
-            self.arm(&mut st, t, repeat);
+            self.arm(&mut st, Instant::now(), t, repeat);
         }
     }
 
@@ -265,7 +282,7 @@ impl<P: LoopPromise> Timer<P> {
     /// master returns early, 246-249).
     pub fn stop(&self) {
         catch_up();
-        let (p, id) = {
+        let (p, id, held) = {
             let mut st = self.0.borrow_mut();
             let p = st.promise.take();
             let id = if st.state == State::Running {
@@ -274,7 +291,9 @@ impl<P: LoopPromise> Timer<P> {
             } else {
                 None
             };
-            (p, id)
+            // the loop lets go of a repeating timer with timeout 0
+            // (`lean_dec(obj)`, review HU-02)
+            (p, id, st.held.take())
         };
         if let Some(id) = id {
             timer_stop(id);
@@ -282,6 +301,7 @@ impl<P: LoopPromise> Timer<P> {
         // dropped outside the borrow: the last reference resolves it with
         // `none`, which may run its `sync` dependents
         drop(p);
+        drop(held);
     }
 
     /// `Timer.cancel` (`lean_uv_timer_cancel`): a running timer with a promise
@@ -646,20 +666,26 @@ mod signals {
     /// (in signal-number order: occurrences of one signal that came between
     /// two calls are one delivery, where libuv makes one per occurrence) to
     /// this thread's watchers of it, repeating ones first, then in creation
-    /// order.
+    /// order. The watchers of every signal of the batch are taken before
+    /// the first delivery (review HU-05): natively the handler writes one
+    /// message per watcher listening when the signal comes, so a watcher
+    /// that a `sync` dependent of an earlier delivery starts does not get
+    /// a signal of the same batch.
     fn on_ready(_: Ready) {
         let came = arrived();
-        for s in came {
-            let mut ls: Vec<(bool, u64, Rc<dyn Listener>)> = DELIVERY.with(|d| {
-                d.borrow()
-                    .listeners
-                    .iter()
-                    .filter(|e| e.signum == s)
-                    .map(|e| (e.repeating, e.seq, e.watcher.clone()))
-                    .collect()
-            });
-            ls.sort_by_key(|&(rep, seq, _)| (!rep, seq));
-            for (.., l) in ls {
+        let batch: Vec<Vec<Rc<dyn Listener>>> = DELIVERY.with(|d| {
+            let d = d.borrow();
+            came.iter()
+                .map(|&s| {
+                    let mut ls: Vec<&Entry> =
+                        d.listeners.iter().filter(|e| e.signum == s).collect();
+                    ls.sort_by_key(|e| (!e.repeating, e.seq));
+                    ls.into_iter().map(|e| e.watcher.clone()).collect()
+                })
+                .collect()
+        });
+        for ls in batch {
+            for l in ls {
                 l.deliver();
             }
         }
@@ -963,6 +989,55 @@ mod tests {
         let _c: Timer<Q> = Timer::new(1, false);
         assert!(ran.get());
         assert_eq!(p.0.slot.get(), Some(Some(0)));
+        sched::finish();
+    }
+
+    /// Review HU-02 (fixes-14): after the tick of a repeating timer with
+    /// timeout 0, no armed callback holds it, but the loop does
+    /// (`lean_inc(obj)` at its start), until `stop`.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_repeating_timer_with_timeout_zero_is_held_until_stop() {
+        start();
+        let t: Timer<P> = Timer::new(0, true);
+        let p0 = t.next(P::new);
+        assert_eq!(p0.get(), Some(0));
+        assert!(t.0.borrow().armed.is_none());
+        assert_eq!(Rc::strong_count(&t.0), 2, "the loop holds the timer");
+        let p1 = t.next(P::new);
+        assert!(!p1.same(&p0) && !p1.is_resolved());
+        t.stop();
+        assert_eq!(Rc::strong_count(&t.0), 1, "stop lets go of it");
+        sched::finish();
+    }
+
+    /// Review HU-06 (fixes-14): a repeating timer's next period starts from
+    /// the look that found the tick due (libuv's `loop->time`), not from
+    /// when the loop context runs its callback.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn a_repeating_timers_next_period_starts_at_the_look() {
+        start();
+        let t: Timer<P> = Timer::new(100, true);
+        let p0 = t.next(P::new);
+        assert_eq!(p0.get(), Some(0));
+        let p1 = t.next(P::new);
+        // tick 1 comes due while nothing looks
+        std::thread::sleep(Duration::from_millis(120));
+        let look = Instant::now();
+        crate::sched::with(|s| {
+            s.ev_check(look, true);
+            s.ev_start_loop();
+        });
+        // the loop context runs the callback 30 ms after the look
+        std::thread::sleep(Duration::from_millis(30));
+        sched::poll();
+        assert!(p1.is_resolved());
+        assert_eq!(
+            crate::sched::with(|s| s.ev.next_timer()),
+            Some(look + Duration::from_millis(100))
+        );
+        t.stop();
         sched::finish();
     }
 

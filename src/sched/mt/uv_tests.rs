@@ -190,6 +190,28 @@ fn a_repeating_timer_ticks_at_once_then_every_period() {
     task::finish(&sh);
 }
 
+/// Review HU-02 (fixes-14): after the tick of a repeating timer with timeout
+/// 0, no armed callback holds it, but the loop does (`lean_inc(obj)` at its
+/// start), until `stop`.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_repeating_timer_with_timeout_zero_is_held_until_stop() {
+    let _s = serial();
+    let sh = start_test();
+    let t: Timer<P> = Timer::new(0, true);
+    let p0 = t.next(P::maker(&sh));
+    assert_eq!(p0.get().0, 0);
+    // the loop thread has finished the callback once it lets the lock go
+    drop(lock());
+    assert!(locked(&t.0).armed.is_none());
+    assert_eq!(Arc::strong_count(&t.0), 2, "the loop holds the timer");
+    let p1 = t.next(P::maker(&sh));
+    assert!(!p1.same(&p0) && !p1.is_resolved());
+    t.stop();
+    assert_eq!(Arc::strong_count(&t.0), 1, "stop lets go of it");
+    task::finish(&sh);
+}
+
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_cancelled_one_shot_timer_starts_anew() {

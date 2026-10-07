@@ -659,16 +659,25 @@ impl Loop {
 
     /// The signal pipe's callback: the signals that came, each to the
     /// loop's watchers of it, repeating ones first, then in creation order.
+    /// The watchers of every signal of the batch are taken before the first
+    /// delivery (review HU-05): natively the handler writes one message per
+    /// watcher listening when the signal comes, so a watcher that a `sync`
+    /// dependent of an earlier delivery starts does not get a signal of the
+    /// same batch.
     fn deliver_signals(&self) {
-        for s in uv_signals::arrived() {
-            let mut ls: Vec<(bool, u64, Arc<dyn Listener>)> = locked(&self.data)
-                .listeners
-                .iter()
-                .filter(|e| e.signum == s)
-                .map(|e| (e.repeating, e.seq, e.watcher.clone()))
-                .collect();
-            ls.sort_by_key(|&(rep, seq, _)| (!rep, seq));
-            for (.., l) in ls {
+        let came = uv_signals::arrived();
+        let batch: Vec<Vec<Arc<dyn Listener>>> = {
+            let d = locked(&self.data);
+            came.iter()
+                .map(|&s| {
+                    let mut ls: Vec<_> = d.listeners.iter().filter(|e| e.signum == s).collect();
+                    ls.sort_by_key(|e| (!e.repeating, e.seq));
+                    ls.into_iter().map(|e| e.watcher.clone()).collect()
+                })
+                .collect()
+        };
+        for ls in batch {
+            for l in ls {
                 // no delivery once `finish` has returned (the list keeps
                 // the watchers: these are clones)
                 if super::manager_finished() {
@@ -979,7 +988,7 @@ pub fn loop_alive() -> bool {
 // ---------------------------------------------------------------------------
 // Timers
 
-struct TimerState<P> {
+struct TimerState<P: LoopPromise> {
     timeout: u64,
     repeating: bool,
     state: State,
@@ -987,6 +996,12 @@ struct TimerState<P> {
     promise: Option<P>,
     /// The loop's timer while it runs.
     armed: Option<TimerId>,
+    /// The loop's reference to a running repeating timer with timeout 0
+    /// after its tick (review HU-02): libuv does not start it again (repeat
+    /// 0 is no repeat), so no armed callback holds it, but natively the
+    /// loop keeps it (`lean_inc(obj)` at the start) until `stop`. A cycle,
+    /// broken by `stop`.
+    held: Option<Timer<P>>,
 }
 
 /// `Std.Internal.UV.Timer` (`lean_uv_timer_object`): a translator keeps one
@@ -1024,6 +1039,7 @@ impl<P: LoopPromise> Timer<P> {
             state: State::Initial,
             promise: None,
             armed: None,
+            held: None,
         })))
     }
 
@@ -1065,9 +1081,14 @@ impl<P: LoopPromise> Timer<P> {
             if st.repeating {
                 // libuv starts the next period (`uv_timer_again`) before it
                 // calls back, from the iteration's time (`loop->time`; review
-                // RT2-09); a repeat of 0 does not repeat
-                if repeat != 0 && st.state == State::Running {
-                    let _none = self.arm(lp, &mut st, now, repeat, repeat);
+                // RT2-09); a repeat of 0 does not repeat, but the loop keeps
+                // the running timer until `stop` (review HU-02)
+                if st.state == State::Running {
+                    if repeat != 0 {
+                        let _none = self.arm(lp, &mut st, now, repeat, repeat);
+                    } else if st.held.is_none() {
+                        st.held = Some(self.clone());
+                    }
                 }
                 match &st.promise {
                     Some(p) if !p.is_resolved() => Some(p.clone()),
@@ -1173,7 +1194,7 @@ impl<P: LoopPromise> Timer<P> {
     /// running one stops and is finished.
     pub fn stop(&self) {
         let l = lock();
-        let (p, old) = {
+        let (p, old, held) = {
             let mut st = locked(&self.0);
             let p = st.promise.take();
             let old = if st.state == State::Running {
@@ -1182,9 +1203,12 @@ impl<P: LoopPromise> Timer<P> {
             } else {
                 None
             };
-            (p, old)
+            // the loop lets go of a repeating timer with timeout 0
+            // (`lean_dec(obj)`, review HU-02)
+            (p, old, st.held.take())
         };
         drop(old);
+        drop(held);
         // dropped outside the state's lock: the last reference resolves it
         // with `none`, which may run its `sync` dependents (with the loop
         // lock held, as natively)

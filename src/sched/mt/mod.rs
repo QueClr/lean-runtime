@@ -527,6 +527,13 @@ pub fn before_task_value() {}
 #[inline]
 pub fn before_publish() {}
 
+/// The drain-end hook (docs/sched.md, "The glue", item 11): in the
+/// single-thread scheduler the writer threads of the streams the drain
+/// handed off end here; threads mode hands off no stream, so there is
+/// nothing to wait for.
+#[inline]
+pub fn after_drain() {}
+
 /// `IO.sleep ms` and `dbgSleep`: the calling thread sleeps
 /// (`std::this_thread::sleep_for`).
 pub fn sleep_ms(ms: u32) {

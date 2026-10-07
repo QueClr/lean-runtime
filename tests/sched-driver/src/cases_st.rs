@@ -82,6 +82,15 @@ pub fn lookup(id: &str) -> Option<Case> {
         "loop_sleeps_after_task" => (no_init, loop_sleeps_after_task),
         "loop_cycle_long" => (no_init, loop_cycle_long),
         "loop_carried_then_poll" => (no_init, loop_carried_then_poll),
+        // fixes-14: AR-52, HU-01..06
+        "timer_due_in_final_run" => (no_init, timer_due_in_final_run),
+        "timer_chain_in_final_run" => (no_init, timer_chain_in_final_run),
+        "timer_effect_order" => (no_init, timer_effect_order),
+        "timer_repeat_zero_held" => (no_init, timer_repeat_zero_held),
+        "timer_fresh_next_twice" => (no_init, timer_fresh_next_twice),
+        "signal_before_timer_in_look" => (no_init, signal_before_timer_in_look),
+        "signal_batch_new_watcher" => (no_init, signal_batch_new_watcher),
+        "timer_period_from_look" => (no_init, timer_period_from_look),
         // tests/cases/io: the cases with tasks
         "lock_blocked" => (no_init, lock_blocked),
         "lock_exit" => (no_init, lock_exit),
@@ -93,6 +102,13 @@ pub fn lookup(id: &str) -> Option<Case> {
         "handoff_then_resolve" => (no_init, handoff_then_resolve),
         "handoff_then_write" => (no_init, handoff_then_write),
         "handoff_then_kill" => (no_init, handoff_then_kill),
+        // fixes-14: HR-01..03
+        "handoff_then_resolve_again" => (no_init, handoff_then_resolve_again),
+        "handoff_then_sync_map" => (no_init, handoff_then_sync_map),
+        "handoff_in_tree_then_sync_map" => (no_init, handoff_in_tree_then_sync_map),
+        "handoff_then_try_lock" => (no_init, handoff_then_try_lock),
+        // fixes-14 round 2: RF14-07
+        "deferred_resolve_before_handoff" => (no_init, deferred_resolve_before_handoff),
         // Not Lean programs: the regression programs of sched-io's reviews.
         "rsio_poll_fds_with_stream_lock" => {
             (no_init, crate::review::rsio_poll_fds_with_stream_lock)
@@ -166,6 +182,10 @@ pub fn lookup(id: &str) -> Option<Case> {
         // initializer keeps a recursive mutex locked and `main` locks it
         // again on the same OS thread.
         "rs7_init_reclock" => (rs7_init_reclock_init, rs7_init_reclock),
+        // Not a case of `tests/cases`: review RF14-03, a `sync` dependent that
+        // `depend` runs at once is Lean's fast path, with no panic.
+        "rf14_depend_fast_path" => (no_init, rf14_depend_fast_path),
+        "rf14_fast_pool_caller_waits" => (no_init, rf14_fast_pool_caller_waits),
         // tests/cases/net: networking (net-1)
         _ => return crate::netcases::lookup(id),
     })
@@ -2176,5 +2196,701 @@ fn effect_points_in_a_started_task(_: &[String]) -> u32 {
     drop(t);
     let (fp, fq) = (has_finished(&p), has_finished(&q));
     eprintln(&format!("p finished: {fp}, q finished: {fq}"));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-14: the final run and the event loop (AR-52), the timers and signals
+// (HU-01..06), and the stream hand-offs (HR-01..03)
+
+/// Lean's `toString` of an `Option Int` or an `Option Nat`.
+fn opt_text(o: &Option<i64>) -> String {
+    match o {
+        Some(v) => format!("(some {v})"),
+        None => "none".into(),
+    }
+}
+
+// tests/cases/uvloop/timer_due_in_final_run.lean (review AR-52; the twin
+// spins args[1] ms instead of the calibrated computation): the timer comes
+// due while the final run runs the task on `main`'s stack, with no loop
+// context alive; the final run starts one after the task.
+fn timer_due_in_final_run(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let len = Ref::new(ms);
+    let tm: UTimer = Timer::new(300, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| println("timer fired"),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/timer_chain_in_final_run.lean (review AR-52; the twin
+// spins args[1] ms): timer A's dependent starts timer B, which comes due
+// while the final run runs the task, after A's loop context has ended.
+fn timer_chain_in_final_run(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let len = Ref::new(ms);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let tb: UTimer = Timer::new(700, false);
+            let pb = tb.next(UvPromise::new);
+            let _ = map_task(
+                |_: Option<()>| println("B fired"),
+                pb.result_opt(),
+                PRIO_DEFAULT,
+                true,
+                true,
+            );
+            drop(pb);
+            println("A fired");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(300);
+    let _w = as_task(move || spin_ms(len.get()), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/timer_effect_order.lean (review HU-01; the twin spins
+// args[1] ms in each phase): a timer due at an effect point goes first as a
+// due sleeper does. Phase 3 is `Std.Async.sleep 100` as its Lean code
+// reads: a one-shot timer, `result?.map (sync := true)`, then the rest in a
+// task (`bindTask`, not `sync`).
+fn timer_effect_order(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let ready: Rc<Promise<()>> = Rc::new(Promise::new());
+    let r2 = ready.clone();
+    let s = as_task(
+        move || {
+            r2.resolve(());
+            drop(r2);
+            sleep(200);
+            println("phase 1: sleeper woke");
+        },
+        PRIO_DEFAULT,
+    );
+    let _ = ready.result_opt().get();
+    spin_ms(ms);
+    println("phase 1: main computed false");
+    s.get();
+    let t: UTimer = Timer::new(100, false);
+    let p = t.next(UvPromise::new);
+    let d = map_task(
+        |_: Option<()>| println("phase 2: timer fired"),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p);
+    spin_ms(ms);
+    println("phase 2: main computed false");
+    d.get();
+    let t3: UTimer = Timer::new(100, false);
+    let p3 = t3.next(UvPromise::new);
+    let m = map_task(
+        |o: Option<()>| o.is_some(),
+        p3.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        false,
+    );
+    drop(p3);
+    let atk = map_task(
+        |ok: bool| {
+            println("phase 3: async sleep done");
+            ok
+        },
+        m,
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    spin_ms(ms);
+    println("phase 3: main computed false");
+    println(&format!("phase 3: async task ok: {}", atk.get()));
+    0
+}
+
+// tests/cases/uvloop/timer_repeat_zero_held.lean (review HU-02): the loop
+// holds a running repeating timer with timeout 0 until `stop`.
+fn timer_repeat_zero_held(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]);
+    let task = {
+        let t: UTimer = Timer::new(ms, true);
+        let p0 = t.next(UvPromise::new);
+        let _ = p0.result_opt().get();
+        drop(p0);
+        let p1 = t.next(UvPromise::new);
+        p1.result_opt()
+    };
+    sleep(200);
+    println(&format!(
+        "dropped: second promise finished: {}",
+        has_finished(&task)
+    ));
+    let u: UTimer = Timer::new(ms, true);
+    let q0 = u.next(UvPromise::new);
+    let _ = q0.result_opt().get();
+    drop(q0);
+    let q1 = u.next(UvPromise::new);
+    let qt = q1.result_opt();
+    drop(q1);
+    sleep(200);
+    println(&format!(
+        "kept: second promise finished before stop: {}",
+        has_finished(&qt)
+    ));
+    u.stop();
+    let f = has_finished(&qt);
+    println(&format!(
+        "after stop: finished {f}, value {}",
+        repr_unit(&qt.get())
+    ));
+    0
+}
+
+// tests/cases/uvloop/timer_fresh_next_twice.lean (review HU-03): the
+// catch-up of the second extern does not run the tick that came due
+// microseconds before.
+fn timer_fresh_next_twice(args: &[String]) -> u32 {
+    let period = to_nat(&args[0]);
+    let t: UTimer = Timer::new(period, true);
+    let a = t.next(UvPromise::new);
+    let b = t.next(UvPromise::new);
+    sleep(200);
+    println(&format!(
+        "next twice: first finished {}, second finished {}",
+        finished(&a),
+        finished(&b)
+    ));
+    drop((a, b));
+    t.stop();
+    let u: UTimer = Timer::new(period, true);
+    let c = u.next(UvPromise::new);
+    u.reset();
+    sleep(200);
+    println(&format!("next then reset: first finished {}", finished(&c)));
+    drop(c);
+    u.stop();
+    0
+}
+
+// tests/cases/uvloop/signal_before_timer_in_look.lean (review HU-04; the
+// twin spins args[2] ms in timer A's dependent): within one look, the
+// signal comes before the timer due.
+fn signal_before_timer_in_look(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let ms = to_nat(&args[2]);
+    let len = Ref::new(ms);
+    let w: USignal = Signal::new(num as i32, false);
+    let pw = uv_ok(w.next(UvPromise::new));
+    let _s = map_task(
+        |_: Option<i64>| println("signal"),
+        pw.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(pw);
+    let ta: UTimer = Timer::new(10, false);
+    let pa = ta.next(UvPromise::new);
+    let _a = map_task(
+        move |_: Option<()>| {
+            spin_ms(len.get());
+            println("A done false");
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(pa);
+    let tb: UTimer = Timer::new(100, false);
+    let pb = tb.next(UvPromise::new);
+    let _b = map_task(
+        |_: Option<()>| println("timer B"),
+        pb.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(pb);
+    let pid = lio::get_pid();
+    // a process spawn is an effect point
+    lean_runtime::sched::effect();
+    let _child = ok(lio::spawn(
+        "sh",
+        &["-c", &format!("sleep 0.3; kill -USR1 {pid}")],
+        lio::INHERIT,
+    ));
+    sleep(2000);
+    println("main done");
+    0
+}
+
+// tests/cases/uvloop/signal_batch_new_watcher.lean (review HU-05; the twin
+// spins args[3] ms in timer A's dependent): a watcher started by a `sync`
+// dependent of an earlier delivery of the batch does not get a later
+// signal of the batch.
+fn signal_batch_new_watcher(args: &[String]) -> u32 {
+    let usr1: i64 = args[0].parse().expect("an Int");
+    let usr2: i64 = args[1].parse().expect("an Int");
+    let ms = to_nat(&args[3]);
+    let len = Ref::new(ms);
+    let w0: USignal = Signal::new(usr2 as i32, true);
+    let p0 = uv_ok(w0.next(UvPromise::new));
+    let _d0 = map_task(
+        |v: Option<i64>| println(&format!("W0 got {}", opt_text(&v))),
+        p0.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p0);
+    let w2task: Ref<Option<Task<Option<i64>>>> = Ref::new(None);
+    let w2t = w2task.clone();
+    let w1: USignal = Signal::new(usr1 as i32, false);
+    let p1 = uv_ok(w1.next(UvPromise::new));
+    let _d1 = map_task(
+        move |v: Option<i64>| {
+            let w2: USignal = Signal::new(usr2 as i32, false);
+            let p2 = uv_ok(w2.next(UvPromise::new));
+            let _ = map_task(
+                |v: Option<i64>| println(&format!("W2 got {}", opt_text(&v))),
+                p2.result_opt(),
+                PRIO_DEFAULT,
+                true,
+                true,
+            );
+            w2t.set(Some(p2.result_opt()));
+            drop(p2);
+            println(&format!("W1 got {}, started W2", opt_text(&v)));
+        },
+        p1.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p1);
+    let ta: UTimer = Timer::new(10, false);
+    let pa = ta.next(UvPromise::new);
+    let _a = map_task(
+        move |_: Option<()>| {
+            spin_ms(len.get());
+            println("A done false");
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(pa);
+    let pid = lio::get_pid();
+    lean_runtime::sched::effect();
+    let _child = ok(lio::spawn(
+        "sh",
+        &[
+            "-c",
+            &format!("sleep 0.3; kill -USR1 {pid}; sleep 0.1; kill -USR2 {pid}"),
+        ],
+        lio::INHERIT,
+    ));
+    sleep(2000);
+    match w2task.get() {
+        Some(t) => println(&format!("W2 finished: {}", has_finished(&t))),
+        None => println("W2 not started"),
+    }
+    0
+}
+
+// tests/cases/uvloop/timer_period_from_look.lean (review HU-06; the twin
+// spins args[1] ms in `main` and args[2] ms in X): tick 2's period starts
+// from the look that found tick 1 due, not from its callback, which runs
+// after X.
+fn timer_period_from_look(args: &[String]) -> u32 {
+    let (main_ms, x_ms) = (to_nat(&args[1]), to_nat(&args[2]));
+    let len_x = Ref::new(x_ms);
+    let t: UTimer = Timer::new(1000, true);
+    let p0 = t.next(UvPromise::new);
+    let _ = p0.result_opt().get();
+    drop(p0);
+    let t0 = mono_ms_now();
+    let p1 = t.next(UvPromise::new);
+    let tick2: Ref<Option<Task<Option<()>>>> = Ref::new(None);
+    let (tm, k2) = (t.clone(), tick2.clone());
+    let _d1 = map_task(
+        move |_: Option<()>| {
+            let p2 = tm.next(UvPromise::new);
+            k2.set(Some(p2.result_opt()));
+            drop(p2);
+        },
+        p1.result_opt(),
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    drop(p1);
+    let ready: Rc<Promise<()>> = Rc::new(Promise::new());
+    let r2 = ready.clone();
+    let xt = as_task(
+        move || {
+            let n = len_x.get();
+            r2.resolve(());
+            drop(r2);
+            sleep(300);
+            spin_ms(n);
+            false
+        },
+        PRIO_DEFAULT,
+    );
+    let _ = ready.result_opt().get();
+    spin_ms(main_ms);
+    let now = mono_ms_now();
+    sleep((t0 + 3200).saturating_sub(now) as u32);
+    let f = match tick2.get() {
+        Some(t2) => has_finished(&t2),
+        None => false,
+    };
+    println(&format!("tick 2 by then: {f}"));
+    println(&format!("X: ok: {}", xt.get()));
+    0
+}
+
+/// A handle's last reference dropped by the translator's free (a drain, in
+/// the no-suspend scope), then the glue's drain-end hook
+/// (`sched::after_drain`): where natively the drop's `fclose` returned.
+fn drop_in_drain<T>(v: T) {
+    {
+        let _scope = lean_runtime::sched::no_suspend();
+        drop(v);
+    }
+    lean_runtime::sched::after_drain();
+}
+
+/// `IO.Process.spawn { cmd := "sh", args := #["-c", script], stdin := .piped }`
+/// then `takeStdin`, `write` of 65536 bytes (as much as an empty pipe
+/// takes), `flush` and `putStr "x"`: the handle's last byte waits in its
+/// buffer, which the pipe cannot take until the child reads.
+fn child_with_full_stdin(script: &str) -> (Handle, lean_runtime::io::process::ChildProcess) {
+    lean_runtime::sched::effect();
+    let child = ok(lio::spawn(
+        "sh",
+        &["-c", script],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Inherit,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    ok(stdin.write(&[b'x'; 65536]));
+    ok(stdin.flush());
+    ok(stdin.put_str(b"x"));
+    (stdin, child.process)
+}
+
+// tests/cases/process/handoff_then_resolve_again.lean (review HR-01; the
+// glue tests the promise inside `sched::resolve`'s store, `Promise::resolve`)
+fn handoff_then_resolve_again(_: &[String]) -> u32 {
+    let p: Rc<Promise<i64>> = Rc::new(Promise::new());
+    let pb = p.clone();
+    let b = as_task(
+        move || {
+            sleep(300);
+            pb.resolve(2);
+            let v = pb.result_opt().get();
+            println(&format!("B sees {}", opt_text(&v)));
+        },
+        PRIO_DEFAULT,
+    );
+    let (stdin, child) = child_with_full_stdin("sleep 1; cat > /dev/null");
+    drop_in_drain(stdin);
+    p.resolve(1);
+    let v = p.result_opt().get();
+    println(&format!("main sees {}", opt_text(&v)));
+    b.get();
+    let _ = child.wait();
+    0
+}
+
+// tests/cases/process/handoff_then_sync_map.lean (review HR-02): the drain's
+// end waits for the handed-off writer, so `t` has finished when the glue
+// asks `dependent_runs_now`, and the function runs at once on `main`.
+fn handoff_then_sync_map(_: &[String]) -> u32 {
+    let t = as_task(
+        || {
+            sleep(300);
+            5u64
+        },
+        PRIO_DEFAULT,
+    );
+    let slow = as_task(
+        || {
+            sleep(1500);
+            7u64
+        },
+        PRIO_DEFAULT,
+    );
+    let (stdin, child) = child_with_full_stdin("sleep 1; cat > /dev/null");
+    drop_in_drain(stdin);
+    let d = map_task(
+        move |v: u64| {
+            let w = slow.get();
+            println(&format!("dep {v} {w}"));
+        },
+        t,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    println("main after mapTask");
+    d.get();
+    let _ = child.wait();
+    0
+}
+
+// tests/cases/process/handoff_in_tree_then_sync_map.lean (leanrs's deep
+// drain of HR-02): the handle is dropped with the array that holds it, in
+// its drain (`Arr`, a `DrainScope`), whose end waits for the writer.
+fn handoff_in_tree_then_sync_map(_: &[String]) -> u32 {
+    let t = as_task(
+        || {
+            sleep(300);
+            5u64
+        },
+        PRIO_DEFAULT,
+    );
+    let slow = as_task(
+        || {
+            sleep(1500);
+            7u64
+        },
+        PRIO_DEFAULT,
+    );
+    let (stdin, child) = child_with_full_stdin("sleep 1; cat > /dev/null");
+    // `Tree.node none #[Tree.node (some stdin) #[]]`, dropped after
+    // `Tree.count`'s last use
+    let tree = Arr::new(vec![Arr::new(vec![Some(stdin)])]);
+    drop(tree);
+    let d = map_task(
+        move |v: u64| {
+            let w = slow.get();
+            println(&format!("dep {v} {w}"));
+        },
+        t,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    println("main after mapTask");
+    d.get();
+    let _ = child.wait();
+    0
+}
+
+// tests/cases/process/deferred_resolve_before_handoff.lean (review RF14-07):
+// one free (an `Arr`'s drain, which drops the last element first, as
+// `lean_del_core`) drops the promise, then the child's stdin, whose last
+// byte goes to a writer thread; the promise's deferred resolution waits only
+// for the writers handed off before it, so the reader reads the child's
+// stdout, and the child then reads its stdin.
+fn deferred_resolve_before_handoff(_: &[String]) -> u32 {
+    lean_runtime::sched::effect();
+    let child = ok(lio::spawn(
+        "sh",
+        &["-c", "head -c 70000 /dev/zero; cat > /dev/null"],
+        StdioConfig {
+            stdin: Stdio::Piped,
+            stdout: Stdio::Piped,
+            stderr: Stdio::Inherit,
+        },
+    ));
+    let stdin = child.stdin.expect("piped");
+    let stdout = child.stdout.expect("piped");
+    let p: Promise<()> = Promise::new();
+    let r = p.result_opt();
+    let reader = as_task(
+        move || {
+            let _ = r.get();
+            ok(lio::read_to_end(&stdout)).len() as u64
+        },
+        PRIO_DEFAULT,
+    );
+    // the reader runs and blocks on the promise
+    sleep(50);
+    ok(stdin.write(&[b'x'; 65536]));
+    ok(stdin.flush());
+    ok(stdin.put_str(b"x"));
+    /// `Sum IO.FS.Handle (IO.Promise Unit)`.
+    #[allow(dead_code)]
+    enum E {
+        H(Handle),
+        P(Promise<()>),
+    }
+    let arr = Arr::new(vec![E::H(stdin), E::P(p)]);
+    drop(arr);
+    println(&format!("reader got {}", reader.get()));
+    let st = ok(child.process.wait());
+    println(&format!("child {st}"));
+    0
+}
+
+/// Not a Lean program: review RF14-03's gap. With one worker
+/// (`LEAN_NUM_THREADS=1`), a pool task runs on `main`'s stack and calls
+/// `depend` on a finished source (as when `depend`'s writers point let it
+/// finish); the dependent runs at once, as Lean's fast path, in the pool
+/// task's frame, and waits for a queued task. Natively `wait_for` raises
+/// the worker limit for the pool task, and the queued task runs; before
+/// the fix the dependent's entry hid the pool task, so the wait kept the
+/// worker, and the program hung.
+fn rf14_fast_pool_caller_waits(_: &[String]) -> u32 {
+    use lean_runtime::sched::{self, Outcome, TaskId};
+    let p = as_task(
+        || {
+            let ran = Rc::new(std::cell::Cell::new(false));
+            let r2 = ran.clone();
+            sched::depend(
+                TaskId::FINISHED,
+                Box::new(move || {
+                    let q = Task::spawn(|| 7u64, PRIO_DEFAULT);
+                    r2.set(q.get() == 7);
+                    Outcome::Done
+                }),
+                PRIO_DEFAULT,
+                true,
+                true,
+            );
+            ran.get()
+        },
+        PRIO_DEFAULT,
+    );
+    println(&format!(
+        "the function's wait ran the queued task: {}",
+        p.get()
+    ));
+    0
+}
+
+/// Not a Lean program: review RF14-03. `process/handoff_then_sync_map`
+/// without the drain-end hook (a glue that has not adopted it, or a drain
+/// nested in an outer no-suspend scope): `dependent_runs_now` sees `t`
+/// unfinished, and `depend`'s writers point lets it finish, so `depend`
+/// runs the `sync` dependent at once. It runs as Lean's fast path (the
+/// function applied in the caller), so its waits, for the finished `t` and
+/// for the unfinished `slow`, print no "`Task.get` called from a `(sync :=
+/// true)` task"; before RF14-03 it ran as a `sync` task, and the wait for
+/// `slow` printed it.
+fn rf14_depend_fast_path(_: &[String]) -> u32 {
+    let t = as_task(
+        || {
+            sleep(300);
+            5u64
+        },
+        PRIO_DEFAULT,
+    );
+    let slow = as_task(
+        || {
+            sleep(1500);
+            7u64
+        },
+        PRIO_DEFAULT,
+    );
+    let (stdin, child) = child_with_full_stdin("sleep 1; cat > /dev/null");
+    {
+        // the translator's free path, without the drain-end hook
+        let _scope = lean_runtime::sched::no_suspend();
+        drop(stdin);
+    }
+    let t2 = t.clone();
+    let d = map_task(
+        move |v: u64| {
+            let u = t2.get();
+            let w = slow.get();
+            println(&format!("dep {v} {u} {w}"));
+        },
+        t,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    println("main after mapTask");
+    d.get();
+    let _ = child.wait();
+    0
+}
+
+// tests/cases/process/handoff_then_try_lock.lean (review HR-03): each try
+// function is the context's first writers point after the hand-off; the
+// port leaves the drain-end hook out (a glue that calls it joins the writer
+// there, and the try then finds none to wait for).
+fn handoff_then_try_lock(_: &[String]) -> u32 {
+    fn round(name: &str, take: impl FnOnce() + 'static, attempt: impl FnOnce() -> bool) {
+        let started: Rc<Promise<()>> = Rc::new(Promise::new());
+        let s2 = started.clone();
+        let taker = as_task(
+            move || {
+                s2.resolve(());
+                drop(s2);
+                sleep(150);
+                take();
+            },
+            PRIO_DEDICATED,
+        );
+        let _ = started.result_opt().get();
+        let (stdin, child) = child_with_full_stdin("sleep 0.5; cat > /dev/null");
+        {
+            // the translator's free path, without the drain-end hook
+            let _scope = lean_runtime::sched::no_suspend();
+            drop(stdin);
+        }
+        let got = attempt();
+        println(&format!("{name}: {got}"));
+        taker.get();
+        let _ = child.wait();
+    }
+    use lean_runtime::sched::sync::{Mutex, RecursiveMutex, SharedMutex};
+    let m = Rc::new(Mutex::new());
+    let m2 = m.clone();
+    round("BaseMutex.tryLock", move || m2.lock(), || m.try_lock());
+    let r = Rc::new(RecursiveMutex::new());
+    let r2 = r.clone();
+    round(
+        "BaseRecursiveMutex.tryLock",
+        move || r2.lock(),
+        || r.try_lock(),
+    );
+    let s = Rc::new(SharedMutex::new());
+    let s2 = s.clone();
+    round(
+        "BaseSharedMutex.tryWrite",
+        move || s2.write(),
+        || s.try_write(),
+    );
+    let w = Rc::new(SharedMutex::new());
+    let w2 = w.clone();
+    round(
+        "BaseSharedMutex.tryRead",
+        move || w2.write(),
+        || w.try_read(),
+    );
     0
 }

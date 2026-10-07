@@ -1,0 +1,8 @@
+id = "timer_period_from_look"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HU-06 (by inspection; case asked for by leanrs), judged by the coordinator, 2026-10-07"
+streams = "separate"
+# The arguments: the length of the calibration's chunks (`main` computes 15
+# times the rounds per 100 ms, about 1.5 s, and the task 20 times, about
+# 2 s, in any build), then the twin's two computations, in ms.

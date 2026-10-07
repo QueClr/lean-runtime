@@ -1,0 +1,5 @@
+id = "deferred_resolve_before_handoff"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs's reviewer's lead, judged real as review RF14-07 of lean-runtime fixes-14 (review-fixes-14/judge-deferred/DeferredResolveVsWriter.lean), 2026-10-07"
+streams = "separate"

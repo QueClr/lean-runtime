@@ -30,6 +30,11 @@ const WITH_TASKS: &[(&str, &str)] = &[
     ("process", "handoff_then_resolve"),
     ("process", "handoff_then_write"),
     ("process", "handoff_then_kill"),
+    ("process", "handoff_then_resolve_again"),
+    ("process", "handoff_then_sync_map"),
+    ("process", "handoff_in_tree_then_sync_map"),
+    ("process", "handoff_then_try_lock"),
+    ("process", "deferred_resolve_before_handoff"),
 ];
 
 fn check(id: &str) {
@@ -244,6 +249,31 @@ fn rs7_init_reclock() {
         assert_eq!(out_of(&got), want, "{kv:?}");
         assert!(got.err.is_empty(), "{kv:?}: stderr {:?}", err_of(&got));
     }
+}
+
+/// Review RF14-03: a `sync` dependent that `depend` runs at once (its source
+/// finished during `depend`'s writers point) is Lean's fast path: its waits
+/// print no "`Task.get` called from a `(sync := true)` task".
+#[test]
+fn rf14_depend_fast_path() {
+    let got = run_with("rf14_depend_fast_path", &[], &[], Some(20), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "");
+    assert_eq!(out_of(&got), "dep 5 5 7\nmain after mapTask\n");
+}
+
+/// Review RF14-03's gap: with one worker, a pool task's dependent that
+/// `depend` runs at once waits for a queued task, which runs, as natively.
+#[test]
+fn rf14_fast_pool_caller_waits() {
+    let env = [("LEAN_NUM_THREADS".to_string(), "1".to_string())];
+    let got = run_with("rf14_fast_pool_caller_waits", &[], &env, Some(10), false);
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(err_of(&got), "");
+    assert_eq!(
+        out_of(&got),
+        "the function's wait ran the queued task: true\n"
+    );
 }
 
 /// RNET-01 of net-1's review: a receive's allocation that ends the process
@@ -1301,6 +1331,15 @@ cases!(
     loop_sleeps_after_task,
     loop_cycle_long,
     loop_carried_then_poll,
+    // fixes-14: AR-52, HU-01..06
+    timer_due_in_final_run,
+    timer_chain_in_final_run,
+    timer_effect_order,
+    timer_repeat_zero_held,
+    timer_fresh_next_twice,
+    signal_before_timer_in_look,
+    signal_batch_new_watcher,
+    timer_period_from_look,
     timer_repeating,
     timer_cancel_reset,
     signal_usr1,
@@ -1377,4 +1416,11 @@ cases!(
     handoff_then_resolve,
     handoff_then_write,
     handoff_then_kill,
+    // fixes-14: HR-01..03
+    handoff_then_resolve_again,
+    handoff_then_sync_map,
+    handoff_in_tree_then_sync_map,
+    handoff_then_try_lock,
+    // fixes-14 round 2: RF14-07
+    deferred_resolve_before_handoff,
 );

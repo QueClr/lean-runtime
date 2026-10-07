@@ -191,7 +191,9 @@ impl Reg {
 
 /// A callback due on the loop context.
 pub(crate) enum Due {
-    Timer(u64),
+    /// A timer's call, with the time of the look that found it due (the
+    /// loop's time for its callback: `Reactor::fired_at`, review HU-06).
+    Timer(u64, Instant),
     /// A watch's call (descriptor number, watch id): its readiness is
     /// looked at again right before the call (`next_due`).
     Fd(i32, u64),
@@ -211,6 +213,9 @@ pub(crate) struct Reactor {
     /// The loop context, while it runs.
     loop_ctx: Option<CtxId>,
     last_check: Option<Instant>,
+    /// The loop's time for the timer callback that runs now
+    /// ([`loop_time`]): libuv's `loop->time` of the iteration that runs it.
+    fired_at: Option<Instant>,
 }
 
 impl Drop for Reactor {
@@ -374,18 +379,22 @@ impl Reactor {
         }
     }
 
-    /// The pending timers due by `now`, in their order (deadline, then start
-    /// order, as libuv's heap), queued for the loop context.
-    fn take_due_timers(&mut self, now: Instant) {
+    /// The pending timers due by `by`, in their order (deadline, then start
+    /// order, as libuv's heap), queued for the loop context with the look's
+    /// time `look`. Whether it queued one.
+    fn take_due_timers(&mut self, by: Instant, look: Instant) -> bool {
+        let mut took = false;
         while let Some(&Reverse((d, id))) = self.timers.peek() {
-            if d > now {
+            if d > by {
                 break;
             }
             self.timers.pop();
             if self.timer_cbs.contains_key(&id) {
-                self.due.push_back(Due::Timer(id));
+                self.due.push_back(Due::Timer(id, look));
+                took = true;
             }
         }
+        took
     }
 
     /// The next due callback for the loop context, or `None` (and the loop
@@ -393,9 +402,9 @@ impl Reactor {
     fn next_due(&mut self) -> Option<Run> {
         while let Some(d) = self.due.pop_front() {
             match d {
-                Due::Timer(id) => {
+                Due::Timer(id, look) => {
                     if let Some(cb) = self.timer_cbs.remove(&id) {
-                        return Some(Run::Timer(cb));
+                        return Some(Run::Timer(cb, look));
                     }
                 }
                 Due::Fd(raw, id) => {
@@ -437,7 +446,9 @@ impl Reactor {
 }
 
 enum Run {
-    Timer(Rc<dyn Fn()>),
+    /// A timer's call: its callback and the time of the look that found it
+    /// due.
+    Timer(Rc<dyn Fn()>, Instant),
     /// A watch's call: its callback, descriptor number, id and readiness.
     Fd(Rc<dyn Fn(Ready)>, i32, u64, Ready),
 }
@@ -479,13 +490,30 @@ impl Sched {
         }
     }
 
-    /// Look at the loop without waiting: due timers, and (at most once per
-    /// `CHECK_EVERY`, unless `force`) the descriptors.
-    pub(crate) fn ev_check(&mut self, now: Instant, force: bool) {
+    /// Look at the loop without waiting: (at most once per `CHECK_EVERY`,
+    /// unless `force`) the descriptors, then the timers due by `now`.
+    /// Whether it queued a timer's call (an effect point lets the loop
+    /// context go first then, as a due sleeper: review HU-01).
+    pub(crate) fn ev_check(&mut self, now: Instant, force: bool) -> bool {
+        self.ev_check_by(now, now, force)
+    }
+
+    /// [`Sched::ev_check`] that takes only the timers due by `timers_by`
+    /// (`catch_up`, review HU-03). Within one look the descriptors' events
+    /// (a signal watcher's pipe among them) are queued before the timers
+    /// due, as libuv runs `uv__io_poll`'s callbacks before
+    /// `uv__run_timers` in one iteration, and as threads mode does (review
+    /// HU-04).
+    pub(crate) fn ev_check_by(&mut self, now: Instant, timers_by: Instant, force: bool) -> bool {
         if !self.ev.active() {
-            return;
+            return false;
         }
-        self.ev.take_due_timers(now);
+        self.ev_check_fds(now, force);
+        self.ev.take_due_timers(timers_by, now)
+    }
+
+    /// The descriptors part of [`Sched::ev_check_by`].
+    fn ev_check_fds(&mut self, now: Instant, force: bool) {
         if self.ev.regs.is_empty() {
             return;
         }
@@ -604,9 +632,22 @@ pub(crate) fn loop_main() {
         }
     }
     let mut reset = Reset(None);
+    // The loop's time for a timer's callback (`fired_at`, review HU-06): for
+    // what was due when this context first ran, the time of the look that
+    // found it due, as libuv's `loop->time` of the iteration that runs it
+    // (natively the loop thread runs it then; here other contexts able to
+    // run may go first); for what a look found due while this context ran
+    // a callback, the time it takes it, as natively the busy loop thread
+    // looks again only then.
+    let first = Instant::now();
     while let Some(run) = with(|s| s.ev.next_due()) {
         match run {
-            Run::Timer(cb) => cb(),
+            Run::Timer(cb, look) => {
+                let t = if look < first { look } else { Instant::now() };
+                with(|s| s.ev.fired_at = Some(t));
+                cb();
+                with(|s| s.ev.fired_at = None);
+            }
             Run::Fd(cb, raw, id, ready) => {
                 reset.0 = Some((raw, id));
                 cb(ready);
@@ -964,7 +1005,13 @@ pub(crate) fn catch_up() {
         if !s.tk.started || !s.ev.active() || s.ev.loop_ctx == Some(s.cx.cur) {
             return false;
         }
-        s.ev_check(Instant::now(), true);
+        // only the timers due a loop wake-up ago (review HU-03): natively
+        // the loop thread wakes for a timer and takes its lock some time
+        // after the deadline, so an extern right after the timer came due
+        // (two `next`s in a row on a fresh repeating timer, `next` then
+        // `reset`) acts first
+        let now = Instant::now();
+        s.ev_check_by(now, now.checked_sub(LOOP_LATENCY).unwrap_or(now), true);
         s.ev_start_loop();
         match s.ev.loop_ctx {
             Some(c) => c != s.cx.cur && s.cx.ctxs[c].status == Status::Runnable,
@@ -974,6 +1021,24 @@ pub(crate) fn catch_up() {
     if go {
         super::ctx::yield_now();
     }
+}
+
+/// How long after a timer's deadline the extern of another thread can still
+/// take the loop's lock first (`catch_up`, review HU-03): one wake-up of the
+/// loop thread from `epoll_wait`, some tens of microseconds on an idle host
+/// and up to about a millisecond on a loaded one. 1 ms (review RF14-02: with
+/// 100 µs, the second of two externs in a row could come after it on a
+/// loaded host, in a debug build).
+const LOOP_LATENCY: Duration = Duration::from_millis(1);
+
+/// The loop's time for the timer callback that runs now on the loop context
+/// (libuv's `loop->time` of the iteration that runs it, review HU-06): the
+/// time of the look that found the timer due, or, for a timer a look found
+/// due while the loop context ran another callback, the time the loop
+/// context took it (`loop_main`). `None` outside a timer's callback. A
+/// repeating timer arms its next period from it, as `uv_timer_again` does.
+pub(crate) fn loop_time() -> Option<Instant> {
+    with(|s| s.ev.fired_at)
 }
 
 /// Block the running context until `deadline` or until another wakes it
@@ -1018,6 +1083,40 @@ mod tests {
         assert_eq!(armed(raw), Some(epoll::EventFlags::IN));
         unwatch(id);
         assert!(armed(raw).is_none());
+    }
+
+    /// Review HU-04 (fixes-14): within one look the descriptors' events are
+    /// queued before the timers due, as libuv runs the io callbacks before
+    /// the timers in one iteration.
+    #[test]
+    fn within_one_look_descriptor_events_come_before_due_timers() {
+        let (r, w) = rustix::pipe::pipe().unwrap();
+        let id = watch(r, Interest::READ, Rc::new(|_| {})).unwrap();
+        let t = timer_start(Instant::now(), Rc::new(|| {}));
+        rustix::io::write(&w, b"x").unwrap();
+        assert!(with(|s| s.ev_check(Instant::now(), true)));
+        let fd_first: Vec<bool> = with(|s| {
+            let v = s.ev.due.iter().map(|d| matches!(d, Due::Fd(..))).collect();
+            s.ev.due.clear();
+            v
+        });
+        assert_eq!(fd_first, [true, false]);
+        timer_stop(t);
+        unwatch(id);
+    }
+
+    /// Review HU-03 (fixes-14): the catch-up's look (`ev_check_by` with the
+    /// timers due a loop wake-up ago) leaves a timer that came due less
+    /// than `LOOP_LATENCY` ago, and takes one due earlier.
+    #[test]
+    fn a_catch_up_leaves_a_timer_due_within_the_loop_latency() {
+        let d = Instant::now();
+        let t = timer_start(d, Rc::new(|| {}));
+        let look = |now: Instant| with(|s| s.ev_check_by(now, now - LOOP_LATENCY, true));
+        assert!(!look(d + LOOP_LATENCY / 2));
+        assert!(look(d + LOOP_LATENCY));
+        with(|s| s.ev.due.clear());
+        timer_stop(t);
     }
 
     #[test]

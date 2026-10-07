@@ -1,0 +1,4 @@
+BaseMutex.tryLock: false
+BaseRecursiveMutex.tryLock: false
+BaseSharedMutex.tryWrite: false
+BaseSharedMutex.tryRead: false

@@ -1,0 +1,7 @@
+phase 1: sleeper woke
+phase 1: main computed false
+phase 2: timer fired
+phase 2: main computed false
+phase 3: async sleep done
+phase 3: main computed false
+phase 3: async task ok: true

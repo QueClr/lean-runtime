@@ -140,6 +140,14 @@ const UNREFERENCED: u32 = 1 << 16;
 /// `link` holds the emulated worker id reserved for it at the pick, the id
 /// of the worker that started it (review RF3-01; `pick`, `take_reserved`).
 const RESERVED: u32 = 1 << 17;
+/// A dependent that `depend` runs at once because its source finished
+/// during `depend`'s writers point (review HR-02): Lean's fast path
+/// (`lean_task_map_core` and `lean_task_bind_core` apply the function in
+/// the caller when the source has finished), so while it runs it is the
+/// caller's code: `in_sync_task` answers for the task below it (review
+/// RF14-03). A bind's continuation, waiting for the task it continues as,
+/// is no longer one (`bind_wait` clears it).
+const FAST: u32 = 1 << 18;
 
 /// The bits of `Entry::flags` above the flags: the task's priority (its
 /// queue, `common::priority`; `DEDICATED` for a dedicated task).
@@ -969,17 +977,31 @@ impl Sched {
     /// `d` (just registered as a dependent) was created depending on `src`
     /// (`sync`: with `sync := true`): if `src` is unfinished, `d` waits for
     /// it and runs or is enqueued when it finishes, as Lean's `add_dep`;
-    /// otherwise it is enqueued now (a `sync` dependent of a finished task
-    /// is no task: `dependent_runs_now`).
-    fn depend(&mut self, src: TaskId, d: u32, sync: bool) {
+    /// otherwise an async `d` is enqueued now, and a `sync` one is to run
+    /// now on the calling thread (true), as Lean applies the function in
+    /// the caller when the source has finished (review HR-02: the glue's
+    /// `dependent_runs_now` came before `depend`'s writers point, which let
+    /// `src` finish). That run is Lean's fast path (`FAST`, review RF14-03):
+    /// the source had finished before the call returned, so natively the
+    /// glue's check would have seen it, and no `sync` task runs; a
+    /// `Task.get` in the function reports `GET_IN_SYNC_TASK` only where the
+    /// caller is a `sync` task.
+    fn depend(&mut self, src: TaskId, d: u32, sync: bool) -> bool {
         if sync {
             self.ent_mut(d).flags |= SYNC;
         }
         if let Some(s) = self.find(src) {
             self.link(s, d);
-            return;
+            return false;
+        }
+        if sync {
+            let th = self.cur_thread();
+            self.ent_mut(d).flags |= INLINE | FAST;
+            self.set_thread(d, th);
+            return true;
         }
         self.enqueue(d);
+        false
     }
 
     /// Take pending task `i` off its queue, its source's dependents and the
@@ -1213,7 +1235,13 @@ impl Sched {
     /// with a sleeper or a watched descriptor the hub never ran a started
     /// `src` by itself (`last_resort`), so the program hung where native
     /// ends.
-    fn bind_wait(&mut self, i: u32, src: TaskId, job: Job) -> Option<Job> {
+    ///
+    /// When `src` has finished meanwhile (the writers point at the job's
+    /// end let it finish after the glue's check), an async `i` is queued,
+    /// and a `sync` one runs again at once, on the thread of its first run
+    /// (review RF14-04), as `add_dep`'s `enqueue_core` runs a
+    /// `LEAN_SYNC_PRIO` task (`BindNext::RunNow`, review HR-02).
+    fn bind_wait(&mut self, i: u32, src: TaskId, job: Job) -> BindNext {
         if self.st_ref().running.last() == Some(&i) {
             self.st().running.pop();
             self.refresh_holds(self.cx.cur);
@@ -1230,25 +1258,45 @@ impl Sched {
             if self.cx.blocked > 0 {
                 self.wake_progress();
             }
-            return Some(job);
+            return BindNext::Drop(job);
         }
         let e = self.ent_mut(i);
-        e.flags &= !(RUNNING | INLINE | FROM_WALK | ON_THREAD);
+        // the thread it ran on, for a `sync` one that runs on at once
+        let th = e.aux[0];
+        e.flags &= !(RUNNING | INLINE | FROM_WALK | ON_THREAD | FAST);
         e.aux = [0, 0];
         e.job = Some(job);
-        match self.find(src) {
-            Some(s) => self.link(s, i),
-            None => self.enqueue(i),
-        }
+        let now = match self.find(src) {
+            Some(s) => {
+                self.link(s, i);
+                false
+            }
+            None if self.ent(i).flags & SYNC != 0 => {
+                // on the thread of its first run (review RF14-04): the
+                // finishing thread of its source's walk, or `depend`'s
+                // caller, which may lie above the thread below it now
+                let e = self.ent_mut(i);
+                e.flags |= INLINE;
+                e.aux[0] = th;
+                true
+            }
+            None => {
+                self.enqueue(i);
+                false
+            }
+        };
         if self.tk.worker == i {
             self.worker_idle();
+        }
+        if now {
+            return BindNext::RunNow;
         }
         if self.cx.blocked > 0 {
             let g = self.ent(i).gen;
             self.wake_cell((i, g));
             self.wake_progress();
         }
-        None
+        BindNext::Wait
     }
 
     /// Promise `i` has been resolved (the translator stored its value): its
@@ -1636,7 +1684,9 @@ impl Sched {
     /// such tasks run on the thread below them: their waits raise no limit,
     /// as natively `wait_for` sees a `sync` dependent at its internal
     /// priority `LEAN_SYNC_PRIO` (`in_pool` false), so they keep that
-    /// thread's worker.
+    /// thread's worker. A dependent that `depend` runs at once (`FAST`) is
+    /// the caller's code (Lean's fast path): it is passed over, and the
+    /// activity below it is innermost if it was (review RF14-03).
     fn holds_worker(&self, st: &CtxState, w: Wait) -> bool {
         let (mut ri, mut wi) = (st.running.len(), st.walks.len());
         let mut innermost = true;
@@ -1644,6 +1694,10 @@ impl Sched {
             let task_above = ri > 0 && (wi == 0 || ri > st.walks[wi - 1].depth);
             if task_above {
                 let e = self.ent(st.running[ri - 1]);
+                if e.flags & FAST != 0 {
+                    ri -= 1;
+                    continue;
+                }
                 if e.flags & ON_THREAD == 0 {
                     let waits =
                         innermost && matches!(w, Wait::Cell(..) | Wait::Progress | Wait::OnItself);
@@ -1665,13 +1719,21 @@ impl Sched {
     /// Whether a `wait` of the running context raises the worker limit, as
     /// native `wait_for` does for a pool task (`may_run_awaited`'s `spare`):
     /// its innermost activity is a running pool task on a thread of its own,
-    /// not a `sync` task, and not a walk (review AR-16).
+    /// not a `sync` task, and not a walk (review AR-16). Dependents that
+    /// `depend` runs at once (`FAST`) are passed over: they are the
+    /// caller's code (review RF14-03).
     fn wait_raises_limit(&self) -> bool {
         let st = self.st_ref();
-        let Some(&i) = st.running.last() else {
+        let n = st.running.len()
+            - st.running
+                .iter()
+                .rev()
+                .take_while(|&&r| self.ent(r).flags & FAST != 0)
+                .count();
+        let Some(&i) = st.running[..n].last() else {
             return false;
         };
-        if st.walks.last().is_some_and(|w| w.depth >= st.running.len()) {
+        if st.walks.last().is_some_and(|w| w.depth >= n) {
             return false;
         }
         let e = self.ent(i);
@@ -2306,7 +2368,7 @@ impl Sched {
         // `sync` dependent of a timer's promise that sleeps or waits) stays
         // suspended when `finish` returns; before the fix the final run
         // waited for it, for good when it waited forever.
-        let lp = self
+        let mut lp = self
             .ev
             .loop_ctx()
             .filter(|&c| self.cx.ctxs[c].status != Status::Dead);
@@ -2317,6 +2379,23 @@ impl Sched {
             let now = Instant::now();
             self.promote_sleepers(now);
             self.ev_check(now, true);
+        } else if self.ev.active()
+            && (self.tk.loop_work + LOOP_VALVE)
+                .checked_sub(self.tk.loop_used)
+                .is_some_and(|left| !left.is_zero())
+        {
+            // With no loop context, a timer that came due, or a descriptor
+            // event (a signal) that came, while the final run computed on
+            // `main`'s stack starts one (review AR-52): natively the loop
+            // thread fires it alongside the workers. Only what is due by
+            // now: natively a timer due after the workers have ended never
+            // fires. The new loop context then goes by the rules below;
+            // with its budget used up, none starts (review RF14-05: it
+            // would be left able to run, never run).
+            self.ev_check(Instant::now(), true);
+            if self.ev_start_loop() {
+                lp = self.ev.loop_ctx();
+            }
         }
         // But a pool or dedicated task run on its stack (`IO.waitAny` or
         // `Task.get` in a callback runs the task a free worker would start)
@@ -2425,7 +2504,15 @@ impl Sched {
     }
 
     fn check_canceled_now(&mut self) -> bool {
-        let Some(&i) = self.st_ref().running.last() else {
+        // a dependent `depend` runs at once is the caller's code (`FAST`,
+        // review RF14-03): the caller's flags answer
+        let st = self.st_ref();
+        let Some(&i) = st
+            .running
+            .iter()
+            .rev()
+            .find(|&&r| self.ent(r).flags & FAST == 0)
+        else {
             return false;
         };
         let late = if self.tk.shutting_down {
@@ -2442,10 +2529,28 @@ impl Sched {
 // ---------------------------------------------------------------------------
 // Running tasks
 
+/// What a bind task does after its function returned a task (`bind_wait`).
+enum BindNext {
+    /// It was deleted meanwhile: its continuation, to drop.
+    Drop(Job),
+    /// It waits for the task, or is queued.
+    Wait,
+    /// A `sync` bind task whose task has finished: it runs again now, on
+    /// the current thread (review HR-02).
+    RunNow,
+}
+
 /// Run handed task `i` on the running context: begin, its job, then its end
 /// and the walk of its dependents (or, for a bind task, its wait for the task
-/// it continues as).
+/// it continues as; a `sync` one whose task has finished by then runs again
+/// at once, review HR-02).
 pub(crate) fn run_task(i: u32) {
+    while run_task_once(i) {}
+}
+
+/// One run of [`run_task`]: whether task `i` is to run again now
+/// (`BindNext::RunNow`).
+fn run_task_once(i: u32) -> bool {
     let (job, own, worker) = with(|s| {
         let reserved = s.take_reserved(i);
         let (job, own, dedicated) = s.begin(i);
@@ -2477,13 +2582,13 @@ pub(crate) fn run_task(i: u32) {
     // a job that called `end_running_task` has ended its task and walked
     // its dependents already (AR-26): the task is no longer running here
     let ended = with(|s| s.st_ref().running.last() != Some(&i));
-    let leftover = match out {
-        Outcome::Done if ended => None,
+    let next = match out {
+        Outcome::Done if ended => BindNext::Wait,
         Outcome::Done => {
             if with(|s| s.end(i)) {
                 walk_loop();
             }
-            None
+            BindNext::Wait
         }
         Outcome::Continue(..) if ended => {
             panic!("lean-runtime: a job that ended its task (end_running_task) returned Continue")
@@ -2494,7 +2599,16 @@ pub(crate) fn run_task(i: u32) {
     if let Some(g) = &g {
         g.task_end(own);
     }
-    drop(leftover);
+    match next {
+        BindNext::Drop(job) => {
+            // a deleted bind task's continuation, dropped outside the
+            // scheduler's state and after the glue's `task_end`
+            drop(job);
+            false
+        }
+        BindNext::Wait => false,
+        BindNext::RunNow => true,
+    }
 }
 
 /// The emulated pool worker a running task occupies (`Sched::enter_worker`),
@@ -2810,17 +2924,40 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool {
 /// (true): a new task running `job` once `src` has finished (it reads
 /// `src`'s value), as Lean's `add_dep`; when `src` finishes, a `sync`
 /// dependent runs there and then on the finishing thread, the others are
-/// queued. Requires `!dependent_runs_now(src, sync)`. `prio` as for
-/// `spawn` (the whole value, saturated); only `sync` makes a `sync`
-/// dependent.
+/// queued. The glue calls it when `dependent_runs_now(src, sync)` is false.
+/// `prio` as for `spawn` (the whole value, saturated); only `sync` makes a
+/// `sync` dependent.
+///
+/// Its writers point may let other contexts run, so `src` may have
+/// finished by the time the dependent is made, after the glue's check:
+/// then an async dependent is queued, and a `sync` one runs now, inside
+/// this call, on the calling thread, before it returns (review HR-02). It
+/// runs as Lean's fast path, the function applied in the caller
+/// (`lean_task_map_core`, `lean_task_bind_core`), since natively the
+/// source had finished before the drop that delayed it here returned: no
+/// `sync` task, so a `Task.get` in it reports `GET_IN_SYNC_TASK` only
+/// where the caller is a `sync` task (`in_sync_task` answers for the
+/// caller, and so do `IO.checkCanceled` and the worker it holds while it
+/// waits; review RF14-03). Its job has then run before the call returns:
+/// for a map, it has stored the value in the glue's slot, and the id
+/// returned names a finished task (the glue's slot comes first, item 3 of
+/// "The glue" in docs/sched.md); for a bind whose function returned an
+/// unfinished task, the id names a task that waits for that one. So the call runs translator code: the glue holds no
+/// borrow across it that the job could need. Threads mode runs such a
+/// dependent inside the call too (another thread may finish `src` after
+/// the check). The signature and the returned id are as before.
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId {
     super::ensure_started();
     super::writers_point();
-    with(|s| {
+    let (i, id, now) = with(|s| {
         let i = s.register(job, prio, keep_alive, true);
-        s.depend(src, i, sync);
-        s.id_of(i)
-    })
+        let now = s.depend(src, i, sync);
+        (i, s.id_of(i), now)
+    });
+    if now {
+        run_task(i);
+    }
+    id
 }
 
 /// `Task.get`/`IO.wait` (`lean_task_get`): returns once task `id` has
@@ -3010,10 +3147,14 @@ pub fn running_worker() -> Option<u32> {
 /// this is true, it reports that Lean panic, then calls `wait`.
 pub fn in_sync_task() -> bool {
     with(|s| {
+        // a dependent `depend` runs at once is the caller's code (`FAST`)
         s.st_ref()
             .running
-            .last()
-            .is_some_and(|&i| s.ent(i).flags & SYNC != 0)
+            .iter()
+            .rev()
+            .map(|&i| s.ent(i).flags)
+            .find(|f| f & FAST == 0)
+            .is_some_and(|f| f & SYNC != 0)
     })
 }
 
@@ -3385,9 +3526,19 @@ fn effect_slow() {
             }
             // The event loop: what became ready or due runs as natively on
             // its thread (a context woken now goes first only once it has
-            // been able to run for `STALE`, below).
-            s.ev_check(now, false);
+            // been able to run for `STALE`, below). A timer due by now goes
+            // first as a due sleeper does, when the loop context can run
+            // its callback (review HU-01): natively the loop thread ran it
+            // at its deadline, while this context computed.
+            let timer = s.ev_check(now, false);
             s.ev_start_loop();
+            if timer
+                && s.ev
+                    .loop_ctx()
+                    .is_some_and(|c| s.cx.ctxs[c].status == Status::Runnable)
+            {
+                go = true;
+            }
             if s.cx.runnable.iter().any(|&c| {
                 let x = &s.cx.ctxs[c];
                 (round > 0 && !x.at_effect) || now.saturating_duration_since(x.ready) >= STALE

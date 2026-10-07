@@ -89,7 +89,8 @@ LSCHED-01), net-1, net-2, fixes-1 and the io batches (AR-1 to AR-20).
 - fixes-1's writer hand-offs (AR-8): a dropped stream's close blocks the
   dropping thread, as natively, so no writer thread exists. "A context's
   own writers" become "a thread's own", and a thread has none.
-  `before_task_value` and `before_publish` stay callable, as no-ops.
+  `before_task_value`, `before_publish` and the drain-end hook
+  `after_drain` (fixes-14) stay callable, as no-ops.
 - sched-3's runs on a waiter's or poller's stack (AR-9, AR-10) and the
   polling threshold: a waiter blocks, a worker runs the task, and
   `IO.getTaskState` gives native's answer at once.
@@ -183,6 +184,7 @@ stack-overflow`, `net`'s unit tests of threads mode (0.7).
    `is_finished`, `cancel`, `check_canceled`, `release` (for every task, IO
    tasks included), `in_sync_task`, `promise_new`, `resolve`,
    `option_get_or_block`, `hang`, `before_task_value`, `before_publish`,
+   `after_drain`,
    `effect`, `poll`, `ref_read`, `set_ref_read_yields`, `sleep_ms`,
    `enter_no_suspend`, `leave_no_suspend`, `no_suspend`, `in_no_suspend`,
    `io_cooperative`, `Job`, `Outcome`, `TaskId`, `TaskState`, `sync::*`.
@@ -564,7 +566,18 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
   module; an extern's timer counts from its own clock read, not from the
   loop's cached time (`uv_timer_start` adds the timeout to `loop->time`,
   which can be a little old). A repeating timer's next period counts from
-  the iteration's time, as libuv's `uv_timer_again` (review RT2-09).
+  the iteration's time, as libuv's `uv_timer_again` (review RT2-09). A
+  running repeating timer with timeout 0 is held by the loop from its tick
+  until `stop`, as natively `lean_inc(obj)` (review HU-02, fixes-14; before,
+  the loop let go of it after the tick). The watchers of every signal of a
+  batch are taken before the first delivery, so a watcher that a `sync`
+  dependent of an earlier delivery starts does not get a later signal of
+  the batch (review HU-05, fixes-14). Cases `uvloop/timer_repeat_zero_held`
+  and `signal_batch_new_watcher` failed in both modes before; the twins of
+  the other fixes-14 cases (`timer_due_in_final_run`,
+  `timer_chain_in_final_run`, `timer_effect_order`, `timer_fresh_next_twice`,
+  `signal_before_timer_in_look`, `timer_period_from_look`) passed in threads
+  mode before and after: its loop thread runs alongside the workers.
 - Tests: the unit tests of `sched::mt::uv` (`src/sched/mt/uv_tests.rs`):
   the loop lock (recursive; a waiter goes before the loop's next
   iteration; under Miri too), one-shot and repeating timers resolved on
@@ -1273,6 +1286,7 @@ pub fn finish();
 pub fn effect() {}  pub fn poll() {}  pub fn ref_read() {}  // no-ops
 pub fn set_ref_read_yields(_on: bool) {}
 pub fn before_task_value() {}  pub fn before_publish() {}  // no-ops
+pub fn after_drain() {}                                    // no-op
 pub fn sleep_ms(ms: u32);
 pub fn enter_no_suspend();  pub fn leave_no_suspend();     // a depth per thread
 pub fn no_suspend() -> NoSuspendGuard;  pub fn in_no_suspend() -> bool;

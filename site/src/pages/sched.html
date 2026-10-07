@@ -155,6 +155,7 @@ So <code>while !(← IO.hasFinished t) do pure ()</code> ends, as it does native
     <code>Task.pure</code> needs none either: the glue makes a finished task that holds the value.</li>
   <li><code>Promise.result!</code> on a promise dropped without a value prints Lean's panic message.
     Then the context waits forever (<code>option_get_or_block</code>), as the native thread does.</li>
+  <li>A <code>sync</code> dependent made on a task that finished meanwhile runs at once, on the same thread, as natively.</li>
   <li>When a task finishes, its <code>sync</code> dependents run first.
     The contexts that wait for it wake when that walk ends, or earlier when another task the program still holds finishes, as natively.
     One exception is a Lean bug (<a href="lean-bugs.html#lb-32">LB-32</a>): when <code>result!</code> starts its endless wait, they wake at once.</li>
@@ -190,6 +191,9 @@ In the keyed form, the closing store is the store made in the same frame as the 
 <p><strong>Promises dropped in a free.</strong> Natively a <code>sync</code> dependent runs inside the free, when the free reaches its promise.
 The translators must not suspend inside a free, so the crate keeps the resolution in a list.
 The list runs when the free ends.
+A promise that the free reaches before a dropped stream is resolved first.
+The context waits for that stream's writer thread only after it, as natively the promise is resolved before the stream's <code>fclose</code>.
+This gives native's outcome only when the translator frees the objects in native's order, the last element of an array first.
 It is moved out first, so a free inside a dependent resolves its own promises first, as natively.
 The case <code>tasks/promise_nested_free_order</code> checks this order.
 Inside one free, the order follows the translator's drops, which can differ from native's.</p>
@@ -210,6 +214,10 @@ Pool and dedicated tasks run to completion, as natively, also when they run on t
 A task whose dependency never finishes, such as an unresolved promise, is not waited for.</p>
 <p>The <a href="#loop">loop context</a> is not waited for, because natively libuv's loop thread is detached.</p>
 <ul>
+  <li>When no loop context is alive, the final run looks at the loop after the last task.
+    A timer that came due, or a signal that came, while the final run ran tasks starts the loop context.
+    Natively the loop thread fires that timer alongside the workers.
+    The rules below then apply.</li>
   <li>A pool or dedicated task can run on the loop context's stack, for example a task that a callback waits for with <code>IO.waitAny</code>.
     Natively that task runs on a worker thread, and the exit waits for it.
     So <code>finish</code> waits for the loop context while such a task runs on it.
@@ -267,7 +275,10 @@ Batch sched-io (2026-10-04) makes such calls cooperate.</p>
     This holds for a lock held across any wait.</li>
   <li><strong>Free and drop paths.</strong> Both translators mark them with a no-suspend scope.
     In the scope, the io calls never suspend the context.
-    A dropped stream whose pipe is full is flushed when the scope ends.</li>
+    A dropped stream whose pipe is full goes to a writer thread.
+    The context waits for that thread at the end of the free, where the glue calls <code>sched::after_drain</code>.
+    Natively the drop waits in <code>fclose</code> there.
+    It also waits at its next point that publishes or can suspend, for example a lock or a <code>tryLock</code>.</li>
 </ul>
 <h3 id="loop">The event loop</h3>
 <ul>
@@ -279,7 +290,9 @@ Batch sched-io (2026-10-04) makes such calls cooperate.</p>
     While its call is queued or running, the watch is out of epoll's set.
     So a callback that blocks does not make the hub spin.</li>
   <li>The hub waits in <code>epoll_wait</code> when nothing can run.
-    The polling and effect points look without waiting, at most once a millisecond.</li>
+    The polling and effect points look without waiting: at the descriptors at most once a millisecond, at the timers each time.</li>
+  <li>In one look, the events of the descriptors come before the timers that are due, as in one libuv iteration.</li>
+  <li>At an effect point, a timer that is due goes first, as a context whose sleep has ended does.</li>
 </ul>
 <h3 id="uv">Std.Internal.UV: the loop, timers and signals</h3>
 <ul>
@@ -287,13 +300,17 @@ Batch sched-io (2026-10-04) makes such calls cooperate.</p>
   <li>A timer or a signal watcher resolves its promise on the loop context.
     So the promise's <code>sync</code> dependents run on a context of its own, as natively on libuv's thread.</li>
   <li>Timers and watchers follow Lean's state machines: one-shot and repeating, <code>next</code>, <code>reset</code>, <code>cancel</code> and <code>stop</code>.</li>
-  <li>Every extern first lets the loop run what is due, as native's loop lock does.</li>
+  <li>A repeating timer starts its next period from the time of the look that found its tick due, as libuv does.
+    A repeating timer with timeout 0 ticks once, and the loop keeps it until <code>stop</code>.</li>
+  <li>Every extern first lets the loop run what is due, as native's loop lock does.
+    A timer that came due less than 1 ms before stays for the loop: natively the extern usually gets the lock first.</li>
   <li>Signals use signal-hook's safe API: flags, native's own signal pipe that the loop watches, and a conditional default action.
     When no watcher listens, a signal has its default action again, as natively.
     A second signal to a one-shot watcher takes the default action too, as libuv's reset handler does.
     When the default action ignores the signal, the loop drops the second signal.
     When two handlers run at the same time on two threads, the loop can end the process for the second signal.
-    A signal that came before a one-shot registration does not use up that registration.</li>
+    A signal that came before a one-shot registration does not use up that registration.
+    A watcher that starts while the loop delivers a batch of signals does not get a signal of that batch.</li>
   <li>Recorded deviations: SIGIO ends the program with status 157 instead of its signal.
     SIGTSTP, SIGTTIN and SIGTTOU stop it with SIGSTOP.</li>
   <li><code>Loop.alive</code> is true, and <code>Loop.configure</code> changes nothing a program can see.</li>

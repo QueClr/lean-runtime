@@ -80,7 +80,9 @@ needed. So a task is *deferred*: it runs at the first of these points.
   processors). The task then starts on a *context* of its own.
 - **An effect point.** At an output, a flush, a process spawn or an exit,
   a task queued 5 ms ago or more (`STALE`) goes first, as natively its
-  worker would have run it by then.
+  worker would have run it by then; so do a context whose sleep has ended
+  and a UV timer that has come due, as natively their threads ran them at
+  their deadlines (review HU-01 for the timer).
 - **Polling.** `IO.getTaskState`/`IO.hasFinished` report a pending task
   waiting until the program asks again after a sleep, or asks 1000 times
   without one; what a free worker would start then starts on a context of
@@ -423,6 +425,23 @@ threads waited for, 984-985):
      sleeps 1 s; `main` returns at 100 ms): native prints "main done", then
      "t done"; with the first version of this fix "t done" was lost
      (RF13-01).
+   - **With no loop context alive, the final run looks at the loop** once
+     no task is left to start (review AR-52, fixes-14): a timer that came
+     due, or a descriptor event (a signal) that came, while the final run
+     ran tasks on `main`'s stack starts the loop context, which then goes by
+     the rules below, as natively the loop thread fires it alongside the
+     workers. Only what is due by then: natively a timer due after the
+     workers have ended never fires. With the loop context's budget used
+     up (below), none starts (review RF14-05). Cases
+     `uvloop/timer_due_in_final_run`
+     (a one-shot timer of 300 ms with a `sync` dependent that prints, and a
+     task that computes for about 1.5 s with no scheduling point, calibrated
+     in `main`) and `timer_chain_in_final_run` (timer A's `sync` dependent
+     starts timer B of 700 ms; A fires while `main` sleeps, and its loop
+     context ends; B comes due while the final run runs the task): "main
+     done", then "timer fired"; "A fired", "main done", "B fired", as
+     natively; before, the last line was lost. Unit test
+     `the_final_run_fires_a_timer_that_came_due_during_a_task`.
    - **It can go on: it runs alone, for the final run's task time plus
      1 s.** A sleep or a descriptor wait of the loop context that has
      ended by now ends first (the final run wakes the due sleepers and
@@ -964,10 +983,27 @@ per scheduler (per thread):
 - **When it looks.** The hub, when no context can run, waits in
   `epoll_wait` until a descriptor is ready or the earliest sleeper or timer
   is due. Each step of the hub, each polling point and each effect point
-  looks without waiting: due timers always, the descriptors at most once a
-  millisecond. A context woken by the loop is an ordinary context able to
-  run: at an effect point it goes first only once it has been able to run
-  for 5 ms (`STALE`), as for any other.
+  looks without waiting: the descriptors at most once a millisecond, then
+  the due timers always. Within one look a descriptor's event (a signal
+  watcher's pipe among them) is queued before the timers due, as libuv
+  runs the io callbacks before the timers in one iteration (`uv__io_poll`,
+  then `uv__run_timers`), and as threads mode does (review HU-04,
+  fixes-14). Case `uvloop/signal_before_timer_in_look` (a `sync` dependent
+  of timer A computes for about 1 s on the loop; timer B comes due at
+  100 ms, SIGUSR1 at 300 ms; one look finds both after A's dependent):
+  "A done", "signal", "timer B", as natively; before, "timer B" came first.
+  A context woken by the loop is an ordinary context able to run: at an
+  effect point it goes first only once it has been able to run for 5 ms
+  (`STALE`), as for any other. A timer that the effect point's look finds
+  due goes first at once, as a due sleeper does, when the loop context can
+  run its callback (review HU-01): natively the loop thread ran it at its
+  deadline. Case `uvloop/timer_effect_order` (a sleeper, a one-shot timer of
+  100 ms with a `sync` dependent that prints, and `Std.Async.sleep 100` in
+  an async task, each while `main` computes for about 0.5 s with no
+  scheduling point, then prints): each event's line before `main`'s, as
+  natively; before, the timer's and the async task's came after (the loop
+  context started at the effect point had been able to run for less than
+  5 ms). Unit test `an_effect_point_lets_a_due_timer_go_first`.
 
 Example (`taskio/task_reads_main_writes`): `main` writes 200 000 bytes to
 `cat`'s input while a task reads `cat`'s output.
@@ -1024,7 +1060,25 @@ its own.
   dependent calling an extern runs no iteration. The yield lets every
   context able to run go first, not only the loop's, so each extern is a
   scheduling point for all of them, an order native's threads allow too
-  (RSIOB-14). Cases `uvloop/timer_due_stop` (a one-shot timer due during a
+  (RSIOB-14). It takes only the timers due a loop wake-up ago (1 ms,
+  `LOOP_LATENCY`; review HU-03, fixes-14): natively the loop thread wakes
+  from `epoll_wait` for a timer and takes its lock some tens of
+  microseconds after the deadline (up to about a millisecond on a loaded
+  host), so an extern made right after a timer came due takes the lock
+  first. Case `uvloop/timer_fresh_next_twice`: two `next`s in a row on a
+  fresh repeating timer of period 1 s give one promise, which the 0th tick
+  resolves ("true, true"), and `next` then `reset` moves the 0th tick to
+  1 s later ("false"), as natively; before, the second extern ran the tick
+  that had come due microseconds before ("true, false", "true"). Both
+  orders are races, natively too (review RF14-02): an extern that comes
+  later than the loop's wake (here, later than `LOOP_LATENCY`; in threads
+  mode and natively, after the loop thread took the lock) lets the tick go
+  first, so the case accepts each line's other outcome too (`alt1` to
+  `alt3`, LSCHED-04 below). The latency was 100 µs in the first version;
+  1 ms keeps native's usual order on a loaded host, and every other uvloop
+  case gives the same outcome with it. Unit test
+  `a_catch_up_leaves_a_timer_due_within_the_loop_latency`. Cases
+  `uvloop/timer_due_stop` (a one-shot timer due during a
   computation, then `stop`: its promise holds `()`),
   `uvloop/signal_cancel_restart` (a signal during a computation, then
   `cancel` and `next`, as `Std.Async`'s signal selector does: the resolved
@@ -1043,8 +1097,30 @@ its own.
   - repeating: the first `next` gives a promise that resolves at once (the
     0th multiple), then each tick resolves the current promise, and `next`
     gives a new one once it has resolved. libuv starts the next period
-    before the callback, from the time it fires. A repeating timer with
-    timeout 0 ticks once (libuv's repeat 0 means no repeat), as natively;
+    before the callback, from the loop's time (`uv_timer_again` adds the
+    period to `loop->time` of the iteration). Here that is the time of the
+    look that found the tick due, not the time the loop context starts the
+    callback, which other contexts able to run may delay (review HU-06,
+    fixes-14; `reactor::loop_time`); for a tick that a look found due while
+    the loop context ran another callback, the time the loop context takes
+    it, as natively the busy loop thread looks again only then. Case
+    `uvloop/timer_period_from_look` (tick 1 of a 1 s timer comes due while
+    `main` computes for about 1.5 s; `main`'s clock read then finds it due
+    and a sleeping task's sleep over, and that task computes 2 s before the
+    loop context runs tick 1; `main` looks at 3.2 s): "tick 2 by then:
+    true", as natively; before, tick 2 came about 3 s after the look. Unit
+    test `a_repeating_timers_next_period_starts_at_the_look`. A repeating
+    timer with timeout 0 ticks once (libuv's repeat 0 means no repeat), as
+    natively, and the loop keeps it until `stop`, as natively
+    `lean_inc(obj)` at its start (review HU-02, fixes-14, both modes: the
+    timer holds itself, `held`, from its tick until `stop`). Case
+    `uvloop/timer_repeat_zero_held` (after the tick, `next` gives a promise
+    that the timer holds; the program drops the timer and the promise and
+    keeps the promise's task): "finished: false", as natively; before, the
+    loop let go of the timer after its tick, and the task read `none`. With
+    the timer kept, `stop` lets go of the promise, which reads `none`. Unit
+    tests `a_repeating_timer_with_timeout_zero_is_held_until_stop` (both
+    modes);
   - `reset` moves a running timer's next resolution to `timeout` ms from
     now; `cancel` drops the promise (a one-shot timer becomes initial
     again); `stop` drops it (a finished timer's too, as timer.cpp 243-246)
@@ -1171,7 +1247,16 @@ its own.
   `EAGAIN`, then takes each signal's `arrived` flag and delivers the
   signals that came, in signal-number order, to this thread's watchers of
   each: repeating ones first, then in creation order, as libuv's signal
-  tree orders them (RSIOB-08; case `uvloop/signal_order`). Occurrences of
+  tree orders them (RSIOB-08; case `uvloop/signal_order`). The watchers of
+  every signal of the batch are taken before the first delivery (review
+  HU-05, fixes-14, both modes): natively the handler writes one message
+  per watcher listening when the signal comes, so a watcher that a `sync`
+  dependent of an earlier delivery starts does not get a signal of the same
+  batch. Case `uvloop/signal_batch_new_watcher` (a repeating watcher W0 of
+  SIGUSR2; a one-shot watcher W1 of SIGUSR1 whose `sync` dependent starts a
+  one-shot watcher W2 of SIGUSR2; both signals come while the loop computes
+  in a timer's `sync` dependent): W1 and W0 get theirs and W2's promise
+  stays pending, as natively; before, W2 got SIGUSR2 too. Occurrences of
   one signal between two calls are one delivery, where libuv makes one per
   occurrence (its pipe carries one message per occurrence and watcher); a
   repeating watcher's promise takes one value either way.
@@ -1352,7 +1437,9 @@ Lean bug):
   deliveries.
 
 **The loop holds a running handle**, as natively `lean_inc(obj)`: a
-running timer or a listening watcher fires even if the program dropped it.
+running timer or a listening watcher fires even if the program dropped it,
+and a running repeating timer with timeout 0, which no tick resolves after
+its first, keeps its promise until `stop` (HU-02, above).
 The promises are the translator's (`LoopPromise`: `is_resolved`,
 `resolve`); a handle keeps a clone, and dropping the last clone resolves
 the promise with `none`, as `deactivate_promise`. So the cases keep a
@@ -1406,7 +1493,10 @@ number, and status 138 after `stop`), `signal_stale`,
 `loop_sleep_compute_print`, `loop_valve_counts_run`, `loop_spawn_poll`,
 `loop_poll_work`, `loop_spins_on_task`, `loop_cycle`, `loop_cycle_long`,
 `loop_sleeps_after_task`, `loop_carried_then_poll`, `loop_polls_at_exit`
-("Exit"),
+("Exit"), `timer_due_in_final_run`, `timer_chain_in_final_run` ("Exit",
+AR-52), `timer_effect_order`, `timer_repeat_zero_held`,
+`timer_fresh_next_twice`, `signal_before_timer_in_look`,
+`signal_batch_new_watcher`, `timer_period_from_look` (HU-01 to HU-06),
 `signal_sigio_default`,
 and the Lean-bug cases above. A case whose native program computes while a
 signal or a timer comes (`timer_due_stop`, `signal_cancel_restart`) takes
@@ -1593,12 +1683,15 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    after it is a panic) and only finishes up, with no wait. The call does
    nothing for an id the scheduler is not running as the innermost task in
    this context (`TaskId::FINISHED` from a job the glue runs itself, a
-   second call; review RT2-14). In threads mode the job may start before
-   `spawn` or `depend` returns (a worker takes it at once, or the source
-   of a `sync` dependent finished meanwhile and the dependent runs inside
-   the call): the glue stores the id where the job reads it before it
-   gives the id to anyone, so that no dependent exists yet when such a job
-   finds no id and the call does nothing. A
+   second call; review RT2-14). The job may start before `spawn` or
+   `depend` returns: in threads mode a worker takes it at once; in both
+   modes the source of a `sync` dependent may have finished by the time
+   `depend` makes it, and the dependent then runs inside the call (review
+   HR-02, fixes-14: in the single-thread scheduler `depend`'s writers point
+   lets other contexts run, after the glue's `dependent_runs_now`). The
+   glue stores the id where the job reads it before it gives the id to
+   anyone, so that no dependent exists yet when such a job finds no id and
+   the call does nothing. A
    chain of `sync` dependents whose jobs
    call it recurses once per link, as natively (review RT2-15): mind
    `main`'s stack. Threads mode has the same call and contract (a
@@ -1606,7 +1699,40 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - `Task.spawn`/`IO.asTask`: `spawn(job, prio, keep_alive)`;
    - `Task.map`/`bind`, `IO.mapTask`/`bindTask`: when
      `dependent_runs_now(src, sync)` is true, apply `f` at once; otherwise
-     `depend(src, job, prio, sync, keep_alive)`;
+     `depend(src, job, prio, sync, keep_alive)`. If `src` has finished by
+     the time `depend` makes the dependent (its writers point can let it
+     finish), a `sync` dependent runs at once, inside the call, and an
+     async one is queued (review HR-02, fixes-14; before, the single-thread
+     scheduler queued the `sync` one, which then ran later, where a
+     `Task.get` in it printed the "`Task.get` called from a `(sync :=
+     true)` task" panic). The `sync` one runs as Lean's fast path, the
+     function applied in the caller (`lean_task_map_core`,
+     `lean_task_bind_core`: natively the source had finished before the
+     drop that delayed it here returned, so the glue's check would have
+     seen it): it is the caller's code, so `in_sync_task` answers for the
+     caller, and a `Task.get` in it prints that panic only where the caller
+     is a `sync` task (review RF14-03; the task is marked `FAST`). So do
+     `IO.checkCanceled` (the caller's flag) and the worker it holds while
+     it waits: a pool caller's wait in it frees the caller's worker, as
+     native `wait_for` does for the pool task the function natively runs
+     in (with one worker, a wait for a queued task runs that task; the
+     driver's program `rf14_fast_pool_caller_waits`, which hung before; unit
+     test `a_dependent_run_at_once_checks_its_callers_cancel`). The
+     signature and the result are unchanged: the id of the task, whose job
+     has run: for a map, it has finished, its value already in the glue's
+     slot; for a bind whose function returned an unfinished task, it waits
+     for that task. So `depend` runs translator code: the glue holds no
+     borrow across it that the job could need. Likewise a `sync` bind task whose function returned a task that
+     has finished by the time the bind task waits for it (the writers point
+     at the job's end) runs on at once, on the thread of its first run
+     (review RF14-04), instead of being queued. Unit tests
+     `depend_runs_a_sync_dependent_of_a_finished_source_at_once`,
+     `a_dependent_run_at_once_waits_as_its_caller`,
+     `a_sync_bind_task_whose_task_has_finished_runs_on_at_once` and
+     `a_sync_bind_task_runs_on_on_the_thread_of_its_first_run`; the
+     driver's program `rf14_depend_fast_path` (`process/handoff_then_sync_map`
+     without the drain-end hook: the function waits for an unfinished task
+     with no panic on stderr);
    - `prio` is Lean's `Task.Priority`, the whole `Nat`. A priority of 2^64
      or more (a big `Nat`) is passed as `u64::MAX`, saturated, never its
      low bits. 0 to 8 are the pool's queues, and every priority above 8 is
@@ -1711,7 +1837,12 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - `IO.Promise.new`: `promise_new()`. Before the task manager runs it
      returns Lean's internal-panic message, which the glue reports.
    - `IO.Promise.resolve v`: `resolve(id, || store some v)`. Only the first
-     resolution stores.
+     resolution stores. The glue tests whether the promise has a value
+     inside `store` (which `resolve` calls only for an unresolved promise),
+     never before the call: `resolve` makes a writers point first, during
+     which another context can resolve the promise (review HR-01: lean2rr's
+     glue tested its slot first and stored over another resolution; case
+     `process/handoff_then_resolve_again`, which the driver's glue passes).
    - Dropping the last reference to an unresolved promise:
      `resolve(id, || store none)` (Lean's `deactivate_promise`).
    - `IO.Promise.result?` (`lean_io_promise_result_opt`): no call, glue
@@ -1944,10 +2075,12 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
       or may suspend (`sched::writers_point`): its effect points (output,
       flush, process spawn, `IO.Process.exit`), polls, sleeps, waits
       (`wait`, `wait_any`, `hang`), promise resolutions, task creations
-      (`spawn`, `depend`), `Std.Sync` operations (a lock, an unlock, a
-      `Condvar` wait or notify; so `Std.Channel` and the rest of `Std.Sync`
-      too), the glue's reference writes (`before_publish`, item 7), the end
-      of a task's job (`before_task_value`, item 3, and `run_task`) and of
+      (`spawn`, `depend`), `Std.Sync` operations (a lock, a try, an unlock,
+      a `Condvar` wait or notify; so `Std.Channel` and the rest of
+      `Std.Sync` too; the try functions since review HR-03, fixes-14), the
+      glue's reference writes (`before_publish`, item 7), the end of each
+      drain (the drain-end hook `after_drain`, below), the end of a task's
+      job (`before_task_value`, item 3, and `run_task`) and of
       `main` (`finish`), `IO.cancel`, the entry of every stream lock (so a
       write through another descriptor of the same pipe comes after the
       handed-off bytes), of `flock` and of `Child.wait`, and the entry of
@@ -1975,6 +2108,95 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
       natively glibc unlinks a stream from its list before `fclose` flushes
       it, so `exit` never waits for another thread's `fclose` in progress
       (`rfx2_exit_unrelated_handoff`: exit at once, as natively in 0.31 s).
+
+    **The drain-end hook: `sched::after_drain()`** (reviews HR-01 to
+    HR-03, fixes-14; part of the glue's contract). Natively the drop's
+    `fclose` returns before the free goes on, so code after the free reads
+    state that every other thread changed while the drop waited. Here the
+    hand-off returns at once, and the context's next writers point waits
+    for the writer while other contexts run: glue code that reads state
+    after the free, reaches a writers point, then acts on what it read,
+    acts on stale state. lean2rr's glue tested a promise, then resolved it
+    over another context's resolution (HR-01); it tested
+    `sync && taskDone(src)`, then `depend` (whose writers point let `src`
+    finish) queued a `sync` dependent (HR-02); a try function read a lock
+    with no writers point at all (HR-03). So each translator calls
+    `after_drain()` at the end of every drain, where native's `fclose`
+    would have returned:
+    - when: once the drain's no-suspend scope has been left and its
+      deferred resolutions have run (`run_deferred`), where a switch is
+      allowed (the call may let other contexts run, as `run_deferred`
+      may). `DrainScope`'s outermost drop calls both, in that order
+      (leanrs's `Deep` and `Dyn` drains); lean2rr calls `run_deferred`,
+      then `after_drain`, from its drained hook (review RF14-07: the order
+      was the other one in the first version of fixes-14);
+    - what: the writer threads of the streams the calling context handed
+      off end (`join_own_writers`), while the other contexts run, so the
+      bytes are delivered and every effect of the other contexts meanwhile
+      is visible, as natively after `fclose`;
+    - cost: one relaxed load while no writer runs in the process, so it
+      is safe and cheap to call after every drain. The count of running
+      writers is process-wide: while a writer of another context (or of
+      another thread) runs, the call takes the slow path (a lock and a scan
+      of the writers) and waits for nothing (review RF14-06);
+    - so a drain's end now lets other contexts run whenever its context
+      has a writer that runs: `DrainScope`'s outermost drop, and lean2rr's
+      drained hook, switch then (they could already switch in
+      `run_deferred`);
+    - it waits for nothing inside a no-suspend scope (a drain nested in an
+      outer one: the outer drain's end waits), while the context holds a
+      stream lock, or while a panic unwinds; the next writers point waits
+      then;
+    - in threads mode it does nothing (a drop's `fclose` blocks its own
+      thread there).
+
+    **Deferred resolutions and the drain's writers** (review RF14-07).
+    Natively a free (`lean_del_core`) reaches its objects in its order, so
+    a promise reached before a stream is resolved, its `sync` dependents
+    run, before the stream's `fclose` blocks; one reached after waits for
+    it. Here both are put off to the drain's end: each deferred entry
+    records a writer mark (`io::coop::writer_mark`, the id the next
+    hand-off gets), and `run_deferred` walks the entries in push order;
+    before each one it waits for the context's writers but the ones the
+    drain handed off after the entry (ids from its mark up to the walk's
+    start), and runs it with those skipped by every writers point, its
+    `sync` dependents' included (`io::coop::skip_writers`; an exit, which
+    natively flushes the still open stream, waits for them). Then
+    `after_drain` waits for the rest. The list is moved out before any
+    wait, so no entry is queued at a switch (R6). Case
+    `process/deferred_resolve_before_handoff` (one free drops `#[stdin,
+    p]`, so the promise first, as `lean_del_core` frees from the last
+    element; a reader task waits for `p`, then reads a child's standard
+    output; the child writes 70 000 bytes before it reads its standard
+    input, whose last byte waits in the dropped handle): "reader got
+    70000", "child 0", as natively; before, the drain's end waited for the
+    writer before it resolved `p`, and the program hung (debug builds of
+    the first version of fixes-14 aborted on R6 first). The other order,
+    `#[p, stdin]`, waits for the writer before it resolves `p`, as natively
+    `fclose` blocks first: that program deadlocks, natively too (unit test
+    `deferred_resolutions_wait_only_for_the_writers_handed_off_before_them`,
+    both orders with a pipe a thread drains). The rule gives native's outcome only when the translator hands its drops
+    and deferrals to the crate in native's free order (`lean_del_core`'s
+    LIFO, an array from its last element): the marks follow the order of
+    the translator's calls. A translator that frees in another order (Rust
+    drop glue, which drops an array from its first element, a struct in
+    declaration order) gets the outcome that order implies, which can be
+    native's mirror: `#[stdin, p]` then behaves as natively `#[p, stdin]`
+    does. That is the translator's own free order (leanrs: its DV11), not
+    the crate's.
+
+    Cases (recorded natively): `process/handoff_then_sync_map` (the
+    hand-off, then `IO.mapTask (sync := true)` over a task that finishes
+    at 300 ms, whose function waits for another task: "dep 5 7", "main
+    after mapTask"; before, the "`Task.get` called from a `(sync := true)`
+    task" panic and the lines reversed), `handoff_in_tree_then_sync_map`
+    (leanrs's form: the handle is dropped with the tree that holds it, in
+    the driver an `Arr`'s `DrainScope`), `handoff_then_resolve_again` (HR-01:
+    "B sees (some 2)", "main sees (some 2)") and `handoff_then_try_lock`
+    (each try function right after a hand-off, with no drain-end hook in
+    the port, while a task takes the lock at 150 ms: "false" four times;
+    before, the try took the lock first, and the port hung); unit test
+    `the_drain_end_hook_and_the_try_locks_wait_for_the_writer`.
 
     The wait is the scheduler's: the waiting context looks again every 1
     to 16 ms, woken by the event loop's timers (so it sees a writer's end
@@ -2349,6 +2571,20 @@ but a `sync` dependent is Lean code that may block. The rules:
   drain's end (lean2rr: its `drained` hook, Reussir patch 0040).
   `leave_no_suspend` never runs it (AR-8 stands). While a panic unwinds,
   nothing runs and the entries stay queued for the next `run_deferred()`.
+  Each entry records a writer mark at its `defer`; before it runs, the
+  walk waits for the context's writers but the ones its drain handed off
+  after it, and it runs with those skipped, as natively the free resolved
+  the promise before their `fclose`; the drain-end hook `after_drain`
+  then waits for the rest (review RF14-07; item 11 of "The glue",
+  "Deferred resolutions and the drain's writers"). The rule gives native's outcome only when the translator hands its drops
+  and deferrals to the crate in native's free order (`lean_del_core`'s
+  LIFO, an array from its last element): the marks follow the order of
+  the translator's calls. A translator that frees in another order (Rust
+  drop glue, which drops an array from its first element, a struct in
+  declaration order) gets the outcome that order implies, which can be
+  native's mirror: `#[stdin, p]` then behaves as natively `#[p, stdin]`
+  does. That is the translator's own free order (leanrs: its DV11), not
+  the crate's.
 - **R5.** The list is per thread; each entry is tagged with the context
   that deferred it, and `run_deferred()` moves out the running context's
   entries only before it walks them. Entries run in push order (the order
@@ -2868,6 +3104,7 @@ accepts both (`tests/cases/README.md`).
 | LSCHED-01 | Runaway pure tasks (`Task.spawn` of a computation that never ends), queued before an IO task, when they would take every worker (for example one, at `LEAN_NUM_THREADS=1`; leanrs's DV26 (b), reviews AR-15, RS4-02, LF3-03) | The workers take the pure tasks first (first come, first served) and never finish them: the IO task never runs, and the exit waits forever (or `main` does, if it waits for the IO task) | An IO task does not wait for pure tasks no IO task waits for: a worker only marks such a task started ("The pure-task rule"), and since AR-25 an IO task also passes over the pure tasks that wait in the queue for a worker that started pure tasks keep. So the IO task runs during `main`'s next wait. A started runaway task runs at the exit, which then waits forever; a passed-over one is still queued, so if the program drops it, it is deleted and never runs, and the program can end where native hangs | The pure-task rule: a pure task no IO task waits for is deferred, so that a runaway one cannot take the only thread from `main`, which natively goes on in parallel (`tasks/runaway_pure_task_started`); a pure task has no effects, so the deferral shows only in what other tasks a stalled worker would have kept from running | `tasks/runaway_pure_task_before_io` (native: `main done false false`, then a hang; here: `io task ran` first, then the hang, `alt1`); `tasks/runaway_pure_passed_over` (one worker; `p0` finite, then runaway `p1`, kept, then an IO task; `main` drops `p1` after 300 ms and waits for the IO task; native: nothing, then a hang; here: `io`, `done`, status 0, `alt1`) |
 | LSCHED-02 | A waiter needs a worker that started pure tasks keep, and the oldest of them never ends and reaches no polling point, effect point or zero sleep (two workers or more; reviews AR-25, LF3-01, LF3-04) | Another worker finishes its task and takes the awaited one: the waiter goes on, and the exit waits forever for the runaway task | The oldest started pure task runs on the one thread to free its worker (`needed_picked`) and never ends: nothing after the wait happens | One thread runs one task at a time and cannot tell which started task would end first; the oldest has run the longest. The program hangs either way (a started task runs to completion before the exit); only what it does before the hang differs | `tasks/runaway_pure_before_awaited` (native: `t = 1001`, `p finished: false, q finished: true`, then a hang; here: nothing, then a hang, `alt1`) |
 | LSCHED-03 | A waiter needs a worker that started pure tasks keep, while a context that holds a worker sleeps, and the oldest started task reaches no yield point (two workers or more; reviews RF3-02, LF3-05) | A race: the sleeper's worker takes the awaited task when the sleeper wakes and ends, a started task's worker when that task ends; whichever comes first | The oldest started task runs at once for the waiter (AR-25), so the awaited task comes after that task's run, whatever the sleeper does. With yield points in the started task (reference reads, clock reads, outputs, zero sleeps) the hub resumes the due sleeper there, and its worker takes the awaited task, as natively (LF3-01, LF3-04) | One thread cannot know how long a started pure task takes, and cannot preempt it. Waiting for the sleeper's wake instead (RF3-02's fix) idled the only thread for as long as an unrelated sleeper slept, so a watchdog fired where native ends (LF3-05, `tasks/picked_task_watchdog`), and it was reverted: a delay by the started task's own run time is the admitted cost | `tasks/picked_task_sleeping_worker` (native: `t` while `p` still runs, `p finished then: false`; here: `t` after `p`'s run, `true`, `alt1`) |
+| LSCHED-04 | A UV extern made within a loop wake-up after a timer came due (review RF14-02) | A race: the extern takes the loop's lock first, before the loop thread has woken for the timer, almost always; a slow extern lets the timer's callback run first | The same race, decided by elapsed time: the catch-up leaves a timer due less than `LOOP_LATENCY` (1 ms) ago, and runs one due earlier; threads mode has native's race | One thread decides by the clock what native threads decide by who gets the lock first; both orders are native's | `uvloop/timer_fresh_next_twice` (native: "true, true" and "false"; the other outcome of each line, alone or together, as `alt1` to `alt3`, accepted in every mode) |
 
 The other places where the crate's schedule is one of native's but may
 differ from the most frequent one are "Schedules that depend on the

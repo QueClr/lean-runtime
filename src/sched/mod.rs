@@ -26,7 +26,9 @@
 //!   wait cores"): `Gate` or the keyed claims for a thunk, a static or a
 //!   constant another context computes (`wait.rs`), `Ref` or `ref_keyed`
 //!   for `ST.Ref` (`refs.rs`), and `defer` and `run_deferred` (or
-//!   `DrainScope`) for a promise dropped in its free (`drain.rs`).
+//!   `DrainScope`) for a promise dropped in its free (`drain.rs`);
+//! - calls the drain-end hook `after_drain` at the end of each of its
+//!   drains, after `run_deferred` (`DrainScope` does both).
 
 mod common;
 mod ctx;
@@ -154,6 +156,33 @@ pub fn before_task_value() {
 /// [`writers_point`] (item 7 of "The glue").
 #[inline]
 pub fn before_publish() {
+    writers_point();
+}
+
+/// The drain-end hook (item 11 of "The glue" in `docs/sched.md`, review
+/// HR-01..03): the end of a drain of the running context (a translator's
+/// free walk), once its no-suspend scope has been left and its deferred
+/// resolutions have run (`run_deferred`, each of which waited only for the
+/// writers handed off before it, review RF14-07). The writer threads of the
+/// streams the drain's drops handed off (`io::coop::hand_off`) end here,
+/// while the other contexts run, as natively the drop's `fclose` had
+/// returned before the free went on: so glue code that reads state after
+/// the drain (a promise's resolution, a task's state for
+/// `dependent_runs_now`, a lock) reads it as natively, not before a
+/// writers point that lets other contexts change it. Call it at every
+/// drain's end, where a switch is allowed (as `run_deferred`): whenever
+/// the running context has a writer that runs, it lets the other contexts
+/// run until that writer ends. One relaxed load while no writer runs in
+/// the process: the count of running writers is process-wide, so while
+/// another context's (or another thread's) writer runs, the call takes the
+/// slow path (a lock and a scan of the writers) and waits for nothing
+/// (review RF14-06). It waits for nothing inside a no-suspend scope (an
+/// outer drain's end waits instead), while the context holds a stream
+/// lock, or while a panic unwinds: the next writers point waits then.
+/// `DrainScope`'s outermost drop calls it. In threads mode it does nothing
+/// (no stream is handed off).
+#[inline]
+pub fn after_drain() {
     writers_point();
 }
 

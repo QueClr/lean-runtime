@@ -31,7 +31,17 @@
 //! - R4: the deferred list runs only after the drain has ended and the
 //!   scope has been left, through `run_deferred()`: `DrainScope`'s
 //!   outermost drop calls it, a translator with drains of its own
-//!   (lean2rr's Reussir drains) calls it at each drain's end;
+//!   (lean2rr's Reussir drains) calls it at each drain's end, then the
+//!   drain-end hook `after_drain()` (`DrainScope` calls both). Each entry
+//!   first waits for the writers of the streams the context handed off
+//!   before it (its mark), and runs with the writers of the streams its
+//!   drain handed off after it skipped, as natively the free reached the
+//!   promise before their `fclose` (review RF14-07); `after_drain` then
+//!   waits for the rest (review HR-01..03). That is native's outcome only
+//!   when the translator drops and defers in native's free order
+//!   (`lean_del_core`'s LIFO): a translator that frees in another order
+//!   (Rust drop glue) gets the outcome that order implies, which can be
+//!   native's mirror (leanrs's DV11);
 //!   `leave_no_suspend` never runs it (AR-8). While a panic unwinds nothing
 //!   runs, and the entries stay queued for the next `run_deferred()`;
 //! - R5: each entry is tagged with the context that deferred it, and a
@@ -88,8 +98,10 @@ thread_local! {
     /// (`park_depth`), as the no-suspend depth is.
     static DEPTH: Cell<u32> = const { Cell::new(0) };
     /// The deferred resolutions, in push order, each with the context that
-    /// deferred it (`tag`). No destructor (see the module's teardown note).
-    static LIST: RefCell<ManuallyDrop<Vec<(u32, Deferred)>>> =
+    /// deferred it (`tag`) and its writer mark (`writer_mark`: the streams
+    /// the drain handed off before it have lower ids, review RF14-07). No
+    /// destructor (see the module's teardown note).
+    static LIST: RefCell<ManuallyDrop<Vec<Entry>>> =
         const { RefCell::new(ManuallyDrop::new(Vec::new())) };
     /// `LIST`'s length, for `DrainScope`'s inline test.
     static QUEUED: Cell<u32> = const { Cell::new(0) };
@@ -99,6 +111,36 @@ thread_local! {
     /// and one that never returns stays counted, with the rest of its
     /// walk). `deferred_pending()` reads it.
     static PENDING: Cell<u32> = const { Cell::new(0) };
+}
+
+/// A deferred resolution in `LIST`: its context (`tag`), the resolution,
+/// and its writer mark (`writer_mark`).
+type Entry = (u32, Deferred, u64);
+
+/// The id the next stream hand-off will get (`io::coop::writer_mark`): an
+/// entry's mark, below which are the writers handed off before it.
+#[cfg(all(feature = "sched", feature = "io"))]
+fn writer_mark() -> u64 {
+    crate::io::coop::writer_mark()
+}
+
+#[cfg(not(all(feature = "sched", feature = "io")))]
+fn writer_mark() -> u64 {
+    0
+}
+
+/// While it lives, the writers points of this thread skip the writers with
+/// ids in `lo..hi` (`io::coop::skip_writers`).
+#[cfg(all(feature = "sched", feature = "io"))]
+fn skip_writers(lo: u64, hi: u64) -> Option<crate::io::coop::SkipWriters> {
+    crate::io::coop::skip_writers(lo, hi)
+}
+
+/// Without the io layer's hand-offs (threads mode, `sched` without `io`)
+/// there is no writer to skip.
+#[cfg(not(all(feature = "sched", feature = "io")))]
+fn skip_writers(_lo: u64, _hi: u64) -> Option<std::convert::Infallible> {
+    None
 }
 
 /// The context an entry belongs to: the running context's number on the
@@ -164,12 +206,17 @@ impl DrainScope {
 
 impl Drop for DrainScope {
     /// The depth minus one. The outermost exit calls `leave_no_suspend()`,
-    /// then, if an entry is queued, `run_deferred()`, except while a panic
-    /// unwinds (the entries stay queued for the next `run_deferred()`, R4).
-    /// This drop may switch (a deferred resolution's dependent may block):
-    /// a translator drops the scope only where a switch is allowed, at the
-    /// end of the drop that started the drain. One thread-local load more
-    /// when nothing is queued.
+    /// then, if an entry is queued, `run_deferred()` (each entry waits for
+    /// the writers handed off before it, review RF14-07), except while a
+    /// panic unwinds (the entries stay queued for the next
+    /// `run_deferred()`, R4), then the drain-end hook (`after_drain`: the
+    /// writers of the other streams the drain handed off end, review
+    /// HR-01..03). This drop may switch (a writers' wait, a deferred
+    /// resolution's dependent that blocks): a translator drops the scope
+    /// only where a switch is allowed, at the end of the drop that started
+    /// the drain; it switches whenever the context has a writer that runs.
+    /// Two relaxed or thread-local loads more while no writer runs in the
+    /// process and nothing is queued.
     #[inline]
     fn drop(&mut self) {
         let last = DEPTH.with(|d| {
@@ -184,6 +231,8 @@ impl Drop for DrainScope {
         if QUEUED.with(Cell::get) > 0 && !std::thread::panicking() {
             run_deferred();
         }
+        // waits for nothing while a panic unwinds
+        super::after_drain();
     }
 }
 
@@ -212,10 +261,13 @@ impl Deferred {
 
 /// Put a promise's resolution off to the end of the running drain (R3),
 /// tagged with the running context: it runs at that context's next
-/// `run_deferred()`, after the drain.
+/// `run_deferred()`, after the drain. It records the writer mark: the
+/// streams the drain hands off after it are the ones its resolution does
+/// not wait for (review RF14-07).
 pub fn defer(d: Deferred) {
     let t = tag();
-    LIST.with(|l| l.borrow_mut().push((t, d)));
+    let m = writer_mark();
+    LIST.with(|l| l.borrow_mut().push((t, d, m)));
     add(&QUEUED, 1);
     add(&PENDING, 1);
 }
@@ -248,14 +300,14 @@ pub fn run_deferred() {
     let me = tag();
     let list = LIST.with(|l| {
         let mut l = l.borrow_mut();
-        if !l.iter().any(|(t, _)| *t == me) {
+        if !l.iter().any(|(t, ..)| *t == me) {
             None
         } else if super::in_no_suspend_scope() {
             Some(None)
         } else {
             let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut **l)
                 .into_iter()
-                .partition(|(t, _)| *t == me);
+                .partition(|(t, ..)| *t == me);
             **l = rest;
             Some(Some(mine))
         }
@@ -271,8 +323,18 @@ pub fn run_deferred() {
         None => return,
     };
     add(&QUEUED, -(list.len() as i64));
+    // Each entry waits first for the context's writers but the ones its
+    // drain handed off after it (ids from its mark up to now), as natively
+    // the free reached the promise before those streams' `fclose`, then it
+    // runs with those writers skipped by every writers point, its `sync`
+    // dependents' included (review RF14-07). The list is moved out, so a
+    // switch during a wait leaves no entry queued (R6). The drain's end
+    // (`after_drain`) waits for the rest afterwards.
+    let now = writer_mark();
     let mut walk = Walk(list.into_iter());
-    for (_, d) in walk.0.by_ref() {
+    for (_, d, mark) in walk.0.by_ref() {
+        let _skip = skip_writers(mark, now);
+        super::after_drain();
         {
             let _done = Done;
             d.run();
@@ -287,11 +349,11 @@ pub fn run_deferred() {
 /// unwinding, back to the thread's list, after the ones queued meanwhile
 /// (those came from inside the entry that panicked, so they come first
 /// natively). They stay counted in `PENDING`.
-struct Walk(std::vec::IntoIter<(u32, Deferred)>);
+struct Walk(std::vec::IntoIter<Entry>);
 
 impl Drop for Walk {
     fn drop(&mut self) {
-        let rest: Vec<(u32, Deferred)> = self.0.by_ref().collect();
+        let rest: Vec<Entry> = self.0.by_ref().collect();
         if rest.is_empty() {
             return;
         }
@@ -325,7 +387,7 @@ pub(crate) fn queue_empty() -> bool {
 #[cfg(feature = "sched")]
 pub(crate) fn context_ends() {
     let me = tag();
-    let left = LIST.with(|l| l.borrow().iter().any(|(t, _)| *t == me));
+    let left = LIST.with(|l| l.borrow().iter().any(|(t, ..)| *t == me));
     if left {
         run_deferred();
     }

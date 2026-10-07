@@ -1,0 +1,5 @@
+id = "handoff_in_tree_then_sync_map"
+area = "process"
+lean_version = "4.34.0"
+source = "leanrs's check of lean2rr hunt HR-02 (leanrs-scratch/hr02-deep/SdDeep.lean with Tr.lean, here in one file): the handle is dropped with the tree that holds it, a deep drain"
+streams = "separate"

@@ -1,0 +1,5 @@
+id = "handoff_then_try_lock"
+area = "process"
+lean_version = "4.34.0"
+source = "lean2rr hunt HR-03 (by inspection: sched::sync's try functions had no writers point), judged by the coordinator, 2026-10-07"
+streams = "separate"

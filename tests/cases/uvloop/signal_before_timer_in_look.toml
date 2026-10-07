@@ -1,0 +1,8 @@
+id = "signal_before_timer_in_look"
+area = "uvloop"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HU-04 (by inspection; case asked for by leanrs), judged by the coordinator, 2026-10-07"
+streams = "separate"
+# The arguments: the signal number (10, SIGUSR1), the length of the
+# calibration's chunks (the callback computes 10 times the rounds per
+# 100 ms, about 1 s in any build), and the twin's computation, in ms.

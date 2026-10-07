@@ -1,0 +1,3 @@
+dropped: second promise finished: false
+kept: second promise finished before stop: false
+after stop: finished true, value none

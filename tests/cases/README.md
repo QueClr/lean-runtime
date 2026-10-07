@@ -151,7 +151,9 @@ Written in `<id>.toml` for programs and inline for rows:
 - **A busy loop of a given duration is calibrated in `main`.** `scripts/cases.py
   expect` records native from an unoptimized C build, about 18 times slower
   than `-O3` and than the translators' builds, so such a case counts the
-  steps per 100 ms first (`uvloop/loop_sleep_expired`).
+  steps per 100 ms first (`uvloop/loop_sleep_expired`). A new case spins
+  with xorshift64 (`spin` in `uvloop/timer_effect_order`): a translator can
+  fold an LCG loop away.
 - **Expected values come from compiled Lean 4.34.0, never from `#eval`.**
 - **No case or probe is named after a core module** (`Init`, `Std`, `Lean`,
   `Lake`): plain `lean` names the main module after the file, and a file

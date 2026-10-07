@@ -1168,6 +1168,11 @@ fn loop_carried_then_poll(_: &[String]) -> u32 {
     drop(tm);
     sleep(100);
     println("main done");
+    // The process outlives t by 300 ms (review RF14-01): when t ends,
+    // `finish` returns and the exit flushes, which raced the loop thread's
+    // wake from `wait_any`, its clock read and its line (natively the same
+    // race; the case guards the single-thread scheduler's RF13-14).
+    sleep(1500);
     0
 }
 
@@ -1457,6 +1462,338 @@ fn signal_reset_after_repeating_stop(args: &[String]) -> u32 {
     sleep(300);
     println(&format!("B got: {}", finished(&pb)));
     let _ = b.stop();
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-14: AR-52 and HU-01..06 (tests/sched-driver/src/cases_st.rs ports
+// them for the single-thread scheduler)
+
+/// Lean's `toString` of an `Option Int`.
+fn opt_text(o: &Option<i64>) -> String {
+    match o {
+        Some(v) => format!("(some {v})"),
+        None => "none".into(),
+    }
+}
+
+/// tests/cases/uvloop/timer_due_in_final_run.lean (review AR-52; the twin
+/// spins args[1] ms): the loop thread fires the timer while a worker
+/// computes.
+fn timer_due_in_final_run(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(300, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| println("timer fired"),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/timer_chain_in_final_run.lean (review AR-52; the twin
+/// spins args[1] ms).
+fn timer_chain_in_final_run(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let tm: UTimer = Timer::new(10, false);
+    let p = tm.next(UvPromise::new);
+    let _dep = map_task(
+        |_: Option<()>| {
+            let tb: UTimer = Timer::new(700, false);
+            let pb = tb.next(UvPromise::new);
+            let _ = map_task(
+                |_: Option<()>| println("B fired"),
+                pb.result_opt(),
+                PRIO_DEFAULT,
+                true,
+            );
+            drop(pb);
+            println("A fired");
+        },
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    drop(tm);
+    sleep(300);
+    let _w = as_task(move || spin_ms(ms), PRIO_DEFAULT);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/timer_effect_order.lean (review HU-01; the twin spins
+/// args[1] ms in each phase; phase 3 is `Std.Async.sleep` as its Lean code
+/// reads).
+fn timer_effect_order(args: &[String]) -> u32 {
+    let ms = to_nat(&args[1]);
+    let ready: Arc<Promise<()>> = Arc::new(Promise::new());
+    let r2 = ready.clone();
+    let s = as_task(
+        move || {
+            r2.resolve(());
+            drop(r2);
+            sleep(200);
+            println("phase 1: sleeper woke");
+        },
+        PRIO_DEFAULT,
+    );
+    let _ = ready.result.get();
+    spin_ms(ms);
+    println("phase 1: main computed false");
+    s.get();
+    let t: UTimer = Timer::new(100, false);
+    let p = t.next(UvPromise::new);
+    let d = map_task(
+        |_: Option<()>| println("phase 2: timer fired"),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p);
+    spin_ms(ms);
+    println("phase 2: main computed false");
+    d.get();
+    let t3: UTimer = Timer::new(100, false);
+    let p3 = t3.next(UvPromise::new);
+    let m = map_task(
+        |o: Option<()>| o.is_some(),
+        p3.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p3);
+    let atk = map_task(
+        |ok: bool| {
+            println("phase 3: async sleep done");
+            ok
+        },
+        m,
+        PRIO_DEFAULT,
+        false,
+    );
+    spin_ms(ms);
+    println("phase 3: main computed false");
+    println(&format!("phase 3: async task ok: {}", atk.get()));
+    0
+}
+
+/// tests/cases/uvloop/timer_repeat_zero_held.lean (review HU-02).
+fn timer_repeat_zero_held(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]);
+    let task = {
+        let t: UTimer = Timer::new(ms, true);
+        let p0 = t.next(UvPromise::new);
+        let _ = p0.result_opt().get();
+        drop(p0);
+        let p1 = t.next(UvPromise::new);
+        p1.result_opt()
+    };
+    sleep(200);
+    println(&format!(
+        "dropped: second promise finished: {}",
+        has_finished(&task)
+    ));
+    let u: UTimer = Timer::new(ms, true);
+    let q0 = u.next(UvPromise::new);
+    let _ = q0.result_opt().get();
+    drop(q0);
+    let q1 = u.next(UvPromise::new);
+    let qt = q1.result_opt();
+    drop(q1);
+    sleep(200);
+    println(&format!(
+        "kept: second promise finished before stop: {}",
+        has_finished(&qt)
+    ));
+    u.stop();
+    let f = has_finished(&qt);
+    println(&format!(
+        "after stop: finished {f}, value {}",
+        repr_unit(&qt.get())
+    ));
+    0
+}
+
+/// tests/cases/uvloop/timer_fresh_next_twice.lean (review HU-03).
+fn timer_fresh_next_twice(args: &[String]) -> u32 {
+    let period = to_nat(&args[0]);
+    let t: UTimer = Timer::new(period, true);
+    let a = t.next(UvPromise::new);
+    let b = t.next(UvPromise::new);
+    sleep(200);
+    println(&format!(
+        "next twice: first finished {}, second finished {}",
+        finished(&a),
+        finished(&b)
+    ));
+    drop((a, b));
+    t.stop();
+    let u: UTimer = Timer::new(period, true);
+    let c = u.next(UvPromise::new);
+    u.reset();
+    sleep(200);
+    println(&format!("next then reset: first finished {}", finished(&c)));
+    drop(c);
+    u.stop();
+    0
+}
+
+/// tests/cases/uvloop/signal_before_timer_in_look.lean (review HU-04; the
+/// twin spins args[2] ms in timer A's dependent).
+fn signal_before_timer_in_look(args: &[String]) -> u32 {
+    let num: i64 = args[0].parse().expect("an Int");
+    let ms = to_nat(&args[2]);
+    let w: USignal = Signal::new(num as i32, false);
+    let pw = uv_ok(w.next(UvPromise::new));
+    let _s = map_task(
+        |_: Option<i64>| println("signal"),
+        pw.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(pw);
+    let ta: UTimer = Timer::new(10, false);
+    let pa = ta.next(UvPromise::new);
+    let _a = map_task(
+        move |_: Option<()>| {
+            spin_ms(ms);
+            println("A done false");
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(pa);
+    let tb: UTimer = Timer::new(100, false);
+    let pb = tb.next(UvPromise::new);
+    let _b = map_task(
+        |_: Option<()>| println("timer B"),
+        pb.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(pb);
+    let pid = get_pid();
+    spawn_sh(&format!("sleep 0.3; kill -USR1 {pid}"));
+    sleep(2000);
+    println("main done");
+    0
+}
+
+/// tests/cases/uvloop/signal_batch_new_watcher.lean (review HU-05; the twin
+/// spins args[3] ms in timer A's dependent).
+fn signal_batch_new_watcher(args: &[String]) -> u32 {
+    let usr1: i64 = args[0].parse().expect("an Int");
+    let usr2: i64 = args[1].parse().expect("an Int");
+    let ms = to_nat(&args[3]);
+    let w0: USignal = Signal::new(usr2 as i32, true);
+    let p0 = uv_ok(w0.next(UvPromise::new));
+    let _d0 = map_task(
+        |v: Option<i64>| println(&format!("W0 got {}", opt_text(&v))),
+        p0.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p0);
+    let w2task: SharedRef<Option<Task<Option<i64>>>> = new_ref(None);
+    let w2t = w2task.clone();
+    let w1: USignal = Signal::new(usr1 as i32, false);
+    let p1 = uv_ok(w1.next(UvPromise::new));
+    let _d1 = map_task(
+        move |v: Option<i64>| {
+            let w2: USignal = Signal::new(usr2 as i32, false);
+            let p2 = uv_ok(w2.next(UvPromise::new));
+            let _ = map_task(
+                |v: Option<i64>| println(&format!("W2 got {}", opt_text(&v))),
+                p2.result_opt(),
+                PRIO_DEFAULT,
+                true,
+            );
+            w2t.set(Some(p2.result_opt()));
+            drop(p2);
+            println(&format!("W1 got {}, started W2", opt_text(&v)));
+        },
+        p1.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p1);
+    let ta: UTimer = Timer::new(10, false);
+    let pa = ta.next(UvPromise::new);
+    let _a = map_task(
+        move |_: Option<()>| {
+            spin_ms(ms);
+            println("A done false");
+        },
+        pa.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(pa);
+    let pid = get_pid();
+    spawn_sh(&format!(
+        "sleep 0.3; kill -USR1 {pid}; sleep 0.1; kill -USR2 {pid}"
+    ));
+    sleep(2000);
+    match w2task.get() {
+        Some(t) => println(&format!("W2 finished: {}", has_finished(&t))),
+        None => println("W2 not started"),
+    }
+    0
+}
+
+/// tests/cases/uvloop/timer_period_from_look.lean (review HU-06; the twin
+/// spins args[1] ms in `main` and args[2] ms in X).
+fn timer_period_from_look(args: &[String]) -> u32 {
+    let (main_ms, x_ms) = (to_nat(&args[1]), to_nat(&args[2]));
+    let t: UTimer = Timer::new(1000, true);
+    let p0 = t.next(UvPromise::new);
+    let _ = p0.result_opt().get();
+    drop(p0);
+    let t0 = mono_ms_now();
+    let p1 = t.next(UvPromise::new);
+    let tick2: SharedRef<Option<Task<Option<()>>>> = new_ref(None);
+    let (tm, k2) = (t.clone(), tick2.clone());
+    let _d1 = map_task(
+        move |_: Option<()>| {
+            let p2 = tm.next(UvPromise::new);
+            k2.set(Some(p2.result_opt()));
+            drop(p2);
+        },
+        p1.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    drop(p1);
+    let ready: Arc<Promise<()>> = Arc::new(Promise::new());
+    let r2 = ready.clone();
+    let xt = as_task(
+        move || {
+            r2.resolve(());
+            drop(r2);
+            sleep(300);
+            spin_ms(x_ms);
+            false
+        },
+        PRIO_DEFAULT,
+    );
+    let _ = ready.result.get();
+    spin_ms(main_ms);
+    let now = mono_ms_now();
+    sleep((t0 + 3200).saturating_sub(now) as u32);
+    let f = match tick2.get() {
+        Some(t2) => has_finished(&t2),
+        None => false,
+    };
+    println(&format!("tick 2 by then: {f}"));
+    println(&format!("X: ok: {}", xt.get()));
     0
 }
 
@@ -2041,6 +2378,14 @@ const TWINS: &[(&str, Twin)] = &[
     ("loop_sleeps_after_task", loop_sleeps_after_task),
     ("loop_cycle_long", loop_cycle_long),
     ("loop_carried_then_poll", loop_carried_then_poll),
+    ("timer_due_in_final_run", timer_due_in_final_run),
+    ("timer_chain_in_final_run", timer_chain_in_final_run),
+    ("timer_effect_order", timer_effect_order),
+    ("timer_repeat_zero_held", timer_repeat_zero_held),
+    ("timer_fresh_next_twice", timer_fresh_next_twice),
+    ("signal_before_timer_in_look", signal_before_timer_in_look),
+    ("signal_batch_new_watcher", signal_batch_new_watcher),
+    ("timer_period_from_look", timer_period_from_look),
     ("signal_sigio_default", signal_sigio_default),
     ("timer_stop_in_sync_dependent", lb20_probe),
     ("timer_cancel_in_sync_dependent", lb20_probe),

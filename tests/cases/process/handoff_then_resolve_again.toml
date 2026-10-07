@@ -1,0 +1,5 @@
+id = "handoff_then_resolve_again"
+area = "process"
+lean_version = "4.34.0"
+source = "lean2rr hunt HR-01 (hunt-refs/hr01/PromiseResolveRace.lean), judged by the coordinator, 2026-10-07: lean2rr's glue tested the promise before its writers point; a glue that tests inside `sched::resolve`'s store passes"
+streams = "separate"
