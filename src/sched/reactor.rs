@@ -553,7 +553,10 @@ impl Sched {
 
     pub(crate) fn ev_start_loop(&mut self) -> bool {
         if self.ev.wants_loop() {
-            let c = self.start_context(loop_main);
+            // libuv's loop thread has 1 GiB natively, whatever
+            // `LEAN_STACK_SIZE_KB` says (hunt HSK-03)
+            let size = self.cx.loop_stack_size();
+            let c = self.start_context(loop_main, size);
             self.ev.loop_ctx = Some(c);
             return true;
         }

@@ -295,6 +295,20 @@ pub const CASES: &[(&str, Case)] = &[
         "wait_chain_bind_continued",
         (no_init, wait_chain_bind_continued),
     ),
+    // fixes-16: hunt HSK-01, HSK-02
+    (
+        "wait_nested_deep_stacks",
+        (no_init, wait_nested_deep_stacks),
+    ),
+    (
+        "wait_any_nested_deep_stacks",
+        (no_init, wait_any_nested_deep_stacks),
+    ),
+    ("wait_deep_main_thread", (no_init, wait_deep_main_thread)),
+    (
+        "final_run_deep_main_thread",
+        (no_init, final_run_deep_main_thread),
+    ),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -5121,5 +5135,145 @@ fn wait_chain_bind_continued(args: &[String]) -> u32 {
     let s2 = map_task(|x: u64| x + 1, r, PRIO_DEFAULT, true, false);
     let u = map_task(|x: u64| x + 1, s2, PRIO_DEFAULT, false, false);
     println(&format!("{}", u.get()));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-16: deep recursion and the stacks tasks run on (hunt HSK-01 to
+// HSK-03). The stack a level takes depends on the build (a debug build's
+// frame here; 16 to 32 bytes in lean2rr's optimized build; 32 to 64 bytes
+// natively with `leanc -O3`, 4 to 6 times more in `scripts/cases.py`'s
+// unoptimized build), so the ports recurse by bytes, not by levels: each
+// level counts for `LEVEL` bytes, an optimized build's, and the recursion
+// computes the same value.
+
+/// The stack a level of the ports' recursions takes.
+const LEVEL: u64 = 32;
+
+/// One step of the recursions: `x * 3 % 1000003 + 1`.
+fn step(x: u64) -> u64 {
+    x * 3 % 1000003 + 1
+}
+
+/// `n` steps from `x` (`descend`'s and `deep`'s values once their
+/// recursion returns).
+pub(crate) fn steps(n: u64, mut x: u64) -> u64 {
+    for _ in 0..n {
+        x = step(x);
+    }
+    x
+}
+
+/// Run `bottom` with `bytes` of stack in use below the caller: recursion in
+/// frames that each hold a 256-byte buffer across the call below them,
+/// until the stack has grown by `bytes`.
+pub(crate) fn at_depth(bytes: u64, bottom: impl FnOnce() -> u64 + 'static) -> u64 {
+    #[inline(never)]
+    fn down(until: usize, bottom: &mut Option<Box<dyn FnOnce() -> u64>>) -> u64 {
+        let pad = [0u8; 256];
+        let here = std::ptr::addr_of!(pad).addr();
+        let r = if here <= until {
+            (bottom.take().expect("the bottom runs once"))()
+        } else {
+            down(until, bottom)
+        };
+        std::hint::black_box(&pad);
+        r
+    }
+    let here = 0u8;
+    let until = std::ptr::addr_of!(here)
+        .addr()
+        .saturating_sub(bytes as usize);
+    down(until, &mut Some(Box::new(bottom)))
+}
+
+/// `deep d` (`def deep : Nat → Nat | 0 => 0 | n + 1 => deep n * 3 %
+/// 1000003 + 1`), `LEVEL` bytes a level.
+pub(crate) fn deep_levels(d: u64) -> u64 {
+    at_depth(d * LEVEL, || 0);
+    steps(d, 0)
+}
+
+// partial def descend (top : Nat) (d k : Nat) : Nat :=
+//   if d == 0 then
+//     if k == 0 then 0 else (Task.spawn fun _ => descend top top (k - 1)).get + 1
+//   else descend top (d - 1) k * 3 % 1000003 + 1
+//
+// `descend top top k`, `LEVEL` bytes a level.
+fn descend(top: u64, k: u64) -> u64 {
+    let base = at_depth(top * LEVEL, move || {
+        if k == 0 {
+            0
+        } else {
+            Task::spawn(move || descend(top, k - 1), PRIO_DEFAULT).get() + 1
+        }
+    });
+    steps(top, base)
+}
+
+// partial def descendAny (top : Nat) (d k : Nat) : IO Nat := do
+//   if d == 0 then
+//     if k == 0 then return 0
+//     let t ← IO.asTask (prio := .dedicated) (descendAny top top (k - 1))
+//     match ← IO.waitAny [t] with
+//     | .ok v => return v + 1
+//     | .error e => throw e
+//   else
+//     let r ← descendAny top (d - 1) k
+//     return r * 3 % 1000003 + 1
+//
+// `descendAny top top k`, `LEVEL` bytes a level.
+fn descend_any(top: u64, k: u64) -> u64 {
+    let base = at_depth(top * LEVEL, move || {
+        if k == 0 {
+            0
+        } else {
+            let t = as_task(move || descend_any(top, k - 1), PRIO_DEDICATED);
+            wait_any(&[t]) + 1
+        }
+    });
+    steps(top, base)
+}
+
+// def main (args : List String) : IO Unit := do
+//   let d := args[0]!.toNat!
+//   let k := args[1]!.toNat!
+//   IO.println s!"get chain {descend d d k}"
+fn wait_nested_deep_stacks(args: &[String]) -> u32 {
+    let (d, k) = (to_nat(&args[0]), to_nat(&args[1]));
+    println(&format!("get chain {}", descend(d, k)));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let d := args[0]!.toNat!
+//   let k := args[1]!.toNat!
+//   IO.println s!"waitAny chain {← descendAny d d k}"
+fn wait_any_nested_deep_stacks(args: &[String]) -> u32 {
+    let (d, k) = (to_nat(&args[0]), to_nat(&args[1]));
+    println(&format!("waitAny chain {}", descend_any(d, k)));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let d := args[0]!.toNat!
+//   let t ← IO.asTask (do let h ← IO.getNumHeartbeats; pure (deep (d + h)))
+//   IO.println s!"task {(← IO.wait t).toOption}"
+fn wait_deep_main_thread(args: &[String]) -> u32 {
+    let d = to_nat(&args[0]);
+    let t = as_task(move || deep_levels(d), PRIO_DEFAULT);
+    println(&format!("task (some {})", t.get()));
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let d := args[0]!.toNat!
+//   discard <| IO.asTask (do let h ← IO.getNumHeartbeats; IO.println s!"final {deep (d + h)}")
+fn final_run_deep_main_thread(args: &[String]) -> u32 {
+    let d = to_nat(&args[0]);
+    let _ = as_task(
+        move || println(&format!("final {}", deep_levels(d))),
+        PRIO_DEFAULT,
+    );
     0
 }

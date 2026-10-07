@@ -7,8 +7,10 @@
 //! thread's own stack, and one per task the scheduler starts, each a
 //! coroutine on a stack of its own (`corosensei`). A task that is needed
 //! (`Task.get`, `IO.wait`) still runs right there, on the stack of whoever
-//! needs it; a context switch happens only when the running context blocks,
-//! or lets the others go first at an effect or polling point.
+//! needs it, when that stack has about a native worker's room left
+//! (`Sched::room_to_run_here`, hunt HSK-01), else on a context of its own;
+//! a context switch happens only when the running context blocks, or lets
+//! the others go first at an effect or polling point.
 //!
 //! Every switch goes through `main`'s stack: corosensei's coroutines are
 //! asymmetric (a coroutine suspends to whoever resumed it), so `main`'s
@@ -28,6 +30,7 @@
 //! one step is the translator's glue (`Glue::suspend`, `Suspend`); the
 //! scheduler decides when it may happen (docs/sched.md, "The glue").
 
+use super::env::DEFAULT_THREAD_STACK;
 use super::task::CtxState;
 use super::{glue, with, Sched};
 use corosensei::stack::{DefaultStack, Stack};
@@ -259,6 +262,52 @@ pub fn running_stack() -> Option<StackBounds> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Unit tests: the low end of the thread's own stack that `stack_room`
+    /// takes (0: the real source), so that a test can give `main` a known
+    /// room without the feature `stack-overflow`.
+    pub(crate) static TEST_THREAD_LOW: Cell<usize> = const { Cell::new(0) };
+}
+
+/// The low end of the calling thread's own stack (the top of the guard
+/// below it), if known: from the record of Lean's stack-overflow report
+/// (feature `stack-overflow`, a registered thread); unknown otherwise.
+fn thread_stack_low() -> Option<usize> {
+    #[cfg(test)]
+    {
+        let low = TEST_THREAD_LOW.with(Cell::get);
+        if low != 0 {
+            return Some(low);
+        }
+    }
+    own_stack_low()
+}
+
+#[cfg(feature = "stack-overflow")]
+use super::stack_overflow::own_stack_low;
+
+/// Without the feature `stack-overflow` no thread has a record: unknown.
+#[cfg(not(feature = "stack-overflow"))]
+fn own_stack_low() -> Option<usize> {
+    None
+}
+
+/// The free part of the running stack below the caller: from the caller's
+/// position (the address of a local) down to the stack's low end, the top
+/// of its guard. On a context, its bounds give the low end
+/// (`running_stack`); on the thread's own stack (`main`'s context), the
+/// record of Lean's stack-overflow report does (`thread_stack_low`).
+/// `None` where the low end is unknown.
+pub(crate) fn stack_room() -> Option<usize> {
+    let low = match running_stack() {
+        Some(b) => b.guard_hi,
+        None => thread_stack_low()?,
+    };
+    let here = 0u8;
+    Some(std::ptr::addr_of!(here).addr().saturating_sub(low))
+}
+
 /// The context running on this thread changes: the hub calls it right
 /// before it resumes a context (`Some`, its stack) and right after the
 /// context is back (`None`), and `PanicGuard` after a panic. It updates
@@ -360,9 +409,15 @@ pub(crate) struct Contexts {
     pub(crate) workers: u32,
     /// The number of the task manager's workers (`LEAN_NUM_THREADS`).
     pub(crate) pool_limit: u32,
-    /// Stacks of ended contexts, for new ones.
-    stacks: Vec<DefaultStack>,
+    /// Stacks of ended contexts, for new ones, with their usable sizes
+    /// (`keep_stack`, `take_stack`).
+    stacks: Vec<(usize, DefaultStack)>,
+    /// The usable size of a worker context's stack (`start_with`).
     stack_size: usize,
+    /// The free stack a task needs to run on its waiter's stack
+    /// (`room_to_run_here`): a native worker's stack, at most a context's,
+    /// less its slack (`inline_slack`).
+    room_need: usize,
     /// A context lets the others go first at an effect point (`effect`).
     pub(crate) in_effect: bool,
     pub(crate) glue: Option<Rc<dyn Glue>>,
@@ -377,9 +432,26 @@ pub(crate) struct Contexts {
 /// they neither wrap nor run into the next context's (review RS1S-07).
 static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 
-/// How many stacks of ended contexts are kept for new ones. Their touched
-/// pages stay resident (as a native worker thread's stack does).
+/// How many stacks of ended worker contexts are kept for new ones. Their
+/// touched pages stay resident (as a native worker thread's stack does;
+/// hunt HSK-05, docs/sched.md). One more is kept for the event loop's
+/// context when its size differs (`loop_stack_size`).
 const POOLED_STACKS: usize = 8;
+
+/// How much less than a native worker's stack a task may get when it runs
+/// on its waiter's stack (`room_to_run_here`): the frames a waiter has
+/// below it in the common case (`main`, a task that waits early), so that
+/// those waits still run the task right there. At most a sixteenth of the
+/// stack (`inline_slack`), so that a small `LEAN_STACK_SIZE_KB` keeps the
+/// rule (review RF16-01: with 1 MiB whatever the size, the rule was off at
+/// 896 KiB and below, and promised 128 KiB at 1152 KiB).
+pub(crate) const INLINE_SLACK: usize = 1 << 20;
+
+/// The slack for a native worker's stack of `base` bytes: `INLINE_SLACK`,
+/// at most `base / 16` (1 MiB from 16 MiB up; 72 KiB at 1152 KiB).
+pub(crate) fn inline_slack(base: usize) -> usize {
+    INLINE_SLACK.min(base / 16)
+}
 
 /// Linux's `ENOMEM` and `EAGAIN` (the same on aarch64 and x86-64; `sched`
 /// may be built without `io`, whose constants these are).
@@ -413,18 +485,55 @@ impl Contexts {
             workers: 0,
             pool_limit: 0,
             stacks: Vec::new(),
-            stack_size: 1 << 30,
+            stack_size: DEFAULT_THREAD_STACK,
+            room_need: DEFAULT_THREAD_STACK - inline_slack(DEFAULT_THREAD_STACK),
             in_effect: false,
             glue: None,
             in_use: 0,
         }
     }
 
-    pub(crate) fn set_stack_size(&mut self, size: usize) {
+    /// The contexts' stack size (`size`, rounded up), and the stack a native
+    /// worker has (`native`: `thread_stack_size()`), the base of the room a
+    /// task needs to run on its waiter's stack (`room_to_run_here`).
+    pub(crate) fn set_stack_size(&mut self, size: usize, native: usize) {
         // A multiple of 64 KiB (the largest page size of Linux targets), so
         // that the guard's size can be read off a stack (`bounds_of`).
         self.stack_size = size.max(1 << 16).div_ceil(1 << 16).saturating_mul(1 << 16);
+        let base = native.min(self.stack_size);
+        self.room_need = base - inline_slack(base);
         self.stacks.clear();
+    }
+
+    /// The usable size of the event loop's context's stack (`loop_main`):
+    /// natively libuv's loop thread is made before `LEAN_STACK_SIZE_KB` is
+    /// read, so it has `lthread`'s default, 1 GiB, whatever the variable
+    /// says (hunt HSK-03); here never less than a worker context's either.
+    pub(crate) fn loop_stack_size(&self) -> usize {
+        self.stack_size.max(DEFAULT_THREAD_STACK)
+    }
+
+    /// A pooled stack of `size` usable bytes, the last one kept.
+    fn take_stack(&mut self, size: usize) -> Option<DefaultStack> {
+        let k = self.stacks.iter().rposition(|&(s, _)| s == size)?;
+        Some(self.stacks.remove(k).1)
+    }
+
+    /// An ended context's stack of `size` usable bytes goes to the pool if
+    /// it has room for one of that size: `POOLED_STACKS` of a worker
+    /// context's size, one of the loop context's (one runs at a time), none
+    /// of another (a size `start_with` has changed since).
+    fn keep_stack(&mut self, size: usize, st: DefaultStack) {
+        let cap = if size == self.stack_size {
+            POOLED_STACKS
+        } else if size == self.loop_stack_size() {
+            1
+        } else {
+            0
+        };
+        if self.stacks.iter().filter(|&&(s, _)| s == size).count() < cap {
+            self.stacks.push((size, st));
+        }
     }
 
     /// The number of live contexts, `main`'s included.
@@ -501,6 +610,19 @@ impl Sched {
         }
     }
 
+    /// Whether a task may run on the running stack, on its waiter's (hunt
+    /// HSK-01): its free part (`stack_room`) is at least the stack a native
+    /// worker has, `thread_stack_size()` (at most a context's), less its
+    /// slack (`inline_slack`: 1 MiB, at most a sixteenth of that stack). Natively each awaited task runs on a worker's thread
+    /// of its own, with that whole stack; here a task run on its waiter's
+    /// stack then gets about as much, and nested waits do not add up their
+    /// stack use. Where the low end is unknown (a thread's own stack without
+    /// the feature `stack-overflow`, or not registered with Lean's report),
+    /// yes, as before the rule.
+    pub(crate) fn room_to_run_here(&self) -> bool {
+        stack_room().is_none_or(|r| r >= self.cx.room_need)
+    }
+
     /// Whether context `c` is able to run (runnable or running).
     #[cfg(feature = "io")]
     pub(crate) fn can_run(&self, c: CtxId) -> bool {
@@ -565,9 +687,11 @@ impl Sched {
         // Nothing wakes a waiter of a started pure task (`pick`'s wake-up
         // has gone by): it runs on the waiter's stack instead
         // (`may_run_awaited`; fixes-8, review RF8-03).
+        // Unless it has started on a context of its own because the waiter's
+        // stack has too little room (`here_or_own_context`, hunt HSK-01).
         if let Wait::Cell(i, g) = w {
             debug_assert!(
-                !self.is_picked(i, g),
+                !self.is_picked(i, g) || self.preselected(i),
                 "lean-runtime: a context blocks on the started pure task {i}/{g}"
             );
         }
@@ -643,16 +767,15 @@ impl Sched {
 
     /// Start entry `e` (generation `g`) on a new worker context, able to run.
     pub(crate) fn start_worker(&mut self, e: u32, g: u32) -> CtxId {
-        let id = self.start_context(worker_main);
+        let id = self.start_context(worker_main, self.cx.stack_size);
         self.cx.ctxs[id].preselect = Some((e, g));
         id
     }
 
-    /// A new context running `entry` (a worker's, or the event loop's),
-    /// able to run.
-    pub(crate) fn start_context(&mut self, entry: fn()) -> CtxId {
-        let size = self.cx.stack_size;
-        let stack = match self.cx.stacks.pop() {
+    /// A new context running `entry` (a worker's, or the event loop's) on a
+    /// stack of `size` usable bytes (a multiple of 64 KiB), able to run.
+    pub(crate) fn start_context(&mut self, entry: fn(), size: usize) -> CtxId {
+        let stack = match self.cx.take_stack(size) {
             Some(st) => st,
             None => match DefaultStack::new(size) {
                 Ok(st) => st,
@@ -790,13 +913,10 @@ impl Sched {
                 .take()
                 .expect("lean-runtime: no coroutine to put back")
                 .into_stack();
-            // Only a stack of the current size is reused (`start_with` may
-            // have changed it since this context started).
-            if self.cx.stacks.len() < POOLED_STACKS
-                && self.cx.ctxs[n].stack_size == self.cx.stack_size
-            {
-                self.cx.stacks.push(st);
-            }
+            // Only a stack of a size in use is reused (`start_with` may have
+            // changed the size since this context started).
+            let size = self.cx.ctxs[n].stack_size;
+            self.cx.keep_stack(size, st);
             let x = &mut self.cx.ctxs[n];
             x.yielder = std::ptr::null();
             x.bounds = None;

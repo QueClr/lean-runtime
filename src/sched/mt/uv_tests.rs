@@ -725,3 +725,65 @@ fn rt2_13_signal_next_with_a_promise_resolved_between_its_reads() {
     let _ = s.stop();
     assert!(Arc::ptr_eq(&r.expect("next panicked").unwrap().0, &q0.0));
 }
+
+// ---------------------------------------------------------------------------
+// fixes-16: the loop thread's stack (hunt HSK-03)
+
+/// Use at least `bytes` of stack below the caller, in frames that each hold
+/// a 1 KiB buffer across the call below them; the number of frames.
+fn use_stack(bytes: usize) -> usize {
+    #[inline(never)]
+    fn down(n: usize) -> usize {
+        let buf = [n as u8; 1024];
+        let r = if n == 0 { 0 } else { down(n - 1) + 1 };
+        std::hint::black_box(&buf);
+        r
+    }
+    down(bytes / 1024)
+}
+
+const HSK03_CHILD: &str = "LEAN_RUNTIME_TEST_HSK03_CHILD";
+
+/// Hunt HSK-03 (fixes-16): the loop thread has `lthread`'s default stack,
+/// 1 GiB, whatever the task manager's threads have (here 256 KiB, as a
+/// small `LEAN_STACK_SIZE_KB` makes it): natively libuv's loop thread is
+/// made before the variable is read. A timer's resolution hook (a `sync`
+/// dependent's stand-in, set by the promise's maker, so before the timer
+/// can fire) uses 8 MiB of stack on the loop thread. Before the fix the
+/// loop thread had the task manager's 256 KiB, and the hook overflowed it.
+/// In a child process (an overflow ends it), killed after 30 s.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hsk03_the_loop_thread_has_lthreads_default_stack() {
+    if std::env::var_os(HSK03_CHILD).is_none() {
+        let _s = serial();
+        run_child_within(
+            "sched::mt::uv::tests::hsk03_the_loop_thread_has_lthreads_default_stack",
+            HSK03_CHILD,
+            30,
+        );
+        return;
+    }
+    let sh = start_test();
+    let frames = Arc::new(StdMutex::new(None));
+    let t: Timer<P> = Timer::new(10, false);
+    let p = t.next(|| {
+        let p = P::new(&sh);
+        let frames = frames.clone();
+        p.on_resolve(move || {
+            *frames.lock().unwrap() = Some((use_stack(8 << 20), std::thread::current().id()));
+        });
+        p
+    });
+    let (_, on) = p.get();
+    // the hook runs right after the resolution, which wakes this thread
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while frames.lock().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let (n, hook_on) = frames.lock().unwrap().take().expect("the hook ran");
+    assert_eq!(n, 8 << 10);
+    assert_eq!(hook_on, on, "the hook ran on the resolving thread");
+    assert_eq!(Some(on), LOOP_THREAD_ID.get().copied(), "the loop thread");
+    task::finish(&sh);
+}

@@ -748,6 +748,45 @@ fn cwd_child_lower_nice() {
     assert_eq!(child_nice(None), format!("{mine}\n"));
 }
 
+/// LRIO2-F1 on the helper path (review RIO2-14's helper thread, for a
+/// caller whose nice value is below the spawner's): the helper goes back to
+/// `/` before it ends, as the spawner thread does before its answer, so no
+/// thread holds the spawn's directory once the caller has the result. Its
+/// end alone was not enough: `join` returns before the kernel drops a dying
+/// thread's working directory, and `spawner_leaves_cwd` (which takes this
+/// path after `cwd_child_nice` in one process) failed under load. In a
+/// child process, with a fresh spawner.
+#[test]
+fn helper_leaves_cwd() {
+    if std::env::var_os("LEAN_RUNTIME_TEST_CHILD").is_none() {
+        let out = run_self("io::process::tests::helper_leaves_cwd");
+        assert!(out.status.success(), "{out:?}");
+        return;
+    }
+    let mine = rustix::process::getpriority_process(None).unwrap();
+    let higher = (mine + 7).min(19);
+    if higher == mine {
+        eprintln!("helper_leaves_cwd: nice value already 19, no helper path");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("lean-runtime-helper-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let d = dir.to_str().unwrap().to_owned();
+    // the spawner thread takes a higher nice value for another caller
+    std::thread::spawn(move || {
+        rustix::process::setpriority_process(None, higher).unwrap();
+        child_nice(Some(b"/"))
+    })
+    .join()
+    .unwrap();
+    // so this caller's spawn runs on a helper thread
+    *super::HELPER_CWD.lock().unwrap() = None;
+    assert_eq!(pwd_in(&d).unwrap().1, format!("{d}\n"));
+    let at_end = super::HELPER_CWD.lock().unwrap().take();
+    std::fs::remove_dir(&dir).unwrap();
+    assert_eq!(at_end.as_deref(), Some(std::path::Path::new("/")));
+}
+
 /// The child's blocked signals are the calling thread's, with a `cwd` too,
 /// where the spawner thread (created before the caller blocked the signal)
 /// spawns (review RIO2-14). In a child process, with a fresh spawner.

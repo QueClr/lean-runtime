@@ -1975,6 +1975,35 @@ impl Sched {
         }
     }
 
+    /// Task `i`, which may run now (`may_run_awaited`, or the final run's
+    /// next task), runs on the running stack, its waiter's, only if that
+    /// stack has room for it (`room_to_run_here`, hunt HSK-01): natively
+    /// each awaited task runs on a worker thread of its own, with a whole
+    /// stack, so nested waits do not add up their stack use. Otherwise it
+    /// starts now on a context of its own, as the free worker that may
+    /// start it would (unless a context already starts with it), and the
+    /// waiter blocks on it. Whether it runs here.
+    ///
+    /// It runs here in any case without a task manager (natively on the
+    /// caller's thread too), and in the state of a task handed to a context
+    /// that is about to begin it (neither queued nor started), which no
+    /// other context observes (`may_run_awaited`). A task started this way
+    /// stays queued, or started (`PICKED`), until its context begins it
+    /// (`take_preselect`), so that a waiter with room that comes first still
+    /// may run it, and the context then takes the next queued task, as a
+    /// worker whose task ran elsewhere.
+    fn here_or_own_context(&mut self, i: u32) -> bool {
+        let f = self.ent(i).flags;
+        if !self.tk.started || f & (QUEUED | PICKED) == 0 || self.room_to_run_here() {
+            return true;
+        }
+        if !self.preselected(i) {
+            let g = self.ent(i).gen;
+            self.start_worker(i, g);
+        }
+        false
+    }
+
     /// The pending task at the deepest end of the chain of pending tasks
     /// that `i` waits for (`i` itself if it waits for none), if every link
     /// waits for a pending task: `None` when one waits for a running task,
@@ -2002,7 +2031,9 @@ impl Sched {
     /// free workers take the queue's heads (AR-10):
     /// - a listed task that is the only unfinished one of the list runs here
     ///   once it may (`may_run_awaited`, the waiter's worker not counted
-    ///   free), or the pending chain it waits for, from its deepest end; only
+    ///   free), or the pending chain it waits for, from its deepest end (on
+    ///   a context of its own, started then, if this stack lacks the room:
+    ///   `here_or_own_context`, hunt HSK-01); only
     ///   when every listed id names that one task (none has finished: a task
     ///   whose value is set before its walk notifies is due to be returned at
     ///   the notification, so the other is no longer the only one; review of
@@ -2035,6 +2066,11 @@ impl Sched {
             if !self.cx.cur_ctx().holds {
                 if let Some(r) = self.chain_root(u) {
                     if self.may_run_awaited(r, false) {
+                        // here only with room, else on a context of its own
+                        // (hunt HSK-01)
+                        if !self.here_or_own_context(r) {
+                            return None;
+                        }
                         self.hand(r);
                         return Some(r);
                     }
@@ -2060,7 +2096,7 @@ impl Sched {
     }
 
     /// Whether a context already starts with task `i` (`preselect`).
-    fn preselected(&self, i: u32) -> bool {
+    pub(crate) fn preselected(&self, i: u32) -> bool {
         let g = self.ent(i).gen;
         self.cx
             .ctxs
@@ -2216,8 +2252,10 @@ impl Sched {
             *chain = None;
             // AR-10: here only once a free worker would start it; until then
             // the waiter blocks (a pool waiter's worker is free meanwhile),
-            // and the hub starts the heads on contexts of their own.
-            if !self.may_run_awaited(i, true) {
+            // and the hub starts the heads on contexts of their own. Then
+            // here only with room for it, else it starts on a context of its
+            // own now and the waiter blocks on it (hunt HSK-01).
+            if !self.may_run_awaited(i, true) || !self.here_or_own_context(i) {
                 return WaitStep::Block(Wait::Cell(i, id.gen()));
             }
             self.hand(i);
@@ -2286,7 +2324,7 @@ impl Sched {
                 *chain = None;
                 return WaitStep::Again;
             }
-            if !self.may_run_awaited(d, true) {
+            if !self.may_run_awaited(d, true) || !self.here_or_own_context(d) {
                 return WaitStep::Block(Wait::Cell(d, g));
             }
             v.pop();
@@ -2388,8 +2426,10 @@ impl Sched {
 
     /// The final run's next step, on `main`'s context (lean2rr's `next_tag`
     /// at shutdown): the started pure tasks first, then queued tasks as a
-    /// free worker would start them; `main` waits while tasks run on other
-    /// contexts, and runs whatever they queue meanwhile. A task enqueued
+    /// free worker would start them, on `main`'s stack if it has the room
+    /// (`here_or_own_context`), else each on a context of its own; `main`
+    /// waits while tasks run on other contexts, and runs whatever they
+    /// queue meanwhile. A task enqueued
     /// after `main` returned always runs, unlike natively, where one queued
     /// once no standard worker is left never does (LB-13). When only tasks
     /// waiting for others remain (an unresolved promise, a cycle), it is
@@ -2407,12 +2447,22 @@ impl Sched {
             self.tk.workers_ended = true;
             return Final::EndWorkers;
         }
+        // On `main`'s stack only with room, else on a context of its own,
+        // which `main` waits for (hunt HSK-02: `main` on the process's
+        // thread, `LEAN_MAIN_USE_THREAD=0`, has 8 MiB natively, its workers
+        // 1 GiB).
         if let Some((i, _)) = self.last_resort() {
+            if !self.here_or_own_context(i) {
+                return Final::Wait;
+            }
             self.tk.picked.pop_front();
             self.hand(i);
             return Final::Run(i);
         }
         if let Some((i, _)) = self.startable(Gate::Any) {
+            if !self.here_or_own_context(i) {
+                return Final::Wait;
+            }
             self.hand(i);
             return Final::Run(i);
         }
@@ -3021,7 +3071,9 @@ pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) ->
 /// `Task.get`/`IO.wait` (`lean_task_get`): returns once task `id` has
 /// finished. A pending task runs here, on the stack of whoever needs it,
 /// once it is the task a free worker would start now (as natively a worker
-/// runs it while the caller waits; `may_run_awaited`, review AR-10); until
+/// runs it while the caller waits; `may_run_awaited`, review AR-10), if
+/// that stack has about a native worker's room left; otherwise it starts
+/// then on a context of its own (`here_or_own_context`, hunt HSK-01). Until
 /// then, and for a task running on another context or an unresolved
 /// promise, the caller waits while other contexts run, and the hub starts
 /// the queue's heads on contexts of their own; a task needed by its own
@@ -3092,7 +3144,9 @@ pub fn state(id: TaskId) -> TaskState {
 ///   its walk still runs is not seen until a notification (review RS2-06 of
 ///   sched-2);
 /// - if none counts, the only unfinished task of the list, if there is one,
-///   runs here once a free worker would start it (`wait_any_step`), and a
+///   runs here once a free worker would start it (`wait_any_step`; on a
+///   context of its own, started then, if this stack lacks a native
+///   worker's room: hunt HSK-01), and a
 ///   pure task a worker has started that a listed task needs starts on a
 ///   context of its own; no other task runs on the waiter's stack (review
 ///   AR-10);

@@ -238,13 +238,23 @@ pub fn start(glue: Rc<dyn Glue>) {
 /// applies to contexts started afterwards: the stacks kept for reuse are
 /// dropped, and a context still running on a stack of the old size does not
 /// return it to the pool when it ends.
+///
+/// Two stacks do not follow `stack_size`. The event loop's context gets at
+/// least 1 GiB, as natively libuv's loop thread has 1 GiB whatever
+/// `LEAN_STACK_SIZE_KB` says. And a needed task runs on its waiter's stack
+/// only if that stack has a native worker's room left: `thread_stack_size()`
+/// read here, at most `stack_size`, less its slack (1 MiB, at most a
+/// sixteenth of it; docs/sched.md, "The stack room of a run on the waiter's
+/// stack").
 pub fn start_with(glue: Rc<dyn Glue>, workers: u32, stack_size: usize) {
     LAZY.with(|l| l.borrow_mut().take());
     STATE.with(|st| st.set(STARTED | if workers > 0 { DEFERS } else { 0 }));
     with(|s| {
         s.cx.glue = Some(glue);
         s.cx.pool_limit = workers;
-        s.cx.set_stack_size(stack_size);
+        // a native worker's stack: the room a task needs to run on its
+        // waiter's stack (`room_to_run_here`, hunt HSK-01)
+        s.cx.set_stack_size(stack_size, thread_stack_size());
         s.tk.started = workers > 0;
     });
     task::MANAGER.with(|m| m.set(workers > 0));

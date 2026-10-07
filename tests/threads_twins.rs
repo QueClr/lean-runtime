@@ -827,6 +827,51 @@ fn loop_blocked_at_exit(_: &[String]) -> u32 {
     3
 }
 
+/// tests/cases/uvloop/loop_deep_sync_dependent.lean (fixes-16, hunt
+/// HSK-03): the timer's `sync` dependent recurses through 64 MB of stack on
+/// the loop thread, which has `lthread`'s default 1 GiB whatever
+/// `LEAN_STACK_SIZE_KB` says (16 MiB here). Before the fix the loop thread
+/// had the task manager's size, and the dependent overflowed it. The
+/// recursion counts its levels in bytes, as the single-thread driver's
+/// port does (`deep_levels`).
+fn loop_deep_sync_dependent(args: &[String]) -> u32 {
+    let d = to_nat(&args[0]);
+    let tm: UTimer = Timer::new(100, false);
+    let p = tm.next(UvPromise::new);
+    let r = map_task(
+        move |_: Option<()>| deep_levels(d),
+        p.result_opt(),
+        PRIO_DEFAULT,
+        true,
+    );
+    println(&format!("loop {}", r.get()));
+    drop((p, tm));
+    0
+}
+
+/// `deep d` (`def deep : Nat → Nat | 0 => 0 | n + 1 => deep n * 3 %
+/// 1000003 + 1`), each level counted as 32 bytes of stack, an optimized
+/// build's (tests/sched-driver/src/cases.rs, `LEVEL`): recursion in frames
+/// that each hold a 256-byte buffer across the call below them, until the
+/// stack has grown by `32 d` bytes; then the value.
+fn deep_levels(d: u64) -> u64 {
+    #[inline(never)]
+    fn down(until: usize) -> u64 {
+        let pad = [0u8; 256];
+        let here = std::ptr::addr_of!(pad).addr();
+        let r = if here <= until { 0 } else { down(until) };
+        std::hint::black_box(&pad);
+        r
+    }
+    let here = 0u8;
+    down(
+        std::ptr::addr_of!(here)
+            .addr()
+            .saturating_sub(d as usize * 32),
+    );
+    (0..d).fold(0, |x, _| x * 3 % 1000003 + 1)
+}
+
 /// tests/cases/uvloop/loop_task_at_exit.lean (review RF13-01): the IO task
 /// the loop thread waits for runs on a pool worker, which `finish` joins.
 fn loop_task_at_exit(_: &[String]) -> u32 {
@@ -2463,6 +2508,8 @@ const TWINS: &[(&str, Twin)] = &[
         signal_oneshot_keep_in_sync_dependent,
     ),
     ("signal_stop_drops_promise", signal_stop_drops_promise),
+    // fixes-16: hunt HSK-03
+    ("loop_deep_sync_dependent", loop_deep_sync_dependent),
     ("worker_keeps_streams", worker_keeps_streams),
     ("worker_keeps_errno", worker_keeps_errno),
     (

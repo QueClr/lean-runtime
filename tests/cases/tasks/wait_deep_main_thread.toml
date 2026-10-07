@@ -1,0 +1,5 @@
+id = "wait_deep_main_thread"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean2rr's stack hunt HSK-02 (hunt-stack, RtHuntStack1 `task` with LEAN_MAIN_USE_THREAD=0), lean-runtime fixes-16"
+streams = "separate"

@@ -1,0 +1,5 @@
+id = "wait_any_nested_deep_stacks"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean2rr's stack hunt HSK-01 (hunt-stack, RtHuntStack1 `chainio`, here with `IO.waitAny`), lean-runtime fixes-16"
+streams = "separate"

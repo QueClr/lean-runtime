@@ -68,6 +68,8 @@ pub fn lookup(id: &str) -> Option<Case> {
         "signal_reset_usr1_after_repeating_stop" => (no_init, signal_reset_after_repeating_stop),
         "signal_reset_urg_after_repeating_stop" => (no_init, signal_reset_after_repeating_stop),
         "get_tid_loop_thread" => (no_init, get_tid_loop_thread),
+        // fixes-16: hunt HSK-03
+        "loop_deep_sync_dependent" => (no_init, loop_deep_sync_dependent),
         "loop_blocked_at_exit" => (no_init, loop_blocked_at_exit),
         "loop_task_at_exit" => (no_init, loop_task_at_exit),
         "loop_sleep_expired" => (no_init, loop_sleep_expired),
@@ -2892,5 +2894,28 @@ fn handoff_then_try_lock(_: &[String]) -> u32 {
         move || w2.write(),
         || w.try_read(),
     );
+    0
+}
+
+// tests/cases/uvloop/loop_deep_sync_dependent.lean (fixes-16, hunt HSK-03):
+// def main (args : List String) : IO Unit := do
+//   let d := args[0]!.toNat!
+//   let tm ← Timer.mk 100 false
+//   let p ← tm.next
+//   let r := p.result!.map (sync := true) fun _ => deep d
+//   IO.println s!"loop {r.get}"
+fn loop_deep_sync_dependent(args: &[String]) -> u32 {
+    let d = to_nat(&args[0]);
+    let tm: UTimer = Timer::new(100, false);
+    let p = tm.next(UvPromise::new);
+    let r = map_task(
+        move |_: ()| crate::cases::deep_levels(d),
+        p.result_bang(),
+        PRIO_DEFAULT,
+        true,
+        false,
+    );
+    println(&format!("loop {}", r.get()));
+    drop((p, tm));
     0
 }

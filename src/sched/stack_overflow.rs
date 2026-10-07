@@ -83,7 +83,8 @@ const CLAIMING: usize = usize::MAX;
 const ALTSTACK_EXTRA: usize = 64 << 10;
 
 /// What the handler knows of one thread. Written only by that thread (I2 in
-/// `docs/native-quirks.md`), read by its handler.
+/// `docs/native-quirks.md`), read by its handler, and by that thread outside
+/// the handler (`own_stack_low`).
 struct Record {
     /// The thread's key: the address of its `errno`; 0 for a free record,
     /// `CLAIMING` while its thread fills it.
@@ -476,6 +477,18 @@ pub(crate) fn publish(b: Option<StackBounds>) {
     };
     let (lo, hi) = b.map_or((0, 0), |b| (b.guard_lo, b.guard_hi));
     Record::set_pair(&r.run_lo, &r.run_hi, lo, hi);
+}
+
+/// The low end of the calling thread's own stack (the top of the guard
+/// below it, `pthread_getattr_np`'s stack address), if the thread has a
+/// record with a known guard: for the scheduler's room rule
+/// (`ctx::stack_room`, hunt HSK-01). Not for the handler (a thread-local).
+pub(crate) fn own_stack_low() -> Option<usize> {
+    let r = SLOT.try_with(Cell::get).ok().flatten()?;
+    if r.thread_lo.load(Ordering::Relaxed) == 0 {
+        return None;
+    }
+    Some(r.thread_hi.load(Ordering::Relaxed))
 }
 
 fn install_process_wide() {

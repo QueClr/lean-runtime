@@ -940,8 +940,11 @@ address exposed with `expose_provenance` and taken back with
     runtime start (`std::rt::init`, before `main`) installs where it finds
     the default disposition, together with alternate stacks for the
     threads std spawns;
-  - with a C-style entry, where std's runtime start never runs (lean2rr's
-    `leanrt`), or in a C program that embeds the crate, it is the default;
+  - with a C-style entry, where std's runtime start never runs (a C program
+    that embeds the crate), it is the default. Both translators' binaries
+    have a Rust `main` (lean2rr's through Reussir's launcher,
+    `std::rt::lang_start`: lean2rr's stack hunt, HSK-06), so theirs is the
+    first case;
   - installed before std's runtime start (from an ELF constructor), it is
     the default too, and std then finds the crate's handler, installs
     neither its handler nor the alternate stacks of the threads it spawns:
@@ -1169,7 +1172,7 @@ address exposed with `expose_provenance` and taken back with
   are given back to a free list when the thread ends, and reused (I6,
   review RT1-03); with `sched`, a registered thread ends only at the exit. A thread has
   none when std installed no handler at its runtime start, so it spawns its
-  threads without one: a C-style entry (lean2rr's `leanrt`), SIGSEGV or
+  threads without one: a C-style entry (a C program that embeds the crate), SIGSEGV or
   SIGBUS ignored when the program started, or another handler installed
   before std's start. Otherwise std gives its threads one, and the crate
   makes none. The blocks number at most the largest count of such threads

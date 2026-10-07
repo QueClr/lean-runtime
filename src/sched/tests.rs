@@ -3239,3 +3239,243 @@ fn an_effect_point_lets_a_due_timer_go_first() {
     assert!(fired.get(), "the due timer did not go first");
     finish();
 }
+
+// ---------------------------------------------------------------------------
+// fixes-16 (hunt HSK-01 to HSK-03): the stack room of a run on the waiter's
+// stack, and the event loop's stack. The low end of `main`'s stack is set
+// by hand (`ctx::TEST_THREAD_LOW`), so that `main`'s room is known without
+// the feature `stack-overflow`; the contexts have 16 MiB, so a task needs
+// 15 MiB of room to run on its waiter's stack (1 GiB, the native worker's
+// size without `LEAN_STACK_SIZE_KB`, is more).
+
+/// Review RF16-01: the slack is at most a sixteenth of the stack, so that a
+/// small `LEAN_STACK_SIZE_KB` keeps the room rule: 1 MiB from 16 MiB up, 72
+/// KiB for `LEAN_STACK_SIZE_KB=1024` (1152 KiB), never the whole stack.
+#[test]
+fn the_inline_slack_scales_with_a_small_stack() {
+    assert_eq!(ctx::inline_slack(1 << 30), 1 << 20);
+    assert_eq!(ctx::inline_slack(16 << 20), 1 << 20);
+    assert_eq!(ctx::inline_slack(1152 << 10), 72 << 10);
+    for kib in [64usize, 896, 1024, 1152, 4096] {
+        let base = kib << 10;
+        assert!(
+            base - ctx::inline_slack(base) >= base / 16 * 15,
+            "{kib} KiB"
+        );
+    }
+}
+
+/// The contexts' stack size of these tests.
+const ROOM_CTX: usize = 16 << 20;
+
+/// Start a scheduler with 16 MiB contexts and give `main` `room` bytes of
+/// stack below the caller (`ctx::TEST_THREAD_LOW`); `false` if the room
+/// rule cannot be checked here (`LEAN_STACK_SIZE_KB` set to less than the
+/// contexts' size).
+fn start_room_test(workers: u32, room: usize) -> bool {
+    start_with(Rc::new(NoSuspend), workers, ROOM_CTX);
+    let base = thread_stack_size().min(ROOM_CTX);
+    let need = base - ctx::inline_slack(base);
+    if need != ROOM_CTX - ctx::inline_slack(ROOM_CTX) {
+        eprintln!("note: LEAN_STACK_SIZE_KB is set: the room rule is not checked");
+        return false;
+    }
+    let here = 0u8;
+    let sp = std::ptr::addr_of!(here).addr();
+    ctx::TEST_THREAD_LOW.with(|c| c.set(sp - room));
+    true
+}
+
+/// Where tasks ran: the context, and the usable size of its stack (`None`
+/// on `main`'s).
+type RanOn = Rc<RefCell<Vec<(CtxId, Option<usize>)>>>;
+
+/// A job that records where it ran (`RanOn`).
+fn ran_on_job(log: &RanOn) -> Job {
+    let log = log.clone();
+    Box::new(move || {
+        let size = running_stack().map(|b| b.top - b.guard_hi);
+        log.borrow_mut().push((current_context(), size));
+        Outcome::Done
+    })
+}
+
+/// With the room (64 MiB here), a needed task runs on its waiter's stack,
+/// as before: 1000 `Task.spawn`/`Task.get` pairs on `main` start no
+/// context (the cost of the rule in the common case is one look at the
+/// stack pointer per wait).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hsk01_with_room_a_needed_task_runs_on_the_waiters_stack() {
+    if !start_room_test(2, 64 << 20) {
+        return;
+    }
+    let log = Rc::new(RefCell::new(Vec::new()));
+    for _ in 0..1000 {
+        let t = spawn(ran_on_job(&log), 0, false);
+        wait(t);
+    }
+    let t = spawn(ran_on_job(&log), 0, true);
+    assert_eq!(wait_any(&[t]), 0);
+    assert_eq!(log.borrow().len(), 1001);
+    assert!(
+        log.borrow().iter().all(|&(c, _)| c == MAIN),
+        "a task ran on a context of its own"
+    );
+    need_ok();
+    finish();
+}
+
+/// Without the room (2 MiB), a needed task that may run now starts on a
+/// context of its own, with the contexts' stack, and the waiter waits for
+/// it: an IO task, a pure one and a dedicated one through `Task.get`, and a
+/// pool task through `IO.waitAny`. Before the fix each ran on `main`'s
+/// stack (hunt HSK-01).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hsk01_without_room_a_needed_task_runs_on_a_context_of_its_own() {
+    if !start_room_test(2, 2 << 20) {
+        return;
+    }
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let io = spawn(ran_on_job(&log), 0, true);
+    wait(io);
+    let pure = spawn(ran_on_job(&log), 0, false);
+    wait(pure);
+    let dedicated = spawn(ran_on_job(&log), 9, true);
+    wait(dedicated);
+    let any = spawn(ran_on_job(&log), 0, true);
+    assert_eq!(wait_any(&[any]), 0);
+    let got = log.borrow().clone();
+    assert_eq!(got.len(), 4);
+    for (k, &(c, size)) in got.iter().enumerate() {
+        assert_ne!(c, MAIN, "task {k} ran on main's stack");
+        assert_eq!(size, Some(ROOM_CTX), "task {k}: its context's stack");
+    }
+    assert!([io, pure, dedicated, any].iter().all(|&t| is_finished(t)));
+    need_ok();
+    finish();
+}
+
+/// Without the room, a pure task the woken worker starts in the waiter's
+/// own look (`PICKED`) starts on a context of its own, and the waiter
+/// blocks on it: the started task's waiter is no hang there (a debug build
+/// checks it in `register_block`). A watched descriptor keeps the hub from
+/// its last resort, and a timer ends the watch after 2 s, so a waiter
+/// blocked with nothing to start the task fails the test.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hsk01_without_room_a_started_pure_task_runs_on_a_context_of_its_own() {
+    if !start_room_test(1, 2 << 20) {
+        return;
+    }
+    let (r, w) = rustix::pipe::pipe().unwrap();
+    let wid = watch(r, Interest::READ, Rc::new(|_| {})).unwrap();
+    let fired = Rc::new(Cell::new(false));
+    let f2 = fired.clone();
+    let timer = timer_start(
+        std::time::Instant::now() + std::time::Duration::from_secs(2),
+        Rc::new(move || {
+            f2.set(true);
+            unwatch(wid);
+        }),
+    );
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let p = spawn(ran_on_job(&log), 0, false);
+    // the worker's latency passes: it starts `p` in `main`'s look
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    wait(p);
+    assert!(!fired.get(), "main waited until the timer ended the watch");
+    let got = log.borrow().clone();
+    assert_eq!(got.len(), 1);
+    assert_ne!(got[0].0, MAIN, "p ran on main's stack");
+    need_ok();
+    assert!(timer_stop(timer));
+    unwatch(wid);
+    drop(w);
+    finish();
+}
+
+/// The final run (`finish`) without the room on `main`'s stack runs each
+/// remaining task on a context of its own, in the order it would run them
+/// on `main`'s (hunt HSK-02: `main` on the process's thread has 8 MiB
+/// natively, the workers 1 GiB). With the room, on `main`'s stack, as
+/// before.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hsk02_the_final_run_without_room_runs_tasks_on_contexts() {
+    for (room, on_main) in [(2 << 20, false), (64 << 20, true)] {
+        std::thread::spawn(move || {
+            if !start_room_test(1, room) {
+                return;
+            }
+            let l = log();
+            let order = Rc::new(RefCell::new(Vec::new()));
+            for name in ["a", "b", "c"] {
+                let (l, order) = (l.clone(), order.clone());
+                spawn(
+                    Box::new(move || {
+                        l.borrow_mut().push(name.to_string());
+                        order.borrow_mut().push(current_context() == MAIN);
+                        Outcome::Done
+                    }),
+                    0,
+                    true,
+                );
+            }
+            finish();
+            assert_eq!(entries(&l), ["a", "b", "c"], "room {room}");
+            assert!(
+                order.borrow().iter().all(|&m| m == on_main),
+                "room {room}: on main {:?}",
+                order.borrow()
+            );
+        })
+        .join()
+        .unwrap();
+    }
+}
+
+/// The event loop's context has a native loop thread's stack, 1 GiB,
+/// whatever the contexts' size (natively libuv's loop thread is made
+/// before `LEAN_STACK_SIZE_KB` is read; hunt HSK-03), and its stack is
+/// kept for the next loop context; a worker context keeps the contexts'
+/// size.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn hsk03_the_loop_context_has_a_native_loop_threads_stack() {
+    start_test(2);
+    let seen: Rc<RefCell<Vec<StackBounds>>> = Rc::new(RefCell::new(Vec::new()));
+    for ms in [5, 30] {
+        let (p, cb, _) = waitable();
+        let s2 = seen.clone();
+        let cb: Rc<dyn Fn()> = Rc::new(move || {
+            s2.borrow_mut().push(running_stack().expect("on a context"));
+            cb();
+        });
+        timer_start(
+            std::time::Instant::now() + std::time::Duration::from_millis(ms),
+            cb,
+        );
+        wait(p);
+    }
+    let seen = seen.borrow().clone();
+    assert_eq!(seen.len(), 2);
+    for b in &seen {
+        assert_eq!(b.top - b.guard_hi, 1 << 30, "the loop context's stack");
+    }
+    assert_eq!(seen[0], seen[1], "the second loop context reused the stack");
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let p = promise_new().unwrap();
+    spawn(ran_on_job(&log), 0, true);
+    // `main` blocks: the task starts on a worker context
+    let t0 = std::time::Instant::now();
+    timer_start(t0 + std::time::Duration::from_millis(20), {
+        Rc::new(move || {
+            resolve(p, || {});
+        })
+    });
+    wait(p);
+    assert_eq!(log.borrow()[0].1, Some(1 << 20), "a worker context's stack");
+    finish();
+}

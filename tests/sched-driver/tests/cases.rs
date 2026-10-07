@@ -1429,4 +1429,11 @@ cases!(
     handoff_then_try_lock,
     // fixes-14 round 2: RF14-07
     deferred_resolve_before_handoff,
+    // fixes-16: the stack room of a task run on its waiter's stack, and the
+    // loop's stack (hunt HSK-01 to HSK-03)
+    wait_nested_deep_stacks,
+    wait_any_nested_deep_stacks,
+    wait_deep_main_thread,
+    final_run_deep_main_thread,
+    loop_deep_sync_dependent,
 );

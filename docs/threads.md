@@ -495,8 +495,12 @@ in `sched::tests` and in `sched::mt::tests` (under Miri too, with
 - **Which thread runs the loop.** A thread of its own, the loop thread, as
   natively (`initialize_libuv`, `libuv.cpp` 19-27, starts an `lthread` that
   runs `event_loop_run_loop` for the life of the process). Here it is made
-  at the first use of the loop, with the task manager's stack size and
-  Lean's stack-overflow report; it calls the glue's `thread_start` once, at
+  at the first use of the loop, with `lthread`'s default stack size, 1 GiB
+  (never less than the task manager's threads' size), and Lean's
+  stack-overflow report: natively the loop thread is made before
+  `lean_run_main` reads `LEAN_STACK_SIZE_KB`, so the variable does not
+  change its stack (lean2rr's stack hunt, HSK-03, fixes-16; before, it had
+  the task manager's size). It calls the glue's `thread_start` once, at
   its start, or, made before `sched::start` (a Lean `initialize` that makes
   a `Timer`), once a glue appears, before it runs translator code (review
   RT2-05); it never ends.
@@ -1008,7 +1012,9 @@ each callback.
   is born multi-threaded (`lean_set_task_header`, 1162). A multi-threaded
   object is never updated in place: `lean_is_exclusive` is false for it.
 - **Threads.** Every `lthread` has Lean's stack size: 1 GiB on 64-bit
-  targets (`thread.cpp` 28), or `LEAN_STACK_SIZE_KB` plus 128 KiB. Each
+  targets (`thread.cpp` 28), or `LEAN_STACK_SIZE_KB` plus 128 KiB, once
+  `lean_run_main` has read the variable; libuv's loop thread, made before,
+  keeps 1 GiB. Each
   installs its own stack guard and alternate signal stack when it starts
   (`lthread::imp::_main` builds a `stack_guard`, `thread.cpp` 128; its
   constructor calls `sigaltstack`, `stack_overflow.cpp` 85-90).
@@ -1102,7 +1108,7 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | A task starts | Deferred. It runs when needed, when the running code blocks with a worker free, at an effect point after 5 ms, when polled, or at exit | When a worker is free, as natively (`enqueue_core`) |
 | Pure-task rule | A started pure task runs late (`pick`) | Not needed. A started pure task runs on its worker, and `main` goes on in parallel |
 | Dropped pure task | Deleted if not started (`release`) | The same. A queued one is deleted; a running one finishes and its value is dropped (`deactivate_task`, `run_task`) |
-| `Task.get`, `IO.wait` | A pending task runs inline on the waiter's stack once it is the head a free worker would take; otherwise the context blocks (sched-3) | The thread blocks (`wait_for`). A pool task frees its worker place meanwhile (the pool grows by one) |
+| `Task.get`, `IO.wait` | A pending task runs inline on the waiter's stack once it is the head a free worker would take, if that stack has a native worker's room left less 1 MiB (else it starts then on a context of its own, fixes-16); otherwise the context blocks (sched-3) | The thread blocks (`wait_for`). A pool task frees its worker place meanwhile (the pool grows by one) |
 | `sync` dependents | Run on the finishing context, newest first | Run on the finishing thread, newest first (`handle_finished`, `enqueue_core`, `run_task`) |
 | Dedicated tasks (any priority above 8, LB-39) | A priority-9 queue, always started | A thread each (`spawn_dedicated_worker`) |
 | `effect`, `poll`, `ref_read` | Let other contexts go first | No-ops |
@@ -1129,7 +1135,9 @@ AR-24, which corrected T2's first choice, fresh streams for every task), so
 their outputs agree.
 
 The single-thread mode runs a waited-for pending task inline on the
-waiter's stack. Threads mode does not: natively a waiter blocks and a worker
+waiter's stack, when that stack has about a native worker's room left
+(docs/sched.md, "The stack room of a run on the waiter's stack"). Threads
+mode does not: natively a waiter blocks and a worker
 runs the task; inline, the waiter's OS thread would own the task's locks,
 and more pool tasks could run than `LEAN_NUM_THREADS`. leanrs agrees (6).
 

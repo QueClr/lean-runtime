@@ -72,7 +72,10 @@ needed. So a task is *deferred*: it runs at the first of these points.
   own. A task whose sources are still pending first runs that chain, from
   its deepest end, one task after the other, under the same rule.
   `IO.waitAny` runs a task of its list only when it is the only unfinished
-  one ("What a waiter or a poller runs on its own stack", sched-3).
+  one ("What a waiter or a poller runs on its own stack", sched-3). It runs
+  there only if that stack has a native worker's room left, less 1 MiB;
+  otherwise it starts then on a context of its own ("The stack room of a
+  run on the waiter's stack", fixes-16).
 - **The running code blocks.** A sleep, a lock, a promise, a task running
   elsewhere, or a read, write or wait that would block in the kernel
   ("Blocking IO and the event loop") blocks it, and one of the task
@@ -96,7 +99,10 @@ deletes it (`release`).
 
 **Contexts.** `main`'s context runs on the thread's own stack. Every other
 context is a corosensei coroutine, on a stack of a native worker thread's
-size: 1 GiB, or `LEAN_STACK_SIZE_KB` plus 128 KiB. corosensei's coroutines
+size: 1 GiB, or `LEAN_STACK_SIZE_KB` plus 128 KiB (`start_with`'s
+`stack_size`). The event loop's context has at least 1 GiB, as libuv's loop
+thread natively, whatever `LEAN_STACK_SIZE_KB` says (HSK-03, below).
+corosensei's coroutines
 are asymmetric (a coroutine suspends to whoever resumed it). So every
 switch goes through `main`'s stack. When `main`'s context blocks, it runs
 the *hub*, which resumes the contexts that can go on, one at a time; a
@@ -403,6 +409,138 @@ a dropped promise (`option_get_or_block`), Lean's own code blocks the walk,
 and the waiters of the walks in progress on its context wake there, where
 natively they wake only when another referenced task finishes, or never.
 
+**The stack room of a run on the waiter's stack** (lean2rr's stack hunt,
+HSK-01 to HSK-03; fixes-16). Natively every awaited task runs on a worker
+thread of its own, with a whole stack: `thread_stack_size()`, 1 GiB, or
+`LEAN_STACK_SIZE_KB` plus 128 KiB. A task run on its waiter's stack shares
+it with the waiter's frames, and a nested wait puts the next task's frames
+on top of both. Before this fix the stack use of nested waits added up:
+`descend` recursed 20000 levels, then waited for a task that did the same,
+45 levels deep, and overflowed a 16 MiB stack where native ends
+(`tasks/wait_nested_deep_stacks`).
+- **The rule** (`Sched::room_to_run_here`, `here_or_own_context`). `wait`,
+  `IO.waitAny` and the final run run a task on the running stack only when
+  its free part (`ctx::stack_room`: the address of a local, less the
+  stack's low end) is at least the stack of a native worker less a slack
+  (`inline_slack`: 1 MiB, at most a sixteenth of that stack, review
+  RF16-01). The native worker's stack is `thread_stack_size()`, read by
+  `start_with`, or the contexts' size where that is smaller. So **a task
+  run on its waiter's stack has at least min(a native worker's stack, the
+  contexts' stack) less the slack free at its start; otherwise it runs on
+  a context of its own, with the contexts' stack size. Where the stack's
+  low end is unknown it always runs on the waiter's stack. So nested waits
+  share one stack only within the slack of waiter frames.** The slack lets
+  the common waits keep running the task right there: `main`, or a task on
+  a context, with less stack in use than the slack.
+- **Where it applies.** After sched-3's rule: a task that may not run now
+  (`may_run_awaited` says no) waits as before. A task that may run now but
+  finds too little room starts at once on a new context (`start_worker`,
+  unless a context already starts with it), as the free worker would
+  start it, and the waiter blocks on it: `Wait::Cell` in `wait`, `Wait::Any`
+  in `IO.waitAny`, `Wait::FinalRun` in the final run. The task stays queued,
+  or started (`PICKED`), until its context begins it (`take_preselect`), so
+  a waiter with room that comes first may still run it; the context then
+  takes the next queued task, as a worker whose task ran elsewhere. The
+  debug check that no context blocks on a started pure task
+  (`register_block`, RF8-03) lets a waiter block on one that a context is
+  about to begin. Without a task manager (`LEAN_NUM_THREADS=0`) a task runs
+  on the caller's stack, as natively on the caller's thread.
+- **The low end of the stack.** On a context, its bounds
+  (`running_stack()`). On the thread's own stack (`main`'s context), the
+  record of Lean's stack-overflow report (feature `stack-overflow`; a
+  thread that `install_stack_overflow_handler` registered, or `start` once
+  it is installed): `pthread_getattr_np`'s stack address, which for the
+  process's main thread is the top of its stack less `RLIMIT_STACK`.
+  **Where the low end is unknown** (without the feature, or on a thread that
+  is not registered), the task runs on the waiter's stack, as before the
+  fix: nested waits on such a thread still add up their stack use. Both
+  translators build the feature and register their program thread
+  (review RF16-04).
+- **What it costs.** A wait that may run a task now looks at the stack
+  pointer once more. In the common case the task still runs on the
+  waiter's stack: `main` on a thread of `thread_stack_size()` (lean2rr's
+  default, `io::startup::run_main`), or a task on a context, with less
+  stack in use than the slack, has the room. The unit test
+  `hsk01_with_room_a_needed_task_runs_on_the_waiters_stack` runs 1000
+  `Task.spawn`/`Task.get` pairs on `main` and starts no context. A wait
+  without the room starts a context: a pooled stack (no `mmap` after the
+  first), corosensei's set-up of a coroutine, and two switches through the
+  hub (to the new context and back), about what native pays to wake a
+  worker. Every such wait of `main` on the process's own thread pays it
+  (`LEAN_MAIN_USE_THREAD=0`: `RLIMIT_STACK`, usually 8 MiB, against 1 GiB),
+  as does every wait below more than the slack of recursion. leanrs's contexts and program thread have
+  4 GiB, and its base is the native worker's 1 GiB: a wait there runs the
+  task on its stack unless about 3 GiB are in use.
+- **What it changes in the schedule.** A task started on a context of its
+  own runs at the point where it ran on the waiter's stack: the waiter
+  blocks at once, and the new context is the next to run, after the
+  contexts that were able to run before it. For a pool waiter the emulated
+  workers count the same: it frees its worker in `Wait::Cell`
+  (`holds_worker`), and the new context holds one from its begin; where the
+  waiter keeps its worker (a `sync` dependent, a walk on a pool worker), the
+  run on the waiter's stack counted one worker for both tasks, and the
+  context counts two, as natively (review RF16-04). Between the start and the
+  begin no context holds the task's worker, so a context that runs before
+  the new one could start one more pool task than the limit, as after
+  `start_polled` and `IO.waitAny`'s starts. The task gets a context's thread
+  number (`thread_number`), not one nested on the waiter's; its emulated
+  worker id and `IO.getTID` follow the same rule as on the waiter's stack
+  (given at its begin).
+- **The event loop's stack** (HSK-03). The event loop's context has
+  `max(1 GiB, the contexts' size)` (`Contexts::loop_stack_size`), and so
+  does threads mode's loop thread (`mt::uv`, `start_loop_thread`):
+  natively libuv's loop thread is made before `lean_run_main` reads
+  `LEAN_STACK_SIZE_KB`, so it keeps `lthread`'s default, 1 GiB. Before the
+  fix both followed the variable. The pool of ended contexts' stacks is
+  keyed by size: up to 8 of the contexts' size, and 1 of the loop's when
+  the two differ (one loop context runs at a time).
+- **Cases**, native recorded (3 runs each, at most 0.3 s and 350 MB of
+  resident memory natively), with ports in both drivers (the loop case in
+  the single-thread driver and in `tests/threads_twins.rs`). The stack a
+  level takes depends on the build: 16 to 32 bytes in lean2rr's, 32 to
+  64 bytes natively with `leanc -O3`, 4 to 6 times more in the unoptimized
+  build of `scripts/cases.py`. So each port recurses by bytes, not by
+  levels: a level counts for 32 bytes, an optimized build's, whatever the
+  port's own frames (`at_depth` in `tests/sched-driver/src/cases.rs`).
+  "Before" is lean2rr's hunt binaries and both drivers before the fix:
+
+  | Case | What the program does | Native | Before |
+  |---|---|---|---|
+  | `tasks/wait_nested_deep_stacks` | `20000 44`, `LEAN_STACK_SIZE_KB=16384`: 45 nested recursions with `Task.spawn` and `Task.get` (0.64 MB each optimized; lean2rr before the fix overflows from about 28 on) | `get chain 704750`, status 0 | Lean's overflow message, status 134 |
+  | `tasks/wait_any_nested_deep_stacks` | the same with dedicated tasks, each waited for with `IO.waitAny` | `waitAny chain 704750`, status 0 | status 134 |
+  | `tasks/wait_deep_main_thread` | `LEAN_MAIN_USE_THREAD=0` and `ulimit -s 8192`: `main` waits for an IO task that recurses 1000000 levels (16 to 32 MB optimized) | `task (some 111111)`, status 0 | status 134 |
+  | `tasks/final_run_deep_main_thread` | the same task, never waited for: the final run runs it | `final 111111`, status 0 | status 134 |
+  | `uvloop/loop_deep_sync_dependent` | `LEAN_STACK_SIZE_KB=16384`: a timer's `sync` dependent recurses 2000000 levels (32 to 64 MB optimized) on the loop | `loop 456791`, status 0 | status 134 (threads mode too) |
+
+  Unit tests: `hsk01_with_room_a_needed_task_runs_on_the_waiters_stack`,
+  `hsk01_without_room_a_needed_task_runs_on_a_context_of_its_own` (an IO,
+  a pure and a dedicated task with `Task.get`, a pool task with
+  `IO.waitAny`), `hsk01_without_room_a_started_pure_task_runs_on_a_context_of_its_own`,
+  `hsk02_the_final_run_without_room_runs_tasks_on_contexts` and
+  `hsk03_the_loop_context_has_a_native_loop_threads_stack` (`sched::`,
+  with `main`'s low end set by hand, `ctx::TEST_THREAD_LOW`), and threads
+  mode's `hsk03_the_loop_thread_has_lthreads_default_stack` (8 MiB used by
+  a timer's hook on the loop thread, the task manager at 256 KiB, in a
+  child process).
+- **Note: HSK-04, a frame past the guard page** (parked hardening). A
+  frame larger than the guard can step over a guard of one page (4 KiB)
+  when the stack is nearly full: GMP's `alloca` scratch space in native's
+  big-number routines, or any large frame of a translator's code. The
+  access then lands past the guard: a plain SIGSEGV, or a write into the
+  mapping below, instead of Lean's report. A context's guard is one page
+  (corosensei's `DefaultStack`), as a native thread's (glibc's default
+  guard), so such a step does here what it does natively. A larger guard
+  (several pages, a `Stack` of the crate's own) would catch more of these
+  steps, as hardening beyond native.
+- **Note: HSK-05, pooled stacks keep their pages** (parked). An ended
+  context's stack goes to the pool with the pages its run touched: a deep
+  recursion's pages stay resident until the stack is reused or dropped,
+  for up to 8 worker stacks and the loop's. Natively a worker thread's
+  stack keeps its pages for the worker's life too (Lean's workers live
+  until the task manager ends), and a dedicated thread's stack goes at its
+  end. `madvise(MADV_DONTNEED)` at pooling would give them back, as
+  lean2rr's leanrt did, but rustix's `madvise` is `unsafe`.
+
 **Exit (decisions Q5 refinement A).** `finish` sets Lean's shutdown flag
 (`IO.checkCanceled` is true in tasks from then on). Then it runs the
 remaining tasks and waits, and only then returns; the glue then flushes the
@@ -411,7 +549,9 @@ standard streams and exits. In native's order (`~task_manager`,
 queue is empty and are joined, 981-982, and only then are the dedicated
 threads waited for, 984-985):
 1. it runs the queued and the started pool tasks and waits for the running
-   ones, until no pool task is queued, started or running;
+   ones, until no pool task is queued, started or running (each on
+   `main`'s stack if it has the room, else on a context of its own:
+   "The stack room of a run on the waiter's stack");
 2. then the standard workers end (reviews AR-33, AR-34): with `io`, the
    emulated workers' current standard streams and `errno` (`slots`) are
    dropped, so a handle a task left set as its stdout is closed and
@@ -2007,8 +2147,11 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    Rust's handler, and alternate stacks for the threads std spawns, only
    where it finds the default disposition, so installed before it, the
    crate's handler leaves a Rust thread that does not register without
-   Rust's report (review SO-2). With a C-style entry (lean2rr's `leanrt`),
-   std's runtime start never runs, and the previous action is the default.
+   Rust's report (review SO-2). Both translators' binaries have a Rust
+   `main` (lean2rr's through Reussir's launcher, `std::rt::lang_start`), so
+   the previous action there is Rust's handler. With a C-style entry (a C
+   program that embeds the crate), std's runtime start never runs, and the
+   previous action is the default.
    From then on:
    - a fault in the guard page below the stack of a registered thread, or
      of the context running on it, writes
@@ -3129,7 +3272,7 @@ fine, but need to be documented well".
 | Dropped pure tasks are found by reading cell counts when a task would start (`droppable_in`, pins) | `release` at the last reference, as `deactivate_task` | The same moment as Lean's, and no search |
 | Pure tasks start on contexts like IO tasks | Started pure tasks run later ("The pure-task rule") | `runaway_pure_task_started` |
 | Hand-written stack switch, any context to any other | corosensei; every switch goes through `main`'s stack | O2: no hand-written assembly |
-| Stacks reserved with `MAP_NORESERVE`, released with `madvise` when pooled | corosensei's `mmap(PROT_NONE)` and `mprotect`; up to 8 pooled stacks keep their touched pages | No `unsafe` in the crate (see the checklist) |
+| Stacks reserved with `MAP_NORESERVE`, released with `madvise` when pooled | corosensei's `mmap(PROT_NONE)` and `mprotect`; up to 8 pooled stacks (and one of the loop context's size) keep their touched pages (HSK-05) | No `unsafe` in the crate (see the checklist) |
 | `checkCanceled`, clock and ref reads do not yield | They are polling points; ref reads only with `set_ref_read_yields` | Decisions Q5 refinement B |
 | Walks of promises dropped inside a Reussir free (`later`) | The deferred resolutions (`defer`, `run_deferred`, core 3.3): the list moved out before its walk, so a free inside a dependent resolves its own promises first | Native's order (the judge's nested-free verdict) |
 | The event loop (`net`) | The scheduler's own (`src/sched/reactor.rs`, sched-io): epoll, timers and watches; blocking IO cooperates | The glue has no hook; the network builds on it |
@@ -3189,7 +3332,8 @@ machine's speed" (above) and "The limits of one thread" (below).
   hold `Rc` values in every test.
 - **Stack size.** 1 GiB, or `LEAN_STACK_SIZE_KB` rounded down to 4 KiB plus
   128 KiB, as Lean's `lthread`. `start` reads it, and the size is rounded up
-  to 64 KiB. corosensei's `DefaultStack` maps it `PROT_NONE` and makes all
+  to 64 KiB. The event loop's context has at least 1 GiB, whatever the
+  variable says (HSK-03; "The stack room of a run on the waiter's stack"). corosensei's `DefaultStack` maps it `PROT_NONE` and makes all
   but one guard page writable with `mprotect`. That charges the commit
   accounting as an ordinary writable mapping does, where lean2rr passes
   `MAP_NORESERVE`:

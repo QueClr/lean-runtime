@@ -42,7 +42,11 @@
 //!    takes before each spawn; where it cannot (lowering a nice value needs
 //!    privilege), the caller makes that spawn on a short-lived helper thread
 //!    of its own, which has the caller's nice value and unshares its
-//!    file-system attributes in turn (review RIO2-14). The spawner's
+//!    file-system attributes in turn (review RIO2-14). Both go back to `/`
+//!    after the spawn, the helper before it ends, so no thread of the
+//!    process holds `cwd` once the caller has the result (leanrs review
+//!    LRIO2-F1: `lsof` and `umount` would see it; a dying thread's working
+//!    directory is dropped only after `join` returns). The spawner's
 //!    file-system attributes are a copy taken at its `unshare`: its `umask`
 //!    and root directory stay the process's of that moment, so a child
 //!    spawned with a `cwd` after a `umask` change (by user C code: Lean has
@@ -679,9 +683,20 @@ impl Job {
                 return;
             }
         }
+        let r = self.spawn_and_leave();
+        let _ = self.answer.send(Answer::Spawned(r));
+    }
+
+    /// `spawn`, then back to `/`, so this thread holds no directory once the
+    /// caller has the result (LRIO2-F1). The spawner thread does it before
+    /// its answer; a helper thread (`on_helper`) before it ends, since its
+    /// end is not enough: `join` returns before the kernel drops a dying
+    /// thread's working directory, which the thread then still held (the
+    /// test `spawner_leaves_cwd` failed under load).
+    fn spawn_and_leave(&self) -> Result<Pid, SpawnError> {
         let r = self.spawn();
         let _ = rustix::process::chdir("/");
-        let _ = self.answer.send(Answer::Spawned(r));
+        r
     }
 
     /// Enters `cwd` (a relative one from the caller's working directory)
@@ -999,6 +1014,11 @@ fn spawn_in(spec: &Arc<Spec>, dups: Vec<(i32, i32)>, cwd: &[u8]) -> Result<Pid, 
     }
 }
 
+/// The working directory of the last helper thread (`on_helper`) as it
+/// ended: the test `helper_leaves_cwd` reads it.
+#[cfg(test)]
+pub(crate) static HELPER_CWD: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
 /// A job the spawner thread could not run at the caller's nice value: a
 /// short-lived thread the caller creates, which has the caller's nice value
 /// and signal mask, gives itself file-system attributes of its own and runs
@@ -1007,12 +1027,18 @@ fn on_helper(job: Job) -> Result<Pid, SpawnError> {
     let helper = std::thread::Builder::new()
         .name("lean-runtime-spawn".to_owned())
         .spawn(move || {
-            if unshare_fs() {
-                job.spawn()
+            let r = if unshare_fs() {
+                job.spawn_and_leave()
             } else {
                 let cwd = job.spec.cwd.as_deref().unwrap_or_default();
                 fallback_spawn(&job.spec, &job.dups, cwd, !cwd.starts_with(b"/"))
+            };
+            #[cfg(test)]
+            {
+                *HELPER_CWD.lock().unwrap_or_else(PoisonError::into_inner) =
+                    std::fs::read_link("/proc/thread-self/cwd").ok();
             }
+            r
         })
         .map_err(|e| SpawnError::Os(thread_error(e)))?;
     helper.join().unwrap_or(Err(SpawnError::Os(EAGAIN)))

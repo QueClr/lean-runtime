@@ -133,8 +133,14 @@ pub fn thread_stack_size() -> usize {
             return sz.saturating_add(STACK_BUFFER_SPACE);
         }
     }
-    1 << 30
+    DEFAULT_THREAD_STACK
 }
+
+/// `lthread`'s default stack size on 64-bit targets (1 GiB), which
+/// `LEAN_STACK_SIZE_KB` replaces once `lean_run_main` has read it. libuv's
+/// loop thread is made before that (`libuv.cpp`), so it keeps this size
+/// whatever the variable says (hunt HSK-03).
+pub(crate) const DEFAULT_THREAD_STACK: usize = 1 << 30;
 
 /// `LEAN_STACK_BUFFER_SPACE` (`src/runtime/thread.h`).
 pub(crate) const STACK_BUFFER_SPACE: usize = 128 * 1024;

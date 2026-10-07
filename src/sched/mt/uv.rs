@@ -435,9 +435,12 @@ pub(crate) fn lock() -> LoopGuard {
 }
 
 /// The loop thread (`libuv.cpp` 26: `lthread([]() {
-/// event_loop_run_loop(&global_ev); })`), detached, with the task manager's
-/// stack size. A thread the system cannot make ends the process as an
-/// `lthread` that cannot be made does (`failed to create thread`).
+/// event_loop_run_loop(&global_ev); })`), detached, with `lthread`'s
+/// default stack size, 1 GiB: natively it is made before
+/// `LEAN_STACK_SIZE_KB` is read, so the variable does not change it (hunt
+/// HSK-03); never less than the task manager's threads' either. A thread
+/// the system cannot make ends the process as an `lthread` that cannot be
+/// made does (`failed to create thread`).
 ///
 /// The glue's `thread_start` runs once on it: at its start when the task
 /// manager has a glue then, otherwise once a glue appears (the loop made
@@ -447,6 +450,7 @@ pub(crate) fn lock() -> LoopGuard {
 /// lock of the scheduler per iteration until then; review RT2-05).
 fn start_loop_thread(lp: &'static Loop) {
     let (glue, stack_size) = glue_and_stack_size();
+    let stack_size = stack_size.max(crate::sched::env::DEFAULT_THREAD_STACK);
     drop(spawn_thread(stack_size, move || {
         let _ = LOOP_THREAD_ID.set(std::thread::current().id());
         #[cfg(feature = "stack-overflow")]

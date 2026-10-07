@@ -32,7 +32,8 @@ It must finish the task before the task's value is needed.
 <ul>
   <li><strong>It is needed.</strong> <code>Task.get</code> or <code>IO.wait</code> runs it on the stack of the code that needs it.
     It does so once the task is the head of the queue, which a free worker would start.
-    Until then, the code waits, and the hub starts the heads on contexts of their own (sched-3).</li>
+    Until then, the code waits, and the hub starts the heads on contexts of their own (sched-3).
+    The task runs on that stack only when the stack has enough free space (<a href="#room">below</a>).</li>
   <li><strong>The running code blocks</strong> (a sleep, a lock, a promise, a read of an empty pipe) and a worker is free.
     The task then starts on a <a href="glossary.html#g-context">context</a> of its own.
     The number of workers is <code>LEAN_NUM_THREADS</code>, or the number of online processors.</li>
@@ -52,12 +53,33 @@ So a waiter runs no task on its own stack except the one that a free worker woul
 Another task there could block on something that only the waiter gives, and the program would hang where native ends.
 <code>IO.waitAny</code> runs a task of its list only when that task is the only unfinished one.
 While it waits, it keeps its worker, as native <code>wait_any</code> does.</p>
+<p id="room"><strong>The free space on the waiter's stack</strong> (fixes-16).
+Natively each task that a thread waits for runs on a worker thread of its own, with a full stack.
+A task that runs on its waiter's stack shares that stack with the waiter.
+So nested waits add up their stack use, and a deep recursion can overflow where native ends.</p>
+<ul>
+  <li><strong>The rule.</strong> A task runs on the waiter's stack only when the free part of that stack is large enough.
+    It must be at least the stack of a native worker, less a small margin: 1 MiB, or a sixteenth of a small stack.
+    The stack of a native worker is 1 GiB, or <code>LEAN_STACK_SIZE_KB</code> plus 128 KiB.
+    If the contexts have a smaller stack, their size applies.</li>
+  <li><strong>Otherwise</strong> the task starts at once on a context of its own, with the contexts' stack size, as a free worker would start it.
+    The waiter waits for it.
+    This applies to <code>Task.get</code>, <code>IO.wait</code>, <code>IO.waitAny</code> and the final run after <code>main</code>.</li>
+  <li><strong>The free part.</strong> On a context, the scheduler knows the bounds of the stack.
+    On <code>main</code>'s thread, the record of Lean's stack-overflow report gives the low end.
+    Without that record (no feature <code>stack-overflow</code>, or a thread that did not register), the task runs on the waiter's stack, as before.</li>
+  <li><strong>The cost.</strong> In the common case, the waiter has used less than that margin, so the task still runs on its stack.
+    <code>main</code> on the process's own thread (<code>LEAN_MAIN_USE_THREAD=0</code>) has the size of <code>RLIMIT_STACK</code>, usually 8 MiB.
+    So each of its waits starts a context: a stack from the pool and two switches.</li>
+</ul>
 
 <h2 id="hub">Contexts and the hub</h2>
 <ul>
   <li><code>main</code>'s context runs on the thread's own stack.</li>
   <li>Every other context is a corosensei coroutine.
     Its stack has the size of a native worker's stack: 1 GiB, or <code>LEAN_STACK_SIZE_KB</code> plus 128 KiB.</li>
+  <li>The loop context has a stack of at least 1 GiB, whatever <code>LEAN_STACK_SIZE_KB</code> says.
+    Natively libuv's loop thread starts before Lean reads that variable, so it keeps 1 GiB.</li>
   <li>corosensei's coroutines are asymmetric: a coroutine suspends to the code that resumed it.
     So every switch goes through <code>main</code>'s stack.</li>
   <li>When <code>main</code>'s context blocks, it runs the <a href="glossary.html#g-hub">hub</a>.
