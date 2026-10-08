@@ -348,6 +348,13 @@ pub(crate) struct Tasks {
     worker: u32,
     wake: Option<Instant>,
     worker_exists: bool,
+    /// The last worker that became free (a context stopped holding one,
+    /// `refresh_holds`), as two values of the queue's sequence (`next_q`):
+    /// when that context came to hold it, and when it stopped. The tasks
+    /// queued between were in the queue when the worker became free, so it
+    /// took the first of them in the queue's order (`startable`'s
+    /// `Gate::Before`; the review of fixes-19).
+    freed: Option<(u32, u32)>,
     /// The last generation handed out (never 0).
     serial: u32,
     /// Pure tasks a worker has started, not run yet (`pick`), in that order:
@@ -454,6 +461,7 @@ impl Tasks {
             worker: NONE,
             wake: None,
             worker_exists: false,
+            freed: None,
             serial: 0,
             picked: VecDeque::new(),
             picked_live: 0,
@@ -1661,6 +1669,14 @@ impl Sched {
     /// not such a pure task is the candidate: an IO task does not wait for
     /// started pure tasks, which count as finished for it (LSCHED-01). A
     /// picked one that an IO task has come to wait for comes first.
+    ///
+    /// The gate of an effect point, a zero sleep or the final run's polling
+    /// point: `Gate::Before` passes over the tasks queued after its time,
+    /// except those queued while the context that last freed a worker held
+    /// it (`queued_while_held`); the first candidate left, in the same
+    /// order, is the one (hunt HSC-02 and the review of fixes-19);
+    /// `Gate::After` ends the scan at the first candidate queued before its
+    /// mark (an older task a free worker takes first).
     pub(crate) fn startable(&mut self, gate: Gate) -> Option<(u32, u32)> {
         if !self.tk.started {
             return None;
@@ -1680,13 +1696,29 @@ impl Sched {
             let w = self.tk.worker;
             let cand = self.next_cand(&mut lone, &mut at)?;
             let e = self.ent(cand);
-            let ok = match gate {
-                Gate::Any => true,
-                Gate::Before(t) => self.queued_by(cand, t),
-                Gate::After(mark) => (e.link.wrapping_sub(mark) as i32) > 0,
-            };
-            if !ok {
-                return None;
+            match gate {
+                Gate::Any => {}
+                // A task queued too recently is passed over (hunt HSC-02,
+                // fixes-19): the tasks that pass were all queued before it,
+                // when natively a free worker took them in this scan's
+                // order, without it. Before the fix the scan ended there, so
+                // a newer task of a higher priority, or the lone worker's
+                // late pick (`settle_worker`), kept the older ones from
+                // starting at all. Not one queued while the context that
+                // last freed a worker held it (`queued_while_held`, the
+                // review of fixes-19): it was in the queue when that worker
+                // became free, which took the first such task in this
+                // order, so it passes as one queued by `t` does.
+                Gate::Before(t) if !self.queued_by(cand, t) && !self.queued_while_held(cand) => {
+                    continue
+                }
+                Gate::Before(_) => {}
+                // A task queued before `mark` was queued before every task
+                // that passes, at the same or a higher priority (the scan's
+                // order) or as the lone worker's pick: natively a free worker
+                // takes it first, so the scan ends there.
+                Gate::After(mark) if (e.link.wrapping_sub(mark) as i32) <= 0 => return None,
+                Gate::After(_) => {}
             }
             let in_use = self.pool_in_use();
             if self.ent(cand).prio() != DEDICATED && in_use >= self.cx.pool_limit {
@@ -1774,6 +1806,14 @@ impl Sched {
     /// thread's worker. A dependent that `depend` runs at once (`FAST`) is
     /// the caller's code (Lean's fast path): it is passed over, and the
     /// activity below it is innermost if it was (review RF14-03).
+    ///
+    /// One worker per context, the innermost activity's, is the whole count
+    /// because a task runs on a waiter's stack only when no activity below
+    /// keeps a worker busy meanwhile: the waiter holds none, or frees it in
+    /// its `wait`; a waiter that keeps one (a `sync` dependent on a pool
+    /// worker) runs the task on a context of its own (`wait_keeps_worker`,
+    /// hunt HSC-01), and `IO.waitAny` runs nothing on a stack that holds a
+    /// worker (`wait_any_step`).
     fn holds_worker(&self, st: &CtxState, w: Wait) -> bool {
         let (mut ri, mut wi) = (st.running.len(), st.walks.len());
         let mut innermost = true;
@@ -1884,7 +1924,10 @@ impl Sched {
     }
 
     /// Context `c`'s running tasks, wait or status changed: count again
-    /// whether it holds a worker (`holds_worker`).
+    /// whether it holds a worker (`holds_worker`). When it stops holding
+    /// one, a worker became free: `Tasks::freed` records the queue's
+    /// sequence then, and when the context came to hold it (`startable`'s
+    /// `Gate::Before`). The sequence counts enqueues, so no clock is read.
     pub(crate) fn refresh_holds(&mut self, c: CtxId) {
         let x = &self.cx.ctxs[c];
         let now = x.status != Status::Dead && self.holds_worker(&x.st, x.wait);
@@ -1892,11 +1935,28 @@ impl Sched {
         if now != x.holds {
             x.holds = now;
             if now {
+                x.held_since = self.tk.next_q;
                 self.cx.in_use += 1;
             } else {
+                self.tk.freed = Some((x.held_since, self.tk.next_q));
                 self.cx.in_use -= 1;
             }
         }
+    }
+
+    /// Whether queued entry `i` was queued while the context that last freed
+    /// a worker held it (`Tasks::freed`): natively it was in the queue when
+    /// that worker became free. Its queue position (`Entry::link`, the
+    /// sequence its enqueue stamped, after the hold began and at or before
+    /// its end) says so exactly, compared with wrapping as `Gate::After`
+    /// compares it; a re-queued task (a bind task's continuation) has the
+    /// position of its last enqueue.
+    fn queued_while_held(&self, i: u32) -> bool {
+        let Some((from, to)) = self.tk.freed else {
+            return false;
+        };
+        let q = self.ent(i).link;
+        (q.wrapping_sub(from) as i32) > 0 && (q.wrapping_sub(to) as i32) <= 0
     }
 
     /// What the idle worker picks: the first task of the highest non-empty
@@ -2060,10 +2120,13 @@ impl Sched {
     /// next task), runs on the running stack, its waiter's, only if that
     /// stack has room for it (`room_to_run_here`, hunt HSK-01): natively
     /// each awaited task runs on a worker thread of its own, with a whole
-    /// stack, so nested waits do not add up their stack use. Otherwise it
-    /// starts now on a context of its own, as the free worker that may
-    /// start it would (unless a context already starts with it), and the
-    /// waiter blocks on it. Whether it runs here.
+    /// stack, so nested waits do not add up their stack use. It does not run
+    /// there either when the waiter keeps a pool worker busy while it waits
+    /// (`wait_keeps_worker`: a `sync` dependent on a pool worker, hunt
+    /// HSC-01): the context would count one worker for the waiter's and the
+    /// task's thread. Otherwise it starts now on a context of its own, as
+    /// the free worker that may start it would (unless a context already
+    /// starts with it), and the waiter blocks on it. Whether it runs here.
     ///
     /// It runs here in any case without a task manager (natively on the
     /// caller's thread too), and in the state of a task handed to a context
@@ -2079,7 +2142,10 @@ impl Sched {
     /// review RF16-03).
     fn here_or_own_context(&mut self, i: u32) -> bool {
         let f = self.ent(i).flags;
-        if !self.tk.started || f & (QUEUED | PICKED) == 0 || self.room_to_run_here() {
+        if !self.tk.started || f & (QUEUED | PICKED) == 0 {
+            return true;
+        }
+        if self.room_to_run_here() && !self.wait_keeps_worker() {
             return true;
         }
         if !self.preselected(i) {
@@ -2087,6 +2153,24 @@ impl Sched {
             self.start_worker(i, g);
         }
         false
+    }
+
+    /// Whether the running context holds one of the task manager's workers
+    /// that its `wait` keeps busy (hunt HSC-01, fixes-19): its innermost
+    /// own-thread activity holds a pool worker (`holds_worker`), and the wait
+    /// raises no worker limit (`wait_raises_limit`): a `sync` dependent run on
+    /// a pool worker (in a pool task's walk, or in the walk of a promise a
+    /// pool task resolves). Natively that worker stays
+    /// blocked in `wait_for`, and the awaited task runs on another thread, a
+    /// second worker for a pool task, a thread of its own for a dedicated
+    /// one. A task run on this stack would be the innermost activity, the
+    /// only one `holds_worker` counts: one worker for both (a pool task), or
+    /// none (a dedicated task). So such a waiter runs the task on a context
+    /// of its own (`here_or_own_context`), which counts its worker apart.
+    /// `IO.waitAny` already runs nothing on a stack that holds a worker
+    /// (`wait_any_step`).
+    fn wait_keeps_worker(&self) -> bool {
+        self.cx.ctxs[self.cx.cur].holds && !self.wait_raises_limit()
     }
 
     /// The pending task at the deepest end of the chain of pending tasks

@@ -313,6 +313,32 @@ pub const CASES: &[(&str, Case)] = &[
     // fixes-17b: the review of fixes-17 (a bind task's continuation queued
     // again)
     ("bind_requeue_preselect", (no_init, bind_requeue_preselect)),
+    // fixes-19: hunt HSC-01, HSC-02
+    (
+        "sync_wait_second_worker",
+        (no_init, sync_wait_second_worker),
+    ),
+    (
+        "sync_wait_dedicated_keeps_worker",
+        (no_init, sync_wait_dedicated_keeps_worker),
+    ),
+    (
+        "sync_wait_dedicated_waits_queued",
+        (no_init, sync_wait_dedicated_waits_queued),
+    ),
+    (
+        "effect_stale_behind_newer_head",
+        (no_init, effect_stale_behind_newer_head),
+    ),
+    // the review of fixes-19
+    (
+        "effect_freed_worker_takes_newer_head",
+        (no_init, effect_freed_worker_takes_newer_head),
+    ),
+    (
+        "effect_late_run_keeps_newer_head_behind",
+        (no_init, effect_late_run_keeps_newer_head_behind),
+    ),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -5473,5 +5499,245 @@ fn bind_requeue_preselect(_: &[String]) -> u32 {
     p0.resolve(());
     t0.get();
     println(&format!("s finished before z's end: {early}"));
+    0
+}
+
+// ---------------------------------------------------------------------------
+// fixes-19: hunt HSC-01 (a task that a `sync` dependent which keeps its
+// worker waits for takes a worker of its own) and HSC-02 (an effect point
+// starts a task queued 5 ms ago that a newer task of a higher priority is
+// ahead of).
+
+// def main (_args : List String) : IO Unit := do
+//   let p ← IO.asTask (IO.sleep 50)
+//   let s ← IO.mapTask (sync := true) (fun _ => do
+//       let t ← IO.asTask (do IO.sleep 300; IO.println "T done")
+//       let _ ← IO.wait t
+//       IO.sleep 100
+//       IO.println "S done") p
+//   IO.sleep 150
+//   let q ← IO.asTask (IO.println "Q ran")
+//   let _ ← IO.wait q
+//   let _ ← IO.wait s
+fn sync_wait_second_worker(_: &[String]) -> u32 {
+    let p = as_task(|| sleep(50), PRIO_DEFAULT);
+    let s = map_task(
+        |_: ()| {
+            let t = as_task(
+                || {
+                    sleep(300);
+                    println("T done");
+                },
+                PRIO_DEFAULT,
+            );
+            t.get();
+            drop(t);
+            sleep(100);
+            println("S done");
+        },
+        p,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    sleep(150);
+    let q = as_task(|| println("Q ran"), PRIO_DEFAULT);
+    q.get();
+    drop(q);
+    s.get();
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let p ← IO.asTask (IO.sleep 50)
+//   let s ← IO.mapTask (sync := true) (fun _ => do
+//       let d ← IO.asTask (prio := .dedicated) (do IO.sleep 300; IO.println "D done")
+//       let _ ← IO.wait d
+//       IO.println "S done") p
+//   IO.sleep 150
+//   let q ← IO.asTask (IO.println "Q ran")
+//   let _ ← IO.wait q
+//   let _ ← IO.wait s
+fn sync_wait_dedicated_keeps_worker(_: &[String]) -> u32 {
+    let p = as_task(|| sleep(50), PRIO_DEFAULT);
+    let s = map_task(
+        |_: ()| {
+            let d = as_task(
+                || {
+                    sleep(300);
+                    println("D done");
+                },
+                PRIO_DEDICATED,
+            );
+            d.get();
+            drop(d);
+            println("S done");
+        },
+        p,
+        PRIO_DEFAULT,
+        true,
+        true,
+    );
+    sleep(150);
+    let q = as_task(|| println("Q ran"), PRIO_DEFAULT);
+    q.get();
+    drop(q);
+    s.get();
+    0
+}
+
+// def main (_args : List String) : IO Unit := do
+//   let p ← IO.asTask (IO.sleep 50)
+//   let _s ← IO.mapTask (sync := true) (fun _ => do
+//       let d ← IO.asTask (prio := .dedicated) (do
+//         let q ← IO.asTask (IO.eprintln "q ran")
+//         let _ ← IO.wait q
+//         IO.eprintln "d done")
+//       let _ ← IO.wait d
+//       IO.eprintln "s done") p
+//   IO.sleep 300
+//   IO.eprintln "main done"
+fn sync_wait_dedicated_waits_queued(_: &[String]) -> u32 {
+    let p = as_task(|| sleep(50), PRIO_DEFAULT);
+    // `_s` is unused: compiled Lean drops it at once (an IO task still runs).
+    drop(map_task(
+        |_: ()| {
+            let d = as_task(
+                || {
+                    let q = as_task(|| eprintln("q ran"), PRIO_DEFAULT);
+                    q.get();
+                    drop(q);
+                    eprintln("d done");
+                },
+                PRIO_DEDICATED,
+            );
+            d.get();
+            drop(d);
+            eprintln("s done");
+        },
+        p,
+        PRIO_DEFAULT,
+        true,
+        true,
+    ));
+    sleep(300);
+    eprintln("main done");
+    0
+}
+
+// @[noinline] def spin (n : Nat) (acc : UInt64) : UInt64 := Id.run do
+//   let mut a := acc
+//   for i in [0:n] do
+//     a := a * 6364136223846793005 + i.toUInt64
+//   return a
+#[inline(never)]
+fn spin_steps(n: u64, acc: u64) -> u64 {
+    let mut a = acc;
+    for i in 0..n {
+        a = std::hint::black_box(a.wrapping_mul(6364136223846793005).wrapping_add(i));
+    }
+    a
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let l1 ← IO.asTask (pure ())
+//   let l2 ← IO.asTask (IO.println "L2")
+//   let r := spin n 1
+//   if r == 42 then IO.println "?"
+//   let h ← IO.asTask (prio := .max) (pure ())
+//   IO.println "main"
+//   let _ ← IO.wait l1
+//   let _ ← IO.wait l2
+//   let _ ← IO.wait h
+fn effect_stale_behind_newer_head(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let l1 = as_task(|| (), PRIO_DEFAULT);
+    let l2 = as_task(|| println("L2"), PRIO_DEFAULT);
+    let r = spin_steps(n, 1);
+    if r == 42 {
+        println("?");
+    }
+    let h = as_task(|| (), PRIO_MAX);
+    println("main");
+    l1.get();
+    drop(l1);
+    l2.get();
+    drop(l2);
+    h.get();
+    0
+}
+
+// The review of fixes-19: HSC-02's pass-over and a worker freed after a newer
+// task of a higher priority was queued.
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let x ← IO.asTask (do
+//       IO.sleep 20
+//       let h ← IO.asTask (prio := .max) (IO.println "H")
+//       pure h)
+//   let l ← IO.asTask (IO.println "L")
+//   let r := spin n 1
+//   if r == 42 then IO.println "?"
+//   let h ← IO.ofExcept (← IO.wait x)
+//   (← IO.getStdout).flush
+//   let _ ← IO.wait l
+//   let _ ← IO.wait h
+//   IO.println "main"
+fn effect_freed_worker_takes_newer_head(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let x = as_task(
+        || {
+            sleep(20);
+            as_task(|| println("H"), PRIO_MAX)
+        },
+        PRIO_DEFAULT,
+    );
+    let l = as_task(|| println("L"), PRIO_DEFAULT);
+    let r = spin_steps(n, 1);
+    if r == 42 {
+        println("?");
+    }
+    let h = x.get();
+    drop(x);
+    // `IO.FS.Stream.flush`: an effect point, as a translator's glue makes
+    // it (docs/sched.md, "The glue", item 5), even with nothing to write
+    lean_runtime::sched::effect();
+    let _ = Handle::stdout().flush();
+    l.get();
+    drop(l);
+    h.get();
+    drop(h);
+    println("main");
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let l1 ← IO.asTask (pure ())
+//   let l2 ← IO.asTask (IO.println "L2")
+//   let r := spin n 1
+//   if r == 42 then IO.println "?"
+//   let h ← IO.asTask (prio := .max) (IO.println "H")
+//   IO.println "main"
+//   let _ ← IO.wait l1
+//   let _ ← IO.wait l2
+//   let _ ← IO.wait h
+fn effect_late_run_keeps_newer_head_behind(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let l1 = as_task(|| (), PRIO_DEFAULT);
+    let l2 = as_task(|| println("L2"), PRIO_DEFAULT);
+    let r = spin_steps(n, 1);
+    if r == 42 {
+        println("?");
+    }
+    let h = as_task(|| println("H"), PRIO_MAX);
+    println("main");
+    l1.get();
+    drop(l1);
+    l2.get();
+    drop(l2);
+    h.get();
     0
 }

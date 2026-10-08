@@ -83,7 +83,12 @@ needed. So a task is *deferred*: it runs at the first of these points.
   processors). The task then starts on a *context* of its own.
 - **An effect point.** At an output, a flush, a process spawn or an exit,
   a task queued 5 ms ago or more (`STALE`) goes first, as natively its
-  worker would have run it by then; so do a context whose sleep has ended
+  worker would have run it by then (the first such task in the order a
+  free worker takes them; newer tasks ahead of it are passed over, unless
+  they were queued while the context that last freed a worker held it,
+  hunt HSC-02 and the review of fixes-19, "Schedules that depend on the
+  machine's speed" below); so do a
+  context whose sleep has ended
   and a UV timer that has come due, as natively their threads ran them at
   their deadlines (review HU-01 for the timer).
 - **Polling.** `IO.getTaskState`/`IO.hasFinished` report a pending task
@@ -183,11 +188,44 @@ deadlock, as natively). Mutation checks: walks that hold no worker fail
 fail the last two; counting the waiter's worker as free in a `sync` task
 runs the queued task in `sync_dep_waits_queued_task`.
 
+**A waiter that keeps its worker runs nothing on its stack** (hunt HSC-01,
+fixes-19). `holds_worker` counts one worker per context, the innermost
+activity's. That is exact only while every activity below a task run on
+the waiter's stack holds no worker or frees it in its wait (`main`, a
+dedicated task, a pool task's own `wait`). A `sync` dependent run on a
+pool worker (in a pool task's walk, or in the walk of a promise that a
+pool task resolves) keeps that worker busy in its wait, which raises no
+limit (`wait_raises_limit` false); the task it waits for runs natively on
+another thread: a second worker for a pool task, a thread of its own for
+a dedicated one. Run on the waiter's stack,
+that task became the innermost activity: one worker counted for two, or
+none for one (a dedicated task), and the pool started one task too many.
+So `wait` runs the task there only when the waiter does not keep a worker
+(`wait_keeps_worker`: the context holds one, and the wait raises no
+limit); otherwise the task starts on a context of its own, at once, as in
+a wait without the stack room (`here_or_own_context`, below), and the
+waiter blocks on it (`Wait::Cell`, which keeps its worker): two workers
+counted, or one and a thread. `IO.waitAny` already ran nothing on a
+stack that holds a worker. Cases (recorded natively; "before" is the
+crate before the fix):
+
+| Case | What the program does | Native | Before |
+|---|---|---|---|
+| `tasks/sync_wait_second_worker` | two workers: `p` sleeps 50 ms; its `sync` dependent `s` starts `t` (300 ms) and waits for it; `main` queues `q` at 150 ms | "T done", "Q ran", "S done" | "Q ran" first |
+| `tasks/sync_wait_dedicated_keeps_worker` | one worker: the same with a dedicated `d` | "D done", "S done", "Q ran" | "Q ran" first |
+| `tasks/sync_wait_dedicated_waits_queued` | one worker: `s` waits for a dedicated `d`, which queues `q` and waits for it | a deadlock after "main done" | "q ran", "d done", "s done", "main done", then the exit |
+
+Each one's port fails with `wait_keeps_worker` removed from
+`here_or_own_context` (mutation check). The counters do not change:
+`holds_worker`, `refresh_holds` and `pool_in_use`'s debug recount count
+as before; only fewer tasks run on a waiter's stack.
+
 **A context about to begin its first task** (review RF16-03, fixes-17).
 The scheduler starts a task on a new context (`start_worker`) where a free
 worker would take it: in the hub, at an effect point, a polling point or a
 zero sleep, at the polling threshold (`start_polled`), in `IO.waitAny`, and
-in a wait without the stack room (`here_or_own_context`). The new context
+in a wait without the stack room or whose waiter keeps its worker
+(`here_or_own_context`). The new context
 begins the task only when it first runs (`take_preselect`), after the
 contexts that were able to run before it. Natively the worker takes the
 task off the queue at once and is busy from then on. So the workers in use
@@ -345,7 +383,11 @@ AR-10, corrected; `src/sched/task.rs`):
   `may_run_awaited` lets the woken worker take what it would have taken
   by now (`settle_worker`). If that worker starts the awaited pure task
   (`pick`), the task runs on the waiter's stack, as any started task does
-  (fixes-8, below). `may_run_awaited`
+  (fixes-8, below). A task that may run now runs on the waiter's stack
+  only with the stack room and when the waiter does not keep a pool worker
+  busy in its wait (a `sync` dependent on a pool worker, hunt HSC-01);
+  otherwise it starts on a context of its own (`here_or_own_context`).
+  `may_run_awaited`
   also says yes for a pending task in no queue that waits for nothing
   (`QUEUED` and `WAITING` clear): the state of a task handed to a context
   that is about to begin it, between `hand` and `begin`. On one thread no
@@ -485,7 +527,9 @@ on top of both. Before this fix the stack use of nested waits added up:
   a context, with less stack in use than the slack.
 - **Where it applies.** After sched-3's rule: a task that may not run now
   (`may_run_awaited` says no) waits as before. A task that may run now but
-  finds too little room starts at once on a new context (`start_worker`,
+  finds too little room, or whose waiter keeps a pool worker busy in its
+  wait (`wait_keeps_worker`, hunt HSC-01, in "The model"), starts at once
+  on a new context (`start_worker`,
   unless a context already starts with it), as the free worker would
   start it, and the waiter blocks on it: `Wait::Cell` in `wait`, `Wait::Any`
   in `IO.waitAny`, `Wait::FinalRun` in the final run. The task stays queued,
@@ -531,9 +575,12 @@ on top of both. Before this fix the stack use of nested waits added up:
   contexts that were able to run before it. For a pool waiter the emulated
   workers count the same: it frees its worker in `Wait::Cell`
   (`holds_worker`), and the new context holds one from its start; where the
-  waiter keeps its worker (a `sync` dependent, a walk on a pool worker), the
-  run on the waiter's stack counted one worker for both tasks, and the
-  context counts two, as natively (review RF16-04). Between the start and
+  waiter keeps its worker (a `sync` dependent on a pool worker), the run on
+  the waiter's stack counted one worker for both tasks, and the context
+  counts two, as natively (review RF16-04); since hunt HSC-01 such a waiter
+  always starts the task on a context of its own, with the room too
+  ("A waiter that keeps its worker runs nothing on its stack", in "The
+  model"). Between the start and
   the begin the new context holds the task's worker already
   (`starting_holds`, review RF16-03), as after `start_polled` and
   `IO.waitAny`'s starts ("A context about to begin its first task", in
@@ -879,6 +926,65 @@ machine the same program can take another of native's schedules:
 
 The recorded cases do not depend on these thresholds: their sleeps are tens
 of milliseconds or longer.
+
+**Which stale task an effect point starts** (hunt HSC-02, fixes-19). An
+effect point, a zero sleep (90 µs, `WORKER_LATENCY`) and the final run's
+polling point (`Wait::FinalLoop`) start a task queued that long ago
+(`startable` with `Gate::Before`). The tasks queued by then are all older
+than the others, so natively a free worker took them in the queue's order
+(the highest priority first, first come, first served within a priority)
+before the newer ones existed. The scan passes over the newer ones and
+takes the first old one in that order, the lone worker's pick first if it
+is old. Before the fix it ended at the first newer candidate. The lone
+worker picks lazily (`settle_worker`, at the next look after its 90 µs),
+so after a long computation without a scheduling point its pick, and the
+queue's head, can be a newer task of a higher priority: the older tasks
+behind it never started there. Case `tasks/effect_stale_behind_newer_head`
+(one worker: `main` queues `l1` and `l2`, which prints "L2", computes for
+about 0.5 s natively without a scheduling point, queues `h` at
+`Task.Priority.max`, prints "main"): "L2", "main", as natively; before the
+fix "main", "L2". The second round of an effect point (`Gate::After`, the
+tasks queued by what that point let go first) keeps ending its scan at the
+first task queued before its mark: such a task is older than every task
+that passes, at the same or a higher priority (or the lone worker's
+pick), so natively a free worker takes it first.
+
+**A worker that became free took the queue's head then** (the review of
+fixes-19). A newer task is not passed over when it was queued while the
+context that last freed a worker held it: natively it was in the queue
+when that worker became free, and the worker took the first task of the
+queue then, in the queue's order. `refresh_holds` records the window
+(`Tasks::freed`): from when the context came to hold its worker
+(`Ctx::held_since`: a task's begin, a wake from a wait that freed it) to
+when it stopped holding it (the task's walk ended, its `wait` freed the
+worker, the context ended), as two values of the queue's sequence (the
+count of enqueues, `Tasks::next_q`, which each enqueue stamps into the
+task's queue position); `queued_while_held` asks whether a candidate's
+position falls within it, compared with wrapping as `Gate::After`
+compares it. That is an order, not a time, so no clock is read (a
+re-queued bind task's continuation has its last enqueue's position).
+Such a candidate passes the gate as one queued by
+its time does, so among the candidates that pass, the scan takes the
+queue's order. The pool has one queue, as natively (`m_queues`, whose head
+any free worker takes), so the window is the last one of any context, with
+one worker or several; a window older than the gate's time changes
+nothing (its tasks pass the gate anyway). Cases (one worker, recorded
+natively; "fixes-19" is the pass-over without the window):
+
+| Case | What the program does | Native | 09faf7a | fixes-19 |
+|---|---|---|---|---|
+| `tasks/effect_stale_behind_newer_head` | as above | "L2", "main" | "main", "L2" | "L2", "main" |
+| `tasks/effect_freed_worker_takes_newer_head` | the worker's task `x` sleeps 20 ms, queues `h` at `Task.Priority.max` and ends; `l` is queued behind `x`; `main` computes for about 0.5 s, waits for `x` (run on its stack, late), flushes stdout | "H", "L", "main" | "H", "L", "main" | "L", "H", "main" |
+| `tasks/effect_late_run_keeps_newer_head_behind` | as `effect_stale_behind_newer_head`, with `h` printing "H" | "L2", "main", "H" | "main", "H", "L2" | "L2", "main", "H" |
+
+In `effect_freed_worker_takes_newer_head`, `h` was queued while `main`'s
+context held the worker for `x`, so it passes, and comes first. In
+`effect_late_run_keeps_newer_head_behind`, the effect point runs `l1` on a
+context of its own, late, and its end frees the worker after `h` was
+queued; but `h` was queued before that context held the worker (natively
+`l1` had ended long before), so it is passed over, and `l2` comes first. A
+window without its start (every task queued before the worker became free
+passes) gives "H", "L2", "main" there (mutation check).
 
 ## The pure-task rule
 
@@ -1903,6 +2009,17 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      flush, and C's `exit`, as `lean_io_exit`. The task manager is not
      finalized and no task is waited for (`tasks/exit_from_task`: status 3,
      `main`'s buffered line written, the other task never run).
+     `io::panic::process_exit(code, glue)` does it.
+   - `IO.Process.forceExit` from anywhere:
+     `io::panic::process_force_exit(code, glue)`, as `lean_io_force_exit`
+     (`_Exit`): `effect()`, the context's writer threads joined, but not
+     those of a skip window (item 11), the flag that makes every later
+     `fclose` discard its pending output, then the glue's
+     `PanicGlue::force_exit(code)`. Its default is `std::process::exit`,
+     which also runs the exit handlers of linked C code; a glue that needs
+     `_Exit` exactly calls `_exit` there. No stream is flushed and no task
+     is waited for. `io::exit::force_exit(code)` is the same without the
+     effect point and the glue.
 3. **Tasks.** The task's value lives in the translator's own object. The
    `Job` fills it and returns `Outcome::Done`, or
    `Outcome::Continue(t2, job2)` when a bind function returned an unfinished
@@ -2134,7 +2251,9 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      (`lean_option_get_or_block`), is `option_get_or_block(opt, report)`
      ("`Promise.result!` on a dropped promise" below).
 5. **Yield points.**
-   - `effect()` before output, flush, process spawn and `IO.Process.exit`.
+   - `effect()` before output, flush, process spawn, `IO.Process.exit` and
+     `IO.Process.forceExit` (`io::panic::process_exit` and
+     `process_force_exit` make it themselves).
      A Lean panic's message is output too (`lean_panic` prints it through
      Lean's stderr stream), so `effect()` comes before it.
    - `poll()` at clock reads.

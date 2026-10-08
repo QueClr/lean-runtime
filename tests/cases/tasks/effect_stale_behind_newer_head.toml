@@ -1,0 +1,7 @@
+id = "effect_stale_behind_newer_head"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HSC-02 (hunt-sched2/repros/hsc02.lean: an effect point's scan for a task queued 5 ms ago ended at a newer task of a higher priority), judged by the coordinator, fixes-19, 2026-10-07"
+streams = "separate"
+# The argument is the number of steps of `main`'s computation (about 0.5 s natively; it must
+# take more than 5 ms in a translator's build).

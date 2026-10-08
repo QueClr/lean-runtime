@@ -166,6 +166,7 @@ fn child_case(case: &str) -> ! {
         }
         "uncaught" => p::uncaught(&msg, &mut Native),
         "exit" => p::process_exit(3, &mut Native),
+        "force_exit" => p::process_force_exit(3, &mut Native),
         "internal_during_write" => {
             // another thread holds stderr's lock, its 200000-byte write
             // blocked on the full pipe (review RSH3-01's repro)
@@ -368,7 +369,10 @@ fn panic_rows_through_the_executor() {
 /// - the internal panic: the line, then stdout at `exit(1)`; under
 ///   `LEAN_ABORT_ON_PANIC` stdout is lost (LB-07);
 /// - the uncaught error and `IO.Process.exit`: stdout, then the line;
-///   `LEAN_ABORT_ON_PANIC` plays no part.
+///   `LEAN_ABORT_ON_PANIC` plays no part;
+/// - `IO.Process.forceExit` (`_Exit`; `PanicGlue::force_exit`'s default,
+///   `std::process::exit`): stdout lost, as in the native probe
+///   `forceexit` (`tests/io_rows.rs`); `LEAN_ABORT_ON_PANIC` plays no part.
 fn order_with_pending_stdout() {
     let abort = [("LEAN_ABORT_ON_PANIC", "1"), ("LEAN_BACKTRACE", "0")];
     let quiet = [("LEAN_BACKTRACE", "0")];
@@ -413,6 +417,8 @@ fn order_with_pending_stdout() {
         ),
         ("exit", b"", &quiet, "pending;", 3),
         ("exit", b"", &abort, "pending;", 3),
+        ("force_exit", b"", &quiet, "", 3),
+        ("force_exit", b"", &abort, "", 3),
     ] {
         let o = child(case, msg, env, true);
         let (out, err, got) = outcome(&o);

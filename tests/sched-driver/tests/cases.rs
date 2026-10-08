@@ -1466,4 +1466,12 @@ cases!(
     // fixes-17b: the review of fixes-17 (a bind task's continuation queued
     // again)
     bind_requeue_preselect,
+    // fixes-19: hunt HSC-01, HSC-02
+    sync_wait_second_worker,
+    sync_wait_dedicated_keeps_worker,
+    sync_wait_dedicated_waits_queued,
+    effect_stale_behind_newer_head,
+    // the review of fixes-19
+    effect_freed_worker_takes_newer_head,
+    effect_late_run_keeps_newer_head_behind,
 );

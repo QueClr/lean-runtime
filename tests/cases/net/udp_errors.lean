@@ -58,12 +58,16 @@ def main (args : List String) : IO Unit := do
   tryIO "a datagram over 65507 bytes" do
     let p ← a.send #[ByteArray.mk (Array.replicate 70000 1)] (some (at_ pb))
     wait p unit
-  -- a connected socket whose peer port is closed
-  let closed ← do
-    let t ← UDP.Socket.new
-    t.bind (at_ 0)
-    pure (← t.getSockName).port
+  -- a connected socket whose peer port is closed: `c` is bound while `t`
+  -- still holds its port, so `c` never gets it (an autobind at the connect
+  -- could take the port `t` has just freed, and `c` would send to itself);
+  -- `t`'s last use is the `getSockName` after that bind, where its last
+  -- reference goes and its finalizer closes it, before the connect
+  let t ← UDP.Socket.new
+  t.bind (at_ 0)
   let c ← UDP.Socket.new
+  c.bind (at_ 0)
+  let closed := (← t.getSockName).port
   c.connect (at_ closed)
   tryIO "send to a closed port" do let p ← c.send #[String.toUTF8 "x"] none; wait p unit
   tryIO "recv after it" do let q ← c.recv 100; wait q dgram

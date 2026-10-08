@@ -359,6 +359,10 @@ pub(crate) struct Ctx {
     /// It holds one of the task manager's workers, as last counted in
     /// `Contexts::in_use` (`Sched::refresh_holds`).
     pub(crate) holds: bool,
+    /// The queue's sequence (`Tasks::next_q`) when it last came to hold one
+    /// (`holds`): the start of the window a worker it frees records
+    /// (`Tasks::freed`, the review of fixes-19).
+    pub(crate) held_since: u32,
     /// The emulated pool worker of the innermost task running on it
     /// (`running_worker`, review AR-32): `None` for a dedicated or a `sync`
     /// task, and outside tasks.
@@ -387,6 +391,7 @@ impl Ctx {
             ready: Instant::now(),
             at_effect: false,
             holds: false,
+            held_since: 0,
             worker: None,
             tid: None,
         }

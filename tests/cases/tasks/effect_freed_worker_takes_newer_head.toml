@@ -1,0 +1,7 @@
+id = "effect_freed_worker_takes_newer_head"
+area = "tasks"
+lean_version = "4.34.0"
+source = "the review of lean-runtime's fixes-19 (leanrs-scratch/rev-fix19-repro/Lim.lean: HSC-02's pass-over started a stale task before a newer one of a higher priority that a worker freed after its enqueue takes first), judged by the coordinator, 2026-10-07"
+streams = "separate"
+# The argument is the number of steps of `main`'s computation (about 0.5 s natively; it must
+# take more than 25 ms in a translator's build, past `x`'s sleep and 5 ms).

@@ -1,0 +1,5 @@
+id = "sync_wait_second_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HSC-01 (hunt-sched2/repros/hsc01.lean: a task run on the stack of a sync dependent that keeps its worker counted no second worker), judged by the coordinator, fixes-19, 2026-10-07"
+streams = "separate"

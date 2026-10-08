@@ -207,6 +207,10 @@ pub(crate) struct Shared {
     shutting_down: AtomicBool,
     /// `State::started`, for `manager_running` and `Std.Sync`'s owners.
     started: AtomicBool,
+    /// The threads blocked in `wait` (tests: a test learns that its waiter
+    /// sleeps on `finished_cv` before it lets the task finish).
+    #[cfg(test)]
+    blocked_waits: std::sync::atomic::AtomicU32,
 }
 
 type Guard<'a> = MutexGuard<'a, State>;
@@ -239,6 +243,8 @@ impl Shared {
             quiet_cv: Condvar::new(),
             shutting_down: AtomicBool::new(false),
             started: AtomicBool::new(false),
+            #[cfg(test)]
+            blocked_waits: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -510,8 +516,14 @@ fn worker_main(sh: Arc<Shared>, index: u32) {
             continue;
         };
         g.idle -= 1;
-        g = run_task(&sh, g, id, true);
-        g.idle += 1;
+        // The worker counts itself idle again once its task's walk is done,
+        // before the glue's `task_end` unlocks (`task_end`), or here if it
+        // reached none (a task released before it began).
+        let mut to_idle = true;
+        g = drive(&sh, g, Some((id, true)), Vec::new(), &mut to_idle);
+        if to_idle {
+            g.idle += 1;
+        }
     }
     g.idle -= 1;
     g.live -= 1;
@@ -650,20 +662,22 @@ struct Walk {
 /// walks, in the same order: a long chain of `sync` dependents uses no
 /// stack.
 pub(crate) fn run_task<'a>(sh: &'a Arc<Shared>, g: Guard<'a>, id: u64, own: bool) -> Guard<'a> {
-    drive(sh, g, Some((id, own)), Vec::new())
+    drive(sh, g, Some((id, own)), Vec::new(), &mut false)
 }
 
 /// The loop of `run_task` and `resolve`: run `next` if any, then go on with
-/// the innermost walk.
+/// the innermost walk. `to_idle`: a standard worker runs `next`, its task,
+/// and counts itself idle at the task's `task_end` (which clears it).
 fn drive<'a>(
     sh: &'a Arc<Shared>,
     mut g: Guard<'a>,
     mut next: Option<(u64, bool)>,
     mut walks: Vec<Walk>,
+    to_idle: &mut bool,
 ) -> Guard<'a> {
     loop {
         if let Some((id, own)) = next.take() {
-            let (g2, again) = run_one(sh, g, id, own, &mut walks);
+            let (g2, again) = run_one(sh, g, id, own, &mut walks, to_idle);
             g = g2;
             next = again.map(|j| (j, false));
             continue;
@@ -693,11 +707,18 @@ fn drive<'a>(
             }
             None => {
                 let w = walks.pop().expect("a walk");
+                // The glue's `task_end` first, then the waiters wake: natively
+                // the worker keeps the lock from `resolve_core`'s
+                // notification until it is idle, unless a later `sync`
+                // dependent of the walk runs. The hook's unlock is part of the
+                // task's run, as its job's is, so no waiter goes on in it
+                // (fixes-19: the hook of a `sync` dependent, the last task
+                // of a walk, let a waiter it woke see the worker busy).
+                if let Some(own) = w.end {
+                    g = task_end(sh, g, own, to_idle);
+                }
                 if w.notify {
                     sh.finished_cv.notify_all();
-                }
-                if let Some(own) = w.end {
-                    g = task_end(sh, g, own);
                 }
             }
         }
@@ -705,8 +726,18 @@ fn drive<'a>(
 }
 
 /// The glue's `task_end(own)`, outside the lock (the clone of the glue is
-/// dropped under the hook's guard too: RT1-01).
-fn task_end<'a>(sh: &'a Arc<Shared>, g: Guard<'a>, own: bool) -> Guard<'a> {
+/// dropped under the hook's guard too: RT1-01). A standard worker's task
+/// (`own` and `to_idle`, which this clears) counts the worker idle first,
+/// under the lock: natively `m_idle_std_workers++` follows `resolve_core`
+/// with no unlock between, so a thread that sees the task finished and
+/// queues a task finds the worker idle, and the task goes to it
+/// (`enqueue_core`), not to a new worker (`tasks/worker_keeps_streams`,
+/// 1 run in 5 under load before the fix). From then on the hook is the
+/// worker's way back to its loop, which takes that task before it waits.
+fn task_end<'a>(sh: &'a Arc<Shared>, mut g: Guard<'a>, own: bool, to_idle: &mut bool) -> Guard<'a> {
+    if own && std::mem::take(to_idle) {
+        g.idle += 1;
+    }
     let Some(gl) = g.glue.clone() else {
         return g;
     };
@@ -730,6 +761,7 @@ fn run_one<'a>(
     id: u64,
     own: bool,
     walks: &mut Vec<Walk>,
+    to_idle: &mut bool,
 ) -> (Guard<'a>, Option<u64>) {
     let Some(e) = g.tasks.get_mut(&id) else {
         // released before it began: a dedicated or queued pure task
@@ -785,7 +817,7 @@ fn run_one<'a>(
             }
             // the job ended its task and walked its dependents itself
             // (`end_running_task`, AR-26): only the glue's `task_end` is left
-            None => (task_end(sh, g, own), None),
+            None => (task_end(sh, g, own, to_idle), None),
         },
         Outcome::Continue(src, k) => {
             let Some(e) = g.tasks.get(&id) else {
@@ -817,7 +849,14 @@ fn run_one<'a>(
                 e.job = Some(k);
                 again = add_dep(sh, &mut g, src, id);
             }
-            (task_end(sh, g, own), again)
+            // a task that runs again here at once (`again`) keeps the worker
+            // busy: it counts itself idle after that run
+            let g = if again.is_some() {
+                task_end(sh, g, own, &mut false)
+            } else {
+                task_end(sh, g, own, to_idle)
+            };
+            (g, again)
         }
     }
 }
@@ -996,9 +1035,13 @@ pub(crate) fn wait(sh: &Arc<Shared>, id: TaskId) {
             sh.queue_cv.notify_one();
         }
     }
+    #[cfg(test)]
+    sh.blocked_waits.fetch_add(1, Ordering::Relaxed);
     while g.tasks.contains_key(&id.0) {
         g = wait_on(&sh.finished_cv, g);
     }
+    #[cfg(test)]
+    sh.blocked_waits.fetch_sub(1, Ordering::Relaxed);
     if in_pool {
         g.raised -= 1;
     }
@@ -1153,7 +1196,7 @@ pub(crate) fn resolve(sh: &Arc<Shared>, id: TaskId, store: impl FnOnce()) -> boo
         notify: true,
         end: None,
     };
-    drop(drive(sh, g, None, vec![w]));
+    drop(drive(sh, g, None, vec![w], &mut false));
     true
 }
 
@@ -1184,7 +1227,7 @@ pub(crate) fn end_running_task(id: TaskId) {
             notify: e.flags & (DELETED | UNREFERENCED) == 0,
             end: None,
         };
-        drop(drive(sh, g, None, vec![w]));
+        drop(drive(sh, g, None, vec![w], &mut false));
     })
 }
 
@@ -1247,6 +1290,12 @@ pub(crate) fn finish(sh: &Arc<Shared>) {
 #[cfg(test)]
 pub(crate) fn live_workers(sh: &Shared) -> u32 {
     sh.lock().live
+}
+
+/// The number of threads blocked in `wait` (tests).
+#[cfg(test)]
+pub(crate) fn blocked_waits(sh: &Shared) -> u32 {
+    sh.blocked_waits.load(Ordering::Relaxed)
 }
 
 /// The number of entries in the table (tests).

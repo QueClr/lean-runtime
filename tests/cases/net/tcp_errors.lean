@@ -127,12 +127,17 @@ def main (args : List String) : IO Unit := do
   tryIO "recv? at end of file again" do let p ← c.recv? 100; wait p bytes
   tryIO "send to the half-closed peer" do let p ← c.send #[String.toUTF8 "late"]; wait p unit
   tryIO "the peer reads it" do let p ← sc.recv? 100; wait p bytes
-  -- a refused connect: a port that was bound, then closed
-  let closed ← do
-    let t ← TCP.Socket.new
-    t.bind (at_ 0)
-    pure (← t.getSockName).port
+  -- a refused connect: a port that was bound, then closed. `d` is bound
+  -- while `t` still holds the port, so `d` never gets it (an autobind at
+  -- the connect could take the port `t` has just freed, and `d` would
+  -- connect to itself, a simultaneous open); `t`'s last use is the
+  -- `getSockName` after that bind, where its last reference goes and its
+  -- finalizer closes it, before the connect
+  let t ← TCP.Socket.new
+  t.bind (at_ 0)
   let d ← TCP.Socket.new
+  d.bind (at_ 0)
+  let closed := (← t.getSockName).port
   tryIO "connect to a closed port" do let p ← d.connect (at_ closed); wait p unit
   tryIO "getPeerName after it" do let _ ← d.getPeerName; return ""
   tryIO "getSockName after it" do let a ← d.getSockName; return s!", port chosen {a.port != 0}"

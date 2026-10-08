@@ -2,7 +2,8 @@
 //! Lean 4.34.0 program does, in order, when it panics (`lean_panic_fn`, the
 //! runtime's `lean_panic`), when its runtime panics (`lean_internal_panic`),
 //! when `main` or an initializer ends with an uncaught error
-//! (`lean_io_result_show_error`) and on `IO.Process.exit` (`lean_io_exit`).
+//! (`lean_io_result_show_error`), on `IO.Process.exit` (`lean_io_exit`) and
+//! on `IO.Process.forceExit` (`lean_io_force_exit`).
 //! `semantics::panic` holds the texts and the plans as data; this module
 //! carries a plan out: the effect point, the stream, the flush of stdout,
 //! the write, then the abort or the exit.
@@ -13,10 +14,10 @@
 //! keeps of its own: Lean's current stderr stream (lean2rr's stream cells),
 //! the settings (leanrs's cached abort flag and its "no backtrace", until
 //! leanrs decides; `docs/panic.md`), or its ways to the process's stderr
-//! and out of the process (leanrs's test capture).
+//! and out of the process (leanrs's test capture, lean2rr's `_exit`).
 //!
-//! Native's order, path by path (`object.cpp` 76-191, `io.cpp` 62-68 and
-//! 1606-1608; probe in `docs/panic.md`):
+//! Native's order, path by path (`object.cpp` 76-191, `io.cpp` 62-68,
+//! 1606-1608 and 1610-1612; probe in `docs/panic.md`):
 //! - **[`report`]** (`lean_panic_impl`): with messages on, the message and,
 //!   unless `LEAN_BACKTRACE=0`, `backtrace:` and the frames, one line each,
 //!   on Lean's current stderr stream (`io_eprintln`, one `putStr` per line,
@@ -35,21 +36,24 @@
 //!   `std::cerr << "uncaught exception: " << msg << std::endl` (stdout
 //!   flushed first; the message up to its first NUL byte), then status 1.
 //! - **[`process_exit`]** (`lean_io_exit`): C's `exit(code)`.
+//! - **[`process_force_exit`]** (`lean_io_force_exit`): C's `_Exit(code)`:
+//!   no stream flushed, no exit handler run.
 //!
-//! Here a panic and `IO.Process.exit` first make an effect point of the
-//! scheduler (natively the other threads run meanwhile, so what they would
-//! have printed by now comes first; `sched::effect`). The uncaught error
-//! needs none: the translator has run its tasks to their end before. The
-//! internal panic runs no other code: it is also the out-of-memory end, and
-//! it allocates nothing until its line is written (the line is built on the
-//! stack).
+//! Here a panic, `IO.Process.exit` and `IO.Process.forceExit` first make an
+//! effect point of the scheduler (natively the other threads run meanwhile,
+//! so what they would have printed by now comes first; `sched::effect`).
+//! The uncaught error needs none: the translator has run its tasks to their
+//! end before. The internal panic runs no other code: it is also the
+//! out-of-memory end, and it allocates nothing until its line is written
+//! (the line is built on the stack).
 //!
 //! Source: lean2rr's leanrt `lib.rs` (`panic_text`, `lean_panic`,
 //! `internal_panic`, `uncaught_exception`) and `prelude.rr`
-//! (`l2r_process_exit`); leanrs_rt `src/panic.rs` (`report_plan`,
-//! `internal_panic`, the stack-built line of `io.rs` `write_err_line`) and
-//! `src/io/env.rs` (`uncaught`, `process_exit`); the crate's test drivers'
-//! `glue_common.rs`, which now call this module.
+//! (`l2r_process_exit`), `io.rs` (`force_exit`); leanrs_rt `src/panic.rs`
+//! (`report_plan`, `internal_panic`, the stack-built line of `io.rs`
+//! `write_err_line`) and `src/io/env.rs` (`uncaught`, `process_exit`,
+//! `process_force_exit`); the crate's test drivers' `glue_common.rs`, which
+//! now call this module.
 
 use core::fmt;
 
@@ -157,6 +161,17 @@ pub trait PanicGlue {
     /// process ends, waiting for no task. Default: [`super::exit::exit`].
     fn exit(&mut self, code: i32) -> ! {
         super::exit::exit(code)
+    }
+
+    /// C's `_Exit(code)` ([`process_force_exit`]): the process ends at
+    /// once, with no stream flushed and no exit handler run. Default:
+    /// `std::process::exit(code)`, as safe Rust has no `_Exit`; it also runs
+    /// the exit handlers of linked C and C++ code and flushes their C stdio
+    /// streams ([`super::exit::force_exit`] lists what it runs). A glue that
+    /// links such code and needs `_Exit` exactly (lean2rr: mimalloc's
+    /// handlers) calls `_exit` here.
+    fn force_exit(&mut self, code: i32) -> ! {
+        std::process::exit(code)
     }
 }
 
@@ -305,6 +320,32 @@ pub(crate) fn show_error<G: PanicGlue + ?Sized>(msg: &[u8], glue: &mut G) {
 pub fn process_exit<G: PanicGlue + ?Sized>(code: u8, glue: &mut G) -> ! {
     effect();
     glue.exit(i32::from(code))
+}
+
+/// `IO.Process.forceExit code` (`lean_io_force_exit`, C's `_Exit`), in
+/// three steps:
+/// 1. an effect point, as for [`process_exit`]: what the other threads
+///    would have done by now goes first;
+/// 2. the streams' part of `_Exit`, as [`super::exit::force_exit`] does it:
+///    with `sched`, the writer threads to which the exiting context's drops
+///    handed a stream are joined, except those of a skip window (natively
+///    their stream's free had not come yet; hunt HCO-02); then the flag
+///    that makes every later `fclose` and exit flush discard pending output;
+/// 3. [`PanicGlue::force_exit`] with `code`.
+///
+/// No stream is flushed and no task is waited for. `LEAN_ABORT_ON_PANIC`
+/// plays no part. [`super::exit::force_exit`] is the same without the
+/// effect point, with `std::process::exit` as its end.
+///
+/// Source: lean2rr's leanrt `io.rs` `force_exit` (`_exit`, with an effect
+/// point since its hunt HIO3-01); leanrs_rt `io/env.rs`
+/// `process_force_exit` (an effect point, then `io::exit::force_exit`).
+#[cold]
+#[inline(never)]
+pub fn process_force_exit<G: PanicGlue + ?Sized>(code: u8, glue: &mut G) -> ! {
+    effect();
+    super::exit::before_force_exit();
+    glue.force_exit(i32::from(code))
 }
 
 /// An internal panic's line (`INTERNAL PANIC: `, the message up to its

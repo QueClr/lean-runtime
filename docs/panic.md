@@ -2,7 +2,8 @@
 
 `semantics::panic` gives a panic's plan as data. `io::panic` (feature `io`)
 carries it out, and does the same for the other ends of a program: the
-internal panic, the uncaught error and `IO.Process.exit`. Before this
+internal panic, the uncaught error, `IO.Process.exit` and
+`IO.Process.forceExit`. Before this
 module, each translator and the crate's test drivers had a copy of this
 code (redundancy audit item 3.4). This file records how the copies
 differed, what native Lean 4.34.0 does, and what the crate does now.
@@ -11,8 +12,9 @@ differed, what native Lean 4.34.0 does, and what the crate does now.
 
 Sources: `src/runtime/object.cpp` 76-191 (`should_abort_on_panic`,
 `lean_internal_panic`, `panic_eprintln`, `lean_panic_impl`),
-`src/runtime/io.cpp` 62-68 (`lean_io_result_show_error`) and 1606-1608
-(`lean_io_exit`), the generated `main` (`LCNF/EmitC.lean` 1119-1150).
+`src/runtime/io.cpp` 62-68 (`lean_io_result_show_error`), 1606-1608
+(`lean_io_exit`) and 1610-1612 (`lean_io_force_exit`), the generated `main`
+(`LCNF/EmitC.lean` 1119-1150).
 
 | Path | Lines and stream | Stdout | End |
 |---|---|---|---|
@@ -21,6 +23,7 @@ Sources: `src/runtime/object.cpp` 76-191 (`should_abort_on_panic`,
 | Internal panic | `INTERNAL PANIC: <msg>\n` with `fprintf` on C's `stderr` (one `write` under the `FILE` lock, recursive per thread: the line waits for another thread's write in progress; `%s` stops at a NUL byte) | not flushed | `abort()` (134, stdout lost: LB-07) under `LEAN_ABORT_ON_PANIC`, else `exit(1)` (stdout written after the line) |
 | Uncaught error | after `lean_finalize_task_manager`: `uncaught exception: <msg up to NUL>\n` on `std::cerr` (three writes) | flushed first | status 1 |
 | `IO.Process.exit c` | none | written by `exit` | status `c` |
+| `IO.Process.forceExit c` | none | lost (`std::_Exit` flushes nothing and runs no exit handler) | status `c` |
 
 Both variables are read with `getenv` at every panic, never cached. The
 generated `main` of 4.34.0 leaves panic messages on during module
@@ -60,6 +63,15 @@ natively the line comes after the other write's 200000 bytes, also under
   status 1.
 - `io::panic::process_exit(code, glue) -> !`: an effect point, then the
   exit.
+- `io::panic::process_force_exit(code, glue) -> !`: `IO.Process.forceExit`
+  (`code` is its `UInt8`), in three steps: an effect point; the streams'
+  part of `_Exit` (with `sched`, the writer threads of the context's
+  dropped streams joined, but not those of a skip window, hunt HCO-02;
+  then the flag that makes every later `fclose` and exit flush discard
+  pending output); then the glue's `force_exit(code)`. No stream is
+  flushed, no task is waited for, and `LEAN_ABORT_ON_PANIC` plays no part.
+  `io::exit::force_exit(code)` is the same steps without the effect point,
+  with `std::process::exit` as the end, for a caller without a glue.
 - `io::panic::settings()` and `io::panic::abort_on_panic()`: the
   environment, read now.
 - `io::panic::write_internal_line_locked(line)`: the line's pieces to
@@ -82,6 +94,7 @@ implements none:
 | `internal_stderr(line)` | `write_internal_line_locked` | another writer (leanrs's `stderr()`, its test capture; lean2rr's old path, the crate's `stderr` model per piece); it must not allocate |
 | `abort()` | `std::process::abort` | a test capture's release first |
 | `exit(code)` | `io::exit::exit` | the same |
+| `force_exit(code)` | `std::process::exit` (leanrs's end) | `_exit` (lean2rr): `std::process::exit` also runs the exit handlers of linked C code (mimalloc's) and flushes its C stdio streams, which `_Exit` does not |
 
 ## How the copies differed, and the resolution
 
@@ -112,6 +125,7 @@ the default.
 | 15 | `IO.Process.exit` | `exit(code)` | effect point, the crate's `exit` | the same (test capture released) | the same | the same | `exit` |
 | 16 | During initialization | messages on | on | on | on | on (`settings`) | `settings` |
 | 17 | Statuses | 134, 1, `code` | the same | the same | the same | the same | none |
+| 18 | `IO.Process.forceExit` | `_Exit(code)`: nothing flushed, no exit handler | effect point (its hunt HIO3-01), its writers (`sched::before_publish`), `_exit` | effect point, `io::exit::force_exit` (its writers but a skip window's, the no-flush flag, `std::process::exit`) | `io::exit::force_exit`, no effect point | `process_force_exit`: effect point, the writers but a skip window's, the no-flush flag, `force_exit` | `force_exit` |
 
 leanrs's deferred message differences (the shared-runtime coordinators'
 list; the judge's verdict on the audit's divergence 3): the
@@ -121,6 +135,12 @@ With its own glue for these and for rows 5, 7, 10 and 11's test-capture
 release, leanrs adopts the executor without a change of output; its
 `stderr()` (std's) has a lock of its own, so its internal panic's line
 waits for its own writes in progress, but not for the crate's.
+
+`IO.Process.forceExit` (row 18) is part of the executor since fixes-20:
+both translators make an effect point before it, and
+`process_force_exit` gives them one sequence, with the end through the
+glue. `PanicGlue::force_exit`'s default is leanrs's `std::process::exit`;
+lean2rr keeps its `_exit` with the knob.
 
 ## Open points
 
@@ -148,6 +168,3 @@ waits for its own writes in progress, but not for the crate's.
   `_init_l_Nat_reprFast___closed__0`; with a `String` closed term it does
   not. This is a suspected native bug, for a judge. It is not part of the
   executor.
-- `IO.Process.forceExit` is not part of this module: lean2rr writes the
-  handed-off streams and calls `_exit`, leanrs makes an effect point and
-  calls `io::exit::force_exit`.

@@ -467,13 +467,14 @@ fn tcp_errors(args: &[String]) -> u32 {
             let p = tcp_recv(&sc, 100)?;
             Ok(then(&p, bytes))
         });
-        // a refused connect: a port that was bound, then closed
-        let closed = {
-            let t = new_tcp();
-            t.bind(at(0))?;
-            t.sock_name()?.port()
-        };
+        // a refused connect: a port that was bound, then closed; `d` is
+        // bound while `t` holds the port, as in the Lean program
+        let t = new_tcp();
+        t.bind(at(0))?;
         let d = new_tcp();
+        d.bind(at(0))?;
+        let closed = t.sock_name()?.port();
+        drop(t);
         try_io("connect to a closed port", || {
             let p = tcp_connect(&d, at(closed))?;
             Ok(then(&p, unit))
@@ -744,12 +745,13 @@ fn udp_errors(args: &[String]) -> u32 {
             let p = udp_send(&a, vec![vec![1u8; 70000]], Some(at(pb)))?;
             Ok(then(&p, unit))
         });
-        let closed = {
-            let t = new_udp();
-            t.bind(at(0))?;
-            t.sock_name()?.port()
-        };
+        let t = new_udp();
+        t.bind(at(0))?;
         let c = new_udp();
+        c.bind(at(0))?;
+        let closed = t.sock_name()?.port();
+        // `t`'s last use, as in the Lean program: closed before the connect
+        drop(t);
         c.connect(at(closed))?;
         try_io("send to a closed port", || {
             let p = udp_send(&c, vec![b"x".to_vec()], None)?;
@@ -998,6 +1000,8 @@ fn keepalive_zero_delay(_: &[String]) -> u32 {
         let _ = wait(&tcp_connect(&c, lo(port))?);
         attempt("connected keepAlive 1 0", c.keep_alive(1, 0));
         attempt("connected keepAlive 1 30", c.keep_alive(1, 30));
+        // `s` is kept until here, as in the Lean program
+        drop(s);
         Ok(())
     })())
 }
@@ -1751,13 +1755,15 @@ fn rnet_shutdown_in_connect(_: &[String]) -> u32 {
             "peer recv?: {}",
             recv_res(wait(&tcp_recv(&peer, 64)?))
         ));
-        // a refused connect with a shutdown behind it
-        let closed = {
-            let t = new_tcp();
-            t.bind(lo(0))?;
-            t.sock_name()?.port()
-        };
+        // a refused connect with a shutdown behind it; `d` is bound while
+        // `t` holds the port, so its connect's autobind cannot take the
+        // port `t` frees and connect `d` to itself
+        let t = new_tcp();
+        t.bind(lo(0))?;
         let d = new_tcp();
+        d.bind(lo(0))?;
+        let closed = t.sock_name()?.port();
+        drop(t);
         let (pc, ps) = {
             let _g = lean_runtime::sched::no_suspend();
             let pc = tcp_connect(&d, lo(closed))?;

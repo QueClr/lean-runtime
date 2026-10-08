@@ -201,7 +201,8 @@ pub fn exit(code: i32) -> ! {
 ///
 /// The crate registers none of these. A translator whose glue registers any,
 /// or links C or C++ code that buffers output, and needs `_Exit` exactly,
-/// calls `_exit` from its glue.
+/// calls `_exit` from its glue: [`super::panic::process_force_exit`] takes
+/// the end from [`super::panic::PanicGlue::force_exit`].
 ///
 /// Before `std::process::exit`, a process-wide flag is set that makes every
 /// later `fclose` (a handle dropped by a thread-local destructor, a translator
@@ -223,18 +224,32 @@ pub fn exit(code: i32) -> ! {
 /// and its writer thread writes the rest until `std::process::exit` ends
 /// the process. That difference remains (review RF15-A05; docs/sched.md
 /// has the parked option of a full emulation).
+///
+/// No effect point: [`super::panic::process_force_exit`] is this with an
+/// effect point first and the glue's end (`PanicGlue::force_exit`, whose
+/// default is the same `std::process::exit`).
 pub fn force_exit(code: i32) -> ! {
-    #[cfg(feature = "sched")]
-    super::coop::join_own_writers(super::coop::JoinAt::ForceExit);
-    EXITING_WITHOUT_FLUSH.store(true, Ordering::SeqCst);
+    before_force_exit();
     std::process::exit(code)
 }
 
-/// Set by [`force_exit`]: the process is ending as `_Exit` ends it.
+/// The streams' part of `_Exit`, shared by [`force_exit`] and
+/// [`super::panic::process_force_exit`] (see [`force_exit`]): the writer
+/// threads of the exiting context's dropped streams joined, except those of
+/// a skip window (feature `sched`), then the flag that makes every later
+/// `fclose` and [`exit_flush`] discard pending output. The process must end
+/// right after it.
+pub(crate) fn before_force_exit() {
+    #[cfg(feature = "sched")]
+    super::coop::join_own_writers(super::coop::JoinAt::ForceExit);
+    EXITING_WITHOUT_FLUSH.store(true, Ordering::SeqCst);
+}
+
+/// Set by [`before_force_exit`]: the process is ending as `_Exit` ends it.
 static EXITING_WITHOUT_FLUSH: AtomicBool = AtomicBool::new(false);
 
-/// Whether [`force_exit`] is ending the process: no stream writes its pending
-/// output any more.
+/// Whether [`force_exit`] or [`super::panic::process_force_exit`] is ending
+/// the process: no stream writes its pending output any more.
 pub(crate) fn exiting_without_flush() -> bool {
     EXITING_WITHOUT_FLUSH.load(Ordering::SeqCst)
 }

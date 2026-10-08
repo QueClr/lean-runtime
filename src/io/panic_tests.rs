@@ -1,5 +1,7 @@
 //! Unit tests of `io::panic`: the order of each path's steps, recorded by a
-//! glue whose ways out unwind instead of ending the process. The child
+//! glue whose ways out unwind instead of ending the process. The tests of
+//! `process_force_exit` run their body in a child process (`ran_in_child`):
+//! the no-flush flag it sets stays set for the whole process. The child
 //! processes that end for real, with the crate's own streams, are in
 //! `tests/io_panic.rs`.
 
@@ -17,6 +19,8 @@ enum Call {
     Internal(Vec<u8>),
     Abort,
     Exit(i32),
+    /// `force_exit`'s code, and whether the no-flush flag was set by then.
+    ForceExit(i32, bool),
 }
 
 use Call::*;
@@ -63,6 +67,11 @@ impl PanicGlue for Rec {
     }
     fn exit(&mut self, code: i32) -> ! {
         self.calls.push(Exit(code));
+        resume_unwind(Box::new(Ended))
+    }
+    fn force_exit(&mut self, code: i32) -> ! {
+        let no_flush = super::super::exit::exiting_without_flush();
+        self.calls.push(ForceExit(code, no_flush));
         resume_unwind(Box::new(Ended))
     }
 }
@@ -376,6 +385,100 @@ fn process_exit_steps() {
         run(quiet(), false, |g| process_exit(255, g)),
         (vec![Exit(255)], true)
     );
+}
+
+/// Runs this test binary again as a child that runs only `test`, with
+/// `LEAN_RUNTIME_TEST_IN_CHILD` set, and asserts that it passed: true in the
+/// parent, which then returns; false in the child, which runs the test's
+/// body.
+fn ran_in_child(test: &str) -> bool {
+    const CHILD: &str = "LEAN_RUNTIME_TEST_IN_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        return false;
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--test-threads=1"])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && text.contains("1 passed"),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    true
+}
+
+/// `IO.Process.forceExit`: the glue's `force_exit` with the code, after the
+/// no-flush flag is set, whatever the panic settings; never `exit`, whose
+/// flushes `_Exit` does not make. In a child process (`ran_in_child`).
+#[test]
+#[cfg_attr(miri, ignore)]
+fn process_force_exit_steps() {
+    if ran_in_child("io::panic::tests::process_force_exit_steps") {
+        return;
+    }
+    assert!(!super::super::exit::exiting_without_flush());
+    let abort = PanicSettings::from_env(Some(b"1"), None);
+    assert_eq!(
+        run(abort, true, |g| process_force_exit(3, g)),
+        (vec![ForceExit(3, true)], true)
+    );
+    assert_eq!(
+        run(quiet(), false, |g| process_force_exit(255, g)),
+        (vec![ForceExit(255, true)], true)
+    );
+}
+
+/// `IO.Process.forceExit` makes an effect point before the glue's
+/// `force_exit`: a task queued over 5 ms ago (`STALE`), which a worker
+/// would have started by now, runs first. In a child process
+/// (`ran_in_child`).
+#[cfg(feature = "sched")]
+#[test]
+#[cfg_attr(miri, ignore)]
+fn process_force_exit_lets_a_due_task_go_first() {
+    use crate::sched;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    if ran_in_child("io::panic::tests::process_force_exit_lets_a_due_task_go_first") {
+        return;
+    }
+    struct NoSuspend;
+    impl sched::Glue for NoSuspend {
+        fn suspend(&self, _: sched::Suspend<'_>) {
+            panic!("the crate's unit tests never suspend a context");
+        }
+    }
+    /// A glue whose `force_exit` logs its code where the task logs.
+    struct Logged(Rc<RefCell<Vec<String>>>);
+    impl PanicGlue for Logged {
+        fn force_exit(&mut self, code: i32) -> ! {
+            self.0.borrow_mut().push(format!("force_exit {code}"));
+            resume_unwind(Box::new(Ended))
+        }
+    }
+    sched::start_with(Rc::new(NoSuspend), 1, 1 << 20);
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let l2 = log.clone();
+    let _t = sched::spawn(
+        Box::new(move || {
+            l2.borrow_mut().push("task".to_string());
+            sched::Outcome::Done
+        }),
+        0,
+        true,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(6));
+    let mut glue = Logged(log.clone());
+    let ended = catch_unwind(AssertUnwindSafe(|| process_force_exit(7, &mut glue)));
+    assert!(
+        ended.is_err_and(|e| e.is::<Ended>()),
+        "a Rust panic, not an end"
+    );
+    assert_eq!(*log.borrow(), ["task", "force_exit 7"]);
+    sched::finish();
 }
 
 /// The glue may be a trait object.

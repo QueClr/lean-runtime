@@ -1,0 +1,5 @@
+id = "sync_wait_dedicated_keeps_worker"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HSC-01, second shape (hunt-sched2/repros/hsc01b.lean: a dedicated task run on the stack of a sync dependent left its worker uncounted), judged by the coordinator, fixes-19, 2026-10-07"
+streams = "separate"

@@ -997,7 +997,12 @@ each callback.
 - **Finishing.** `resolve_core` (927) stores the value; `handle_finished`
   (938) walks the dependents, newest first, through `enqueue_core`, so a
   `sync` one (priority `LEAN_SYNC_PRIO`, `lean_task_map_core`, 1211) runs
-  there, on the finishing thread. Cancellation passes on to them.
+  there, on the finishing thread. Cancellation passes on to them. The
+  worker keeps the lock from its task's closure's end (904) through
+  `resolve_core`'s notification (935) to `m_idle_std_workers++` (866),
+  unlocking only around the closures of `sync` dependents: a thread that
+  sees the task finished and queues a task finds the worker idle, and the
+  task goes to it.
 - **Deletion.** The last reference to an unfinished task gone,
   `deactivate_task` (1060) and `deactivate_task_core` (811) mark it deleted
   and drop its closure unlocked. A queued deleted task is freed when
@@ -1101,6 +1106,42 @@ dedicated thread ended). The other locks (a `Ref`'s, a `Std.Sync` object's)
 are never held together with it. The only atomics: the shutdown and
 started flags, and a running task's cancellation flag, read without the
 lock by `check_canceled`.
+
+**A worker is idle once its task's walk is done** (fixes-19). The glue's
+`task_end` runs outside the lock, after the walk, where native has no
+unlock. So:
+- a standard worker counts itself idle (`idle += 1`) under the lock before
+  its task's `task_end` (`task_end`'s `to_idle`, set by `worker_main`; also
+  for a bind task that waits for another task, and for a job that ended
+  its task itself), and takes a task queued meanwhile when it is back in
+  its loop, before it waits. The worker that took no task to its end (a
+  task released before it began) counts itself idle in `worker_main`;
+  one whose bind task runs again at once (`add_dep`'s `again`, only with
+  no task manager running) counts itself idle after that run;
+- every walk's `task_end` comes before its notification of the waiters
+  (`finished_cv`), as part of the task's run, as its job's unlock is: a
+  waiter woken by a `sync` dependent, the last task of its source's walk,
+  goes on only once the hook is over.
+
+Before the fix the worker was counted idle only after its hook, and a
+walk notified before its hook: a waiter that went on in the hook and
+queued a task while the worker was still counted busy made a new worker
+(`enqueue_core`'s rule), where natively the task goes to the idle worker.
+`tasks/worker_keeps_streams` (B's line on A's worker, in A's buffer) failed
+1 run in 5 under load. Unit tests (each opens the gap with a glue whose
+`task_end` waits): `a_worker_is_idle_in_its_tasks_task_end` and
+`a_sync_dependents_task_end_comes_before_its_waiters_wake`; each fails with
+its half of the fix undone. The `live - idle >= max` test counts a worker
+in its hook as idle, as native's worker is by then; the shutdown, which
+ends a worker once the queue is empty, takes it out of `idle` and `live`
+as before. A limit: a thread that is not waiting yet and reads a `sync`
+dependent finished during that dependent's hook goes on while the worker
+is busy; natively the dependent is finished only under the lock, which the
+worker then keeps until the next `sync` closure or until it is idle. The
+other unlocks between a task's finish and the worker's next task are
+native's own: around the jobs of `sync` dependents, the drop of a released
+task's continuation (`run_task`, 905-912), and the next task's
+`task_begin`, which comes after `idle -= 1`, inside its job's unlock.
 
 **The slot.** The job writes the glue's slot before it returns. The
 scheduler then marks the task finished under the lock. So whoever learns

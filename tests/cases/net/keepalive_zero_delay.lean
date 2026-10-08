@@ -28,3 +28,7 @@ def main : IO Unit := do
   let _ ← IO.wait (← c.connect (lo port)).result?
   attempt "connected keepAlive 1 0" (c.keepAlive 1 0)
   attempt "connected keepAlive 1 30" (c.keepAlive 1 30)
+  -- `s` is kept until here, so `c` connects to a listening socket (its last
+  -- use was the `getSockName` above: it was closed before the connect, and
+  -- `c`'s autobind could take its port and connect to itself)
+  let _ ← s.getSockName

@@ -7,7 +7,9 @@
 //! only make the other order likely, never required.
 
 use super::sync::{Condvar, Mutex, RecursiveMutex, SharedMutex};
-use super::task::{bind_local, configure, live_workers, table_len, wake_waiters, Shared};
+use super::task::{
+    bind_local, blocked_waits, configure, live_workers, table_len, wake_waiters, Shared,
+};
 use super::*;
 use crate::sched::await_task;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
@@ -94,6 +96,12 @@ impl Gate {
         while !*g {
             g = self.0 .1.wait(g).unwrap();
         }
+    }
+    /// `wait`, for at most `d`: whether it opened.
+    fn wait_at_most(&self, d: std::time::Duration) -> bool {
+        let g = self.0 .0.lock().unwrap();
+        let (g, _) = self.0 .1.wait_timeout_while(g, d, |open| !*open).unwrap();
+        *g
     }
 }
 
@@ -973,6 +981,113 @@ fn the_glue_hooks_pair_up() {
             "thread end"
         ]
     );
+}
+
+/// A glue that holds the first `task_end` of one kind (of a task on a
+/// thread of its own, or of a `sync` task): it opens `in_hook`, then waits
+/// for `go`, at most `limit`.
+struct HoldEndGlue {
+    own: bool,
+    held: AtomicBool,
+    in_hook: Gate,
+    go: Gate,
+    limit: std::time::Duration,
+}
+
+impl HoldEndGlue {
+    fn new(own: bool, limit: std::time::Duration) -> HoldEndGlue {
+        HoldEndGlue {
+            own,
+            held: AtomicBool::new(false),
+            in_hook: Gate::default(),
+            go: Gate::default(),
+            limit,
+        }
+    }
+}
+
+impl Glue for HoldEndGlue {
+    fn task_end(&self, own_thread: bool) {
+        if own_thread == self.own && !self.held.swap(true, Ordering::SeqCst) {
+            self.in_hook.open();
+            self.go.wait_at_most(self.limit);
+        }
+    }
+}
+
+/// Natively a worker counts itself idle (`m_idle_std_workers++`) under the
+/// lock it has held since its task's closure returned, through
+/// `resolve_core`: a thread that sees the task finished and then queues a
+/// task finds that worker idle, and the task goes to it (`enqueue_core`
+/// makes a worker only when none is idle; `tasks/worker_keeps_streams`).
+/// Here the glue's `task_end` runs after the walk, outside the lock, so the
+/// worker counts itself idle before it. The hook holds that gap open until
+/// `main` has queued `b`. Before the fix the worker counted itself idle
+/// only after the hook: `b`'s enqueue made a second worker.
+#[test]
+fn a_worker_is_idle_in_its_tasks_task_end() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(true, std::time::Duration::from_secs(60)));
+    configure(&sh, glue.clone(), 4, 256 << 10);
+    let a: Slot<Option<u32>> = Slot::default();
+    let ta = spawn(filling(&a, running_worker), 0, true);
+    // `a` has finished, and its worker is in its `task_end`
+    glue.in_hook.wait();
+    assert!(is_finished(ta));
+    let b: Slot<Option<u32>> = Slot::default();
+    let tb = spawn(filling(&b, running_worker), 0, true);
+    let live = live_workers(&sh);
+    glue.go.open();
+    wait(tb);
+    finish();
+    assert_eq!(live, 1, "b's enqueue found a's worker idle: no new worker");
+    assert_eq!(a.get(), Some(&Some(0)));
+    assert_eq!(b.get(), a.get(), "b ran on a's worker");
+}
+
+/// The same gap after a `sync` dependent, the last task of its source's
+/// walk: natively its `resolve_core` notifies under the lock, which the
+/// worker then keeps until it is idle, so the waiter it wakes finds the
+/// worker idle. Here the dependent's `task_end` runs outside the lock, as
+/// part of its run, before its waiters are notified. The hook waits for
+/// `main` at most 300 ms: `main` sleeps in `wait(s)` until the hook has
+/// ended. Before the fix the notification came first: `main` went on in
+/// the hook and queued `b` while `a`'s worker was busy, which made a second
+/// worker.
+#[test]
+fn a_sync_dependents_task_end_comes_before_its_waiters_wake() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(
+        false,
+        std::time::Duration::from_millis(300),
+    ));
+    configure(&sh, glue.clone(), 4, 256 << 10);
+    let a: Slot<Option<u32>> = Slot::default();
+    let ta = spawn(filling(&a, running_worker), 0, true);
+    let sh2 = sh.clone();
+    // `s`, walked on `a`'s worker, ends once `main` sleeps in `wait(s)`
+    let ts = depend(
+        ta,
+        Box::new(move || {
+            until(|| blocked_waits(&sh2) == 1);
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    wait(ts);
+    let b: Slot<Option<u32>> = Slot::default();
+    let tb = spawn(filling(&b, running_worker), 0, true);
+    let live = live_workers(&sh);
+    glue.go.open();
+    wait(tb);
+    finish();
+    assert_eq!(live, 1, "b's enqueue found a's worker idle: no new worker");
+    assert_eq!(a.get(), Some(&Some(0)));
+    assert_eq!(b.get(), a.get(), "b ran on a's worker");
 }
 
 /// Natively a task's standard streams (`IO.setStdout` & co.) and `errno`

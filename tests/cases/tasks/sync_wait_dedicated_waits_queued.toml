@@ -1,0 +1,6 @@
+id = "sync_wait_dedicated_waits_queued"
+area = "tasks"
+lean_version = "4.34.0"
+source = "lean-runtime hunt HSC-01, the hunter's deadlock variant (a dedicated task that a sync dependent waits for waits for a queued task), fixes-19, 2026-10-07"
+streams = "separate"
+expect = { hang = 3 }
