@@ -127,6 +127,19 @@ pub trait Glue: Send + Sync {
     /// The task started by the matching `task_begin`, on the same thread,
     /// has finished (its `sync` dependents have run), or waits for the task
     /// its bind function returned.
+    ///
+    /// For a pool worker's task the worker has already counted itself idle
+    /// and taken its next queued task, if any (as natively, in the hold that
+    /// finished the task; docs/threads.md, 1.3); it runs that task after the
+    /// hook. So the hook must not wait for pool work: a task it queues gets
+    /// no worker on account of its own, which counts idle, and runs only
+    /// once another worker is free (a hook that waits for it stalls until
+    /// then, or for good at the limit); and a task another thread queues
+    /// meanwhile may be handed to this worker, which runs it only after the
+    /// hook. It may queue tasks, release and resolve; keep it short (a task
+    /// handed to the worker meanwhile starts when it returns). A `resolve`
+    /// here runs the promise's `sync` dependents here, on this worker: their
+    /// waits count as the hook's.
     fn task_end(&self, _own_thread: bool) {}
 
     /// The task manager's finalization has ended its standard workers
@@ -294,6 +307,24 @@ pub fn is_finished(id: TaskId) -> bool {
     task::with_shared(|sh| sh.is_none_or(|sh| task::is_finished(sh, id)))
 }
 
+/// Whether a task whose slot the glue found full has finished for the
+/// scheduler (docs/sched.md, "The glue", item 3; hunt HMT2-02): the job
+/// stores the value outside the lock, and the task leaves the table only in
+/// the next hold of the lock, the hold that also walks its dependents and
+/// counts its worker idle (and has it take its next task), as natively one
+/// hold sets `m_value` and goes on to the worker's next task. A full slot
+/// alone is finished only once this answered true; the glue confirms it
+/// then, and from then on reads the slot alone (docs/threads.md, 1.3, the
+/// slot). True for `TaskId::FINISHED` with no lock; otherwise
+/// [`is_finished`]: the lock and one lookup. A true answer means the
+/// removing hold ended before this call's lock, so the slot's contents are
+/// visible and every later call of the scheduler sees the worker idle or
+/// busy with its next task. Ids are never reused, so a finished task's id is
+/// a valid argument.
+pub fn full_slot_finished(id: TaskId) -> bool {
+    id == TaskId::FINISHED || is_finished(id)
+}
+
 /// `IO.getTaskState` (`lean_io_get_task_state_core`, `get_task_state`):
 /// native's answer, with no polling rule: queued or waiting for its source
 /// is `waiting`; running, or an unresolved promise, is `running`.
@@ -342,9 +373,11 @@ pub fn check_canceled() -> bool {
 /// set up, as natively they run in `handle_finished` with what the task left
 /// installed on its thread. The job then returns `Outcome::Done` (a
 /// `Continue` after it aborts the process, with a message); the glue's
-/// `task_end` comes after as usual. After the call the job only finishes
-/// up: it must not wait. A glue whose streams live in `io::streams` needs
-/// none of this (they are the thread's).
+/// `task_end` comes after as usual, and then the task's waiters wake (once
+/// a pool worker counts itself idle, as after the scheduler's own walk;
+/// hunt HMT2-03). After the call the job only finishes up: it must not
+/// wait. A glue whose streams live in `io::streams` needs none of this
+/// (they are the thread's).
 ///
 /// `id` is the job's own task, the id `spawn` or `depend` returned for it:
 /// the call ends it only if this thread runs its job now as the innermost

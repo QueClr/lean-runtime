@@ -92,10 +92,10 @@ pub(crate) fn reactor_coop_on_for_tests() {
 }
 pub use task::{
     cancel, check_canceled, current_context, depend, dependent_runs_now, effect, end_running_task,
-    finish, in_sync_task, is_finished, manager_running, option_get_or_block, poll, promise_new,
-    release, resolve, running_worker, sleep_ms, spawn, state, thread_number, tid_offset, wait,
-    wait_any, Job, Outcome, TaskId, TaskState, GET_IN_SYNC_TASK, PROMISE_BEFORE_MANAGER,
-    PROMISE_DROPPED,
+    finish, full_slot_finished, in_sync_task, is_finished, manager_running, option_get_or_block,
+    poll, promise_new, release, resolve, running_worker, sleep_ms, spawn, state, thread_number,
+    tid_offset, wait, wait_any, Job, Outcome, TaskId, TaskState, GET_IN_SYNC_TASK,
+    PROMISE_BEFORE_MANAGER, PROMISE_DROPPED,
 };
 
 use std::cell::{Cell, RefCell};

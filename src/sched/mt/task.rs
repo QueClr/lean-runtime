@@ -150,6 +150,14 @@ pub(crate) struct State {
     live: u32,
     /// `m_idle_std_workers`: live workers between tasks.
     idle: u32,
+    /// The standard workers (their indices) in their task's `task_end` hook,
+    /// counted idle, that took no task: such a worker cannot wait on
+    /// `queue_cv` meanwhile, so a task it would take when woken is handed to
+    /// it (`wake_one`; hunt HMT2-01).
+    hook_idle: Vec<u32>,
+    /// The tasks handed to such workers (`take`n: counted busy, started):
+    /// each runs its task once its hook has returned.
+    handed: Vec<(u32, u64)>,
     /// Standard workers made so far: the next one's index (its position in
     /// native's `m_std_workers`; `running_worker`, review AR-32).
     made: u32,
@@ -228,6 +236,8 @@ impl Shared {
                 raised: 0,
                 live: 0,
                 idle: 0,
+                hook_idle: Vec::new(),
+                handed: Vec::new(),
                 made: 0,
                 dedicated: 0,
                 queues: Default::default(),
@@ -288,6 +298,27 @@ struct Frame {
     sync: bool,
     canceled: Arc<AtomicBool>,
     shared: Arc<Shared>,
+    /// The job ended its task itself (`end_running_task`), a referenced
+    /// one: its waiters wake once `run_one` has run its `task_end`, when the
+    /// worker counts itself idle (hunt HMT2-03).
+    notify_at_end: Cell<bool>,
+}
+
+/// A standard worker's state across the run of its task, which `drive`
+/// passes down to the task's `task_end` (hunt HMT2-01).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Turn {
+    /// Not a standard worker's own task: a `sync` task, a dedicated task, a
+    /// resolver's walk, a task run at once after `finish`; or a worker's
+    /// task that runs again at once (`add_dep`'s `again`).
+    Other,
+    /// A standard worker runs its task: the task's `task_end` counts it
+    /// idle and takes its next task.
+    Worker,
+    /// Counted idle; no task was queued (or the limit held it back).
+    Idle,
+    /// Took this task, which it runs next.
+    Took(u64),
 }
 
 thread_local! {
@@ -499,30 +530,37 @@ fn worker_main(sh: Arc<Shared>, index: u32) {
     thread_entry(&sh);
     let mut g = sh.lock();
     g.idle += 1;
+    // The task the last one's `task_end` took (counted busy already).
+    let mut next = None;
     loop {
-        if g.queued == 0 {
-            if g.shutting_down {
-                break;
+        let id = match next.take() {
+            Some(id) => id,
+            None => {
+                if g.queued == 0 {
+                    if g.shutting_down {
+                        break;
+                    }
+                    g = wait_on(&sh.queue_cv, g);
+                    continue;
+                }
+                let Some(id) = take(&mut g) else {
+                    g = wait_on(&sh.queue_cv, g);
+                    continue;
+                };
+                id
             }
-            g = wait_on(&sh.queue_cv, g);
-            continue;
-        }
-        // `live >= idle`: a worker counts itself idle only while it lives.
-        if !g.shutting_down && g.live - g.idle >= g.max() {
-            g = wait_on(&sh.queue_cv, g);
-            continue;
-        }
-        let Some(id) = dequeue(&mut g) else {
-            continue;
         };
-        g.idle -= 1;
         // The worker counts itself idle again once its task's walk is done,
-        // before the glue's `task_end` unlocks (`task_end`), or here if it
-        // reached none (a task released before it began).
-        let mut to_idle = true;
-        g = drive(&sh, g, Some((id, true)), Vec::new(), &mut to_idle);
-        if to_idle {
-            g.idle += 1;
+        // and takes its next task, before the glue's `task_end` unlocks
+        // (`task_end`); or here if the run reached no `task_end` (a task
+        // gone from the table: none since `take` marks it running, kept
+        // for safety).
+        let mut turn = Turn::Worker;
+        g = drive(&sh, g, Some((id, true)), Vec::new(), &mut turn);
+        match turn {
+            Turn::Worker => g.idle += 1,
+            Turn::Took(id) => next = Some(id),
+            Turn::Idle | Turn::Other => {}
         }
     }
     g.idle -= 1;
@@ -579,6 +617,28 @@ fn dequeue(g: &mut State) -> Option<u64> {
     None
 }
 
+/// The worker loop's take step (`spawn_worker`'s lambda, 846-866), for a
+/// standard worker counted idle, with a task queued: the first task of the
+/// highest non-empty queue, unless the busy workers reach the limit
+/// (outside the shutdown). The worker then counts as busy, and the task as
+/// started (`RUNNING`), as natively `run_task` takes its closure in the
+/// hold of the dequeue (887-898): so a `release` before its job begins
+/// (during the glue's `task_end`, which comes between, `task_end`) marks a
+/// pure task deleted and canceled, and `state` answers running.
+fn take(g: &mut State) -> Option<u64> {
+    debug_assert!(g.queued > 0);
+    // `live >= idle`: a worker counts itself idle only while it lives.
+    if !g.shutting_down && g.live - g.idle >= g.max() {
+        return None;
+    }
+    let id = dequeue(g)?;
+    g.idle -= 1;
+    if let Some(e) = g.tasks.get_mut(&id) {
+        e.flags |= RUNNING;
+    }
+    Some(id)
+}
+
 /// `enqueue_core` (789-809) for task `id`, pending and not `sync` (a `sync`
 /// one runs on the enqueuing thread: the callers run it themselves, with
 /// `run_task`): a dedicated task gets its thread; a pool task goes to the
@@ -601,8 +661,33 @@ fn enqueue(sh: &Arc<Shared>, g: &mut State, id: u64) {
     if g.idle == 0 && g.live < g.max() {
         spawn_worker(sh, g);
     } else {
-        sh.queue_cv.notify_one();
+        wake_one(sh, g);
     }
+}
+
+/// `m_queue_cv.notify_one()` after an enqueue or a raised limit: an idle
+/// worker takes a queued task. A worker waiting on `queue_cv` is woken, if
+/// one is (it starts the task at once). Otherwise a worker in its
+/// `task_end` hook, counted idle (`hook_idle`), is given the task under
+/// this lock (`take`): from now on it counts busy, as natively the woken
+/// worker is once it has taken the task, and it runs the task once its
+/// hook has returned (hunt HMT2-01: a raise during the hook found the
+/// worker idle and made no worker, though it was about to take a queued
+/// task). Never the calling thread's own worker: a hook that queues a task
+/// would wait for itself.
+fn wake_one(sh: &Shared, g: &mut State) {
+    let hooked = g.hook_idle.len() as u32;
+    if hooked > 0 && g.idle == hooked && g.queued > 0 {
+        let me = running_worker();
+        if let Some(k) = g.hook_idle.iter().position(|&w| Some(w) != me) {
+            if let Some(id) = take(g) {
+                let w = g.hook_idle.swap_remove(k);
+                g.handed.push((w, id));
+                return;
+            }
+        }
+    }
+    sh.queue_cv.notify_one();
 }
 
 /// `add_dep(src, d)` (1009-1023), under the lock: `d` waits for `src` if it
@@ -662,22 +747,23 @@ struct Walk {
 /// walks, in the same order: a long chain of `sync` dependents uses no
 /// stack.
 pub(crate) fn run_task<'a>(sh: &'a Arc<Shared>, g: Guard<'a>, id: u64, own: bool) -> Guard<'a> {
-    drive(sh, g, Some((id, own)), Vec::new(), &mut false)
+    drive(sh, g, Some((id, own)), Vec::new(), &mut Turn::Other)
 }
 
 /// The loop of `run_task` and `resolve`: run `next` if any, then go on with
-/// the innermost walk. `to_idle`: a standard worker runs `next`, its task,
-/// and counts itself idle at the task's `task_end` (which clears it).
+/// the innermost walk. `turn`: `Turn::Worker` when a standard worker runs
+/// `next`, its task; the task's `task_end` counts it idle and takes its
+/// next task (`Turn::Idle`, `Turn::Took`).
 fn drive<'a>(
     sh: &'a Arc<Shared>,
     mut g: Guard<'a>,
     mut next: Option<(u64, bool)>,
     mut walks: Vec<Walk>,
-    to_idle: &mut bool,
+    turn: &mut Turn,
 ) -> Guard<'a> {
     loop {
         if let Some((id, own)) = next.take() {
-            let (g2, again) = run_one(sh, g, id, own, &mut walks, to_idle);
+            let (g2, again) = run_one(sh, g, id, own, &mut walks, turn);
             g = g2;
             next = again.map(|j| (j, false));
             continue;
@@ -715,7 +801,7 @@ fn drive<'a>(
                 // (fixes-19: the hook of a `sync` dependent, the last task
                 // of a walk, let a waiter it woke see the worker busy).
                 if let Some(own) = w.end {
-                    g = task_end(sh, g, own, to_idle);
+                    g = task_end(sh, g, own, turn);
                 }
                 if w.notify {
                     sh.finished_cv.notify_all();
@@ -727,18 +813,36 @@ fn drive<'a>(
 
 /// The glue's `task_end(own)`, outside the lock (the clone of the glue is
 /// dropped under the hook's guard too: RT1-01). A standard worker's task
-/// (`own` and `to_idle`, which this clears) counts the worker idle first,
-/// under the lock: natively `m_idle_std_workers++` follows `resolve_core`
-/// with no unlock between, so a thread that sees the task finished and
-/// queues a task finds the worker idle, and the task goes to it
-/// (`enqueue_core`), not to a new worker (`tasks/worker_keeps_streams`,
-/// 1 run in 5 under load before the fix). From then on the hook is the
-/// worker's way back to its loop, which takes that task before it waits.
-fn task_end<'a>(sh: &'a Arc<Shared>, mut g: Guard<'a>, own: bool, to_idle: &mut bool) -> Guard<'a> {
-    if own && std::mem::take(to_idle) {
+/// (`own` and `Turn::Worker`) first counts the worker idle and runs the
+/// worker loop's take step, under the lock: natively
+/// `m_idle_std_workers++` and the loop's `dequeue` follow `resolve_core`
+/// with no unlock between (fixes-19, hunt HMT2-01). So a thread that sees
+/// the task finished and queues a task finds the worker idle, and the task
+/// goes to it (`enqueue_core`), not to a new worker
+/// (`tasks/worker_keeps_streams`, 1 run in 5 under load before fixes-19);
+/// and a task queued before goes to it at once, so a raise of the limit
+/// meanwhile finds it busy and makes a worker. `turn` becomes `Took(id)`,
+/// the task to run next, or `Idle`.
+///
+/// A worker counted idle in its hook cannot wait on `queue_cv`: it is in
+/// `hook_idle` meanwhile, and a task queued then (or a raise with a task
+/// queued) is handed to it (`wake_one`), which it runs next. So it counts
+/// as idle in its hook only while no task is there for it, as natively.
+fn task_end<'a>(sh: &'a Arc<Shared>, mut g: Guard<'a>, own: bool, turn: &mut Turn) -> Guard<'a> {
+    let glue = g.glue.clone();
+    let mut hooked = None;
+    if own && *turn == Turn::Worker {
         g.idle += 1;
+        let next = if g.queued > 0 { take(&mut g) } else { None };
+        *turn = next.map_or(Turn::Idle, Turn::Took);
+        if next.is_none() && glue.is_some() {
+            hooked = running_worker();
+            if let Some(me) = hooked {
+                g.hook_idle.push(me);
+            }
+        }
     }
-    let Some(gl) = g.glue.clone() else {
+    let Some(gl) = glue else {
         return g;
     };
     drop(g);
@@ -746,7 +850,20 @@ fn task_end<'a>(sh: &'a Arc<Shared>, mut g: Guard<'a>, own: bool, to_idle: &mut 
         gl.task_end(own);
         drop(gl);
     });
-    sh.lock()
+    let mut g = sh.lock();
+    if let Some(me) = hooked {
+        if let Some(k) = g.handed.iter().position(|&(w, _)| w == me) {
+            *turn = Turn::Took(g.handed.swap_remove(k).1);
+        } else {
+            let k = g
+                .hook_idle
+                .iter()
+                .position(|&w| w == me)
+                .expect("lean-runtime: a worker left hook_idle with no task");
+            g.hook_idle.swap_remove(k);
+        }
+    }
+    g
 }
 
 /// One run of task `id`'s job (`run_task`'s body). When it finishes, its
@@ -761,7 +878,7 @@ fn run_one<'a>(
     id: u64,
     own: bool,
     walks: &mut Vec<Walk>,
-    to_idle: &mut bool,
+    turn: &mut Turn,
 ) -> (Guard<'a>, Option<u64>) {
     let Some(e) = g.tasks.get_mut(&id) else {
         // released before it began: a dedicated or queued pure task
@@ -781,6 +898,7 @@ fn run_one<'a>(
         sync: e.sync,
         canceled: flag,
         shared: sh.clone(),
+        notify_at_end: Cell::new(false),
     };
     let glue = g.glue.clone();
     drop(g);
@@ -797,8 +915,12 @@ fn run_one<'a>(
     }
     drop(glue);
     let out = job();
+    // whether the job ended its task itself and its waiters wait for the
+    // `task_end` below (`end_running_task`)
+    let mut notify_at_end = false;
     if framed {
         let frame = CURRENT.with(|r| r.borrow_mut().pop());
+        notify_at_end = frame.as_ref().is_some_and(|f| f.notify_at_end.get());
         drop(frame);
     }
     std::mem::forget(guard);
@@ -816,8 +938,15 @@ fn run_one<'a>(
                 (g, None)
             }
             // the job ended its task and walked its dependents itself
-            // (`end_running_task`, AR-26): only the glue's `task_end` is left
-            None => (task_end(sh, g, own, to_idle), None),
+            // (`end_running_task`, AR-26): the glue's `task_end` is left,
+            // then the waiters wake, as after a walk here (hunt HMT2-03)
+            None => {
+                let g = task_end(sh, g, own, turn);
+                if notify_at_end {
+                    sh.finished_cv.notify_all();
+                }
+                (g, None)
+            }
         },
         Outcome::Continue(src, k) => {
             let Some(e) = g.tasks.get(&id) else {
@@ -852,9 +981,9 @@ fn run_one<'a>(
             // a task that runs again here at once (`again`) keeps the worker
             // busy: it counts itself idle after that run
             let g = if again.is_some() {
-                task_end(sh, g, own, &mut false)
+                task_end(sh, g, own, &mut Turn::Other)
             } else {
-                task_end(sh, g, own, to_idle)
+                task_end(sh, g, own, turn)
             };
             (g, again)
         }
@@ -1032,7 +1161,7 @@ pub(crate) fn wait(sh: &Arc<Shared>, id: TaskId) {
         if g.idle == 0 {
             spawn_worker(sh, &mut g);
         } else {
-            sh.queue_cv.notify_one();
+            wake_one(sh, &mut g);
         }
     }
     #[cfg(test)]
@@ -1196,18 +1325,22 @@ pub(crate) fn resolve(sh: &Arc<Shared>, id: TaskId, store: impl FnOnce()) -> boo
         notify: true,
         end: None,
     };
-    drop(drive(sh, g, None, vec![w], &mut false));
+    drop(drive(sh, g, None, vec![w], &mut Turn::Other));
     true
 }
 
 /// `end_running_task` (AR-26): task `id`, the innermost task running on
 /// this thread, whose job has stored its value, ends now: it leaves the
-/// table and its dependents are walked here (its `sync` ones run here), then
-/// its waiters wake, as after its job returns `Outcome::Done`, but with the
-/// job's own state still in place. The glue's `task_end` stays for
-/// `run_one`. Nothing when `id` is not the innermost task this thread runs
-/// (a job the glue runs itself; review RT2-14), or once it has ended (a
-/// second call).
+/// table and its dependents are walked here (its `sync` ones run here), as
+/// after its job returns `Outcome::Done`, but with the job's own state
+/// still in place. The glue's `task_end` stays for `run_one`, and so does
+/// the wake of its waiters (the frame's `notify_at_end`): `run_one` wakes
+/// them after that `task_end`, once a standard worker counts itself idle,
+/// as after a walk of its own (hunt HMT2-03: they woke here, and a waiter
+/// that queued a task while the job finished up found the worker busy and
+/// made a new one). Nothing when `id` is not the innermost task this thread
+/// runs (a job the glue runs itself; review RT2-14), or once it has ended
+/// (a second call).
 pub(crate) fn end_running_task(id: TaskId) {
     if innermost(|f| f.id) != Some(id.0) {
         return;
@@ -1221,13 +1354,15 @@ pub(crate) fn end_running_task(id: TaskId) {
         let Some(e) = g.tasks.remove(&id) else {
             return;
         };
+        let notify = e.flags & (DELETED | UNREFERENCED) == 0;
+        innermost(|f| f.notify_at_end.set(notify));
         let w = Walk {
             deps: e.deps,
             canceled: e.canceled,
-            notify: e.flags & (DELETED | UNREFERENCED) == 0,
+            notify: false,
             end: None,
         };
-        drop(drive(sh, g, None, vec![w], &mut false));
+        drop(drive(sh, g, None, vec![w], &mut Turn::Other));
     })
 }
 

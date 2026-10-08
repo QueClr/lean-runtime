@@ -3252,6 +3252,17 @@ pub fn is_finished(id: TaskId) -> bool {
     with(|s| s.find(id).is_none())
 }
 
+/// Whether a task whose slot the glue found full has finished for the
+/// scheduler (docs/sched.md, "The glue", item 3): always here, where the
+/// job's store is its last act before it returns `Outcome::Done`, with no
+/// yield point between, and no other thread reads a task's slot. The id is
+/// not read (an old id may name a reused entry). Threads mode's answers
+/// from its table (hunt HMT2-02).
+#[inline(always)]
+pub fn full_slot_finished(_id: TaskId) -> bool {
+    true
+}
+
 /// `IO.getTaskState` (`lean_io_get_task_state_core`), as a polling program
 /// sees it (`query`); `IO.hasFinished` is `state(id) == Finished`. A polling
 /// point: other contexts may run first. At the polling threshold, what a

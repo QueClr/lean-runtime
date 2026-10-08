@@ -2313,3 +2313,277 @@ fn the_workers_end_once_before_the_dedicated_threads_are_waited_for() {
     );
     assert_eq!(glue.ends.load(Ordering::SeqCst), 1);
 }
+
+/// Natively a worker's take of its next queued task (the loop's `dequeue`,
+/// `m_idle_std_workers--`) comes in the hold of its last task's
+/// `resolve_core` (hunt HMT2-01). `c` and `d` are queued while both
+/// workers are busy (the limit is 2); `a` finishes, and its worker takes
+/// `c` before its `task_end` hook, which the glue holds open. Then `b`, a
+/// pool task, waits for `d`: the raise finds no idle worker and makes one,
+/// which runs `d` while `c` waits for it. Before the fix the worker in its
+/// hook counted idle with `c` still queued: the raise made no worker, and
+/// `d` ran only after `c`.
+#[test]
+fn hmt2_01_a_worker_takes_its_next_task_before_its_task_end() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(true, std::time::Duration::from_secs(60)));
+    configure(&sh, glue.clone(), 2, 256 << 10);
+    let (a_started, b_started) = (Gate::default(), Gate::default());
+    let (go_a, go_b, d_ran, d_go) = (
+        Gate::default(),
+        Gate::default(),
+        Gate::default(),
+        Gate::default(),
+    );
+    let d_id: Slot<TaskId> = Slot::default();
+    let (b_started2, go_b2, d_id2) = (b_started.clone(), go_b.clone(), d_id.clone());
+    let tb = spawn(
+        Box::new(move || {
+            b_started2.open();
+            go_b2.wait();
+            wait(*d_id2.get().unwrap());
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    let (a_started2, go_a2) = (a_started.clone(), go_a.clone());
+    let ta = spawn(
+        Box::new(move || {
+            a_started2.open();
+            go_a2.wait();
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    a_started.wait();
+    b_started.wait();
+    // both workers are busy: `c` and `d` stay queued
+    let saw_d: Slot<bool> = Slot::default();
+    let d_ran2 = d_ran.clone();
+    let tc = spawn(
+        filling(&saw_d, move || {
+            d_ran2.wait_at_most(std::time::Duration::from_millis(500))
+        }),
+        0,
+        true,
+    );
+    let (d_ran3, d_go2) = (d_ran.clone(), d_go.clone());
+    let td = spawn(
+        Box::new(move || {
+            d_ran3.open();
+            d_go2.wait_at_most(std::time::Duration::from_secs(60));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    d_id.set(td).unwrap();
+    go_a.open();
+    // `a` has finished; its worker took `c` and is in its `task_end`
+    glue.in_hook.wait();
+    assert!(is_finished(ta));
+    go_b.open();
+    // `b` waits for `d` (the limit is 3), until `d_go` opens
+    until(|| blocked_waits(&sh) == 1);
+    let live = live_workers(&sh);
+    d_go.open();
+    glue.go.open();
+    wait(tc);
+    wait(td);
+    wait(tb);
+    finish();
+    assert_eq!(
+        live, 3,
+        "b's raise found a's worker busy with c: a new worker"
+    );
+    assert_eq!(saw_d.get(), Some(&true), "d ran while c waited for it");
+}
+
+/// The same with `c` and `d` queued while `a`'s worker is in its
+/// `task_end` hook, counted idle (fixes-19): natively the worker waits on
+/// `m_queue_cv` by then, and `c`'s enqueue wakes it to take `c`. Here it
+/// cannot wait on `queue_cv` in its hook, so `c` is handed to it under the
+/// lock (`wake_one`); it counts busy from then on and runs `c` once its
+/// hook returns. So `b`'s raise makes a worker for `d`. Before the fix the
+/// raise found the worker idle and woke nobody, and `d` ran only after `c`.
+#[test]
+fn hmt2_01_a_task_queued_during_a_workers_task_end_is_handed_to_it() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(true, std::time::Duration::from_secs(60)));
+    configure(&sh, glue.clone(), 2, 256 << 10);
+    let (go_b, d_ran, d_go) = (Gate::default(), Gate::default(), Gate::default());
+    let d_id: Slot<TaskId> = Slot::default();
+    let (go_b2, d_id2) = (go_b.clone(), d_id.clone());
+    let tb = spawn(
+        Box::new(move || {
+            go_b2.wait();
+            wait(*d_id2.get().unwrap());
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    let a: Slot<Option<u32>> = Slot::default();
+    let ta = spawn(filling(&a, running_worker), 0, true);
+    // `a` has finished; its worker is in its `task_end`
+    glue.in_hook.wait();
+    assert!(is_finished(ta));
+    let c: Slot<(Option<u32>, bool)> = Slot::default();
+    let d_ran2 = d_ran.clone();
+    let tc = spawn(
+        filling(&c, move || {
+            let w = running_worker();
+            (
+                w,
+                d_ran2.wait_at_most(std::time::Duration::from_millis(500)),
+            )
+        }),
+        0,
+        true,
+    );
+    let (d_ran3, d_go2) = (d_ran.clone(), d_go.clone());
+    let td = spawn(
+        Box::new(move || {
+            d_ran3.open();
+            d_go2.wait_at_most(std::time::Duration::from_secs(60));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    d_id.set(td).unwrap();
+    go_b.open();
+    // `b` waits for `d` (the limit is 3), until `d_go` opens
+    until(|| blocked_waits(&sh) == 1);
+    let live = live_workers(&sh);
+    d_go.open();
+    glue.go.open();
+    wait(tc);
+    wait(td);
+    wait(tb);
+    finish();
+    assert_eq!(
+        live, 3,
+        "b's raise found a's worker busy with c: a new worker"
+    );
+    let (c_worker, saw_d) = *c.get().unwrap();
+    assert_eq!(c_worker, *a.get().unwrap(), "c ran on a's worker");
+    assert!(saw_d, "d ran while c waited for it");
+}
+
+/// `end_running_task` walks the task's dependents inside its job, which
+/// then finishes up; the worker counts itself idle only at the job's end,
+/// at `run_one`'s `task_end` (hunt HMT2-03). Its waiters wake after that,
+/// as after a walk `run_one` makes (fixes-19): `main`, blocked in `wait(a)`
+/// before the job ends its task, goes on only once `a`'s worker is idle, so
+/// `b` goes to it. Before the fix the walk woke `main` at once, and `b`,
+/// queued while the job finished up (here until `main` has queued it, at
+/// most 300 ms), made a second worker.
+#[test]
+fn hmt2_03_end_running_task_wakes_its_waiters_once_the_worker_is_idle() {
+    let _s = serial();
+    let sh = start_test(4);
+    let id: Slot<TaskId> = Slot::default();
+    let a: Slot<Option<u32>> = Slot::default();
+    let main_queued = Gate::default();
+    let (id2, a2, sh2, mq) = (id.clone(), a.clone(), sh.clone(), main_queued.clone());
+    let ta = spawn(
+        Box::new(move || {
+            until(|| blocked_waits(&sh2) == 1);
+            let _ = a2.set(running_worker());
+            end_running_task(*id2.get().unwrap());
+            mq.wait_at_most(std::time::Duration::from_millis(300));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    id.set(ta).unwrap();
+    wait(ta);
+    let b: Slot<Option<u32>> = Slot::default();
+    let tb = spawn(filling(&b, running_worker), 0, true);
+    let live = live_workers(&sh);
+    main_queued.open();
+    wait(tb);
+    finish();
+    assert_eq!(live, 1, "b's enqueue found a's worker idle: no new worker");
+    assert_eq!(b.get(), a.get(), "b ran on a's worker");
+}
+
+/// The glue's rule for a full slot in threads mode (hunt HMT2-02;
+/// docs/sched.md, "The glue", item 3): the job stores the value outside
+/// the lock, and the task leaves the table only in the next hold, which
+/// also walks its dependents and counts its worker idle. Natively one hold
+/// sets `m_value` and goes on to the worker's next task. Here the job holds
+/// that gap open after its store: the slot is full, but
+/// `full_slot_finished` answers false, and `state` running, as native's
+/// answer while `m_value` is still null. Once the hold has ended (the
+/// worker is in its `task_end` hook, which the glue holds open), it answers
+/// true, and a task queued then goes to that worker.
+#[test]
+fn hmt2_02_a_full_slot_is_finished_only_once_its_workers_hold_ended() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(true, std::time::Duration::from_secs(60)));
+    configure(&sh, glue.clone(), 4, 256 << 10);
+    let a: Slot<Option<u32>> = Slot::default();
+    let (stored, go) = (Gate::default(), Gate::default());
+    let (a2, stored2, go2) = (a.clone(), stored.clone(), go.clone());
+    let ta = spawn(
+        Box::new(move || {
+            let _ = a2.set(running_worker());
+            stored2.open();
+            go2.wait_at_most(std::time::Duration::from_secs(60));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    stored.wait();
+    assert!(a.get().is_some(), "the job has stored its value");
+    assert!(!full_slot_finished(ta), "a full slot, not finished yet");
+    assert_eq!(state(ta), TaskState::Running);
+    go.open();
+    glue.in_hook.wait();
+    assert!(full_slot_finished(ta), "finished once the hold ended");
+    let b: Slot<Option<u32>> = Slot::default();
+    let tb = spawn(filling(&b, running_worker), 0, true);
+    let live = live_workers(&sh);
+    glue.go.open();
+    wait(tb);
+    finish();
+    assert_eq!(live, 1, "b's enqueue found a's worker idle: no new worker");
+    assert_eq!(b.get(), a.get(), "b ran on a's worker");
+}
+
+/// The hunter's repro with the glue's rule (native program `hmt2_02.lean`:
+/// `main` spins on `IO.hasFinished a`, then queues `b`; one worker thread
+/// in every run): `main` takes `a` as finished once its slot is full and
+/// `full_slot_finished` agrees, so the hold that counts `a`'s worker idle
+/// has ended, and `b` goes to that worker in every round. Read with the
+/// slot alone (the rule before HMT2-02), `b` often found the worker busy
+/// and made a new one.
+#[test]
+fn hmt2_02_a_task_seen_finished_then_a_new_task_takes_its_worker() {
+    let _s = serial();
+    let sh = start_test(4);
+    for round in 0..20 {
+        let a: Slot<Option<u32>> = Slot::default();
+        let ta = spawn(filling(&a, running_worker), 0, true);
+        while !(a.get().is_some() && full_slot_finished(ta)) {
+            std::hint::spin_loop();
+        }
+        let b: Slot<Option<u32>> = Slot::default();
+        let tb = spawn(filling(&b, running_worker), 0, true);
+        wait(ta);
+        wait(tb);
+        assert_eq!(b.get(), a.get(), "round {round}: b ran on a's worker");
+    }
+    let live = live_workers(&sh);
+    finish();
+    assert_eq!(live, 1, "b always went to a's worker, as natively");
+}

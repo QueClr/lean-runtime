@@ -2127,7 +2127,8 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      the spawning thread, and 2^32 to 2^32 + 8 are pool priorities (LB-39
      of `docs/lean-bugs.md`; case `tasks/big_priority_dedicated`). No
      priority makes a task `sync`: only `depend`'s `sync` argument does;
-   - `Task.get`/`IO.wait`: if the slot holds the value, that; otherwise
+   - `Task.get`/`IO.wait`: if the slot holds the value, that (threads
+     mode: if the task is confirmed finished, below); otherwise
      `await_task(id, report)`, then read the slot. `await_task` is the
      rule: in a `sync` task (`in_sync_task()`) it calls `report` with
      `GET_IN_SYNC_TASK` first, and the glue prints it as a Lean panic
@@ -2222,6 +2223,69 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    list), answer `state` and `Task.get` from the slot, and skip `release`
    and `cancel`. A finished task's id is also the fast path: no call at all
    (review RS1S-10).
+
+   **In threads mode a full slot is finished only once the scheduler has
+   said so** (hunt HMT2-02, fixes-22). There the job stores the value
+   outside the scheduler's lock, and the task leaves the table only in the
+   next hold, which walks its dependents and counts its worker idle (and
+   has it take its next task); natively one hold sets `m_value` and goes
+   on to the worker's next task (docs/threads.md, 1.3, the slot). A glue
+   that took a full slot as finished could queue a task before that hold,
+   while the worker still counts busy (a new worker where native reuses
+   it), or ahead of the finished task's dependents. So the glue keeps a
+   confirmation per task:
+   - an `AtomicBool` in its task object (or its stored id swapped to
+     `TaskId::FINISHED`), read with `Acquire`, set with `Release` only
+     after one of the answers below, never from the slot alone. A task the
+     glue made finished (`Task.pure`, an id `TaskId::FINISHED` from `spawn`
+     or `depend`) starts confirmed. Any other task keeps the id `spawn` or
+     `depend` returned, even if its slot is full by then (a worker can run
+     the job before `spawn` returns);
+   - the answers that confirm: `full_slot_finished(id)` is true (asked
+     only with the slot full); `wait` or `await_task` returned; `state`
+     answered `Finished`; `wait_any` returned the task's index;
+     `dependent_runs_now` answered true while the manager runs
+     (`manager_running()`); and, inside a dependent's job for its source
+     and inside a `Continue` job for the task it continues as, no call at
+     all: the scheduler starts those jobs only once that task has left
+     the table;
+   - `Task.get`/`IO.wait`: if confirmed, the slot. Otherwise, if the slot
+     is full and `full_slot_finished(id)`, confirm, then the slot.
+     Otherwise `await_task(id, report)`, confirm, then the slot;
+   - `IO.getTaskState`/`IO.hasFinished`: if confirmed, `Finished`.
+     Otherwise `s = state(id)`; if `s` is `Finished`, confirm; answer `s`;
+   - the id passed to `depend`, `dependent_runs_now`, `wait_any`, `cancel`
+     and `resolve`: `TaskId::FINISHED` once confirmed, otherwise the id,
+     with no slot test (each call takes the lock and answers a finished
+     task's id as it answers `FINISHED`; threads mode never reuses an id);
+   - a bind task's job, for the task `t2` that its function returned: if
+     `t2` is finished (confirmed, or its slot full and
+     `full_slot_finished`), the bind task finishes with its value;
+     otherwise `Continue(t2's id)`, as natively `m_value` is still null
+     then (`task_bind_fn1`);
+   - the drop of a promise: `resolve(id, store none)` unless confirmed (a
+     full slot not confirmed can be a resolution still in its hold;
+     `resolve` then waits for it and answers false);
+   - the drop of a task: `release(id)` while its slot is empty, as before
+     (a full slot is a task that is finishing).
+
+   Native's answers in that gap (the slot full, not confirmed; natively
+   `m_value` is still null): `IO.getTaskState` is `running`,
+   `IO.hasFinished` false, and `Task.get` waits as `wait_for` does (from a
+   pool task the limit rises by one; from a `sync` task `GET_IN_SYNC_TASK`
+   comes first). The cost: one lock for the first read of a task after its
+   slot filled, unless a wait or a dependent's job confirmed it first; none
+   for later reads. In the single-thread scheduler a full slot is finished
+   (the store is the job's last act before `Done`, with no yield point
+   between), `full_slot_finished` is the constant `true`, and the glue
+   keeps its slot rule. The confirmation is threads mode's only, and the
+   glue's own: a field under `cfg(feature = "threads")`, so that the
+   single-thread task object does not change, or a `confirmed()` that is
+   "slot full" in a single-thread build, so that one code serves both. The
+   crate's threads-mode glues (tests/sched-driver-mt, tests/threads_twins.rs)
+   follow these rules. Unit tests:
+   `hmt2_02_a_full_slot_is_finished_only_once_its_workers_hold_ended` and
+   `hmt2_02_a_task_seen_finished_then_a_new_task_takes_its_worker`.
 4. **Promises.**
    - `IO.Promise.new`: `promise_new()`. Before the task manager runs it
      returns Lean's internal-panic message, which the glue reports.

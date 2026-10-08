@@ -61,6 +61,9 @@ The loop thread exists only after the program's first use of <code>Std.Internal.
   <li><strong>Dependents.</strong> A <a href="glossary.html#g-sync-dependent">sync dependent</a> runs on the thread that finishes its source.
     The other dependents go to the queue.
     The waiters of a task wake when the walk of its dependents ends, as natively.</li>
+  <li><strong>The next task.</strong> A worker that finishes a task takes its next queued task in the same lock hold, as natively.
+    The glue's <code>task_end</code> hook runs after that.
+    A task queued during the hook goes to that worker at once, and the worker starts it when the hook returns.</li>
   <li><strong>The loop thread.</strong> <code>Std.Internal.UV</code>'s timers and signals run on a thread of their own, as natively (T2).
     That thread resolves their promises.
     With <code>net</code>, the sockets and the name lookups run there too (N).</li>
@@ -104,6 +107,8 @@ Each socket has a lock of its own, which only the holder of the loop lock takes.
     Neither translator can do that, so both would make every count atomic.</li>
   <li><strong>Tasks.</strong> The glue's task object is an <code>Arc</code> with a <code>OnceLock</code> slot.
     The job fills the slot.
+    The glue reads a full slot as finished only after the scheduler confirms it, once per task, with <code>full_slot_finished</code>.
+    So a task that the glue queues next finds the worker idle, as natively.
     The last drop of an unfinished task calls <code>release</code>, on any thread.</li>
   <li><strong>References.</strong> <code>IO.Ref</code> follows Lean 4.35's rule, as <code>sched::Ref</code>: a lock and a condition variable.
     While a <code>modify</code> function runs, <code>get</code>, <code>take</code>, <code>set</code> and <code>swap</code> wait for its store.
@@ -146,6 +151,8 @@ Each socket has a lock of its own, which only the holder of the loop lock takes.
     Here the store holds the lock.</li>
   <li><strong>A refused spawn.</strong> Where <code>unshare(CLONE_FS)</code> once worked, a later refusal makes the spawn fail with <code>EAGAIN</code>.
     Natively the forked child enters its directory itself.</li>
+  <li><strong>The <code>task_end</code> hook.</strong> A task that goes to a worker during its hook starts when the hook returns.
+    Native Lean has no such hook, so its worker starts the task at once.</li>
   <li><strong>The loop thread</strong> starts at the first use of <code>Std.Internal.UV</code>, not at the program's start.</li>
   <li><strong>Schedules.</strong> The order of racy output lines varies from run to run, as natively.
     Thread ids and the resident memory are not native's.</li>

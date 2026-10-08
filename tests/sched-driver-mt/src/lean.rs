@@ -13,6 +13,7 @@
 //! condition variable.
 
 use lean_runtime::sched::{self, Deferred, DrainScope, Job, Outcome, TaskId, TaskState};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard, OnceLock, PoisonError};
 
 /// A value that may cross threads: what a task returns, a promise holds or
@@ -48,13 +49,52 @@ impl<T> Var<T> {
 struct TaskObj<T> {
     id: TaskId,
     slot: Arc<OnceLock<T>>,
+    /// The scheduler has said the task finished (threads mode's rule,
+    /// docs/sched.md, "The glue", item 3; hunt HMT2-02): a full slot alone
+    /// is not finished until then. Set (`Release`) only after such an
+    /// answer, read with `Acquire`; true from the start for an id of
+    /// `TaskId::FINISHED`. (A glue for both modes keeps it under
+    /// `cfg(feature = "threads")`.)
+    confirmed: AtomicBool,
 }
 
 impl<T> TaskObj<T> {
-    /// The id to pass to the scheduler: `FINISHED` once the slot holds the
-    /// value (docs/sched.md, "The glue", item 3).
+    fn new(id: TaskId, slot: Arc<OnceLock<T>>) -> TaskObj<T> {
+        TaskObj {
+            id,
+            slot,
+            confirmed: AtomicBool::new(id == TaskId::FINISHED),
+        }
+    }
+
+    fn confirmed(&self) -> bool {
+        self.confirmed.load(Ordering::Acquire)
+    }
+
+    /// After an answer of the scheduler that the task has finished.
+    fn confirm(&self) {
+        self.confirmed.store(true, Ordering::Release);
+    }
+
+    /// Whether the task has finished: confirmed, or its slot is full and
+    /// `full_slot_finished` says so (one lock, once).
+    fn finished(&self) -> bool {
+        if self.confirmed() {
+            return true;
+        }
+        if self.slot.get().is_some() && sched::full_slot_finished(self.id) {
+            self.confirm();
+            return true;
+        }
+        false
+    }
+
+    /// The id to pass to the scheduler: `FINISHED` once confirmed. No slot
+    /// test: `depend`, `dependent_runs_now`, `wait_any`, `cancel` and
+    /// `resolve` take the lock anyway and answer a finished task's id as
+    /// they answer `FINISHED`.
     fn live(&self) -> TaskId {
-        if self.slot.get().is_some() {
+        if self.confirmed() {
             TaskId::FINISHED
         } else {
             self.id
@@ -65,7 +105,8 @@ impl<T> TaskObj<T> {
 impl<T> Drop for TaskObj<T> {
     fn drop(&mut self) {
         // Lean's `deactivate_task`: the last reference is gone, on whichever
-        // thread drops it. Nothing to do for a finished task.
+        // thread drops it. Nothing to do for a task whose value is stored
+        // (a full slot, confirmed or not: the task is finishing).
         if self.slot.get().is_none() {
             sched::release(self.id);
         }
@@ -102,18 +143,21 @@ fn job_filling<T: Val>(slot: &Arc<OnceLock<T>>, f: impl FnOnce() -> T + Send + '
 }
 
 impl<T: Val> Task<T> {
+    /// The task `make` spawns. Its id stays the one `make` returned, even
+    /// if the slot is full by then (a worker can run the job before
+    /// `spawn` returns): only an id of `FINISHED` starts confirmed.
     fn with_slot(make: impl FnOnce(&Arc<OnceLock<T>>) -> TaskId) -> Task<T> {
         let slot = Arc::new(OnceLock::new());
         let id = make(&slot);
-        Task(Arc::new(TaskObj { id, slot }))
+        Task(Arc::new(TaskObj::new(id, slot)))
     }
 
     /// `Task.pure`.
     pub fn pure(v: T) -> Task<T> {
-        Task(Arc::new(TaskObj {
-            id: TaskId::FINISHED,
-            slot: Arc::new(OnceLock::from(v)),
-        }))
+        Task(Arc::new(TaskObj::new(
+            TaskId::FINISHED,
+            Arc::new(OnceLock::from(v)),
+        )))
     }
 
     /// `Task.spawn fn prio`.
@@ -121,15 +165,15 @@ impl<T: Val> Task<T> {
         Task::with_slot(|slot| sched::spawn(job_filling(slot, f), prio, false))
     }
 
-    /// `Task.get` / `IO.wait` (`lean_task_get`): the value if the slot
-    /// holds it; otherwise `sched::await_task`: from a `sync` task, Lean's
-    /// panic message first (`task_manager::wait_for`), then the wait, which
-    /// blocks this thread.
+    /// `Task.get` / `IO.wait` (`lean_task_get`): the value if the task has
+    /// finished (`TaskObj::finished`); otherwise `sched::await_task`: from a
+    /// `sync` task, Lean's panic message first (`task_manager::wait_for`),
+    /// then the wait, which blocks this thread; its return confirms.
     pub fn get(&self) -> T {
-        if let Some(v) = self.0.slot.get() {
-            return v.clone();
+        if !self.0.finished() {
+            sched::await_task(self.0.id, crate::glue::lean_panic);
+            self.0.confirm();
         }
-        sched::await_task(self.0.id, crate::glue::lean_panic);
         self.0
             .slot
             .get()
@@ -137,12 +181,25 @@ impl<T: Val> Task<T> {
             .clone()
     }
 
-    /// `IO.getTaskState`.
+    /// The value inside a job that the scheduler started after this task
+    /// finished (a dependent's job, for its source; a `Continue` job, for
+    /// the task it continues as): confirmed with no call.
+    fn get_finished(&self) -> T {
+        self.0.confirm();
+        self.get()
+    }
+
+    /// `IO.getTaskState`: `Finished` once confirmed; otherwise the
+    /// scheduler's answer, which confirms when it is `Finished`.
     pub fn state(&self) -> TaskState {
-        match self.0.live() {
-            TaskId::FINISHED => TaskState::Finished,
-            id => sched::state(id),
+        if self.0.confirmed() {
+            return TaskState::Finished;
         }
+        let s = sched::state(self.0.id);
+        if s == TaskState::Finished {
+            self.0.confirm();
+        }
+        s
     }
 }
 
@@ -181,7 +238,7 @@ pub fn map_task<A: Val, B: Val>(
     Task::with_slot(|slot| {
         sched::depend(
             src,
-            job_filling(slot, move || f(t.get())),
+            job_filling(slot, move || f(t.get_finished())),
             prio,
             sync,
             keep_alive,
@@ -205,8 +262,11 @@ pub fn bind_task<A: Val, B: Val>(
     Task::with_slot(|slot| {
         let slot = slot.clone();
         let job: Job = Box::new(move || {
-            let t2 = f(t.get());
-            if t2.0.live() == TaskId::FINISHED || sched::is_finished(t2.0.id) {
+            let t2 = f(t.get_finished());
+            // finished now only if the scheduler says so: a full slot that
+            // `full_slot_finished` denies continues, as natively `m_value`
+            // is still null then (`task_bind_fn1`)
+            if t2.0.finished() {
                 sched::before_task_value();
                 let _ = slot.set(t2.get());
                 return Outcome::Done;
@@ -215,7 +275,7 @@ pub fn bind_task<A: Val, B: Val>(
             Outcome::Continue(
                 id2,
                 Box::new(move || {
-                    let v = t2.get();
+                    let v = t2.get_finished();
                     sched::before_task_value();
                     let _ = slot.set(v);
                     Outcome::Done
@@ -230,6 +290,8 @@ pub fn bind_task<A: Val, B: Val>(
 pub fn wait_any<T: Val>(ts: &[Task<T>]) -> T {
     let ids: Vec<TaskId> = ts.iter().map(|t| t.0.live()).collect();
     let k = sched::wait_any(&ids);
+    // `wait_any` answers the index of a task out of the table
+    ts[k].0.confirm();
     ts[k].get()
 }
 
@@ -255,10 +317,7 @@ impl<T: Val> Promise<T> {
             }
         };
         Promise {
-            result: Task(Arc::new(TaskObj {
-                id,
-                slot: Arc::new(OnceLock::new()),
-            })),
+            result: Task(Arc::new(TaskObj::new(id, Arc::new(OnceLock::new())))),
         }
     }
 

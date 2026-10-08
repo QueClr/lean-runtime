@@ -210,7 +210,7 @@ stack-overflow`, `net`'s unit tests of threads mode (0.7).
 1. **The same glue entry points.** `sched` re-exports `sched::mt` under
    the single-thread scheduler's names: `start`, `start_with`, `finish`,
    `spawn`, `depend`, `dependent_runs_now`, `wait`, `wait_any`, `state`,
-   `is_finished`, `cancel`, `check_canceled`, `release` (for every task, IO
+   `is_finished`, `full_slot_finished` (fixes-22), `cancel`, `check_canceled`, `release` (for every task, IO
    tasks included), `in_sync_task`, `promise_new`, `resolve`,
    `option_get_or_block`, `hang`, `before_task_value`, `before_publish`,
    `after_drain`,
@@ -464,6 +464,15 @@ glue's `task_end` is left).
   panic in the single-thread scheduler, an abort with the crate's message
   in threads mode (review RT2-16; before, a panic with the lock held, after
   which `finish` waited for good).
+- In threads mode the task's waiters wake once the job has returned, after
+  the glue's `task_end`, when a standard worker counts itself idle (and
+  has taken its next task), as after a walk the scheduler makes (hunt
+  HMT2-03, fixes-22; before, the walk woke them, and a waiter that queued a
+  task while the job finished up found the worker busy and made a new one;
+  unit test `hmt2_03_end_running_task_wakes_its_waiters_once_the_worker_is_idle`).
+  A thread that only now comes to `wait` finds the task finished and goes
+  on while the job finishes up, and so does a blocked waiter that another
+  notification wakes meanwhile (1.3, its limits).
 
 Unit tests in both schedulers: `a_job_ends_its_task_before_it_closes_its_context`
 (with a control job that does not call it: its dependent runs after the
@@ -1107,23 +1116,42 @@ are never held together with it. The only atomics: the shutdown and
 started flags, and a running task's cancellation flag, read without the
 lock by `check_canceled`.
 
-**A worker is idle once its task's walk is done** (fixes-19). The glue's
-`task_end` runs outside the lock, after the walk, where native has no
-unlock. So:
+**A worker is idle once its task's walk is done** (fixes-19), **and takes
+its next task in the same hold** (fixes-22, hunt HMT2-01). Natively one hold
+of `m_mutex` runs from the closure's end through `resolve_core` (the value
+set, the dependents walked, `notify_all`) to `m_idle_std_workers++` and the
+worker loop's `dequeue` of its next task (`run_task` 904-935, then the loop
+866). The glue's `task_end` runs outside the lock, after the walk, where
+native has no unlock. So:
 - a standard worker counts itself idle (`idle += 1`) under the lock before
-  its task's `task_end` (`task_end`'s `to_idle`, set by `worker_main`; also
-  for a bind task that waits for another task, and for a job that ended
-  its task itself), and takes a task queued meanwhile when it is back in
-  its loop, before it waits. The worker that took no task to its end (a
-  task released before it began) counts itself idle in `worker_main`;
-  one whose bind task runs again at once (`add_dep`'s `again`, only with
-  no task manager running) counts itself idle after that run;
+  its task's `task_end` and, in the same hold, runs the loop's take step
+  (`take`): with a task queued and the limit not reached, it dequeues it,
+  counts itself busy again and marks the task started (`RUNNING`, as
+  natively `run_task` takes the closure in the dequeue's hold: a `release`
+  during the hook marks a pure task deleted and canceled, `state` answers
+  running); it runs that task once the hook returns (`task_end`'s `Turn`,
+  set to `Worker` by `worker_main`; also for a bind task that waits for
+  another task, and for a job that ended its task itself). One whose bind
+  task runs again at once (`add_dep`'s `again`, only with no task manager
+  running) counts itself idle after that run;
+- a worker counted idle in its hook (the queue gave it nothing) cannot wait
+  on `queue_cv`, where natively it would be by then. It is in `hook_idle`
+  meanwhile: an enqueue or a raise of the limit that would wake an idle
+  worker (`wake_one`, `m_queue_cv.notify_one()`) wakes a worker that waits
+  on `queue_cv` if there is one, and otherwise hands the queue's next task
+  to the worker in its hook (`take`, into `handed`), which counts busy from
+  then on and runs it once its hook returns. So a worker counts as idle in
+  its hook only while no task is there for it, as natively. Never the
+  calling thread's own worker: a hook that queued a task for itself would
+  wait for itself;
 - every walk's `task_end` comes before its notification of the waiters
   (`finished_cv`), as part of the task's run, as its job's unlock is: a
   waiter woken by a `sync` dependent, the last task of its source's walk,
-  goes on only once the hook is over.
+  goes on only once the hook is over. A job that ended its task itself
+  (`end_running_task`) walked with no notification: `run_one` notifies
+  after the job's `task_end` (the frame's `notify_at_end`; hunt HMT2-03).
 
-Before the fix the worker was counted idle only after its hook, and a
+Before fixes-19 the worker was counted idle only after its hook, and a
 walk notified before its hook: a waiter that went on in the hook and
 queued a task while the worker was still counted busy made a new worker
 (`enqueue_core`'s rule), where natively the task goes to the idle worker.
@@ -1131,23 +1159,100 @@ queued a task while the worker was still counted busy made a new worker
 1 run in 5 under load. Unit tests (each opens the gap with a glue whose
 `task_end` waits): `a_worker_is_idle_in_its_tasks_task_end` and
 `a_sync_dependents_task_end_comes_before_its_waiters_wake`; each fails with
-its half of the fix undone. The `live - idle >= max` test counts a worker
-in its hook as idle, as native's worker is by then; the shutdown, which
-ends a worker once the queue is empty, takes it out of `idle` and `live`
-as before. A limit: a thread that is not waiting yet and reads a `sync`
-dependent finished during that dependent's hook goes on while the worker
-is busy; natively the dependent is finished only under the lock, which the
-worker then keeps until the next `sync` closure or until it is idle. The
-other unlocks between a task's finish and the worker's next task are
+its half of the fix undone. Before fixes-22 the worker in its hook counted
+idle with tasks queued for it: a pool task's `wait` then raised the limit,
+found `idle == 1` and made no worker (its `notify_one` reached nobody), and
+the task it waited for ran only after the queued one (natively the raise
+finds the worker busy with its next task and makes a worker; with
+`IO.waitAny` or a `Std.Sync` wait in the queued task, a hang native
+finishes). Unit tests: `hmt2_01_a_worker_takes_its_next_task_before_its_task_end`
+(a task queued before the end: the take step) and
+`hmt2_01_a_task_queued_during_a_workers_task_end_is_handed_to_it` (queued
+during the hook: the hand-off); `end_running_task`'s:
+`hmt2_03_end_running_task_wakes_its_waiters_once_the_worker_is_idle`. Each
+fails with its part of the fix undone. The `live - idle >= max` test counts a
+worker in its hook as idle, as native's worker is by then; the shutdown,
+which ends a worker once the queue is empty, takes it out of `idle` and
+`live` as before.
+
+Limits:
+- a task handed to a worker in its hook starts when the hook returns,
+  where natively the woken worker starts it at once (a hook is short: it
+  closes the glue's per-task state);
+- the glue's `task_end` must not wait for pool work (`Glue::task_end`): a
+  task it queues gets no new worker on account of its own worker, which
+  counts idle, and is never handed to it, so it runs only once another
+  worker is free (hunt HMT2-01 (b); a hook that waits for it stalls until
+  then, or for good at the limit); and a task another thread queues
+  meanwhile may be handed to the hook's own worker, which runs it only
+  after the hook (a hook that waits for such a task waits for good). No
+  hook in this repository waits (the threads-mode driver's checks the
+  hook pairs);
+- a thread that is not waiting yet and reads a `sync` dependent finished
+  during that dependent's hook goes on while the worker is busy; natively
+  the dependent is finished only under the lock, which the worker then
+  keeps until the next `sync` closure or until it is idle;
+- a job that ended its task (`end_running_task`) finishes up with its task
+  out of the table: a thread that comes to `wait` or `is_finished` then,
+  or a blocked waiter woken meanwhile by another finish's `notify_all` (a
+  task's walk, a resolution, `wake_waiters`, a lost resolver's
+  `Unclaim`), by a `sync` dependent of this walk, or spuriously, goes on
+  while the worker is busy: a blocked waiter checks only that the task
+  left the table, which the call's hold did. No threads-mode glue calls it
+  today;
+- `wake_one` hands a task to a worker in its hook only when no other
+  worker counts idle (`idle == hook_idle.len()`). A worker on `queue_cv`
+  already signalled for an earlier task, and not yet back under the lock,
+  still counts idle: a second enqueue or a raise then signals nobody new,
+  and its task waits until the hook returns or another worker frees. A
+  delay, never a hang while hooks return;
+- a hand-off counts the hooked worker busy at once, where natively a woken
+  worker counts idle until it holds the lock again and takes the task. So
+  two enqueues in a row during a hook make a second worker (the second
+  finds `idle == 0`); natively that needs the woken worker to take the
+  first task between the two enqueues, a possible schedule but not the
+  usual one.
+
+The other unlocks between a task's finish and the worker's next task are
 native's own: around the jobs of `sync` dependents, the drop of a released
 task's continuation (`run_task`, 905-912), and the next task's
 `task_begin`, which comes after `idle -= 1`, inside its job's unlock.
 
-**The slot.** The job writes the glue's slot before it returns. The
-scheduler then marks the task finished under the lock. So whoever learns
-under the lock that the task has finished also sees the slot (and a
-`OnceLock` slot synchronizes by itself). The rule "the glue's slot comes
-first" (`docs/sched.md`, The glue, item 3) stays.
+**The slot** (hunt HMT2-02, fixes-22). The job writes the glue's slot
+before it returns, outside the lock. The task leaves the table in the next
+hold (`run_one`), which also walks its dependents and counts the worker
+idle (and has it take its next task). Whoever learns under the lock that
+the task has finished also sees the slot (and a `OnceLock` slot
+synchronizes by itself). A full slot read without the lock is not enough:
+between the store and that hold the worker counts busy, so a glue that
+took the slot as finished could queue a task that makes a new worker
+(`IO.hasFinished`, then `IO.asTask`: native reuses the same worker in
+every run), or queue it ahead of the task's dependents. So in threads mode
+the glue confirms a full slot once, and keeps the confirmation in its task
+object (`docs/sched.md`, The glue, item 3: the rule for each glue site and
+the answers that confirm). The crate's call for it is
+`full_slot_finished(id)`: `TaskId::FINISHED`, or the lock and the table.
+It answers true only once the removing hold has ended (or during a
+`sync` dependent's job, which splits that hold, as natively), so every
+later call of the scheduler sees the worker idle or busy with its next
+task.
+
+Memory order: the job's store comes before the worker's lock in `run_one`,
+and that hold's unlock synchronizes with the reader's lock, so the slot's
+contents are visible. A glue's confirmation, stored with `Release` after
+the answer and loaded with `Acquire`, carries the contents to other
+readers, and the order too: a reader that saw it cannot take the lock
+before the hold that removed the task, or its load would read a store that
+happens after it. Unit tests:
+`hmt2_02_a_full_slot_is_finished_only_once_its_workers_hold_ended` (the
+job holds the gap open after its store: `full_slot_finished` false, `state`
+running; true once the worker is in its hook, and a task queued then goes
+to that worker) and
+`hmt2_02_a_task_seen_finished_then_a_new_task_takes_its_worker` (the native
+program's loop, 20 rounds, one worker); each fails with
+`full_slot_finished` answering true for a full slot, the rule before. In
+the single-thread scheduler a full slot stays finished, and
+`full_slot_finished` is the constant `true`.
 
 ### 1.4 How each rule carries over
 
@@ -1356,6 +1461,7 @@ pub fn dependent_runs_now(src: TaskId, sync: bool) -> bool;
 pub fn depend(src: TaskId, job: Job, prio: u64, sync: bool, keep_alive: bool) -> TaskId;
 pub fn wait(id: TaskId);
 pub fn is_finished(id: TaskId) -> bool;
+pub fn full_slot_finished(id: TaskId) -> bool; // HMT2-02: confirm a full slot (1.3, the slot)
 pub fn state(id: TaskId) -> TaskState;
 pub fn wait_any(ids: &[TaskId]) -> usize;
 pub fn cancel(id: TaskId);

@@ -31,6 +31,7 @@ use lean_runtime::io::process::{self, Child, SpawnArgs, Stdio, StdioConfig};
 use lean_runtime::io::{exit, Handle, IoError};
 use lean_runtime::sched::uv::{self, LoopPromise, Signal, Timer};
 use lean_runtime::sched::{self, Job, Outcome, TaskId, TaskState};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -66,12 +67,44 @@ fn ok<T>(r: R<T>) -> T {
 struct TaskObj<T> {
     id: TaskId,
     slot: Arc<OnceLock<T>>,
+    /// The scheduler has said the task finished (docs/sched.md, "The
+    /// glue", item 3; hunt HMT2-02): set (`Release`) only after such an
+    /// answer, read with `Acquire`.
+    confirmed: AtomicBool,
 }
 
 impl<T> TaskObj<T> {
-    /// The id to pass to the scheduler: `FINISHED` once the slot holds it.
+    fn new(id: TaskId, slot: Arc<OnceLock<T>>) -> TaskObj<T> {
+        TaskObj {
+            id,
+            slot,
+            confirmed: AtomicBool::new(id == TaskId::FINISHED),
+        }
+    }
+
+    fn confirmed(&self) -> bool {
+        self.confirmed.load(Ordering::Acquire)
+    }
+
+    fn confirm(&self) {
+        self.confirmed.store(true, Ordering::Release);
+    }
+
+    /// Confirmed, or a full slot that `full_slot_finished` confirms.
+    fn finished(&self) -> bool {
+        if self.confirmed() {
+            return true;
+        }
+        if self.slot.get().is_some() && sched::full_slot_finished(self.id) {
+            self.confirm();
+            return true;
+        }
+        false
+    }
+
+    /// The id to pass to the scheduler: `FINISHED` once confirmed.
     fn live(&self) -> TaskId {
-        if self.slot.get().is_some() {
+        if self.confirmed() {
             TaskId::FINISHED
         } else {
             self.id
@@ -118,22 +151,22 @@ impl<T: Val> Task<T> {
     fn with_slot(make: impl FnOnce(&Arc<OnceLock<T>>) -> TaskId) -> Task<T> {
         let slot = Arc::new(OnceLock::new());
         let id = make(&slot);
-        Task(Arc::new(TaskObj { id, slot }))
+        Task(Arc::new(TaskObj::new(id, slot)))
     }
 
     fn pure(v: T) -> Task<T> {
-        Task(Arc::new(TaskObj {
-            id: TaskId::FINISHED,
-            slot: Arc::new(OnceLock::from(v)),
-        }))
+        Task(Arc::new(TaskObj::new(
+            TaskId::FINISHED,
+            Arc::new(OnceLock::from(v)),
+        )))
     }
 
     /// `Task.get` / `IO.wait`.
     fn get(&self) -> T {
-        if let Some(v) = self.0.slot.get() {
-            return v.clone();
+        if !self.0.finished() {
+            sched::await_task(self.0.id, eprintln);
+            self.0.confirm();
         }
-        sched::await_task(self.0.id, eprintln);
         self.0
             .slot
             .get()
@@ -141,11 +174,22 @@ impl<T: Val> Task<T> {
             .clone()
     }
 
+    /// The value in a dependent's job, for its source: confirmed with no
+    /// call (the scheduler starts it once the source has finished).
+    fn get_finished(&self) -> T {
+        self.0.confirm();
+        self.get()
+    }
+
     fn state(&self) -> TaskState {
-        match self.0.live() {
-            TaskId::FINISHED => TaskState::Finished,
-            id => sched::state(id),
+        if self.0.confirmed() {
+            return TaskState::Finished;
         }
+        let s = sched::state(self.0.id);
+        if s == TaskState::Finished {
+            self.0.confirm();
+        }
+        s
     }
 }
 
@@ -171,7 +215,13 @@ fn map_task<A: Val, B: Val>(
         return Task::pure(f(t.get()));
     }
     Task::with_slot(|slot| {
-        sched::depend(src, job_filling(slot, move || f(t.get())), prio, sync, true)
+        sched::depend(
+            src,
+            job_filling(slot, move || f(t.get_finished())),
+            prio,
+            sync,
+            true,
+        )
     })
 }
 
@@ -190,10 +240,7 @@ impl<T: Val> Promise<T> {
             }
         };
         Promise {
-            result: Task(Arc::new(TaskObj {
-                id,
-                slot: Arc::new(OnceLock::new()),
-            })),
+            result: Task(Arc::new(TaskObj::new(id, Arc::new(OnceLock::new())))),
         }
     }
 
