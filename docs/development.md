@@ -182,7 +182,11 @@ once.
     then on the lock), and every shared holder first waits on the gate
     (`flock -s /tmp/leanrs-timing.gate true`): `flock` alone lets new shared
     holders in ahead of a waiting exclusive one, so without the gate a session
-    could wait for builds started after it asked.
+    could wait for builds started after it asked. A shared holder exports
+    `LEANRS_TIMING_HELD=/tmp/leanrs-timing.lock`, and a job that finds it set
+    skips the gate (it already holds the lock; waiting at the gate would
+    deadlock with a session waiting for the lock). A session checks the load
+    again once it holds both.
   - **Pinning.** One quiet core per session, set with `sched_setaffinity`;
     one timed process at a time; one warm-up per side, then nine alternating
     pairs, each a fresh process.
