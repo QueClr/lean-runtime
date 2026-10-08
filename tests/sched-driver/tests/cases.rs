@@ -217,17 +217,20 @@ fn adv_exit_from_task() {
 }
 
 /// AR-39 (lean2rr's review RS7-02): an initializer keeps a recursive mutex
-/// locked and `main`, on the same OS thread (this glue's, as
-/// `LEAN_MAIN_USE_THREAD=0` natively), locks it again: with workers (the
-/// eager start and the lazy one) a dedicated task cannot take it, and can
-/// once `main` has unlocked it three times; with `LEAN_NUM_THREADS=0` the
-/// tasks run at once on `main`'s thread, so the first takes it too. Before
-/// AR-39 the owner held whether the scheduler had started, and with workers
-/// `main`'s `tryLock` was false and its `lock` waited for good.
+/// locked and `main`, on the same OS thread (`LEAN_MAIN_USE_THREAD=0`, as
+/// natively), locks it again: with workers (the eager start and the lazy
+/// one) a dedicated task cannot take it, and can once `main` has unlocked it
+/// three times; with `LEAN_NUM_THREADS=0` the tasks run at once on `main`'s
+/// thread, so the first takes it too. Before AR-39 the owner held whether
+/// the scheduler had started, and with workers `main`'s `tryLock` was false
+/// and its `lock` waited for good.
 #[test]
 fn rs7_init_reclock() {
+    // `main` on the initializers' thread: the glue runs it on a thread of
+    // its own otherwise, as both translators do (review RF16-02)
     let env = |kv: &[(&str, &str)]| -> Vec<(String, String)> {
         kv.iter()
+            .chain(&[("LEAN_MAIN_USE_THREAD", "0")])
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
     };
@@ -683,19 +686,22 @@ fn small_stacks() -> Vec<(String, String)> {
 }
 
 /// AR-11: `main`'s own stack overflows after a task ran on a context: the
-/// crate's handler knows the guard of the thread `glue::run` registered.
+/// crate's handler knows the guard of `main`'s thread, which `glue::run`
+/// registered: `io::startup::run_main`'s thread (1 MiB plus 128 KiB
+/// here), or with `LEAN_MAIN_USE_THREAD=0` the process's own (8 MiB).
 #[test]
 fn so_main_overflow() {
-    let got = run_with(
-        "so_main_overflow",
-        &["100000000".into()],
-        &small_stacks(),
-        None,
-        false,
-    );
-    assert_eq!(got.code, "134", "stderr {:?}", err_of(&got));
-    assert_eq!(err_of(&got), format!("task ran\n{STACK_OVERFLOW}"));
-    assert!(got.out.is_empty(), "{:?}", out_of(&got));
+    for own_thread in [true, false] {
+        let mut env = small_stacks();
+        if !own_thread {
+            env.push(("LEAN_MAIN_USE_THREAD".into(), "0".into()));
+        }
+        let got = run_with("so_main_overflow", &["100000000".into()], &env, None, false);
+        let err = err_of(&got);
+        assert_eq!(got.code, "134", "{env:?}: stderr {err:?}");
+        assert_eq!(err, format!("task ran\n{STACK_OVERFLOW}"), "{env:?}");
+        assert!(got.out.is_empty(), "{env:?}: {:?}", out_of(&got));
+    }
 }
 
 /// AR-11: a task overflows its context's stack after switches.
@@ -841,6 +847,26 @@ fn hl2_bind_continued_waiter() {
         out_of(&got),
         "waitAny: 7\ns: 42, the timer came first: false\n"
     );
+    assert_eq!(err_of(&got), "");
+}
+
+/// Review RF16-03 (fixes-17), at one worker: the polling threshold starts
+/// `t1` on a context of its own, and a dedicated task that runs before
+/// that context waits for `t2`, queued at `Task.Priority.max`. `t1`'s
+/// worker is busy from the start, so `t2` runs only once `t1` has ended,
+/// as natively; before the fix it ran first, on the dedicated task's stack
+/// ("t2 ran", "y done", "t1 begins", "t1 ends").
+#[test]
+fn rf16_started_task_holds_worker() {
+    let got = run_with(
+        "rf16_started_task_holds_worker",
+        &[],
+        &[("LEAN_NUM_THREADS".into(), "1".into())],
+        Some(20),
+        false,
+    );
+    assert_eq!(got.code, "0", "stderr {:?}", err_of(&got));
+    assert_eq!(out_of(&got), "t1 begins\nt1 ends\nt2 ran\ny done\n");
     assert_eq!(err_of(&got), "");
 }
 
@@ -1212,6 +1238,7 @@ cases!(
     condvar_turns,
     shared_mutex_readers,
     recursive_mutex,
+    recursive_mutex_owner,
     pure_chain_io_dep,
     pure_bind_io_dep,
     exit_from_task,
@@ -1436,4 +1463,7 @@ cases!(
     wait_deep_main_thread,
     final_run_deep_main_thread,
     loop_deep_sync_dependent,
+    // fixes-17b: the review of fixes-17 (a bind task's continuation queued
+    // again)
+    bind_requeue_preselect,
 );

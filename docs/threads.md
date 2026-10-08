@@ -681,6 +681,13 @@ own: `cargo test -p sched-driver-mt` (`docs/development.md`, "Tests").
 - **The glue** (`glue.rs`): `install_stack_overflow_handler` on `main`'s
   thread (the manager's threads install it themselves), the initializers,
   `sched::start(Arc<dyn Glue>)`, `main`, `finish`, the flush. No `unsafe`.
+  `main` runs on the process's thread, after the initializers, whatever
+  `LEAN_MAIN_USE_THREAD` says; the single-thread driver runs it on
+  `io::startup::run_main`'s thread, as the translators do (review
+  RF16-02). Here that changes only `main`'s own stack (`RLIMIT_STACK`,
+  usually 8 MiB, against `thread_stack_size()`): a wait blocks the
+  thread, and every task runs on a thread of the manager, so threads mode
+  has no stack-room rule; no case's `main` needs more than 8 MiB.
   The five hooks check the crate's side of their contract in every case
   (2.4): `thread_start` and `thread_end` pair up on each thread the manager
   makes, and all have ended once `finish` returns; `task_begin` and
@@ -1120,7 +1127,7 @@ first" (`docs/sched.md`, The glue, item 3) stays.
 | Promises | `promise_new`, `resolve`; dependents walked on the resolving context | The same, on the resolving thread. The first resolution wins under the lock (`resolve`, 995) |
 | Exit | `finish` runs what is left on `main`; LB-13 is not copied | `finish` sets the shutdown flag. It waits until no task is queued, no standard worker is left (each ends once the queue is empty) and no dedicated thread is left, then joins them. An enqueue during shutdown still gets a worker, so LB-13 is not copied. Afterwards there is no task manager: tasks run at once |
 | `IO.Process.exit` | From any context | From any thread. The other threads run until the process ends, as natively |
-| `Std.Sync` | Contexts block. The owner is the OS thread, a context and a task's thread number | Threads block on condition variables. The owner is the OS thread (before AR-39 both also held whether the task manager ran) |
+| `Std.Sync` | Contexts block. The owner is the OS thread and the emulated thread of `IO.getTID` (`tid_offset`; hunt HSG-01) | Threads block on condition variables. The owner is the OS thread (before AR-39 both also held whether the task manager ran) |
 | A thunk forced on two threads | The glue's waiter list (`block_sync`, `wake`). Forced inside itself: `hang` | A blocking once-cell in the glue. Forced inside itself: its thread hangs (LB-08) |
 | Stack overflow | The crate's report (`install_stack_overflow_handler`, feature `stack-overflow`, AR-11): the guard of the registered thread's stack or of the context running on it | The guard of each OS thread. Each worker and each dedicated task's thread calls `install_stack_overflow_handler` at its entry, before the glue's `thread_start` (leanrs's point 4): its alternate signal stack and its record; the table grows with the live threads (review RS3-01) |
 | Current streams, `errno` | Per context and per emulated worker (`slots`): a pool task gets the lowest free worker's set, which keeps what it leaves; a dedicated task a fresh one | Per OS thread: a pool worker keeps them from one task to the next, a new worker and a dedicated task's thread start fresh (0.5 item 2) |

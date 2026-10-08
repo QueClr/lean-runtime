@@ -2600,6 +2600,277 @@ fn tid_offset_of_the_event_loop_is_one_thread() {
     finish();
 }
 
+// --- Hunt HSG-01 (fixes-18): the owner of a lock is the emulated OS thread
+// `IO.getTID` names (`tid_offset`), not the context and the depth of the
+// innermost task on it (`thread_number`).
+
+/// A job that locks `m` and ends with it locked, as a task that returns
+/// with a lock held: natively its thread keeps the lock.
+fn locking(m: &Rc<RecursiveMutex>) -> Job {
+    let m = m.clone();
+    Box::new(move || {
+        m.lock();
+        Outcome::Done
+    })
+}
+
+/// The `try_lock` results the tests below saw, each with its tag.
+type Tries = Rc<RefCell<Vec<(&'static str, bool)>>>;
+
+/// A job that records `m.try_lock()` under `tag`.
+fn trying(m: &Rc<RecursiveMutex>, seen: &Tries, tag: &'static str) -> Job {
+    let (m, seen) = (m.clone(), seen.clone());
+    Box::new(move || {
+        seen.borrow_mut().push((tag, m.try_lock()));
+        Outcome::Done
+    })
+}
+
+/// Natively a dedicated task always gets a new thread
+/// (`spawn_dedicated_worker`), so a recursive mutex an earlier dedicated
+/// task left locked is another thread's. Before HSG-01 both ran at depth 1
+/// on `main`'s stack, one owner: `tryLock` was true.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_dedicated_task_after_one_that_left_a_lock_waits() {
+    start_test(1);
+    let m = Rc::new(RecursiveMutex::new());
+    let seen: Tries = Rc::default();
+    wait(spawn(locking(&m), 9, true));
+    wait(spawn(trying(&m, &seen, "dedicated"), 9, true));
+    assert!(!m.try_lock(), "main is another thread");
+    assert_eq!(*seen.borrow(), [("dedicated", false)]);
+    finish();
+}
+
+/// A pool task runs on a worker thread, and a dedicated task after it on a
+/// new thread: the mutex the pool task left locked is another thread's.
+/// Before HSG-01, one owner (depth 1 on `main`'s stack): `tryLock` true.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_dedicated_task_after_a_pool_task_that_left_a_lock_waits() {
+    start_test(1);
+    let m = Rc::new(RecursiveMutex::new());
+    let seen: Tries = Rc::default();
+    wait(spawn(locking(&m), 0, true));
+    wait(spawn(trying(&m, &seen, "dedicated"), 9, true));
+    assert!(!m.try_lock(), "main is another thread");
+    assert_eq!(*seen.borrow(), [("dedicated", false)]);
+    finish();
+}
+
+/// Natively a pool worker stays alive and takes the next pool task once
+/// idle (`enqueue_core` wakes the idle one), so a pool task after a pool
+/// task that ended with a recursive mutex locked locks it again: the same
+/// thread. Two shapes: each task started while `main` sleeps (the hunt's
+/// program, where each ran on a context of its own: before HSG-01 two
+/// owners, `tryLock` false, and `lock` hung), and one run for a dedicated
+/// task that waits for it (natively the idle worker runs it; here one
+/// level deeper on the waiter's stack, so before HSG-01 another owner).
+/// `main` and a dedicated task are other threads.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_pool_task_on_the_idle_worker_locks_again() {
+    start_test(1);
+    let m = Rc::new(RecursiveMutex::new());
+    let seen: Tries = Rc::default();
+    let p = spawn(locking(&m), 0, true);
+    sleep_ms(20);
+    wait(p);
+    let q = spawn(trying(&m, &seen, "pool, after a sleep"), 0, true);
+    sleep_ms(20);
+    wait(q);
+    let r = trying(&m, &seen, "pool, for a dedicated waiter");
+    wait(spawn(
+        Box::new(move || {
+            wait(spawn(r, 0, true));
+            Outcome::Done
+        }),
+        9,
+        true,
+    ));
+    wait(spawn(trying(&m, &seen, "dedicated"), 9, true));
+    assert!(!m.try_lock(), "main is another thread");
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("pool, after a sleep", true),
+            ("pool, for a dedicated waiter", true),
+            ("dedicated", false),
+        ]
+    );
+    finish();
+}
+
+/// Two pool tasks that run at once never share a thread: a pool task that
+/// holds a recursive mutex and waits for another pool task (natively its
+/// worker waits in `Task.get`, and another worker runs that task) keeps its
+/// emulated worker, and the task run on its stack takes another one,
+/// directly or through a dedicated task that waits for it. The holder
+/// itself locks again.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn pool_tasks_that_run_at_once_never_share_an_owner() {
+    start_test(1);
+    let m = Rc::new(RecursiveMutex::new());
+    let seen: Tries = Rc::default();
+    let (m2, s2) = (m.clone(), seen.clone());
+    let a = spawn(
+        Box::new(move || {
+            m2.lock();
+            wait(spawn(trying(&m2, &s2, "pool, for the holder"), 0, true));
+            let c = trying(&m2, &s2, "pool, for a dedicated task");
+            wait(spawn(
+                Box::new(move || {
+                    wait(spawn(c, 0, true));
+                    Outcome::Done
+                }),
+                9,
+                true,
+            ));
+            s2.borrow_mut().push(("the holder", m2.try_lock()));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    wait(a);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("pool, for the holder", false),
+            ("pool, for a dedicated task", false),
+            ("the holder", true),
+        ]
+    );
+    finish();
+}
+
+/// A `sync` task runs on the thread below it, natively and here: a
+/// dependent that `depend` runs at once (`FAST`, Lean's fast path) on its
+/// caller's, a `sync` dependent on the thread that finished its source or
+/// resolved its promise. So each locks again what that thread holds; a
+/// `sync` dependent of a promise that a pool task resolves does not lock
+/// again what `main` holds.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_sync_task_owns_as_the_thread_below_it() {
+    start_test(1);
+    let seen: Tries = Rc::default();
+    // a pool task that holds the mutex: a dependent run at once in it, and
+    // a `sync` dependent of it (made by `main` before it runs)
+    let m = Rc::new(RecursiveMutex::new());
+    let (m2, s2) = (m.clone(), seen.clone());
+    let a = spawn(
+        Box::new(move || {
+            m2.lock();
+            depend(
+                TaskId::FINISHED,
+                trying(&m2, &s2, "at once, in the holder"),
+                0,
+                true,
+                true,
+            );
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    depend(a, trying(&m, &seen, "in the holder's walk"), 0, true, true);
+    wait(a);
+    // `main` holds the mutex: a dependent run at once on it, a `sync`
+    // dependent of a promise it resolves, and one of a promise that a pool
+    // task resolves
+    let n = Rc::new(RecursiveMutex::new());
+    n.lock();
+    depend(
+        TaskId::FINISHED,
+        trying(&n, &seen, "at once, on main"),
+        0,
+        true,
+        true,
+    );
+    let p = promise_new().unwrap();
+    depend(p, trying(&n, &seen, "of main's resolution"), 0, true, true);
+    resolve(p, || {});
+    let q = promise_new().unwrap();
+    depend(
+        q,
+        trying(&n, &seen, "of a pool task's resolution"),
+        0,
+        true,
+        true,
+    );
+    wait(spawn(
+        Box::new(move || {
+            resolve(q, || {});
+            Outcome::Done
+        }),
+        0,
+        true,
+    ));
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("at once, in the holder", true),
+            ("in the holder's walk", true),
+            ("at once, on main", true),
+            ("of main's resolution", true),
+            ("of a pool task's resolution", false),
+        ]
+    );
+    finish();
+}
+
+/// The event loop's callbacks run on native's one loop thread (`libuv.cpp`
+/// 26), here on a new loop context each time one becomes due after the
+/// last has ended: a mutex one callback left locked, a later callback locks
+/// again, and so does the `sync` dependent of the promise it resolves.
+/// `main` and a pool task are other threads. Before HSG-01 each loop
+/// context was another owner.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn loop_callbacks_own_as_one_thread() {
+    start_test(1);
+    let m = Rc::new(RecursiveMutex::new());
+    let seen: Tries = Rc::default();
+    let soon = || std::time::Instant::now() + std::time::Duration::from_millis(5);
+    let p = promise_new().unwrap();
+    let m1 = m.clone();
+    let cb: Rc<dyn Fn()> = Rc::new(move || {
+        m1.lock();
+        resolve(p, || {});
+    });
+    timer_start(soon(), cb);
+    wait(p);
+    let q = promise_new().unwrap();
+    depend(
+        q,
+        trying(&m, &seen, "sync dependent of a callback"),
+        0,
+        true,
+        true,
+    );
+    let (m2, s2) = (m.clone(), seen.clone());
+    let cb: Rc<dyn Fn()> = Rc::new(move || {
+        s2.borrow_mut().push(("a later callback", m2.try_lock()));
+        resolve(q, || {});
+    });
+    timer_start(soon(), cb);
+    wait(q);
+    assert!(!m.try_lock(), "main is another thread");
+    wait(spawn(trying(&m, &seen, "pool"), 0, true));
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("a later callback", true),
+            ("sync dependent of a callback", true),
+            ("pool", false),
+        ]
+    );
+    finish();
+}
+
 // --- Review AR-34 (fixes-4): the standard workers end before the dedicated
 // tasks are waited for.
 

@@ -183,6 +183,57 @@ deadlock, as natively). Mutation checks: walks that hold no worker fail
 fail the last two; counting the waiter's worker as free in a `sync` task
 runs the queued task in `sync_dep_waits_queued_task`.
 
+**A context about to begin its first task** (review RF16-03, fixes-17).
+The scheduler starts a task on a new context (`start_worker`) where a free
+worker would take it: in the hub, at an effect point, a polling point or a
+zero sleep, at the polling threshold (`start_polled`), in `IO.waitAny`, and
+in a wait without the stack room (`here_or_own_context`). The new context
+begins the task only when it first runs (`take_preselect`), after the
+contexts that were able to run before it. Natively the worker takes the
+task off the queue at once and is busy from then on. So the workers in use
+(`pool_in_use`) are the contexts that hold one (`in_use`, kept by
+`refresh_holds`) plus the contexts started with a queued pool task that
+they have not begun yet (`starting_holds`, over the short list
+`Contexts::starting`):
+- a started pure task (`PICKED`) counts once, in `picked_pool`, and a
+  dedicated task has a thread of its own: neither counts there;
+- two contexts started with the same task count one worker (an effect
+  point's `startable` can return a task that a context is about to begin);
+- a waiter that comes first may run the task on its stack
+  (`may_run_awaited` says yes, as for a started pure task: its worker is
+  counted already); then the waiter's context holds the worker, and
+  `hand`, which every run of a queued or started task passes through,
+  takes the task from the new context: it clears the context's
+  `preselect` and takes it off `Contexts::starting`. So the new context,
+  when it runs, finds no first task (`take_preselect`), and takes the next
+  queued task if a worker is free, or ends, as a worker whose task ran
+  elsewhere. The same holds for a second context started with the same
+  task when the first one begins it.
+
+Before the fix the worker was counted only from the begin, so a context
+that ran first could start one pool task more than `LEAN_NUM_THREADS`.
+Driver program `rf16_started_task_holds_worker` (one worker: the polling
+threshold starts `t1` on a context of its own; a dedicated task that runs
+before that context queues `t2` at `Task.Priority.max` and waits for it):
+"t1 begins", "t1 ends", "t2 ran", as natively; before the fix "t2 ran"
+came first, on the dedicated task's stack.
+
+A bind task whose function a waiter runs comes back to the queue later,
+for its continuation, with the same entry and generation (`bind_wait`, and
+the walk of the dependents of the task it continues as). Before `hand`
+took the task from the new context (the review of fixes-17), the
+context's `preselect` named it again then: `starting_holds` counted it,
+`may_run_awaited` let any waiter run it, and the context, when it first
+ran, began the continuation with no free-worker test, while the pool's
+workers were all busy: one pool task more than the limit. Case
+`tasks/bind_requeue_preselect` (one worker: the polling threshold starts
+the bind task `s` on a context of its own; a dedicated task runs `s`'s
+function first; a pool task `z` queues `s`'s continuation and sleeps on
+the worker): "s finished before z's end: false", as natively; before the
+fix `true`. Its program reads no `ST.Ref` before `z`'s end: the first
+reference read is a polling point (`ref_read`), where the context ran
+before the dedicated task and began `s` itself.
+
 **Waiters wake after a walk** (reviews RS2-01, RS2-05 and RS2-06 of
 sched-2). Natively the threads blocked in `Task.get`, `IO.wait` or
 `IO.waitAny` sleep on one condition variable, which `resolve_core`
@@ -439,8 +490,10 @@ on top of both. Before this fix the stack use of nested waits added up:
   start it, and the waiter blocks on it: `Wait::Cell` in `wait`, `Wait::Any`
   in `IO.waitAny`, `Wait::FinalRun` in the final run. The task stays queued,
   or started (`PICKED`), until its context begins it (`take_preselect`), so
-  a waiter with room that comes first may still run it; the context then
-  takes the next queued task, as a worker whose task ran elsewhere. The
+  a waiter with room that comes first may still run it (its worker is
+  counted from the start, review RF16-03); `hand` then takes it from the
+  context, which takes the next queued task if a worker is free, or ends,
+  as a worker whose task ran elsewhere (the review of fixes-17). The
   debug check that no context blocks on a started pure task
   (`register_block`, RF8-03) lets a waiter block on one that a context is
   about to begin. Without a task manager (`LEAN_NUM_THREADS=0`) a task runs
@@ -459,7 +512,8 @@ on top of both. Before this fix the stack use of nested waits added up:
 - **What it costs.** A wait that may run a task now looks at the stack
   pointer once more. In the common case the task still runs on the
   waiter's stack: `main` on a thread of `thread_stack_size()` (lean2rr's
-  default, `io::startup::run_main`), or a task on a context, with less
+  default and the single-thread driver's, `io::startup::run_main`), or a
+  task on a context, with less
   stack in use than the slack, has the room. The unit test
   `hsk01_with_room_a_needed_task_runs_on_the_waiters_stack` runs 1000
   `Task.spawn`/`Task.get` pairs on `main` and starts no context. A wait
@@ -476,16 +530,22 @@ on top of both. Before this fix the stack use of nested waits added up:
   blocks at once, and the new context is the next to run, after the
   contexts that were able to run before it. For a pool waiter the emulated
   workers count the same: it frees its worker in `Wait::Cell`
-  (`holds_worker`), and the new context holds one from its begin; where the
+  (`holds_worker`), and the new context holds one from its start; where the
   waiter keeps its worker (a `sync` dependent, a walk on a pool worker), the
   run on the waiter's stack counted one worker for both tasks, and the
-  context counts two, as natively (review RF16-04). Between the start and the
-  begin no context holds the task's worker, so a context that runs before
-  the new one could start one more pool task than the limit, as after
-  `start_polled` and `IO.waitAny`'s starts. The task gets a context's thread
+  context counts two, as natively (review RF16-04). Between the start and
+  the begin the new context holds the task's worker already
+  (`starting_holds`, review RF16-03), as after `start_polled` and
+  `IO.waitAny`'s starts ("A context about to begin its first task", in
+  "The model"): a context that runs before it starts no pool task beyond
+  the limit, and runs that task itself only if it waits for it. Once
+  such a waiter runs the task, the new context no longer holds that worker
+  or starts with that task (`hand`), also when the task is a bind task
+  whose continuation is queued again before the context runs (the review
+  of fixes-17). The task gets a context's thread
   number (`thread_number`), not one nested on the waiter's; its emulated
-  worker id and `IO.getTID` follow the same rule as on the waiter's stack
-  (given at its begin).
+  worker id, `IO.getTID` and the owner of the locks it takes follow the
+  same rule as on the waiter's stack (given at its begin).
 - **The event loop's stack** (HSK-03). The event loop's context has
   `max(1 GiB, the contexts' size)` (`Contexts::loop_stack_size`), and so
   does threads mode's loop thread (`mt::uv`, `start_loop_thread`):
@@ -522,6 +582,22 @@ on top of both. Before this fix the stack use of nested waits added up:
   mode's `hsk03_the_loop_thread_has_lthreads_default_stack` (8 MiB used by
   a timer's hook on the loop thread, the task manager at 256 KiB, in a
   child process).
+- **The single-thread driver's `main`** (review RF16-02). Its glue
+  (`tests/sched-driver/src/glue.rs`, `run`) runs `main` as both
+  translators do (lean2rr's `run_main2`): the initializers on the
+  process's thread, then `io::startup::run_main(thread_stack_size(), ..)`.
+  So `main` has a thread of Lean's size, or the process's thread with
+  `LEAN_MAIN_USE_THREAD=0`, and its waits take the translators' path: the
+  task on `main`'s stack, and a context of its own only under deep
+  recursion or on the process's thread. Before RF16-02 the driver ran
+  `main` on the process's thread (8 MiB, or the caller's `ulimit -s`), so
+  every wait of its `main` took the context path. The cases
+  `wait_deep_main_thread` and `final_run_deep_main_thread` set
+  `LEAN_MAIN_USE_THREAD=0`, and `ulimit -s 8192` in their `.pipe` line,
+  which the driver's runner runs as `scripts/cases.py` does. A run of the
+  driver's own tests with `LEAN_MAIN_USE_THREAD=0` and no `.pipe`
+  (`rs7_init_reclock`) gets the same 8 MiB limit from the runner. So no
+  outcome depends on the caller's limit.
 - **Note: HSK-04, a frame past the guard page** (parked hardening). A
   frame larger than the guard can step over a guard of one page (4 KiB)
   when the stack is nearly full: GMP's `alloca` scratch space in native's
@@ -1678,7 +1754,9 @@ or a watcher; that is the glue's error.
 ## The glue
 
 A translator writes this glue around the crate. `tests/sched-driver/src/`
-(`glue.rs` with `glue_common.rs`, and `lean.rs`) is a complete example. In
+(`glue.rs` with `glue_common.rs`, and `lean.rs`) is a complete example,
+whose entry (`glue::run`) runs the initializers and `main` as both
+translators do (item 2, `io::startup::run_main`; review RF16-02). In
 threads mode the glue is smaller (no `suspend`, no yield points; a thunk or
 a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
 (`glue.rs`, `lean.rs`) is the example there, with the same case ports
@@ -1962,13 +2040,16 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
      usually come out as native's do (`main`'s id plus 1, 2, ...). Each
      context keeps the number of the code running on it (`Ctx::tid`),
      which a pool or dedicated task replaces from its begin to the end of
-     its run (`enter_worker`, `WorkerGuard`). `thread_number()` is not
-     this number: it is the depth of nested tasks on the context, with
-     which the scheduler tells the owners of locks and taken references
-     apart (`sched::sync`, lean2rr's `refs`), and two tasks run one after
-     the other at the same depth share it. Before AR-37 `IO.getTID` used
-     it, so a dedicated task that followed a finished pool task got the
-     pool task's id, and each new loop context an id of its own. Cases
+     its run (`enter_worker`, `WorkerGuard`). The owner of a lock is
+     this number too (item 6, hunt HSG-01), so a lock in a loop callback
+     is a first need of the loop's number as much as an `IO.getTID`
+     there. `thread_number()` is not this number: it is the depth of
+     nested tasks on the context, with which the scheduler tells the code
+     running now from the code below it (lean2rr's `refs`: the taker of a
+     reference), and two tasks run one after the other at the same depth
+     share it. Before AR-37 `IO.getTID` used it, so a dedicated task that
+     followed a finished pool task got the pool task's id, and each new
+     loop context an id of its own. Cases
      `tasks/get_tid_threads` (with its twin in threads mode) and
      `uvloop/get_tid_loop_thread`; unit tests
      `tid_offset_tells_a_dedicated_task_from_the_idle_worker` and
@@ -2066,9 +2147,47 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    `Std.Channel`, `Barrier`, `Semaphore` and the rest of `Std.Sync` are Lean
    code over these and promises. They need nothing more.
 
-   The owner of a lock is a thread: the OS thread, the context on that
-   thread's scheduler, and the thread number of the innermost task running
-   on the context (`sched::sync`'s module comment). The OS thread tells the
+   The owner of a lock is a thread: the OS thread, and on that thread's
+   scheduler the emulated OS thread of the running code, the number
+   `IO.getTID` adds (`tid_offset`, item 3; `sched::sync`'s module comment;
+   hunt HSG-01). Natively the owner of a `BaseRecursiveMutex` is the OS
+   thread, and a task that ends with the mutex locked leaves it locked by
+   its thread, so the emulated thread gives native's answers:
+   - `main` is 0, and so is a `sync` task run on `main`'s thread;
+   - a pool task has its emulated worker's thread, held from its begin to
+     the end of its run, its waits included: two pool tasks that run at
+     once never share one (a pool task run on its waiter's stack takes
+     another worker than the waiter's), and a pool task after another that
+     ended with the mutex locked locks it again when it gets the same
+     worker, as natively the idle worker that ran the first takes the
+     second;
+   - a dedicated task has a new thread: it waits for a mutex any earlier
+     task left locked;
+   - a `sync` task has the thread below it (a `sync` dependent the
+     finishing or resolving thread's, a dependent run at once its
+     caller's);
+   - the event loop's callbacks have the loop's one thread, the same for
+     every loop context (one loop context runs at a time; a new one starts
+     only once the last has ended).
+
+   Before HSG-01 the owner was the context and the depth of the innermost
+   task on it (`thread_number`), which names no native thread: a dedicated
+   task after a dedicated or pool task that ended holding the mutex, at the
+   same depth on the same context, took it again (natively another
+   thread: `tryLock` false), and a pool task on another context than the
+   one the earlier pool task ran on found it held by another thread
+   (natively the same idle worker: `tryLock` true; with `lock`, a hang
+   here). Threads mode needs no such rule: its tasks run on their native
+   threads, and the owner is the OS thread. Unit tests
+   `a_dedicated_task_after_one_that_left_a_lock_waits`,
+   `a_dedicated_task_after_a_pool_task_that_left_a_lock_waits`,
+   `a_pool_task_on_the_idle_worker_locks_again`,
+   `pool_tasks_that_run_at_once_never_share_an_owner`,
+   `a_sync_task_owns_as_the_thread_below_it` and
+   `loop_callbacks_own_as_one_thread`; case `sync/recursive_mutex_owner`
+   (its twin in threads mode).
+
+   The OS thread tells the
    module initializers from `main` as natively: a `BaseRecursiveMutex` an
    initializer keeps locked is `main`'s to lock again when `main` runs on
    the initializers' thread (`LEAN_MAIN_USE_THREAD=0`, or a glue without
@@ -2082,7 +2201,7 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    tests `a_recursive_lock_is_the_os_threads_across_the_start`,
    `a_recursive_lock_from_another_os_thread_waits` and
    `relocking_from_another_os_thread_hangs`; driver case
-   `rs7_init_reclock`.
+   `rs7_init_reclock` (with `LEAN_MAIN_USE_THREAD=0`).
 7. **Waits of the glue's own objects.** The crate's wait cores do them
    ("The wait cores", core 3.1): a thunk or a static with room for 4 bytes
    holds a `Gate` (`step`, then `finish`, which makes the writers point
@@ -3208,7 +3327,9 @@ argument is checked by:
   programs (`rsio_*`), a panic test,
   and leanrs's three adversarial checks (`adv_*`: blocking during
   unwinding, a second panic there, `process::exit` from a context), in
-  debug and release builds, on both toolchains (`scripts/check.sh`). Every
+  debug and release builds, on both toolchains (`scripts/check.sh`), with
+  `main` on a thread of Lean's size, as the translators run it (review
+  RF16-02, "The stack room of a run on the waiter's stack"). Every
   case with contention suspends: the mutex and condition-variable cases,
   the promise waits, the sleeping tasks of `sync_dependent_order`, and
   every IO wait of the sched-io cases (from a context and from `main`). The
@@ -3513,7 +3634,9 @@ None of these has been timed.
   a thread-local `RefCell` borrow and checks on the sleepers, runnable
   contexts and queues, and a clock read and a queue scan only when something
   is pending. The number of the task manager's workers in use is a counter
-  (review RS1S-11), not a scan of the contexts.
+  (review RS1S-11), not a scan of the contexts, plus a look at the contexts
+  about to begin their first task (a short list, usually empty; review
+  RF16-03).
 - **Effect points.** The same check per output, and a clock read when
   something is pending.
 - **Context switches.**

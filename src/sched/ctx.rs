@@ -349,7 +349,8 @@ pub(crate) struct Ctx {
     /// Its task bookkeeping (running tasks, walks of dependents), as a
     /// thread's.
     pub(crate) st: CtxState,
-    /// A worker's first task (entry, generation).
+    /// A worker's first task (entry, generation); cleared when another
+    /// runner takes that task first (`Sched::hand`).
     pub(crate) preselect: Option<(u32, u32)>,
     /// When it last became able to run (`effect`).
     pub(crate) ready: Instant,
@@ -363,7 +364,8 @@ pub(crate) struct Ctx {
     /// task, and outside tasks.
     pub(crate) worker: Option<u32>,
     /// The emulated OS thread `IO.getTID` names for the code running on it
-    /// (`tid_offset`, review AR-37): the innermost pool or dedicated task's
+    /// (`tid_offset`, review AR-37), and the owner of the locks it takes
+    /// (`sched::sync`, hunt HSG-01): the innermost pool or dedicated task's
     /// (its worker's, a new one), which a `sync` task keeps; outside them
     /// the context's own: `Some(0)` for `main`'s, `None` for another's until
     /// its first use (then an event loop context's is the loop thread's).
@@ -424,6 +426,17 @@ pub(crate) struct Contexts {
     /// The contexts holding one of the task manager's workers
     /// (`Ctx::holds`; `Sched::pool_in_use`).
     pub(crate) in_use: u32,
+    /// The contexts started with a first task (`start_worker`) that have not
+    /// begun it yet (`Sched::take_preselect`): one about to begin a queued
+    /// pool task holds that task's worker already (`Sched::starting_holds`,
+    /// review RF16-03). A context leaves the list when it begins, or when
+    /// its task is handed to another runner (`Sched::hand`: a waiter runs it
+    /// on its stack, or another context started with it begins it), which
+    /// also clears its `Ctx::preselect`: a bind task's continuation, queued
+    /// again under the same entry and generation, is not its task (the
+    /// review of fixes-17). Usually empty: the hub resumes a context it
+    /// starts at once.
+    pub(crate) starting: Vec<CtxId>,
 }
 
 /// The next worker context's number, process-wide: unique across the
@@ -490,6 +503,7 @@ impl Contexts {
             in_effect: false,
             glue: None,
             in_use: 0,
+            starting: Vec::new(),
         }
     }
 
@@ -766,9 +780,13 @@ impl Sched {
     }
 
     /// Start entry `e` (generation `g`) on a new worker context, able to run.
+    /// Until it begins `e` (`take_preselect`), the context holds `e`'s
+    /// worker if `e` is a queued pool task (`starting_holds`, review
+    /// RF16-03).
     pub(crate) fn start_worker(&mut self, e: u32, g: u32) -> CtxId {
         let id = self.start_context(worker_main, self.cx.stack_size);
         self.cx.ctxs[id].preselect = Some((e, g));
+        self.cx.starting.push(id);
         id
     }
 

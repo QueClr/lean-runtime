@@ -918,13 +918,15 @@ pub fn rfx4_fd_after(_: &[String]) -> u32 {
 }
 
 // AR-11: Lean's stack-overflow report, owned by the crate
-// (`sched::install_stack_overflow_handler`, which `glue::run` calls). The
+// (`sched::install_stack_overflow_handler`, which `glue::run` calls on the
+// initializers' thread and on `main`'s, `io::startup::run_main`'s). The
 // task's case is `tasks/stack_overflow_in_task`; these programs check the
 // rest of the handler's rule. `tests/cases.rs` checks their outcomes.
 
-/// `main`'s own stack (the guard of the thread `glue::run` registered)
-/// overflows after a task ran on a context of its own and ended: Lean's
-/// message, status 134, `main starts` (buffered) lost.
+/// `main`'s own stack (the guard of `main`'s thread, a thread of
+/// `thread_stack_size()` that `glue::run` registered) overflows after a
+/// task ran on a context of its own and ended: Lean's message, status 134,
+/// `main starts` (buffered) lost.
 pub fn so_main_overflow(args: &[String]) -> u32 {
     let n = to_nat(&args[0]);
     println("main starts");
@@ -1425,5 +1427,70 @@ pub fn rf13f_loop_cycle_wait(_: &[String]) -> u32 {
     sleep(100);
     println("main done");
     let _ = Handle::stdout().flush();
+    0
+}
+
+// Review RF16-03 (fixes-17): a pool task started on a context of its own
+// holds its worker before that context first runs; `tests/cases.rs` checks
+// the output.
+
+/// `LEAN_NUM_THREADS=1`. `t0`, a pool task, waits for a promise (its worker
+/// is free meanwhile, as native `wait_for` raises the limit) and stays the
+/// woken worker's task, so that no enqueue wakes the worker again; `y`, a
+/// dedicated task, waits for another promise. `main` queues `t1`, wakes `y`,
+/// and polls `t1` until the polling threshold starts it on a context of its
+/// own (`start_polled`). `y` runs before that context: it queues `t2` at
+/// `Task.Priority.max` and waits for it. Natively the one worker runs `t1`
+/// from the threshold on, so `t2` starts only once `t1` has ended. Before
+/// the fix no context held `t1`'s worker until its context began it, and
+/// `y` ran `t2` on its stack first ("t2 ran" and "y done" before "t1
+/// begins").
+pub fn rf16_started_task_holds_worker(_: &[String]) -> u32 {
+    let log: Rc<std::cell::RefCell<Vec<&'static str>>> = Rc::default();
+    let p0: Promise<()> = Promise::new();
+    let r0 = p0.result_opt();
+    let t0 = as_task(
+        move || {
+            r0.get();
+        },
+        PRIO_DEFAULT,
+    );
+    // the woken worker's latency passes: it takes `t0` in `main`'s sleep,
+    // where `t0` starts and blocks
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    sleep(5);
+    let p: Promise<()> = Promise::new();
+    let r = p.result_opt();
+    let l = log.clone();
+    let y = as_task(
+        move || {
+            r.get();
+            let l2 = l.clone();
+            let t2 = as_task(move || l2.borrow_mut().push("t2 ran"), PRIO_MAX);
+            t2.get();
+            l.borrow_mut().push("y done");
+        },
+        PRIO_DEDICATED,
+    );
+    // `y` starts and blocks on its promise
+    sleep(5);
+    let l = log.clone();
+    let t1 = as_task(
+        move || {
+            l.borrow_mut().push("t1 begins");
+            sleep(20);
+            l.borrow_mut().push("t1 ends");
+        },
+        PRIO_DEFAULT,
+    );
+    // `y` can go on: it runs before the context the threshold starts
+    p.resolve(());
+    while !has_finished(&t1) {}
+    y.get();
+    p0.resolve(());
+    t0.get();
+    for s in log.borrow().iter() {
+        println(s);
+    }
     0
 }

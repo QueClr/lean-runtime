@@ -1,0 +1,5 @@
+id = "bind_requeue_preselect"
+area = "tasks"
+lean_version = "4.34.0"
+source = "review of lean-runtime's fixes-17 by the crate's other user (a bind task's continuation, queued again, begun by the context started for the bind task with no worker free), judged by the coordinator, 2026-10-07; fixes-17b"
+streams = "separate"

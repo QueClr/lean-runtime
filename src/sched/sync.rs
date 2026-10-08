@@ -8,13 +8,38 @@
 //!
 //! A context that must wait (the mutex is held by another thread, a condition
 //! variable before it is notified) blocks, and other contexts and queued
-//! tasks run meanwhile, as other threads would. The owner of a lock is a
-//! thread: a context, and on it the thread of the innermost running task (a
-//! task needed by another runs on a worker thread natively, so it is another
-//! thread than its caller; a `sync` dependent runs on its source's). As
-//! natively (glibc), locking a `BaseMutex` that the same thread holds waits
-//! forever, and unlocking one that is not locked by the caller just unlocks
-//! it. A released mutex is handed to the thread that has waited longest.
+//! tasks run meanwhile, as other threads would. The owner of a lock is the
+//! thread the running code natively runs on: the emulated OS thread that
+//! `IO.getTID` names (`tid_offset`, review AR-37), on the OS thread the
+//! scheduler runs on (below). So:
+//! - `main` is thread 0;
+//! - a pool task runs on its emulated worker's thread, which it holds from
+//!   its begin to the end of its run, its waits included: two pool tasks
+//!   that run at once never share one (a task run on the stack of a waiter
+//!   takes another worker than the waiter's), and pool tasks run one after
+//!   the other can, as natively the idle worker takes the next task;
+//! - a dedicated task has a new thread, as natively
+//!   (`spawn_dedicated_worker`);
+//! - a `sync` task runs on the thread below it: a `sync` dependent on the
+//!   thread that finished its source or resolved its promise, a dependent
+//!   run at once (`FAST`) on its caller's;
+//! - the event loop's callbacks run on the loop's one thread, the same for
+//!   every loop context (one runs at a time).
+//!
+//! A task that ends with a lock held leaves it held by its thread, as
+//! natively: a later task on the same emulated worker takes a recursive
+//! mutex again, any other thread waits (hunt HSG-01). Before HSG-01 the
+//! owner was the context and the depth of the innermost task on it
+//! (`thread_number`): a dedicated task after a task that ended holding a
+//! recursive mutex, at the same depth on the same context, took it again,
+//! where natively it is another thread; and a pool task on another context
+//! than the earlier one found it held by another thread, where natively the
+//! same idle worker locks it again (with `lock`, a hang).
+//!
+//! As natively (glibc), locking a `BaseMutex` that the same thread holds
+//! waits forever, and unlocking one that is not locked by the caller just
+//! unlocks it. A released mutex is handed to the thread that has waited
+//! longest.
 //!
 //! The owner also names the OS thread the scheduler runs on (`os_thread`):
 //! natively the module initializers run on the process's first thread and
@@ -34,33 +59,30 @@
 //! it. Each method starts the scheduler first if [`super::start_lazy`] is
 //! waiting for it (`ensure_started`), since a wait needs the scheduler's
 //! contexts. A lock's owner does not depend on the start: `main`'s thread is
-//! the same OS thread and the same context before and after it, so a
+//! the same OS thread and emulated thread 0 before and after it, so a
 //! recursive mutex locked by `main` before its first task and again after it
 //! has one owner (lean2rr's review RS4-05). A separate module, so that a
 //! translator can admit `Std.Sync` on its own (decisions Q8).
 
-use super::{block_sync, current_context, wake, with, CtxId};
+use super::{block_sync, current_context, wake, CtxId};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The thread that runs now (see the module comment): the OS thread, the
-/// context on its scheduler, and the thread of the innermost task running
-/// on that context.
+/// The thread that runs now (see the module comment): the OS thread the
+/// scheduler runs on, and the emulated OS thread of the running code on it
+/// (`tid_offset`: the same numbers as `IO.getTID`'s, each scheduler's own).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Owner {
     os: u64,
-    ctx: CtxId,
-    thread: u64,
+    tid: u64,
 }
 
 fn me() -> Owner {
-    let os = os_thread();
-    with(|s| Owner {
-        os,
-        ctx: s.cx.cur,
-        thread: s.cur_thread(),
-    })
+    Owner {
+        os: os_thread(),
+        tid: super::tid_offset(),
+    }
 }
 
 /// A number naming the calling OS thread, from a process-wide counter at

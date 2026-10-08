@@ -8,7 +8,14 @@
 //! - `expect = { hang = N }`: the output seen in N seconds, code `timeout`;
 //! - `ID.pipe`: the bash line run with `pipefail` instead of the executable,
 //!   with `$BIN` (the executable and the case's id), `$ARGS` and
-//!   `PATH=/usr/bin:/bin`.
+//!   `PATH=/usr/bin:/bin`. Its `ulimit`s (`ulimit -s 8192` of the cases
+//!   with `LEAN_MAIN_USE_THREAD=0`) apply to the executable, as in
+//!   `scripts/cases.py`;
+//! - a run with `LEAN_MAIN_USE_THREAD=0` and no `.pipe` (a driver's own
+//!   test): the executable with a stack limit of 8 MiB (`ulimit -s 8192`,
+//!   the usual default), since `main` runs on the process's thread, whose
+//!   stack is the limit's size, and the scheduler's stack-room rule depends
+//!   on it (review RF16-02). The limit of the caller does not matter then.
 //!
 //! That is how `scripts/cases.py check` runs a case and what it accepts
 //! with no `--translator` (the expected files, then the alternatives
@@ -167,6 +174,15 @@ pub(crate) fn run_full(
             c.args(["-o", "pipefail", "-c", line.trim()]);
             c
         }
+        // `main` on the process's thread: the stack limit set, then the
+        // executable in the shell's place (`exec`: the same process, so the
+        // same group and pid)
+        None if main_on_process_thread(env) => {
+            let mut c = Command::new("/bin/sh");
+            c.args(["-c", "ulimit -s 8192 && exec \"$0\" \"$@\"", exe, id])
+                .args(args);
+            c
+        }
         None => {
             let mut c = Command::new(exe);
             c.arg(id).args(args);
@@ -245,6 +261,16 @@ pub(crate) fn run_full(
     let err = t_err.map(|t| t.join().unwrap()).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&cwd);
     Outcome { out, err, code }
+}
+
+/// Whether `env` runs `main` on the process's thread: `LEAN_MAIN_USE_THREAD`
+/// is exactly `0` (`lean_run_main`'s test), its last value counting, as
+/// `Command::envs` sets them in order.
+fn main_on_process_thread(env: &[(String, String)]) -> bool {
+    env.iter()
+        .rev()
+        .find(|(k, _)| k == "LEAN_MAIN_USE_THREAD")
+        .is_some_and(|(_, v)| v == "0")
 }
 
 /// Case `id`'s `alternatives` table, if it has one, as (`altK`, value)

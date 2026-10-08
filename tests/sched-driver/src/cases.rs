@@ -45,7 +45,7 @@ pub const CASES: &[(&str, Case)] = &[
     ),
     (
         "runaway_pure_task_referenced",
-        (init_keep, runaway_pure_task_referenced),
+        (no_init, runaway_pure_task_referenced),
     ),
     (
         "runaway_pure_task_started",
@@ -59,6 +59,7 @@ pub const CASES: &[(&str, Case)] = &[
     ("condvar_turns", (no_init, condvar_turns)),
     ("shared_mutex_readers", (no_init, shared_mutex_readers)),
     ("recursive_mutex", (no_init, recursive_mutex)),
+    ("recursive_mutex_owner", (no_init, recursive_mutex_owner)),
     ("pure_chain_io_dep", (no_init, pure_chain_io_dep)),
     ("pure_bind_io_dep", (no_init, pure_bind_io_dep)),
     ("exit_from_task", (no_init, exit_from_task)),
@@ -309,6 +310,9 @@ pub const CASES: &[(&str, Case)] = &[
         "final_run_deep_main_thread",
         (no_init, final_run_deep_main_thread),
     ),
+    // fixes-17b: the review of fixes-17 (a bind task's continuation queued
+    // again)
+    ("bind_requeue_preselect", (no_init, bind_requeue_preselect)),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -447,20 +451,20 @@ fn runaway_io_task_unawaited(args: &[String]) -> u32 {
 //   let t := Task.spawn fun _ => spin s 0
 //   keep.set (some t)
 //   IO.eprintln "main done"
-// `keep` is read on `main`'s thread only, so a thread-local stands for the
-// initialized constant in both drivers.
+// `keep` is used on `main`'s thread only, so a thread-local of that thread
+// stands for the initialized constant in both drivers. It is made at
+// `main`'s start, not by an initializer: the single-thread driver runs
+// the initializers on the process's thread and `main` on a thread of its
+// own (review RF16-02), and its values (`Rc`) stay on their thread.
+// `IO.mkRef none` does nothing else a program sees.
 thread_local! {
     static KEEP: std::cell::RefCell<Option<Ref<Option<Task<u64>>>>> = const { std::cell::RefCell::new(None) };
 }
 
-fn init_keep() {
-    KEEP.with(|k| *k.borrow_mut() = Some(Ref::new(None)));
-}
-
 fn runaway_pure_task_referenced(args: &[String]) -> u32 {
+    let keep = KEEP.with(|k| k.borrow_mut().get_or_insert_with(|| Ref::new(None)).clone());
     let s = seed(args);
     let t = Task::spawn(move || spin(s, 0), PRIO_DEFAULT);
-    let keep = KEEP.with(|k| k.borrow().clone().unwrap());
     keep.set(Some(t));
     eprintln("main done");
     0
@@ -864,6 +868,109 @@ fn recursive_mutex(args: &[String]) -> u32 {
     println("main unlocks the second time");
     r.unlock();
     t.get();
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let ms := args.head!.toNat!.toUInt32
+//   -- (a)
+//   let m ← BaseRecursiveMutex.new
+//   let d1 ← IO.asTask (prio := .dedicated) m.lock
+//   IO.ofExcept (← IO.wait d1)
+//   let d2 ← IO.asTask (prio := .dedicated) m.tryLock
+//   IO.println s!"(a) dedicated after dedicated: tryLock {← IO.ofExcept (← IO.wait d2)}"
+//   -- (b)
+//   let m2 ← BaseRecursiveMutex.new
+//   let p1 ← IO.asTask m2.lock
+//   IO.ofExcept (← IO.wait p1)
+//   let d3 ← IO.asTask (prio := .dedicated) m2.tryLock
+//   IO.println s!"(b) dedicated after pool: tryLock {← IO.ofExcept (← IO.wait d3)}"
+//   -- (c)
+//   let m3 ← BaseRecursiveMutex.new
+//   let p2 ← IO.asTask m3.lock
+//   IO.sleep ms
+//   IO.ofExcept (← IO.wait p2)
+//   let p3 ← IO.asTask m3.tryLock
+//   IO.sleep ms
+//   IO.println s!"(c) pool after pool: tryLock {← IO.ofExcept (← IO.wait p3)}"
+//   -- (d)
+//   let m4 ← BaseRecursiveMutex.new
+//   let p4 ← IO.asTask do
+//     m4.lock
+//     let q ← IO.asTask m4.tryLock
+//     IO.ofExcept (← IO.wait q)
+//   IO.println s!"(d) pool for a pool holder: tryLock {← IO.ofExcept (← IO.wait p4)}"
+//   -- (e)
+//   let m5 ← BaseRecursiveMutex.new
+//   let go ← IO.Promise.new (α := Unit)
+//   let p5 ← IO.asTask do
+//     m5.lock
+//     let _ ← IO.wait go.result?
+//   let s ← IO.mapTask (sync := true) (fun _ => (m5.tryLock : IO Bool)) p5
+//   go.resolve ()
+//   IO.println s!"(e) sync dependent of a pool holder: tryLock {← IO.ofExcept (← IO.wait s)}"
+fn recursive_mutex_owner(args: &[String]) -> u32 {
+    let ms = to_nat(&args[0]) as u32;
+    // (a)
+    let m = Obj::new(RecursiveMutex::new());
+    let m1 = m.clone();
+    let d1 = as_task(move || m1.lock(), PRIO_DEDICATED);
+    d1.get();
+    let m1 = m.clone();
+    let d2 = as_task(move || m1.try_lock(), PRIO_DEDICATED);
+    println(&format!(
+        "(a) dedicated after dedicated: tryLock {}",
+        d2.get()
+    ));
+    // (b)
+    let m2 = Obj::new(RecursiveMutex::new());
+    let m1 = m2.clone();
+    let p1 = as_task(move || m1.lock(), PRIO_DEFAULT);
+    p1.get();
+    let m1 = m2.clone();
+    let d3 = as_task(move || m1.try_lock(), PRIO_DEDICATED);
+    println(&format!("(b) dedicated after pool: tryLock {}", d3.get()));
+    // (c)
+    let m3 = Obj::new(RecursiveMutex::new());
+    let m1 = m3.clone();
+    let p2 = as_task(move || m1.lock(), PRIO_DEFAULT);
+    sleep(ms);
+    p2.get();
+    let m1 = m3.clone();
+    let p3 = as_task(move || m1.try_lock(), PRIO_DEFAULT);
+    sleep(ms);
+    println(&format!("(c) pool after pool: tryLock {}", p3.get()));
+    // (d)
+    let m4 = Obj::new(RecursiveMutex::new());
+    let m1 = m4.clone();
+    let p4 = as_task(
+        move || {
+            m1.lock();
+            let m1 = m1.clone();
+            let q = as_task(move || m1.try_lock(), PRIO_DEFAULT);
+            q.get()
+        },
+        PRIO_DEFAULT,
+    );
+    println(&format!("(d) pool for a pool holder: tryLock {}", p4.get()));
+    // (e)
+    let m5 = Obj::new(RecursiveMutex::new());
+    let go: Obj<Promise<()>> = Obj::new(Promise::new());
+    let (m1, go1) = (m5.clone(), go.clone());
+    let p5 = as_task(
+        move || {
+            m1.lock();
+            let _ = go1.result_opt().get();
+        },
+        PRIO_DEFAULT,
+    );
+    let m1 = m5.clone();
+    let s = map_task(move |()| m1.try_lock(), p5, PRIO_DEFAULT, true, true);
+    go.resolve(());
+    println(&format!(
+        "(e) sync dependent of a pool holder: tryLock {}",
+        s.get()
+    ));
     0
 }
 
@@ -5275,5 +5382,96 @@ fn final_run_deep_main_thread(args: &[String]) -> u32 {
         move || println(&format!("final {}", deep_levels(d))),
         PRIO_DEFAULT,
     );
+    0
+}
+
+// def main : IO Unit := do
+//   let p0 ← IO.Promise.new (α := Unit)
+//   let t0 ← IO.asTask (do let _ ← IO.wait p0.result?; pure ())
+//   IO.sleep 5
+//   let p2 ← IO.Promise.new (α := Unit)
+//   let ps ← IO.Promise.new (α := Task (Except IO.Error (Option Unit)))
+//   let y ← IO.asTask (prio := .dedicated) do
+//     let some s ← IO.wait ps.result? | pure ()
+//     let _ ← IO.wait s
+//   let px ← IO.Promise.new (α := Task (Except IO.Error (Option Unit)))
+//   let x ← IO.asTask (prio := .dedicated) do
+//     let some s ← IO.wait px.result? | pure false
+//     let z ← IO.asTask do
+//       p2.resolve ()
+//       IO.sleep 20
+//       IO.hasFinished s
+//     IO.ofExcept (← IO.wait z)
+//   IO.sleep 5
+//   let s ← IO.bindTask (Task.pure ()) fun _ => pure (p2.result?.map (sync := true) Except.ok)
+//   ps.resolve s
+//   px.resolve s
+//   while !(← IO.hasFinished s) do pure ()
+//   let _ ← IO.wait y
+//   let early ← IO.ofExcept (← IO.wait x)
+//   p0.resolve ()
+//   let _ ← IO.wait t0
+//   IO.println s!"s finished before z's end: {early}"
+//
+// (`Except.ok` of an `Option Unit` is that value here: nothing fails.)
+fn bind_requeue_preselect(_: &[String]) -> u32 {
+    let p0: Promise<()> = Promise::new();
+    let r0 = p0.result_opt();
+    let t0 = as_task(
+        move || {
+            r0.get();
+        },
+        PRIO_DEFAULT,
+    );
+    sleep(5);
+    let p2: Obj<Promise<()>> = Obj::new(Promise::new());
+    let ps: Promise<Task<Option<()>>> = Promise::new();
+    let rs = ps.result_opt();
+    let y = as_task(
+        move || {
+            let Some(s) = rs.get() else {
+                return;
+            };
+            s.get();
+        },
+        PRIO_DEDICATED,
+    );
+    let px: Promise<Task<Option<()>>> = Promise::new();
+    let rx = px.result_opt();
+    let p2x = p2.clone();
+    let x = as_task(
+        move || {
+            let Some(s) = rx.get() else {
+                return false;
+            };
+            let z = as_task(
+                move || {
+                    p2x.resolve(());
+                    sleep(20);
+                    has_finished(&s)
+                },
+                PRIO_DEFAULT,
+            );
+            z.get()
+        },
+        PRIO_DEDICATED,
+    );
+    sleep(5);
+    let r2 = p2.result_opt();
+    let s = bind_task(
+        Task::pure(()),
+        move |()| map_task(|o: Option<()>| o, r2, PRIO_DEFAULT, true, false),
+        PRIO_DEFAULT,
+        false,
+        true,
+    );
+    ps.resolve(s.clone());
+    px.resolve(s.clone());
+    while !has_finished(&s) {}
+    y.get();
+    let early = x.get();
+    p0.resolve(());
+    t0.get();
+    println(&format!("s finished before z's end: {early}"));
     0
 }

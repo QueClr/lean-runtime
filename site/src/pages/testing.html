@@ -72,7 +72,8 @@ It adds only what a translator's glue adds.</p>
   <li><code>tests/io2_cases.rs</code> does the same for the cases of the second io batch, and for the <code>debug/</code>, <code>clock/</code> and <code>panics/</code> cases.
     The twins of the cases that set the process title run only with <code>proc-title</code>.
     <a href="repo:tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code>, <code>sync/</code>, <code>refs/</code>, <code>taskio/</code> and <code>uvloop/</code> case, and for the io cases with tasks.
-    Its twins run over <code>sched</code> and <code>io</code>, with a complete example of the glue.</li>
+    Its twins run over <code>sched</code> and <code>io</code>, with a complete example of the glue.
+    The glue runs <code>main</code> as the translators do: on a thread with Lean's stack size, or on the process's thread with <code>LEAN_MAIN_USE_THREAD=0</code>.</li>
   <li><a href="repo:tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a> runs the same twins of the <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code> cases in <a href="threads.html#tests">threads mode</a>.
     Each case runs 5 times, and every run must give a recorded outcome.
     In a threads build, the io twins and the <code>uvloop/</code> twins also run inside tasks.</li>

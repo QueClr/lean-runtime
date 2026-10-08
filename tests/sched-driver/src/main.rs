@@ -42,5 +42,5 @@ fn main() {
     if id == "so_prev_resethand" {
         review::install_prev_resethand();
     }
-    glue::run(init, main, args)
+    glue::run(init, main, args.to_vec())
 }

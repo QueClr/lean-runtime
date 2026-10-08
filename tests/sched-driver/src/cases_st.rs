@@ -154,6 +154,10 @@ pub fn lookup(id: &str) -> Option<Case> {
         "rf13c_loop_spawns_and_sleeps" => (no_init, crate::review::rf13c_loop_spawns_and_sleeps),
         "rf13d_loop_spins_on_task" => (no_init, crate::review::rf13d_loop_spins_on_task),
         "rf13f_loop_cycle_wait" => (no_init, crate::review::rf13f_loop_cycle_wait),
+        // Review RF16-03 (fixes-17).
+        "rf16_started_task_holds_worker" => {
+            (no_init, crate::review::rf16_started_task_holds_worker)
+        }
         "so_rust_thread_overflow" => (no_init, crate::review::so_rust_thread_overflow),
         "so_second_scheduler_thread" => (no_init, crate::review::so_second_scheduler_thread),
         // Not Lean programs: the wait cores where several contexts wait
@@ -222,9 +226,10 @@ fn rust_panic_through_effect(_: &[String]) -> u32 {
 // AR-39 (lean2rr's review RS7-02, its probe `RS7Init` with `RS7=reclock`): a
 // lock's owner is the OS thread, not whether the scheduler has started. Not
 // a case of `tests/cases`: natively the outcome depends on
-// `LEAN_MAIN_USE_THREAD` (on a thread of its own, `main` waits forever), and
-// this glue runs `main` on the initializers' thread, as
-// `LEAN_MAIN_USE_THREAD=0` does natively.
+// `LEAN_MAIN_USE_THREAD` (on a thread of its own, `main` waits forever).
+// `tests/cases.rs` runs it with `LEAN_MAIN_USE_THREAD=0`, where the glue
+// runs `main` on the initializers' thread, as natively; `HELD`, a
+// thread-local of that thread, stands for the initialized constant.
 //
 // initialize held : BaseRecursiveMutex ← do
 //   let r ← BaseRecursiveMutex.new

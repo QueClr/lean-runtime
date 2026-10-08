@@ -1054,14 +1054,32 @@ impl Sched {
     }
 
     /// Take pending task `i` off its queue, its source's dependents and the
-    /// started pure tasks, to run it now.
+    /// started pure tasks, to run it now. A context started for it that has
+    /// not begun it (`Contexts::starting`) no longer starts with it: it
+    /// leaves the list, as a worker whose task ran elsewhere, and when it
+    /// runs takes the next queued task if a worker is free, or ends
+    /// (`take_preselect`). Otherwise it would begin a bind task's
+    /// continuation, which comes back to the queue with the same entry and
+    /// generation (`bind_wait`), with no worker free (the review of
+    /// fixes-17). `take_preselect`'s own context has left the list already.
     fn hand(&mut self, i: u32) {
+        let g = self.ent(i).gen;
+        let ctxs = &mut self.cx.ctxs;
+        self.cx.starting.retain(|&c| {
+            let x = &mut ctxs[c];
+            if x.preselect == Some((i, g)) {
+                x.preselect = None;
+                false
+            } else {
+                true
+            }
+        });
         self.unqueue(i);
         self.unlink(i);
         let e = self.ent_mut(i);
         if e.flags & PICKED != 0 {
             e.flags &= !PICKED;
-            let (p, g) = (e.prio(), e.gen);
+            let p = e.prio();
             let t = &mut self.tk;
             t.picked_live -= 1;
             // its worker runs it now, as the task of the context that runs it
@@ -1708,9 +1726,20 @@ impl Sched {
         None
     }
 
-    /// A worker context's first task, handed, if it is still pending and
-    /// not running elsewhere.
+    /// A worker context's first task, handed, if it is still pending and no
+    /// other runner has taken it (`hand` clears the preselect of the
+    /// contexts started with a task it hands, so a bind task's
+    /// continuation, queued again under the same entry, is not taken here;
+    /// the review of fixes-17). The context leaves `Contexts::starting`:
+    /// from its begin on, the task it runs counts its worker
+    /// (`holds_worker`). Without a task the context takes the next queued
+    /// task if a worker is free, or ends (`worker_main`), as a worker whose
+    /// task ran elsewhere.
     pub(crate) fn take_preselect(&mut self) -> Option<u32> {
+        let c = self.cx.cur;
+        if let Some(k) = self.cx.starting.iter().position(|&s| s == c) {
+            self.cx.starting.swap_remove(k);
+        }
         let (i, g) = self.cx.cur_ctx().preselect.take()?;
         let e = self.ent(i);
         if e.gen != g || e.flags & (QUEUED | PICKED) == 0 {
@@ -1798,9 +1827,10 @@ impl Sched {
         e.flags & ON_THREAD == 0 && e.prio() < DEDICATED
     }
 
-    /// The number of the task manager's workers in use: a counter kept by
-    /// `refresh_holds` (review RS1S-11), checked against a full count in
-    /// debug builds.
+    /// The number of the task manager's workers in use: the contexts that
+    /// hold one, a counter kept by `refresh_holds` (review RS1S-11) and
+    /// checked against a full count in debug builds, and the contexts about
+    /// to begin a queued pool task (`starting_holds`, review RF16-03).
     fn pool_in_use(&self) -> u32 {
         debug_assert_eq!(
             self.cx.in_use,
@@ -1810,7 +1840,47 @@ impl Sched {
                 .filter(|c| c.status != Status::Dead && self.holds_worker(&c.st, c.wait))
                 .count() as u32
         );
-        self.cx.in_use
+        self.cx.in_use + self.starting_holds()
+    }
+
+    /// The workers of the pool tasks that contexts started for them
+    /// (`start_worker`) have not begun yet (`Contexts::starting`; review
+    /// RF16-03). Natively the worker takes such a task off the queue at
+    /// once, and is busy with it from then on; here the context begins it
+    /// only when it first runs (`take_preselect`), after the contexts that
+    /// were able to run before it. Before the fix a context that ran first
+    /// could start one pool task more than the limit. Not counted here: a
+    /// started pure task (`PICKED`: `picked_pool` counts its worker), a
+    /// dedicated task (a thread of its own), and a task that is no longer
+    /// queued (deleted). A task handed to another runner (a waiter ran it on
+    /// its stack, and its context holds the worker; or another context
+    /// started with it began it) takes its contexts off the list (`hand`):
+    /// a bind task's continuation, queued again under the same entry and
+    /// generation, holds no worker of theirs (the review of fixes-17). Two
+    /// contexts started with the same task count one worker (an effect
+    /// point's `startable` may return a task that a context is about to
+    /// begin).
+    fn starting_holds(&self) -> u32 {
+        let s = &self.cx.starting;
+        let mut n = 0;
+        for (k, &c) in s.iter().enumerate() {
+            if let Some(t) = self.starting_task(c) {
+                if !s[..k].iter().any(|&d| self.starting_task(d) == Some(t)) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// The queued pool task that context `c`, started for it, is about to
+    /// begin, if any (`starting_holds`).
+    fn starting_task(&self, c: CtxId) -> Option<(u32, u32)> {
+        let x = &self.cx.ctxs[c];
+        let (i, g) = x.preselect.filter(|_| x.status != Status::Dead)?;
+        let e = self.ent(i);
+        (e.gen == g && e.flags & (QUEUED | PICKED) == QUEUED && e.prio() < DEDICATED)
+            .then_some((i, g))
     }
 
     /// Context `c`'s running tasks, wait or status changed: count again
@@ -1890,8 +1960,10 @@ impl Sched {
     /// worker would start now, as natively a free worker takes the queue's
     /// head (`dequeue`: the first task of the highest non-empty queue) while
     /// the waiter sleeps. That is:
-    /// - a pure task a worker has started (`PICKED`), or a dedicated one (a
-    ///   thread of its own at once);
+    /// - a pure task a worker has started (`PICKED`), a dedicated one (a
+    ///   thread of its own at once), or a pool task a context is about to
+    ///   begin (its worker is counted from the start, review RF16-03; the
+    ///   waiter takes it from that context, `hand`);
     /// - otherwise, if a worker is free, the lone worker's task, else the
     ///   first task of the highest non-empty queue (pure tasks no IO task
     ///   waits for are started on the way, `pick`, as `startable` does).
@@ -1930,6 +2002,15 @@ impl Sched {
             return true;
         }
         if self.ent(i).prio() == DEDICATED {
+            return true;
+        }
+        if self.preselected(i) {
+            // A pool task a context is about to begin: its worker is busy
+            // with it already (`starting_holds`, review RF16-03), as a
+            // started pure task's is. A waiter that comes first runs it,
+            // `hand` takes it from that context, and the context then takes
+            // the next queued task if a worker is free, or ends (the review
+            // of fixes-17: not a bind task's continuation queued later).
             return true;
         }
         self.settle_worker();
@@ -1990,8 +2071,12 @@ impl Sched {
     /// other context observes (`may_run_awaited`). A task started this way
     /// stays queued, or started (`PICKED`), until its context begins it
     /// (`take_preselect`), so that a waiter with room that comes first still
-    /// may run it, and the context then takes the next queued task, as a
-    /// worker whose task ran elsewhere.
+    /// may run it; `hand` then takes it from the context, which takes the
+    /// next queued task if a worker is free, or ends, as a worker whose task
+    /// ran elsewhere (also when the task is a bind task whose continuation
+    /// is queued again before the context runs: the review of fixes-17).
+    /// Meanwhile the context holds the task's worker (`starting_holds`,
+    /// review RF16-03).
     fn here_or_own_context(&mut self, i: u32) -> bool {
         let f = self.ent(i).flags;
         if !self.tk.started || f & (QUEUED | PICKED) == 0 || self.room_to_run_here() {
@@ -2095,13 +2180,15 @@ impl Sched {
         None
     }
 
-    /// Whether a context already starts with task `i` (`preselect`).
+    /// Whether a context already starts with task `i` (`preselect`): one
+    /// started for it that has not begun it yet (`Contexts::starting`; a
+    /// worker context sets its next task and takes it at once).
     pub(crate) fn preselected(&self, i: u32) -> bool {
         let g = self.ent(i).gen;
-        self.cx
-            .ctxs
-            .iter()
-            .any(|c| c.status != Status::Dead && c.preselect == Some((i, g)))
+        self.cx.starting.iter().any(|&c| {
+            let x = &self.cx.ctxs[c];
+            x.status != Status::Dead && x.preselect == Some((i, g))
+        })
     }
 
     /// `IO.getTaskState`'s polling threshold (`query`: `Query::Run`, review
@@ -3264,15 +3351,17 @@ pub fn in_sync_task() -> bool {
     with(|s| s.caller().is_some_and(|i| s.ent(i).flags & SYNC != 0))
 }
 
-/// The thread the running code is on, as the scheduler tells threads apart
-/// (0 in `main`): the running context's base, plus the depth of the
+/// The thread the running code is on, as the scheduler tells nested runs
+/// apart (0 in `main`): the running context's base, plus the depth of the
 /// innermost task running on it, a task run on a context's stack being
 /// natively on another thread than the code below it; a `sync` dependent
-/// on the thread that finished its source. With the context
-/// (`current_context`) it names the owner of a lock or of a taken
-/// reference (`sched::sync`, lean2rr's `refs`). Two tasks run one after the
+/// on the thread that finished its source. It tells the code running now
+/// from the code below it on its context (lean2rr's `refs`: the taker of a
+/// reference). It is not a native thread: two tasks run one after the
 /// other at the same depth get the same number, whatever thread they
-/// natively run on: `IO.getTID` uses `tid_offset` (review AR-37).
+/// natively run on, and one native thread's tasks on two contexts get two.
+/// `IO.getTID` (review AR-37) and the owner of a lock (`sched::sync`, hunt
+/// HSG-01) use `tid_offset`.
 pub fn thread_number() -> u64 {
     with(|s| s.cur_thread())
 }
@@ -3293,7 +3382,8 @@ pub fn thread_number() -> u64 {
 ///   for the whole program (`libuv.cpp` 26).
 ///
 /// New numbers count up from 1 in the order the scheduler first needs
-/// them, as Linux hands out the ids of new threads. They are unique on one
+/// them (here, or for the owner of a lock: `sched::sync`, hunt HSG-01), as
+/// Linux hands out the ids of new threads. They are unique on one
 /// scheduler; with schedulers on several OS threads (an embedder, the
 /// crate's tests), `gettid` plus one thread's number may equal another
 /// thread's id.

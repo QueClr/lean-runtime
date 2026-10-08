@@ -141,8 +141,8 @@ So the oracle reads its inputs at run time.</p>
   <li>A case that natively never ends records the output before its timeout.</li>
   <li><code>scripts/cases.py check --exe-dir DIR</code> runs a translator's build of each case and compares it with the recorded files.</li>
   <li>Each run starts in a fresh directory, with an empty environment, pipes for the three streams, a memory cap and a CPU-time limit.</li>
-  <li>There are 320 program cases, in these areas:
-    <ul class="areas"><li><code>clock/</code> 1</li><li><code>cse/</code> 1</li><li><code>debug/</code> 3</li><li><code>folding/</code> 4</li><li><code>io/</code> 33</li><li><code>net/</code> 29</li><li><code>panics/</code> 1</li><li><code>process/</code> 40</li><li><code>refs/</code> 5</li><li><code>streams/</code> 4</li><li><code>sync/</code> 4</li><li><code>taskio/</code> 6</li><li><code>tasks/</code> 101</li><li><code>temp/</code> 7</li><li><code>time/</code> 3</li><li><code>uvloop/</code> 64</li><li><code>uvsys/</code> 14</li></ul></li>
+  <li>There are 322 program cases, in these areas:
+    <ul class="areas"><li><code>clock/</code> 1</li><li><code>cse/</code> 1</li><li><code>debug/</code> 3</li><li><code>folding/</code> 4</li><li><code>io/</code> 33</li><li><code>net/</code> 29</li><li><code>panics/</code> 1</li><li><code>process/</code> 40</li><li><code>refs/</code> 5</li><li><code>streams/</code> 4</li><li><code>sync/</code> 5</li><li><code>taskio/</code> 6</li><li><code>tasks/</code> 102</li><li><code>temp/</code> 7</li><li><code>time/</code> 3</li><li><code>uvloop/</code> 64</li><li><code>uvsys/</code> 14</li></ul></li>
 </ul>
 <p>A case may list documented <a href="glossary.html#g-deviation">deviations</a>.
 For a translator's own deviation, the expected output stays native's, and the deviation's outcome is also allowed.
@@ -160,7 +160,8 @@ It adds only what a translator's glue adds.</p>
   <li><code>tests/io2_cases.rs</code> does the same for the cases of the second io batch, and for the <code>debug/</code>, <code>clock/</code> and <code>panics/</code> cases.
     The twins of the cases that set the process title run only with <code>proc-title</code>.
     <a href="../tests/sched-driver/src/cases.rs">tests/sched-driver</a> has a twin for every <code>tasks/</code>, <code>sync/</code>, <code>refs/</code>, <code>taskio/</code> and <code>uvloop/</code> case, and for the io cases with tasks.
-    Its twins run over <code>sched</code> and <code>io</code>, with a complete example of the glue.</li>
+    Its twins run over <code>sched</code> and <code>io</code>, with a complete example of the glue.
+    The glue runs <code>main</code> as the translators do: on a thread with Lean's stack size, or on the process's thread with <code>LEAN_MAIN_USE_THREAD=0</code>.</li>
   <li><a href="../tests/sched-driver-mt/src/main.rs">tests/sched-driver-mt</a> runs the same twins of the <code>tasks/</code>, <code>sync/</code>, <code>refs/</code> and <code>taskio/</code> cases in <a href="threads.html#tests">threads mode</a>.
     Each case runs 5 times, and every run must give a recorded outcome.
     In a threads build, the io twins and the <code>uvloop/</code> twins also run inside tasks.</li>

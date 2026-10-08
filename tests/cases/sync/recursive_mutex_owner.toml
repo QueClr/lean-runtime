@@ -1,0 +1,5 @@
+id = "recursive_mutex_owner"
+area = "sync"
+lean_version = "4.34.0"
+source = "lean-runtime fixes-18, hunt HSG-01 (the owner of a recursive mutex is the native thread); after the hunt's RecMutexOwner.lean"
+streams = "separate"

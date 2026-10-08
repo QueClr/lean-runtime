@@ -1,0 +1,5 @@
+(a) dedicated after dedicated: tryLock false
+(b) dedicated after pool: tryLock false
+(c) pool after pool: tryLock true
+(d) pool for a pool holder: tryLock false
+(e) sync dependent of a pool holder: tryLock true
