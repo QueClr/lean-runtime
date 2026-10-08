@@ -618,7 +618,10 @@ impl Handle {
         self.file().get_line(out).map_err(os)
     }
 
-    /// `Handle.isEof` (`lean_io_prim_handle_is_eof`, `feof`).
+    /// The end-of-file indicator (`feof`; io.cpp's `lean_io_prim_handle_is_eof`).
+    /// Lean 4.34 binds no declaration to that C function (`Handle.isEof` is not
+    /// a primitive of `Init`), so no program reaches it: the indicator shows
+    /// only in how `read` and `getLine` behave. Kept as an internal accessor.
     pub fn is_eof(&self) -> bool {
         self.file().is_eof()
     }
