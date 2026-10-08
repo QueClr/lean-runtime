@@ -177,7 +177,12 @@ once.
     `/tmp/leanrs-timing.lock`, taken without waiting. It refuses to start if
     the 1-minute load average is above 1.0 or any lake, cargo, rustc, clang
     or lean process is running. Every build and test script holds the same
-    lock shared (`scripts/check.sh` does).
+    lock shared (`scripts/check.sh` does). A session that waits for the lock
+    first holds `/tmp/leanrs-timing.gate` exclusively (`flock -x` on the gate,
+    then on the lock), and every shared holder first waits on the gate
+    (`flock -s /tmp/leanrs-timing.gate true`): `flock` alone lets new shared
+    holders in ahead of a waiting exclusive one, so without the gate a session
+    could wait for builds started after it asked.
   - **Pinning.** One quiet core per session, set with `sched_setaffinity`;
     one timed process at a time; one warm-up per side, then nine alternating
     pairs, each a fresh process.

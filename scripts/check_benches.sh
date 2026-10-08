@@ -14,6 +14,9 @@ cd "$(dirname "$0")/.."
 N="${1:-1000}"
 if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
   export LEAN_RUNTIME_LOCKED=1
+  # A timing session (flock -x on the gate, then on the lock) holds the gate
+  # while it waits for the lock: wait behind it instead of overtaking it.
+  flock -s /tmp/leanrs-timing.gate true
   exec flock -s /tmp/leanrs-timing.lock "$0" "$@"
 fi
 

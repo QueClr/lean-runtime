@@ -7,6 +7,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
   export LEAN_RUNTIME_LOCKED=1
+  # A timing session (flock -x on the gate, then on the lock) holds the gate
+  # while it waits for the lock: wait behind it instead of overtaking it.
+  flock -s /tmp/leanrs-timing.gate true
   exec flock -s /tmp/leanrs-timing.lock "$0" "$@"
 fi
 TC=${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-09-30}

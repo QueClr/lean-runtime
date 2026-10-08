@@ -57,6 +57,9 @@ cd "$(dirname "$0")/.."
 # session takes it exclusively and must not overlap with builds.
 if [[ -z "${LEAN_RUNTIME_LOCKED:-}" ]]; then
   export LEAN_RUNTIME_LOCKED=1
+  # A timing session (flock -x on the gate, then on the lock) holds the gate
+  # while it waits for the lock: wait behind it instead of overtaking it.
+  flock -s /tmp/leanrs-timing.gate true
   exec flock -s /tmp/leanrs-timing.lock "$0" "$@"
 fi
 TOOLCHAINS=(${LEAN_RUNTIME_TOOLCHAINS:-nightly-2026-08-31 nightly-2026-09-30})
