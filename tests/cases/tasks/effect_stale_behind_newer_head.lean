@@ -5,9 +5,9 @@
 -- "main". Natively the one worker ran `l1` and then `l2` right after their
 -- enqueue, long before `main`'s print; `h` is queued only later. At `main`'s
 -- print a task queued 5 ms ago or more goes first in lean-runtime's
--- single-thread scheduler; a scan that ends at the newer `h`, the first
--- task in the order a free worker takes them, starts neither `l1` nor `l2`
--- there, and "main" comes first.
+-- single-thread scheduler: it runs `l1` there, late, and the worker that
+-- `l1` frees takes the newer `h` first, the queue's head then, so "main"
+-- comes before "L2" (a known difference, LSCHED-05 of its docs/sched.md).
 @[noinline] def spin (n : Nat) (acc : UInt64) : UInt64 := Id.run do
   let mut a := acc
   for i in [0:n] do

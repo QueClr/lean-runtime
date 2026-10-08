@@ -1474,4 +1474,8 @@ cases!(
     // the review of fixes-19
     effect_freed_worker_takes_newer_head,
     effect_late_run_keeps_newer_head_behind,
+    // fixes-21: the reviews of fixes-19's window of a freed worker
+    effect_two_late_runs_keep_queue_order,
+    effect_older_head_before_inline_child,
+    effect_late_run_after_ref_write,
 );

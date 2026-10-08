@@ -3,6 +3,12 @@ area = "tasks"
 lean_version = "4.34.0"
 source = "lean-runtime fixes-19 (the rule of the review of fixes-19 checked against a newer task queued before the late run that frees the worker), 2026-10-07"
 streams = "separate"
+deviations = { lean_runtime = "LSCHED-05" }
 # The argument is the number of steps of `main`'s computation (about 0.5 s natively; it must
 # take more than 5 ms in a translator's build). Natively "main" before "H" is a race of the woken
-# worker against `main`'s print, which `main` wins (5 of 5 runs).
+# worker against `main`'s print, which `main` wins (5 of 5 runs). `expected` is native's; the
+# race's other outcome, "L2", "H", "main", is effect_late_run_keeps_newer_head_behind.alt2.*,
+# written by hand (seen in threads mode under load, the other user's review of fixes-21).
+# lean-runtime runs `l1` late, at `main`'s print, after `h`'s enqueue; the worker it frees takes
+# `h` before `l2`: "main", "H", "L2", effect_late_run_keeps_newer_head_behind.alt1.*, written by
+# hand, which `check` accepts (docs/sched.md, "Known differences from native", LSCHED-05).

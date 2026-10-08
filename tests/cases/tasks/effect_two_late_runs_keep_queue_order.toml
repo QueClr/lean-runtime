@@ -1,0 +1,7 @@
+id = "effect_two_late_runs_keep_queue_order"
+area = "tasks"
+lean_version = "4.34.0"
+source = "the review of lean-runtime's fixes-19 (the window of the last freed worker was the only one kept: two late runs on main's stack, then an effect point, started the second one's task first), judged by the coordinator, fixes-21, 2026-10-08"
+streams = "separate"
+# The argument is the number of steps of `main`'s computation (about 0.5 s natively; it must
+# take more than 5 ms in a translator's build).

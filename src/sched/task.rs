@@ -348,13 +348,6 @@ pub(crate) struct Tasks {
     worker: u32,
     wake: Option<Instant>,
     worker_exists: bool,
-    /// The last worker that became free (a context stopped holding one,
-    /// `refresh_holds`), as two values of the queue's sequence (`next_q`):
-    /// when that context came to hold it, and when it stopped. The tasks
-    /// queued between were in the queue when the worker became free, so it
-    /// took the first of them in the queue's order (`startable`'s
-    /// `Gate::Before`; the review of fixes-19).
-    freed: Option<(u32, u32)>,
     /// The last generation handed out (never 0).
     serial: u32,
     /// Pure tasks a worker has started, not run yet (`pick`), in that order:
@@ -461,7 +454,6 @@ impl Tasks {
             worker: NONE,
             wake: None,
             worker_exists: false,
-            freed: None,
             serial: 0,
             picked: VecDeque::new(),
             picked_live: 0,
@@ -1671,12 +1663,9 @@ impl Sched {
     /// picked one that an IO task has come to wait for comes first.
     ///
     /// The gate of an effect point, a zero sleep or the final run's polling
-    /// point: `Gate::Before` passes over the tasks queued after its time,
-    /// except those queued while the context that last freed a worker held
-    /// it (`queued_while_held`); the first candidate left, in the same
-    /// order, is the one (hunt HSC-02 and the review of fixes-19);
-    /// `Gate::After` ends the scan at the first candidate queued before its
-    /// mark (an older task a free worker takes first).
+    /// point: `Gate::Before` ends the scan at the first candidate queued
+    /// after its time, `Gate::After` at the first one queued before its
+    /// mark; either way a free worker takes that candidate first.
     pub(crate) fn startable(&mut self, gate: Gate) -> Option<(u32, u32)> {
         if !self.tk.started {
             return None;
@@ -1698,20 +1687,20 @@ impl Sched {
             let e = self.ent(cand);
             match gate {
                 Gate::Any => {}
-                // A task queued too recently is passed over (hunt HSC-02,
-                // fixes-19): the tasks that pass were all queued before it,
-                // when natively a free worker took them in this scan's
-                // order, without it. Before the fix the scan ended there, so
-                // a newer task of a higher priority, or the lone worker's
-                // late pick (`settle_worker`), kept the older ones from
-                // starting at all. Not one queued while the context that
-                // last freed a worker held it (`queued_while_held`, the
-                // review of fixes-19): it was in the queue when that worker
-                // became free, which took the first such task in this
-                // order, so it passes as one queued by `t` does.
-                Gate::Before(t) if !self.queued_by(cand, t) && !self.queued_while_held(cand) => {
-                    continue
-                }
+                // The first candidate queued after `t` ends the scan: a
+                // free worker takes it before the older tasks behind it (a
+                // newer one of a higher priority, or the pick of a worker
+                // that a late run freed, `settle_worker`). A task that ran
+                // late here saw what `main` did since; natively that is a
+                // worker delayed past those steps, which then takes the
+                // queue's head of now, so this order is one of native's
+                // (LSCHED-05 in docs/sched.md). Passing over the newer
+                // candidate (fixes-19, hunt HSC-02), or letting pass the
+                // tasks queued while the context that last freed a worker
+                // held it (the review of fixes-19), gave orders that no
+                // native schedule has (fixes-21: the other translator's
+                // second review).
+                Gate::Before(t) if !self.queued_by(cand, t) => return None,
                 Gate::Before(_) => {}
                 // A task queued before `mark` was queued before every task
                 // that passes, at the same or a higher priority (the scan's
@@ -1924,10 +1913,7 @@ impl Sched {
     }
 
     /// Context `c`'s running tasks, wait or status changed: count again
-    /// whether it holds a worker (`holds_worker`). When it stops holding
-    /// one, a worker became free: `Tasks::freed` records the queue's
-    /// sequence then, and when the context came to hold it (`startable`'s
-    /// `Gate::Before`). The sequence counts enqueues, so no clock is read.
+    /// whether it holds a worker (`holds_worker`).
     pub(crate) fn refresh_holds(&mut self, c: CtxId) {
         let x = &self.cx.ctxs[c];
         let now = x.status != Status::Dead && self.holds_worker(&x.st, x.wait);
@@ -1935,28 +1921,11 @@ impl Sched {
         if now != x.holds {
             x.holds = now;
             if now {
-                x.held_since = self.tk.next_q;
                 self.cx.in_use += 1;
             } else {
-                self.tk.freed = Some((x.held_since, self.tk.next_q));
                 self.cx.in_use -= 1;
             }
         }
-    }
-
-    /// Whether queued entry `i` was queued while the context that last freed
-    /// a worker held it (`Tasks::freed`): natively it was in the queue when
-    /// that worker became free. Its queue position (`Entry::link`, the
-    /// sequence its enqueue stamped, after the hold began and at or before
-    /// its end) says so exactly, compared with wrapping as `Gate::After`
-    /// compares it; a re-queued task (a bind task's continuation) has the
-    /// position of its last enqueue.
-    fn queued_while_held(&self, i: u32) -> bool {
-        let Some((from, to)) = self.tk.freed else {
-            return false;
-        };
-        let q = self.ent(i).link;
-        (q.wrapping_sub(from) as i32) > 0 && (q.wrapping_sub(to) as i32) <= 0
     }
 
     /// What the idle worker picks: the first task of the highest non-empty

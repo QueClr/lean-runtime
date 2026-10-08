@@ -83,12 +83,9 @@ needed. So a task is *deferred*: it runs at the first of these points.
   processors). The task then starts on a *context* of its own.
 - **An effect point.** At an output, a flush, a process spawn or an exit,
   a task queued 5 ms ago or more (`STALE`) goes first, as natively its
-  worker would have run it by then (the first such task in the order a
-  free worker takes them; newer tasks ahead of it are passed over, unless
-  they were queued while the context that last freed a worker held it,
-  hunt HSC-02 and the review of fixes-19, "Schedules that depend on the
-  machine's speed" below); so do a
-  context whose sleep has ended
+  worker would have run it by then (while it is the first task in the
+  order a free worker takes them; "Which stale task an effect point
+  starts" below, and LSCHED-05); so do a context whose sleep has ended
   and a UV timer that has come due, as natively their threads ran them at
   their deadlines (review HU-01 for the timer).
 - **Polling.** `IO.getTaskState`/`IO.hasFinished` report a pending task
@@ -927,64 +924,72 @@ machine the same program can take another of native's schedules:
 The recorded cases do not depend on these thresholds: their sleeps are tens
 of milliseconds or longer.
 
-**Which stale task an effect point starts** (hunt HSC-02, fixes-19). An
-effect point, a zero sleep (90 µs, `WORKER_LATENCY`) and the final run's
-polling point (`Wait::FinalLoop`) start a task queued that long ago
-(`startable` with `Gate::Before`). The tasks queued by then are all older
-than the others, so natively a free worker took them in the queue's order
-(the highest priority first, first come, first served within a priority)
-before the newer ones existed. The scan passes over the newer ones and
-takes the first old one in that order, the lone worker's pick first if it
-is old. Before the fix it ended at the first newer candidate. The lone
-worker picks lazily (`settle_worker`, at the next look after its 90 µs),
-so after a long computation without a scheduling point its pick, and the
-queue's head, can be a newer task of a higher priority: the older tasks
-behind it never started there. Case `tasks/effect_stale_behind_newer_head`
-(one worker: `main` queues `l1` and `l2`, which prints "L2", computes for
-about 0.5 s natively without a scheduling point, queues `h` at
-`Task.Priority.max`, prints "main"): "L2", "main", as natively; before the
-fix "main", "L2". The second round of an effect point (`Gate::After`, the
-tasks queued by what that point let go first) keeps ending its scan at the
-first task queued before its mark: such a task is older than every task
-that passes, at the same or a higher priority (or the lone worker's
-pick), so natively a free worker takes it first.
+**Which stale task an effect point starts** (hunt HSC-02, fixes-19; the
+reviews of fixes-19, fixes-21). An effect point, a zero sleep (90 µs,
+`WORKER_LATENCY`) and the final run's polling point (`Wait::FinalLoop`)
+start a task queued that long ago (`startable` with `Gate::Before`): the
+first candidate in the order a free worker takes them (the lone worker's
+pick, then the highest priority first, first come, first served within a
+priority). The scan ends at the first candidate queued more recently, as a
+free worker takes that one first. The second round of an effect point
+(`Gate::After`, the tasks queued by what that point let go first) ends its
+scan at the first task queued before its mark, for the same reason.
 
-**A worker that became free took the queue's head then** (the review of
-fixes-19). A newer task is not passed over when it was queued while the
-context that last freed a worker held it: natively it was in the queue
-when that worker became free, and the worker took the first task of the
-queue then, in the queue's order. `refresh_holds` records the window
-(`Tasks::freed`): from when the context came to hold its worker
-(`Ctx::held_since`: a task's begin, a wake from a wait that freed it) to
-when it stopped holding it (the task's walk ended, its `wait` freed the
-worker, the context ended), as two values of the queue's sequence (the
-count of enqueues, `Tasks::next_q`, which each enqueue stamps into the
-task's queue position); `queued_while_held` asks whether a candidate's
-position falls within it, compared with wrapping as `Gate::After`
-compares it. That is an order, not a time, so no clock is read (a
-re-queued bind task's continuation has its last enqueue's position).
-Such a candidate passes the gate as one queued by
-its time does, so among the candidates that pass, the scan takes the
-queue's order. The pool has one queue, as natively (`m_queues`, whose head
-any free worker takes), so the window is the last one of any context, with
-one worker or several; a window older than the gate's time changes
-nothing (its tasks pass the gate anyway). Cases (one worker, recorded
-natively; "fixes-19" is the pass-over without the window):
+The limit (LSCHED-05, "Known differences from native"). After a
+computation without a scheduling point, the tasks queued before it run
+late, at the effect point, after what `main` did since. When the first of
+them ends, its worker takes the queue's head then (`settle_worker`), which
+can be a newer task of a higher priority, queued after the computation;
+the scan ends there, so the other older tasks run after it, and after the
+effect point's output. Natively the worker ran the older tasks during the
+computation, before the newer task existed. The order here is native's
+when the worker's thread is delayed past `main`'s computation, the one
+order consistent with what the late task saw: in
+`tasks/effect_late_run_after_ref_write`, `l1` runs late and reads the
+value that `main` stored after `h`'s enqueue, and natively a worker that
+ran `l1` after that store takes `h` before `l2`. No rule at the effect
+point can give native's order in both `effect_late_run_keeps_newer_head_behind`
+and `effect_late_run_after_ref_write`: a reference write is no scheduling
+point, so the scheduler's state at the effect point is the same in both,
+and native's order of the first ("L2" before "H") is one that the second's
+late read rules out.
 
-| Case | What the program does | Native | 09faf7a | fixes-19 |
+fixes-19 had two other rules, both removed in fixes-21:
+- the scan passed over a candidate queued too recently and took the first
+  old one (hunt HSC-02): native's order in `effect_stale_behind_newer_head`
+  and `effect_late_run_keeps_newer_head_behind`, but "L2" before "H" after
+  `l1` read the later value in `effect_late_run_after_ref_write`, which no
+  native schedule has;
+- a candidate queued while the context that last freed a worker held it
+  passed too (the review of fixes-19; one window, from that context's first
+  hold to its free, in the queue's sequence). The window began when that
+  context took its task, not when the native worker became free, so it let
+  a task pass ahead of an older one that natively a free worker took first
+  (`effect_older_head_before_inline_child`: "T" before the older "H"), and
+  only the last window was kept (`effect_two_late_runs_keep_queue_order`:
+  "H2" before "H1"). `effect_freed_worker_takes_newer_head`, its case,
+  gives native's outcome without it: the effect point starts nothing, and
+  then the hub starts the lone worker's pick, `h`, first.
+
+Cases (one worker, recorded natively; "fixes-19" is e97854a, and "here"
+is also 09faf7a's outcome):
+
+| Case | What the program does | Native | fixes-19 | Here |
 |---|---|---|---|---|
-| `tasks/effect_stale_behind_newer_head` | as above | "L2", "main" | "main", "L2" | "L2", "main" |
-| `tasks/effect_freed_worker_takes_newer_head` | the worker's task `x` sleeps 20 ms, queues `h` at `Task.Priority.max` and ends; `l` is queued behind `x`; `main` computes for about 0.5 s, waits for `x` (run on its stack, late), flushes stdout | "H", "L", "main" | "H", "L", "main" | "L", "H", "main" |
-| `tasks/effect_late_run_keeps_newer_head_behind` | as `effect_stale_behind_newer_head`, with `h` printing "H" | "L2", "main", "H" | "main", "H", "L2" | "L2", "main", "H" |
+| `tasks/effect_stale_behind_newer_head` | `main` queues `l1` and `l2` (prints "L2"), computes for about 0.5 s natively without a scheduling point, queues `h` at `Task.Priority.max`, prints "main" | "L2", "main" | "L2", "main" | "main", "L2" (`alt1`, LSCHED-05) |
+| `tasks/effect_late_run_keeps_newer_head_behind` | the same, with `h` printing "H" | "L2", "main", "H" | "L2", "main", "H" | "main", "H", "L2" (`alt1`, LSCHED-05) |
+| `tasks/effect_late_run_after_ref_write` | the same, with `l1` printing the value of a reference (0) that `main` sets to 1 after `h`'s enqueue | "l1 saw 0", "L2", "main", "H" | "l1 saw 1", "L2", "main", "H" | "l1 saw 1", "main", "H", "L2" (`alt1`, LSCHED-05) |
+| `tasks/effect_freed_worker_takes_newer_head` | the worker's task `x` sleeps 20 ms, queues `h` at `Task.Priority.max` and ends; `l` is queued behind `x`; `main` computes for about 0.5 s, waits for `x` (run on its stack, late), flushes stdout | "H", "L", "main" | "H", "L", "main" | "H", "L", "main" |
+| `tasks/effect_two_late_runs_keep_queue_order` | `x1` and `x2` each queue a task ("H1", "H2") and end; `main` computes for about 0.5 s, waits for `x1` and `x2` (each run on its stack, late), flushes stdout | "H1", "H2", "main" | "H2", "H1", "main" | "H1", "H2", "main" |
+| `tasks/effect_older_head_before_inline_child` | `main` queues `h` ("H"), then `a` at `Task.Priority.max`, which queues `t` ("T") at the default priority; `main` waits for `a` (run on its stack), prints "main" | "H", "T", "main" (29 of 40 runs); "H", "main", "T" (9); "main", "H", "T" (2) | "T", "main", "H" | "main", "H", "T" |
 
-In `effect_freed_worker_takes_newer_head`, `h` was queued while `main`'s
-context held the worker for `x`, so it passes, and comes first. In
-`effect_late_run_keeps_newer_head_behind`, the effect point runs `l1` on a
-context of its own, late, and its end frees the worker after `h` was
-queued; but `h` was queued before that context held the worker (natively
-`l1` had ended long before), so it is passed over, and `l2` comes first. A
-window without its start (every task queued before the worker became free
-passes) gives "H", "L2", "main" there (mutation check).
+Parked: task creation as an effect point. If a task's creation first lets
+the stale tasks go, as an effect point does, the older tasks run before
+the newer task exists and before `main`'s later steps. A prototype in the
+single-thread driver (`sched::effect()` at the start of its `as_task`,
+with the gate above) gives native's outcome in all six cases. It adds a
+yield point to every task creation, and its effect on the other cases is
+not measured.
 
 ## The pure-task rule
 
@@ -3561,6 +3566,7 @@ accepts both (`tests/cases/README.md`).
 | LSCHED-02 | A waiter needs a worker that started pure tasks keep, and the oldest of them never ends and reaches no polling point, effect point or zero sleep (two workers or more; reviews AR-25, LF3-01, LF3-04) | Another worker finishes its task and takes the awaited one: the waiter goes on, and the exit waits forever for the runaway task | The oldest started pure task runs on the one thread to free its worker (`needed_picked`) and never ends: nothing after the wait happens | One thread runs one task at a time and cannot tell which started task would end first; the oldest has run the longest. The program hangs either way (a started task runs to completion before the exit); only what it does before the hang differs | `tasks/runaway_pure_before_awaited` (native: `t = 1001`, `p finished: false, q finished: true`, then a hang; here: nothing, then a hang, `alt1`) |
 | LSCHED-03 | A waiter needs a worker that started pure tasks keep, while a context that holds a worker sleeps, and the oldest started task reaches no yield point (two workers or more; reviews RF3-02, LF3-05) | A race: the sleeper's worker takes the awaited task when the sleeper wakes and ends, a started task's worker when that task ends; whichever comes first | The oldest started task runs at once for the waiter (AR-25), so the awaited task comes after that task's run, whatever the sleeper does. With yield points in the started task (reference reads, clock reads, outputs, zero sleeps) the hub resumes the due sleeper there, and its worker takes the awaited task, as natively (LF3-01, LF3-04) | One thread cannot know how long a started pure task takes, and cannot preempt it. Waiting for the sleeper's wake instead (RF3-02's fix) idled the only thread for as long as an unrelated sleeper slept, so a watchdog fired where native ends (LF3-05, `tasks/picked_task_watchdog`), and it was reverted: a delay by the started task's own run time is the admitted cost | `tasks/picked_task_sleeping_worker` (native: `t` while `p` still runs, `p finished then: false`; here: `t` after `p`'s run, `true`, `alt1`) |
 | LSCHED-04 | A UV extern made within a loop wake-up after a timer came due (review RF14-02) | A race: the extern takes the loop's lock first, before the loop thread has woken for the timer, almost always; a slow extern lets the timer's callback run first | The same race, decided by elapsed time: the catch-up leaves a timer due less than `LOOP_LATENCY` (1 ms) ago, and runs one due earlier; threads mode has native's race | One thread decides by the clock what native threads decide by who gets the lock first; both orders are native's | `uvloop/timer_fresh_next_twice` (native: "true, true" and "false"; the other outcome of each line, alone or together, as `alt1` to `alt3`, accepted in every mode) |
+| LSCHED-05 | Tasks queued before a computation of 5 ms or more without a scheduling point, and a newer task of a higher priority queued after it, before the next effect point (one worker; hunt HSC-02, the reviews of fixes-19, fixes-21) | The worker ran the older tasks during the computation, in the queue's order, before the newer task existed | They run late, at the effect point, after what `main` did since (a reference it set included). When the first of them ends, its worker takes the queue's head then, the newer task, and the effect point's scan ends there: the other older tasks run after it, and after the effect point's output | One thread runs a task late, after `main`'s later steps; with that late run, the newer task first is the order native gives when the worker's thread is delayed, the one order consistent with what the late task saw. A scan that passed over the newer task (fixes-19) gave native's order without a reference, and with one an order no native schedule has ("Which stale task an effect point starts"). Parked there: task creation as an effect point | `tasks/effect_stale_behind_newer_head` (native: "L2", "main"; here: "main", "L2", `alt1`); `tasks/effect_late_run_keeps_newer_head_behind` (native: "L2", "main", "H"; here: "main", "H", "L2", `alt1`); `tasks/effect_late_run_after_ref_write` (native: "l1 saw 0", "L2", "main", "H"; here: "l1 saw 1", "main", "H", "L2", `alt1`) |
 
 The other places where the crate's schedule is one of native's but may
 differ from the most frequent one are "Schedules that depend on the

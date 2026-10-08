@@ -339,6 +339,19 @@ pub const CASES: &[(&str, Case)] = &[
         "effect_late_run_keeps_newer_head_behind",
         (no_init, effect_late_run_keeps_newer_head_behind),
     ),
+    // fixes-21: the reviews of fixes-19's window of a freed worker
+    (
+        "effect_two_late_runs_keep_queue_order",
+        (no_init, effect_two_late_runs_keep_queue_order),
+    ),
+    (
+        "effect_older_head_before_inline_child",
+        (no_init, effect_older_head_before_inline_child),
+    ),
+    (
+        "effect_late_run_after_ref_write",
+        (no_init, effect_late_run_after_ref_write),
+    ),
 ];
 
 /// The cases of `CASES` that threads mode (`tests/sched-driver-mt`) does
@@ -5733,6 +5746,118 @@ fn effect_late_run_keeps_newer_head_behind(args: &[String]) -> u32 {
         println("?");
     }
     let h = as_task(|| println("H"), PRIO_MAX);
+    println("main");
+    l1.get();
+    drop(l1);
+    l2.get();
+    drop(l2);
+    h.get();
+    0
+}
+
+// fixes-21: the reviews of fixes-19's window of a freed worker (an effect
+// point let pass the tasks queued while the context that last freed a worker
+// held it).
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let x1 ← IO.asTask (do
+//       let h ← IO.asTask (IO.println "H1")
+//       pure h)
+//   let x2 ← IO.asTask (do
+//       let h ← IO.asTask (IO.println "H2")
+//       pure h)
+//   let r := spin n 1
+//   if r == 42 then IO.println "?"
+//   let h1 ← IO.ofExcept (← IO.wait x1)
+//   let h2 ← IO.ofExcept (← IO.wait x2)
+//   (← IO.getStdout).flush
+//   let _ ← IO.wait h1
+//   let _ ← IO.wait h2
+//   IO.println "main"
+fn effect_two_late_runs_keep_queue_order(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let x1 = as_task(|| as_task(|| println("H1"), PRIO_DEFAULT), PRIO_DEFAULT);
+    let x2 = as_task(|| as_task(|| println("H2"), PRIO_DEFAULT), PRIO_DEFAULT);
+    let r = spin_steps(n, 1);
+    if r == 42 {
+        println("?");
+    }
+    let h1 = x1.get();
+    drop(x1);
+    let h2 = x2.get();
+    drop(x2);
+    // `IO.FS.Stream.flush`: an effect point, as a translator's glue makes
+    // it (docs/sched.md, "The glue", item 5), even with nothing to write
+    lean_runtime::sched::effect();
+    let _ = Handle::stdout().flush();
+    h1.get();
+    drop(h1);
+    h2.get();
+    drop(h2);
+    println("main");
+    0
+}
+
+// def main : IO Unit := do
+//   let h ← IO.asTask (IO.println "H")
+//   let a ← IO.asTask (prio := .max) (do
+//       let _ ← IO.asTask (IO.println "T")
+//       pure ())
+//   let _ ← IO.wait a
+//   IO.println "main"
+//   let _ ← IO.wait h
+fn effect_older_head_before_inline_child(_: &[String]) -> u32 {
+    let h = as_task(|| println("H"), PRIO_DEFAULT);
+    let a = as_task(
+        || {
+            // `_` is unused: compiled Lean drops it at once (an IO task
+            // still runs)
+            drop(as_task(|| println("T"), PRIO_DEFAULT));
+        },
+        PRIO_MAX,
+    );
+    a.get();
+    drop(a);
+    println("main");
+    h.get();
+    0
+}
+
+// def main (args : List String) : IO Unit := do
+//   let n := args.head!.toNat!
+//   let r ← IO.mkRef 0
+//   let l1 ← IO.asTask (do
+//       let v ← r.get
+//       IO.println s!"l1 saw {v}")
+//   let l2 ← IO.asTask (IO.println "L2")
+//   let s := spin n 1
+//   if s == 42 then IO.println "?"
+//   let h ← IO.asTask (prio := .max) (IO.println "H")
+//   r.set 1
+//   IO.println "main"
+//   let _ ← IO.wait l1
+//   let _ ← IO.wait l2
+//   let _ ← IO.wait h
+fn effect_late_run_after_ref_write(args: &[String]) -> u32 {
+    let n = to_nat(&args[0]);
+    let r = Ref::new(0u64);
+    let r1 = r.clone();
+    let l1 = as_task(
+        move || {
+            let v = r1.get();
+            println(&format!("l1 saw {v}"));
+        },
+        PRIO_DEFAULT,
+    );
+    let l2 = as_task(|| println("L2"), PRIO_DEFAULT);
+    let s = spin_steps(n, 1);
+    if s == 42 {
+        println("?");
+    }
+    let h = as_task(|| println("H"), PRIO_MAX);
+    r.set(1);
+    drop(r);
     println("main");
     l1.get();
     drop(l1);

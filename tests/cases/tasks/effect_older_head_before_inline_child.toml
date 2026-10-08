@@ -1,0 +1,10 @@
+id = "effect_older_head_before_inline_child"
+area = "tasks"
+lean_version = "4.34.0"
+source = "the other translator's second review of lean-runtime's fixes-19 (repro A: the window of a freed worker let a task pass that natively waits behind an older one), judged by the coordinator, fixes-21, 2026-10-08"
+streams = "separate"
+schedule_dependent = true
+# Native, 40 runs: "H", "T", "main" (29 runs); "H", "main", "T" (9, alt1); "main", "H", "T" (2,
+# alt2). The one worker starts after `a` was queued and takes it first; then `main`'s wake races
+# the worker's `h` and `t`. "T" before "H" is no native schedule: `t` is queued after `h`, at the
+# same priority. lean-runtime's single-thread scheduler runs `a` on `main`'s stack and gives alt2.

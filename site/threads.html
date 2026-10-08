@@ -228,7 +228,7 @@ Each socket has a lock of its own, which only the holder of the loop lock takes.
   <li><strong>The loop thread</strong> starts at the first use of <code>Std.Internal.UV</code>, not at the program's start.</li>
   <li><strong>Schedules.</strong> The order of racy output lines varies from run to run, as natively.
     Thread ids and the resident memory are not native's.</li>
-  <li><strong>No LSCHED differences.</strong> The <a href="sched.html#pure">pure-task rule</a> and its known differences (LSCHED-01 to LSCHED-03) are the single-thread scheduler's.
+  <li><strong>No LSCHED differences.</strong> The <a href="sched.html#pure">pure-task rule</a>, its known differences (LSCHED-01 to LSCHED-03) and the <a href="sched.html#late">late runs at an effect point</a> (LSCHED-05) are the single-thread scheduler's.
     In threads mode those cases give native's outcome.</li>
 </ul>
 

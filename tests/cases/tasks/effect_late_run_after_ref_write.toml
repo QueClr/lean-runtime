@@ -1,0 +1,15 @@
+id = "effect_late_run_after_ref_write"
+area = "tasks"
+lean_version = "4.34.0"
+source = "the other translator's second review of lean-runtime's fixes-19 (repro B: effect_late_run_keeps_newer_head_behind with a reference that main sets after h's enqueue: l1, run late, read 1, and L2 still came before H), judged by the coordinator, fixes-21, 2026-10-08"
+streams = "separate"
+deviations = { lean_runtime = "LSCHED-05" }
+# The argument is the number of steps of `main`'s computation (about 0.5 s natively; it must
+# take more than 5 ms in a translator's build). `expected` is native's (5 of 5 runs); natively
+# "H" against "main" is a race of the woken worker against `main`'s print, whose other outcome,
+# "l1 saw 0", "L2", "H", "main", is effect_late_run_after_ref_write.alt2.*, written by hand
+# (the other user's review of fixes-21). lean-runtime
+# runs `l1` late, at `main`'s print, after the reference was set: it reads 1, and the worker it
+# frees takes `h` before `l2`, as natively after a delay of the worker's thread: "l1 saw 1",
+# "main", "H", "L2", effect_late_run_after_ref_write.alt1.*, written by hand, which `check`
+# accepts (docs/sched.md, "Known differences from native", LSCHED-05).
