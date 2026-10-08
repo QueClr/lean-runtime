@@ -154,20 +154,27 @@ impl Drop for ContextSlots {
     }
 }
 
-/// Keeps context `n`'s set, or drops it (after the store's borrow).
+/// Keeps context `n`'s set, or drops it (after the store's borrow, as the
+/// set it replaces, if any: hunt HDW-02).
 fn keep(n: usize, event_loop: bool, ended: bool, set: ThreadSlots) {
     let mut set = Some(set);
-    let _ = STORE.try_with(|s| {
-        let mut s = s.borrow_mut();
-        if !ended {
-            if s.contexts.len() <= n {
-                s.contexts.resize_with(n + 1, || None);
+    let old = STORE
+        .try_with(|s| {
+            let mut s = s.borrow_mut();
+            if !ended {
+                if s.contexts.len() <= n {
+                    s.contexts.resize_with(n + 1, || None);
+                }
+                std::mem::replace(&mut s.contexts[n], set.take())
+            } else if event_loop {
+                std::mem::replace(&mut s.event_loop, set.take())
+            } else {
+                None
             }
-            s.contexts[n] = set.take();
-        } else if event_loop {
-            s.event_loop = set.take();
-        }
-    });
+        })
+        .ok()
+        .flatten();
+    drop(old);
     drop(set);
 }
 
@@ -224,23 +231,101 @@ impl Drop for TaskSlots {
     /// its bind function returned, or a panic unwinds it: the thread below
     /// gets its set back; the worker keeps the task's, unless the workers
     /// have ended (`end_workers`: a pool task of LB-13's corrected run); a
-    /// dedicated task's goes.
+    /// dedicated task's goes. A set the worker still had (a second run on
+    /// the same worker id that overlapped this one, possible once a job's
+    /// `end_running_task` freed the id) is replaced and dropped after the
+    /// store's borrow, as the task's own set when it goes (hunt HDW-02).
     fn drop(&mut self) {
         let Some(mut set) = self.held.take() else {
             return;
         };
         set.swap();
         let mut set = Some(set);
+        let mut old = None;
         if let Some(w) = self.worker {
             let _ = STORE.try_with(|s| {
                 let mut s = s.borrow_mut();
                 if !s.ended {
                     if let Some(slot) = s.workers.get_mut(w) {
-                        *slot = set.take();
+                        old = std::mem::replace(slot, set.take());
                     }
                 }
             });
         }
+        drop(old);
         drop(set);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::streams::set_stdout;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// A stream whose drop notes whether the store could be borrowed then
+    /// (a translator's stream drop is translator code, which may reach the
+    /// scheduler and so the store).
+    #[derive(Clone)]
+    struct Probe(Option<Rc<Cell<Option<bool>>>>);
+
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            if let Some(seen) = &self.0 {
+                seen.set(Some(STORE.with(|s| s.try_borrow_mut().is_ok())));
+            }
+        }
+    }
+
+    /// A probe set as the current standard output (in the set swapped in
+    /// now), and what its drop will note.
+    fn set_probe() -> Rc<Cell<Option<bool>>> {
+        let seen = Rc::new(Cell::new(None));
+        drop(set_stdout(Probe(Some(seen.clone())), || Probe(None)));
+        seen
+    }
+
+    /// Hunt HDW-02: two runs that overlap on one worker id (possible once a
+    /// job's `end_running_task` freed the id): the inner run's end keeps its
+    /// set at the worker, and the outer run's end replaces it. The replaced
+    /// set is dropped after the store's borrow (before the fix, under it).
+    #[test]
+    fn a_replaced_worker_set_drops_outside_the_store() {
+        let outer = TaskSlots::begin(true, Some(0));
+        let inner = TaskSlots::begin(true, Some(0));
+        let seen = set_probe();
+        drop(inner);
+        assert_eq!(seen.get(), None, "the worker keeps the inner run's set");
+        drop(outer);
+        assert_eq!(seen.get(), Some(true), "dropped, outside the borrow");
+        let rest = STORE.with(|s| std::mem::take(&mut s.borrow_mut().workers));
+        drop(rest);
+    }
+
+    /// The same for a context's kept set (`keep`): a suspended context's,
+    /// and the event loop's between two loop contexts.
+    #[test]
+    fn a_replaced_context_set_drops_outside_the_store() {
+        let outer = ContextSlots::enter(3, false);
+        let inner = ContextSlots::enter(3, false);
+        let seen = set_probe();
+        inner.leave(false);
+        assert_eq!(seen.get(), None, "kept for the context's resume");
+        outer.leave(false);
+        assert_eq!(seen.get(), Some(true), "dropped, outside the borrow");
+
+        let first = ContextSlots::enter(4, true);
+        let second = ContextSlots::enter(5, true);
+        let seen = set_probe();
+        second.leave(true);
+        assert_eq!(seen.get(), None, "kept for the next loop context");
+        first.leave(true);
+        assert_eq!(seen.get(), Some(true), "dropped, outside the borrow");
+        let rest = STORE.with(|s| {
+            let mut s = s.borrow_mut();
+            (std::mem::take(&mut s.contexts), s.event_loop.take())
+        });
+        drop(rest);
     }
 }

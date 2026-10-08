@@ -79,7 +79,9 @@ The crate's `unsafe` beyond this file's entries is in vetted dependencies:
 rustix and nix (system calls, feature `io`; nix's `sigaction` and its
 re-exported libc also for the feature `stack-overflow`; rustix's `mm` for
 `proc-title`'s block; rustix also for
-`sched` and `threads`, the event loop's `poll`, `epoll` and eventfd),
+`sched` and `threads`, the event loop's `poll`, `epoll` and eventfd, and
+its `thread` feature's `sched_getaffinity`, the count of processors when
+`/sys` and `/proc` cannot be read, hunt HDW-01),
 corosensei (stack switching, `sched`) and signal-hook (signal handlers, its
 safe API only, `sched`, and `threads` for `sched::uv`'s signal watchers,
 T2),

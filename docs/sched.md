@@ -39,7 +39,7 @@ This file covers:
 | `src/sched/uv.rs` | `Std.Internal.UV`'s loop, timers and signals on the event loop |
 | `src/sched/slots.rs` | With `io`: the current standard streams and modelled `errno` of each context and each emulated worker, swapped in while it runs (review AR-24) |
 | `src/sched/uv_signals.rs` | The process-wide part of the signal watchers' delivery (signal-hook's handlers, the signal pipe, the counts), shared with threads mode's `sched::uv` (T2) |
-| `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors, `LEAN_STACK_SIZE_KB` |
+| `src/sched/env.rs` | `LEAN_NUM_THREADS`, the number of processors (glibc 2.39's `get_nprocs` order: `/sys/devices/system/cpu/online`, `/proc/stat`, the affinity mask, 2; hunt HDW-01), `LEAN_STACK_SIZE_KB` |
 | `src/sched/common.rs` | The plain items both modes share: `TaskState`, the messages, the priorities, `await_task` (`Task.get`'s rule) and `thread_create_failed` (native's abort when a thread cannot be made) |
 | `src/sched/threads.rs`, `src/sched/mt/` | Threads mode (feature `threads`, `docs/threads.md`): the module `sched` of a threads build, and `sched::mt`, with `sched::mt::uv`, `Std.Internal.UV` on a loop thread of its own (T2) |
 | `src/sched/sync.rs` | `Std.Sync`'s mutexes and condition variable |
@@ -1910,6 +1910,9 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    its thread-locals from one task to the next; cases
    `tasks/worker_keeps_streams` and `worker_keeps_errno`), a dedicated task
    with a fresh one. A glue must not swap `io::streams` in its hooks too.
+   A set that leaves the store, also one that a kept set replaces (two
+   runs that overlap on one worker id), is dropped after the store's
+   borrow, since a stream's drop is translator code (hunt HDW-02).
 
    A glue that keeps per-thread state of its own (lean2rr's stream cells,
    which only its generated code can build and drop) follows the same
@@ -1962,7 +1965,16 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - `sched::start(glue)` on the thread that runs `main`
      (`lean_init_task_manager`). It takes Lean's numbers: the task
      manager's workers from `LEAN_NUM_THREADS` (else the online
-     processors), and each context's stack from Lean's thread size
+     processors as glibc's `sysconf(_SC_NPROCESSORS_ONLN)` counts them,
+     `sched::hardware_concurrency`: `/sys/devices/system/cpu/online`, else
+     the `cpuN` lines of `/proc/stat`, else the calling thread's affinity
+     mask, else 2; never 0, so a sandbox without `/sys` and `/proc` still
+     gets a task manager, as natively, hunt HDW-01; the affinity count
+     holds at most 1024 processors (rustix's `CpuSet`): when the kernel's
+     mask is larger (`EINVAL`) it is 1024, where glibc counts up to 32768
+     and gives 32768 beyond that, which happens only when neither `/sys`
+     nor `/proc` can be read), and each context's
+     stack from Lean's thread size
      (`lthread`: 1 GiB on 64-bit targets, or `LEAN_STACK_SIZE_KB` rounded
      down to 4 KiB plus 128 KiB). A translator with rules of its own calls
      `start_with(glue, workers, stack_size)` instead (leanrs: its

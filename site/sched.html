@@ -62,7 +62,8 @@ It must finish the task before the task's value is needed.
     The task runs on that stack only when the stack has enough free space (<a href="#room">below</a>).</li>
   <li><strong>The running code blocks</strong> (a sleep, a lock, a promise, a read of an empty pipe) and a worker is free.
     The task then starts on a <a href="glossary.html#g-context">context</a> of its own.
-    The number of workers is <code>LEAN_NUM_THREADS</code>, or the number of online processors.</li>
+    The number of workers is <code>LEAN_NUM_THREADS</code>, or the number of online processors.
+    If the system does not give that number, it is the number of processors that the thread can use, or else 2, as in glibc.</li>
   <li><strong>An <a href="glossary.html#g-yield-point">effect point</a>.</strong> At an output, a flush, a process spawn or an exit, a task queued 5 ms ago or more goes first.
     Natively, a worker would have run it by then.
     The task must be the first in the order that a free worker takes tasks.

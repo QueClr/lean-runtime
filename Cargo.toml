@@ -24,7 +24,8 @@ path = "src/lib.rs"
 #   exactly, with only `io_safety`, which adds no crate);
 # - `sched`: corosensei (decisions Q5 and O2), with its default features
 #   (mmap'd stacks with a guard page, and unwinding across the switch),
-#   rustix (the event loop's epoll and poll; sched-io), and signal-hook (the
+#   rustix (the event loop's epoll and poll, sched-io; `sched_getaffinity`,
+#   the count of processors without `/sys` and `/proc`), and signal-hook (the
 #   `Std.Internal.UV.Signal` watchers: its safe flag, self-pipe and
 #   conditional default actions; accepted by the owner, 2026-10-04);
 # - `proc-title`: rustix's `mm` (the `mmap` of the constructor's block,
@@ -37,7 +38,8 @@ path = "src/lib.rs"
 #   threads, locks, condition variables and atomics only; its
 #   `Std.Internal.UV` loop thread (`sched::uv` in threads mode, T2) uses
 #   rustix (`poll` and the async eventfd) and signal-hook (the signal
-#   watchers' delivery), as `sched`'s loop does.
+#   watchers' delivery), as `sched`'s loop does; the count of processors
+#   uses rustix's `sched_getaffinity` as in `sched`.
 # The requirements are carets compatible with leanrs's offline registry (nix
 # 0.31.3, rustix 1.1.4, io-uring 0.7.13, corosensei 0.3.4, signal-hook 0.3.18), with only the features the crate
 # uses; leanrs resolves them in its own workspace. lean-runtime's own builds
@@ -45,7 +47,7 @@ path = "src/lib.rs"
 # (`cargo build --offline --locked --features io,sched`; `cargo fetch
 # --locked` once fills the cache).
 [dependencies]
-rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "1.1", optional = true, default-features = false, features = ["std", "event", "fs", "pipe", "process", "stdio", "system", "termios", "thread", "time"] }
 nix = { version = "0.31", optional = true, default-features = false, features = ["fs", "hostname", "poll", "process", "resource", "sched", "signal", "user"] }
 io-uring = { version = "=0.7.13", optional = true, default-features = false, features = ["io_safety"] }
 corosensei = { version = "0.3.4", optional = true }

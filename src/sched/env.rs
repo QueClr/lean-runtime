@@ -2,8 +2,8 @@
 //! threads (`LEAN_NUM_THREADS`, else the number of online processors) and the
 //! stack size of a thread (`LEAN_STACK_SIZE_KB`, else 1 GiB). From lean2rr's
 //! leanrt (`sched.rs`: `pool_limit`, `hardware_concurrency`; `rt.rs`:
-//! `main_stack_size`, `strtoull10`), with `sysconf` replaced by the file glibc
-//! reads for it.
+//! `main_stack_size`, `strtoull10`), with `sysconf` replaced by the files
+//! and the system call glibc reads for it.
 
 /// The number of worker threads of Lean's task manager
 /// (`get_lean_num_threads` in `src/runtime/object.cpp`): `LEAN_NUM_THREADS`
@@ -41,26 +41,74 @@ pub(crate) fn atoi_unsigned(s: &[u8]) -> u32 {
 }
 
 /// `std::thread::hardware_concurrency()` as Lean's runtime gets it (libc++
-/// calls `sysconf(_SC_NPROCESSORS_ONLN)`): the number of online processors,
-/// not limited by the CPU affinity mask or a cgroup quota; 0 if unknown.
-/// glibc counts them from `/sys/devices/system/cpu/online` (a list of ranges
-/// such as `0-3,8-11`), and falls back to `/proc/stat`.
+/// calls `sysconf(_SC_NPROCESSORS_ONLN)`, glibc's `get_nprocs`): the number
+/// of online processors, not limited by the CPU affinity mask or a cgroup
+/// quota while `/sys` or `/proc` can be read. Never 0 (hunt HDW-01): glibc
+/// 2.39 (`sysdeps/unix/sysv/linux/getsysstats.c`) tries, in this order,
+/// 1. `/sys/devices/system/cpu/online` (a list of ranges such as
+///    `0-3,8-11`; `read_sysfs_file`),
+/// 2. the `cpuN` lines at the front of `/proc/stat` (`get_nproc_stat`),
+/// 3. the calling thread's affinity mask (`__get_nprocs_sched`),
+/// 4. 2, "the smallest number meaning that this is not a uniprocessor
+///    system" (`get_nprocs_fallback`).
+///
+/// Each step is taken only when the ones before it gave 0. A sandbox without
+/// `/sys` and `/proc` reaches step 3, where the task manager got 0 workers
+/// before (no task manager: `IO.Promise.new` was an internal panic).
 pub fn hardware_concurrency() -> u32 {
-    if let Some(s) = first_line("/sys/devices/system/cpu/online") {
-        if let Some(n) = count_cpu_list(s.trim()) {
-            return n;
-        }
+    nprocs(
+        || first_line("/sys/devices/system/cpu/online"),
+        || std::fs::read_to_string("/proc/stat").ok(),
+        || affinity_count(rustix::thread::sched_getaffinity(None)),
+    )
+}
+
+/// glibc's order of [`hardware_concurrency`] over its three sources, each
+/// read only when the ones before it gave nothing (so a run with `/sys`
+/// opens no other file, as natively, review AR-31): `online`, the first
+/// line of `/sys/devices/system/cpu/online`; `stat`, `/proc/stat`;
+/// `affinity`, the count of the affinity mask, 0 if unknown.
+fn nprocs(
+    online: impl FnOnce() -> Option<String>,
+    stat: impl FnOnce() -> Option<String>,
+    affinity: impl FnOnce() -> u32,
+) -> u32 {
+    if let Some(n) = online().and_then(|s| count_cpu_list(s.trim())) {
+        return n;
     }
-    if let Ok(s) = std::fs::read_to_string("/proc/stat") {
-        let n = s
-            .lines()
-            .filter(|l| l.starts_with("cpu") && l.as_bytes().get(3).is_some_and(u8::is_ascii_digit))
-            .count();
-        if n > 0 {
-            return n as u32;
-        }
+    if let Some(n) = stat().map(|s| count_stat_cpus(&s)).filter(|&n| n > 0) {
+        return n;
     }
-    0
+    match affinity() {
+        0 => 2,
+        n => n,
+    }
+}
+
+/// glibc's `get_nproc_stat`: the lines `cpuN` (a digit after `cpu`) among
+/// the lines at the front of `/proc/stat` that begin with `cpu` (the total
+/// line `cpu ` among them); the first other line ends the count.
+fn count_stat_cpus(s: &str) -> u32 {
+    s.lines()
+        .take_while(|l| l.starts_with("cpu"))
+        .filter(|l| l.as_bytes().get(3).is_some_and(u8::is_ascii_digit))
+        .count() as u32
+}
+
+/// glibc's `__get_nprocs_sched`: the number of processors in the calling
+/// thread's affinity mask, `sched_getaffinity(0, ...)`, or 0 if it fails (a
+/// sandbox may refuse the call) or the mask is empty. glibc asks with room
+/// for 32768 processors and answers 32768 when the kernel's mask is larger
+/// (`EINVAL`); rustix's safe `sched_getaffinity` asks with a fixed
+/// `CpuSet` of 1024 (`CpuSet::MAX_CPU`), so the same answer, the set's
+/// size, comes here already beyond 1024 possible processors, where glibc
+/// counts up to 32768 (reached only without `/sys` and `/proc`).
+fn affinity_count(r: rustix::io::Result<rustix::thread::CpuSet>) -> u32 {
+    match r {
+        Ok(set) => set.count(),
+        Err(rustix::io::Errno::INVAL) => rustix::thread::CpuSet::MAX_CPU as u32,
+        Err(_) => 0,
+    }
 }
 
 /// The first line of the file at `path`, read as glibc's `get_nprocs`
@@ -238,5 +286,59 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn hardware_concurrency_counts_something() {
         assert!(hardware_concurrency() >= 1);
+        assert!(affinity_count(rustix::thread::sched_getaffinity(None)) >= 1);
+    }
+
+    /// Hunt HDW-01: glibc's order (`get_nprocs`), each source read only when
+    /// the ones before it gave nothing, and 2 when all three give nothing
+    /// (before the fix: 0, no task manager).
+    #[test]
+    fn nprocs_falls_back_as_glibc() {
+        let unread = || -> Option<String> { panic!("read after a source that answered") };
+        let no_affinity = || -> u32 { panic!("asked after a source that answered") };
+        let stat = "cpu  1 2 3\ncpu0 1 2 3\ncpu1 1 2 3\ncpu2 1 2 3\nintr 5\n";
+        // /sys answers: nothing else is read
+        assert_eq!(nprocs(|| Some("0-3,8-11".into()), unread, no_affinity), 8);
+        // /sys unreadable or unparsable or empty: /proc/stat's cpuN lines
+        assert_eq!(nprocs(|| None, || Some(stat.into()), no_affinity), 3);
+        assert_eq!(
+            nprocs(|| Some("x".into()), || Some(stat.into()), no_affinity),
+            3
+        );
+        assert_eq!(
+            nprocs(|| Some(String::new()), || Some(stat.into()), no_affinity),
+            3
+        );
+        // both files unreadable: the affinity mask's count
+        assert_eq!(nprocs(|| None, || None, || 6), 6);
+        // /proc/stat without cpuN lines at its front counts 0: the mask
+        assert_eq!(nprocs(|| None, || Some("intr 5\ncpu0 1\n".into()), || 5), 5);
+        assert_eq!(nprocs(|| None, || Some(String::new()), || 5), 5);
+        // nothing known: glibc's 2, never 0
+        assert_eq!(nprocs(|| None, || None, || 0), 2);
+    }
+
+    #[test]
+    fn stat_cpus_as_glibc() {
+        assert_eq!(count_stat_cpus("cpu  1\ncpu0 1\ncpu1 1\nintr 1\n"), 2);
+        // the count ends at the first line that does not begin with `cpu`
+        assert_eq!(count_stat_cpus("cpu  1\ncpu0 1\nintr 1\ncpu1 1\n"), 1);
+        assert_eq!(count_stat_cpus("cpu  1\n"), 0);
+        assert_eq!(count_stat_cpus(""), 0);
+    }
+
+    #[test]
+    fn affinity_counts_as_glibc() {
+        let mut set = rustix::thread::CpuSet::new();
+        assert_eq!(affinity_count(Ok(set)), 0, "an empty mask: glibc's 0, so 2");
+        set.set(0);
+        set.set(5);
+        set.set(1023);
+        assert_eq!(affinity_count(Ok(set)), 3);
+        // the kernel's mask is larger than the set: the set's size
+        assert_eq!(affinity_count(Err(rustix::io::Errno::INVAL)), 1024);
+        // another error (a sandbox that refuses the call): unknown
+        assert_eq!(affinity_count(Err(rustix::io::Errno::PERM)), 0);
+        assert_eq!(affinity_count(Err(rustix::io::Errno::NOSYS)), 0);
     }
 }
