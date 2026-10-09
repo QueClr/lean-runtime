@@ -2278,8 +2278,29 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    - the drop of a promise: `resolve(id, store none)` unless confirmed (a
      full slot not confirmed can be a resolution still in its hold;
      `resolve` then waits for it and answers false);
-   - the drop of a task: `release(id)` while its slot is empty, as before
-     (a full slot is a task that is finishing).
+   - the drop of a task (its last reference, Lean's `deactivate_task`):
+     `release(id)` unless confirmed, whatever the slot holds (hunt
+     HMT3-02, fixes-24). A full slot not confirmed can be a task between
+     its job's store and the hold that finishes it: natively `m_value` is
+     still null there, so the drop deletes the task
+     (`deactivate_task_core`: `m_deleted`) and its finish frees it with no
+     `resolve_core`, so it notifies nobody. The rule before ("`release`
+     while the slot is empty") skipped `release` there, and the finish
+     notified: a waiter of a task whose walk was still in progress woke
+     (RS2-08's effect, `tasks/wait_any_unref_finish`). Ids are never
+     reused in threads mode, so `release` of a finished task's id is one
+     lookup under the lock, and of `TaskId::FINISHED` no call.
+
+   **The drop rule in both builds.** A glue writes one check,
+   `if !confirmed() { release(id) }`, with `confirmed()`:
+   - in threads mode, the confirmation above (the `AtomicBool` loaded with
+     `Acquire`, or the stored id equal to `TaskId::FINISHED`), set only
+     after one of the scheduler's answers, never from the slot alone;
+   - in the single-thread scheduler, "the slot is full"
+     (`slot.get().is_some()`): there a full slot is a finished task, so
+     the rule is the one from before, `release` while the slot is empty,
+     and a finished task's id is never passed again (its entry and, in
+     time, its generation serve later tasks).
 
    Native's answers in that gap (the slot full, not confirmed; natively
    `m_value` is still null): `IO.getTaskState` is `running`,
@@ -2287,7 +2308,8 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    pool task the limit rises by one; from a `sync` task `GET_IN_SYNC_TASK`
    comes first). The cost: one lock for the first read of a task after its
    slot filled, unless a wait or a dependent's job confirmed it first; none
-   for later reads. In the single-thread scheduler a full slot is finished
+   for later reads; and one for the drop of a task never confirmed (its
+   `release`). In the single-thread scheduler a full slot is finished
    (the store is the job's last act before `Done`, with no yield point
    between), `full_slot_finished` is the constant `true`, and the glue
    keeps its slot rule. The confirmation is threads mode's only, and the
@@ -2296,8 +2318,13 @@ a reference blocks its own thread with a lock): `tests/sched-driver-mt/src/`
    "slot full" in a single-thread build, so that one code serves both. The
    crate's threads-mode glues (tests/sched-driver-mt, tests/threads_twins.rs)
    follow these rules. Unit tests:
-   `hmt2_02_a_full_slot_is_finished_only_once_its_workers_hold_ended` and
-   `hmt2_02_a_task_seen_finished_then_a_new_task_takes_its_worker`.
+   `hmt2_02_a_full_slot_is_finished_only_once_its_workers_hold_ended`,
+   `hmt2_02_a_task_seen_finished_then_a_new_task_takes_its_worker` and,
+   for the drop, `hmt3_02_a_task_dropped_after_its_store_notifies_nobody`,
+   which shows the scheduler's side: a `release` in the gap deletes the task
+   and its finish notifies nobody (it fails when the rule is emulated the old
+   way). The scheduler itself did not change for this; the glues' `drop` did,
+   and no test drops a real glue task object in the gap.
 4. **Promises.**
    - `IO.Promise.new`: `promise_new()`. Before the task manager runs it
      returns Lean's internal-panic message, which the glue reports.

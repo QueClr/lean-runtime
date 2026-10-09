@@ -19,6 +19,14 @@
 //! spurious wake-up (which native's `std::condition_variable` also has)
 //! changes nothing but when the check runs.
 //!
+//! **A hold ends with its hand-offs** (hunt HMT3-01). The lock's guard
+//! (`Guard`) runs `hand_off` when it is dropped and before a wait on a
+//! condition variable lets the lock go: a `notify_one` of the hold that
+//! found no worker on `queue_cv` (`wake_one`: every idle worker is in its
+//! `task_end` hook) gives a worker in its hook the queue's next task only
+//! then, as natively a woken worker takes a task only once the notifying
+//! hold has ended. So `State::wakes` is 0 whenever the lock is free.
+//!
 //! **No translator code runs under the lock** (docs/threads.md, 1.3): not a
 //! job, not a resolver's `store`, not a glue hook, and no translator value
 //! is dropped there (a deleted task's job is taken out and dropped after the
@@ -52,6 +60,7 @@ use crate::sched::common::{priority, PRIOS};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::JoinHandle;
@@ -153,11 +162,16 @@ pub(crate) struct State {
     /// The standard workers (their indices) in their task's `task_end` hook,
     /// counted idle, that took no task: such a worker cannot wait on
     /// `queue_cv` meanwhile, so a task it would take when woken is handed to
-    /// it (`wake_one`; hunt HMT2-01).
+    /// it at the end of the hold that woke it (`wake_one`, `hand_off`; hunts
+    /// HMT2-01, HMT3-01).
     hook_idle: Vec<u32>,
     /// The tasks handed to such workers (`take`n: counted busy, started):
     /// each runs its task once its hook has returned.
     handed: Vec<(u32, u64)>,
+    /// The `notify_one`s of the current hold that found no worker waiting on
+    /// `queue_cv` (`wake_one`): `hand_off` serves them when the hold ends;
+    /// 0 whenever the lock is free.
+    wakes: u32,
     /// Standard workers made so far: the next one's index (its position in
     /// native's `m_std_workers`; `running_worker`, review AR-32).
     made: u32,
@@ -221,7 +235,48 @@ pub(crate) struct Shared {
     blocked_waits: std::sync::atomic::AtomicU32,
 }
 
-type Guard<'a> = MutexGuard<'a, State>;
+/// The lock, held (`Shared::lock`). Every hold ends with `hand_off`: when
+/// the guard is dropped, and in `wait_on` before the wait lets the lock go.
+/// `None` only inside `into_inner`.
+pub(crate) struct Guard<'a>(Option<MutexGuard<'a, State>>);
+
+impl<'a> Guard<'a> {
+    /// The end of the hold, for a wait that lets the lock go: `hand_off`,
+    /// then the bare guard.
+    fn into_inner(mut self) -> MutexGuard<'a, State> {
+        let mut g = self
+            .0
+            .take()
+            .expect("lean-runtime: a guard without its lock");
+        hand_off(&mut g);
+        g
+    }
+}
+
+impl Deref for Guard<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        self.0
+            .as_deref()
+            .expect("lean-runtime: a guard without its lock")
+    }
+}
+
+impl DerefMut for Guard<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        self.0
+            .as_deref_mut()
+            .expect("lean-runtime: a guard without its lock")
+    }
+}
+
+impl Drop for Guard<'_> {
+    fn drop(&mut self) {
+        if let Some(g) = &mut self.0 {
+            hand_off(g);
+        }
+    }
+}
 
 impl Shared {
     fn new() -> Shared {
@@ -238,6 +293,7 @@ impl Shared {
                 idle: 0,
                 hook_idle: Vec::new(),
                 handed: Vec::new(),
+                wakes: 0,
                 made: 0,
                 dedicated: 0,
                 queues: Default::default(),
@@ -261,7 +317,7 @@ impl Shared {
     /// The lock. A panic never unwinds while it is held (jobs and hooks
     /// abort the process, `AbortOnUnwind`), so poisoning is ignored.
     fn lock(&self) -> Guard<'_> {
-        self.st.lock().unwrap_or_else(PoisonError::into_inner)
+        Guard(Some(self.st.lock().unwrap_or_else(PoisonError::into_inner)))
     }
 
     pub(crate) fn started(&self) -> bool {
@@ -275,8 +331,13 @@ impl Shared {
     }
 }
 
+/// Wait on `cv`: the hold ends (`hand_off`), and a new one begins when the
+/// wait returns.
 fn wait_on<'a>(cv: &Condvar, g: Guard<'a>) -> Guard<'a> {
-    cv.wait(g).unwrap_or_else(PoisonError::into_inner)
+    Guard(Some(
+        cv.wait(g.into_inner())
+            .unwrap_or_else(PoisonError::into_inner),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -667,27 +728,56 @@ fn enqueue(sh: &Arc<Shared>, g: &mut State, id: u64) {
 
 /// `m_queue_cv.notify_one()` after an enqueue or a raised limit: an idle
 /// worker takes a queued task. A worker waiting on `queue_cv` is woken, if
-/// one is (it starts the task at once). Otherwise a worker in its
-/// `task_end` hook, counted idle (`hook_idle`), is given the task under
-/// this lock (`take`): from now on it counts busy, as natively the woken
-/// worker is once it has taken the task, and it runs the task once its
-/// hook has returned (hunt HMT2-01: a raise during the hook found the
-/// worker idle and made no worker, though it was about to take a queued
-/// task). Never the calling thread's own worker: a hook that queues a task
-/// would wait for itself.
+/// one is (it takes a task once this hold ends). Otherwise every idle
+/// worker is in its `task_end` hook (`hook_idle`) and cannot wait on
+/// `queue_cv`: the wake is counted (`wakes`), and when this hold ends
+/// `hand_off` gives such a worker the queue's next task (hunt HMT2-01: a
+/// raise during the hook found the worker idle and made no worker, though
+/// it was about to take a queued task). Until then the worker stays idle,
+/// as natively a signalled worker is until it holds the lock again (hunt
+/// HMT3-01: handed a task at once, it counted busy in the middle of a walk,
+/// so the walk's next enqueue made a worker, and a finishing worker's walk
+/// gave its first dependent away instead of taking it).
 fn wake_one(sh: &Shared, g: &mut State) {
     let hooked = g.hook_idle.len() as u32;
-    if hooked > 0 && g.idle == hooked && g.queued > 0 {
-        let me = running_worker();
-        if let Some(k) = g.hook_idle.iter().position(|&w| Some(w) != me) {
-            if let Some(id) = take(g) {
-                let w = g.hook_idle.swap_remove(k);
-                g.handed.push((w, id));
-                return;
-            }
-        }
+    if hooked > 0 && g.idle == hooked {
+        g.wakes += 1;
+    } else {
+        sh.queue_cv.notify_one();
     }
-    sh.queue_cv.notify_one();
+}
+
+/// The end of a hold (`Guard`): the wakes `wake_one` counted in it reach the
+/// workers in their `task_end` hooks. For each wake, while a task is queued,
+/// a worker in its hook (never the calling thread's own: a hook that queued
+/// a task would wait for itself) takes the queue's next task (`take`, which
+/// keeps the limit) into `handed`: from now on it counts busy, as natively
+/// the woken worker is once it has taken the task, and it runs the task
+/// once its hook has returned. Within one hold no worker joins the waiters
+/// on `queue_cv` (that needs the lock), so every wake of the hold found
+/// none. A wake left over (fewer such workers or queued tasks, or the
+/// limit) is lost, as natively a `notify_one` that reaches no waiter is,
+/// or a woken worker that finds nothing it may take waits again. A
+/// finishing worker's take step comes before (`task_end`), so it takes the
+/// queue's next task first (the first its walk queued, if no task was
+/// queued before), as natively.
+fn hand_off(g: &mut State) {
+    if g.wakes == 0 {
+        return;
+    }
+    let mut n = std::mem::take(&mut g.wakes);
+    let me = running_worker();
+    while n > 0 && g.queued > 0 {
+        let Some(k) = g.hook_idle.iter().position(|&w| Some(w) != me) else {
+            break;
+        };
+        let Some(id) = take(g) else {
+            break;
+        };
+        let w = g.hook_idle.swap_remove(k);
+        g.handed.push((w, id));
+        n -= 1;
+    }
 }
 
 /// `add_dep(src, d)` (1009-1023), under the lock: `d` waits for `src` if it
@@ -822,12 +912,18 @@ fn drive<'a>(
 /// (`tasks/worker_keeps_streams`, 1 run in 5 under load before fixes-19);
 /// and a task queued before goes to it at once, so a raise of the limit
 /// meanwhile finds it busy and makes a worker. `turn` becomes `Took(id)`,
-/// the task to run next, or `Idle`.
+/// the task to run next, or `Idle`. The take step comes before the hold
+/// ends, and so before its hand-offs (`hand_off`): the worker takes the
+/// queue's next task first (the first its walk queued, if no task was
+/// queued before), and the walk's other wakes go to workers in their hooks
+/// (hunt HMT3-01).
 ///
 /// A worker counted idle in its hook cannot wait on `queue_cv`: it is in
 /// `hook_idle` meanwhile, and a task queued then (or a raise with a task
-/// queued) is handed to it (`wake_one`), which it runs next. So it counts
-/// as idle in its hook only while no task is there for it, as natively.
+/// queued) is handed to it when that hold ends (`wake_one`, `hand_off`),
+/// which it runs next. So it counts as idle in its hook only while no task
+/// is there for it, as natively. A hook that never returns keeps a task
+/// handed to it from running (`Glue::task_end`: a hook must not block).
 fn task_end<'a>(sh: &'a Arc<Shared>, mut g: Guard<'a>, own: bool, turn: &mut Turn) -> Guard<'a> {
     let glue = g.glue.clone();
     let mut hooked = None;

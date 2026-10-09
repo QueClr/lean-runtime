@@ -105,9 +105,15 @@ impl<T> TaskObj<T> {
 impl<T> Drop for TaskObj<T> {
     fn drop(&mut self) {
         // Lean's `deactivate_task`: the last reference is gone, on whichever
-        // thread drops it. Nothing to do for a task whose value is stored
-        // (a full slot, confirmed or not: the task is finishing).
-        if self.slot.get().is_none() {
+        // thread drops it. `release` unless the task is confirmed
+        // (docs/sched.md, "The glue", item 3; hunt HMT3-02): a full slot not
+        // confirmed can be a task between its job's store and the hold that
+        // finishes it, natively still unfinished (`m_value` null), so the
+        // drop deletes it and its finish notifies nobody. Ids are never
+        // reused in threads mode: `release` of a finished task's id is a
+        // lookup. (A glue for both modes writes the same check, with
+        // `confirmed()` = "the slot is full" in a single-thread build.)
+        if !self.confirmed() {
             sched::release(self.id);
         }
     }

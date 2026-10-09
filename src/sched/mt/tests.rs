@@ -2587,3 +2587,185 @@ fn hmt2_02_a_task_seen_finished_then_a_new_task_takes_its_worker() {
     finish();
     assert_eq!(live, 1, "b always went to a's worker, as natively");
 }
+
+// ---------------------------------------------------------------------------
+// hunt-mt3 (third look at fixes-22)
+
+/// HMT3-01 (a): a walk is one hold of the lock. Natively `resolve_core`
+/// queues every pool dependent of the walk with `enqueue_core` while it
+/// holds `m_mutex`: an idle worker woken by the first `notify_one` cannot
+/// take a task before the walk ends, so every enqueue of the walk finds it
+/// idle and no worker is made. Here the lone worker is in its `task_end`
+/// hook (counted idle); `main` resolves a promise with two pool dependents.
+/// Native: 1 worker (it runs `d2`, then `d1`).
+#[test]
+fn hmt3_01a_a_walk_that_queues_two_tasks_during_a_hook_makes_no_worker() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(true, std::time::Duration::from_secs(60)));
+    configure(&sh, glue.clone(), 4, 256 << 10);
+    let a: Slot<Option<u32>> = Slot::default();
+    let ta = spawn(filling(&a, running_worker), 0, true);
+    // `a` has finished; its worker is in its `task_end`, counted idle
+    glue.in_hook.wait();
+    assert!(is_finished(ta));
+    let p = promise_new().unwrap();
+    let (d1, d2): (Slot<Option<u32>>, Slot<Option<u32>>) = Default::default();
+    let t1 = depend(p, filling(&d1, running_worker), 0, false, true);
+    let t2 = depend(p, filling(&d2, running_worker), 0, false, true);
+    // one hold: the walk queues `d2`, then `d1`
+    assert!(resolve(p, || {}));
+    let live = live_workers(&sh);
+    glue.go.open();
+    wait(t1);
+    wait(t2);
+    finish();
+    assert_eq!(
+        live, 1,
+        "both enqueues of one walk find the idle worker: no new worker (native)"
+    );
+}
+
+/// HMT3-01 (b): natively the worker that finishes `s` keeps `m_mutex`
+/// from `resolve_core` through `m_idle_std_workers++` to the loop's
+/// `dequeue`: the dependent its walk queued first (the newest, `d2`) goes
+/// to that worker in every run, and an idle worker woken meanwhile finds
+/// the queue without it. Here worker 1 is in its `task_end` hook (counted
+/// idle) while worker 0 walks `s`'s two pool dependents. Native: `d2` runs
+/// on `s`'s worker in every run (`d1` on either worker), and no third
+/// worker is made (native program `hmt3_01b.lean`).
+#[test]
+fn hmt3_01b_a_walk_on_a_worker_keeps_its_first_dependent_while_another_is_in_its_hook() {
+    let _s = serial();
+    let sh = bind_local();
+    let glue = Arc::new(HoldEndGlue::new(true, std::time::Duration::from_secs(60)));
+    configure(&sh, glue.clone(), 4, 256 << 10);
+    let (s_started, go_s) = (Gate::default(), Gate::default());
+    let s_w: Slot<Option<u32>> = Slot::default();
+    let (s_started2, go_s2, s_w2) = (s_started.clone(), go_s.clone(), s_w.clone());
+    let ts = spawn(
+        Box::new(move || {
+            let _ = s_w2.set(running_worker());
+            s_started2.open();
+            go_s2.wait();
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    s_started.wait();
+    // `a` gets a second worker (the first is busy with `s`); its
+    // `task_end` is held: that worker counts idle in its hook
+    let a: Slot<Option<u32>> = Slot::default();
+    let ta = spawn(filling(&a, running_worker), 0, true);
+    glue.in_hook.wait();
+    assert!(is_finished(ta));
+    let (d1, d2): (Slot<Option<u32>>, Slot<Option<u32>>) = Default::default();
+    let t1 = depend(ts, filling(&d1, running_worker), 0, false, true);
+    let t2 = depend(ts, filling(&d2, running_worker), 0, false, true);
+    go_s.open();
+    // `s`'s walk and its worker's take step are over once `main` wakes
+    wait(ts);
+    let live = live_workers(&sh);
+    glue.go.open();
+    wait(t1);
+    wait(t2);
+    finish();
+    assert_eq!(
+        (live, *d2.get().unwrap()),
+        (2, *s_w.get().unwrap()),
+        "d2 ran on s's worker and no third worker was made (native); d1 ran on {:?}, a on {:?}",
+        d1.get(),
+        a.get()
+    );
+}
+
+/// HMT3-02: the glues' drop rule (docs/sched.md, The glue, item 3).
+/// Natively the last reference dropped after the closure returned and
+/// before the worker's `lock.lock()` (`m_value` still null) deactivates
+/// the task (`deactivate_task_core`: `m_deleted`), and its finish frees it
+/// with no `resolve_core`, so no `notify_all`. The glues' rule before
+/// fixes-24 ("`release` while the slot is empty; a full slot is a task
+/// that is finishing") skipped `release` there (the slot is full), so the
+/// finish notified: here it woke the waiter of `p`, whose walk is still in
+/// progress (an older `sync` dependent holds it), as RS2-08's
+/// `wait_any_unref_finish` shows. The test emulates the glue's drop with
+/// today's rule: `release` unless the task is confirmed (ids are never
+/// reused); it fails with the old rule.
+#[test]
+fn hmt3_02_a_task_dropped_after_its_store_notifies_nobody() {
+    let _s = serial();
+    let _sh = start_test(4);
+    let p = promise_new().unwrap();
+    let go_slow = Gate::default();
+    let go_slow2 = go_slow.clone();
+    let slow = depend(
+        p,
+        Box::new(move || {
+            go_slow2.wait_at_most(std::time::Duration::from_secs(60));
+            Outcome::Done
+        }),
+        0,
+        true,
+        true,
+    );
+    // a dedicated task waits for `p`
+    let woke = Gate::default();
+    let woke2 = woke.clone();
+    let tw = spawn(
+        Box::new(move || {
+            wait(p);
+            woke2.open();
+            Outcome::Done
+        }),
+        9,
+        true,
+    );
+    until(|| blocked_waits(&_sh) == 1);
+    // another dedicated task resolves `p`: its walk runs `slow`, which
+    // holds it; `p` is out of the table, its waiter not notified yet
+    let tr = spawn(
+        Box::new(move || {
+            assert!(resolve(p, || {}));
+            Outcome::Done
+        }),
+        9,
+        true,
+    );
+    until(|| is_finished(p));
+    // an IO task stores its value, and its last reference goes before the
+    // worker's hold
+    let x: Slot<u32> = Slot::default();
+    let (stored, go_x) = (Gate::default(), Gate::default());
+    let (x2, stored2, go_x2) = (x.clone(), stored.clone(), go_x.clone());
+    let tx = spawn(
+        Box::new(move || {
+            let _ = x2.set(1);
+            stored2.open();
+            go_x2.wait_at_most(std::time::Duration::from_secs(60));
+            Outcome::Done
+        }),
+        0,
+        true,
+    );
+    stored.wait();
+    assert!(x.get().is_some());
+    // the handle's drop: no answer of the scheduler confirmed `tx` (the
+    // glue's `confirmed` is false), so `release`, though its slot is full
+    let confirmed = false;
+    if !confirmed {
+        release(tx);
+    }
+    go_x.open();
+    until(|| is_finished(tx));
+    let early = woke.wait_at_most(std::time::Duration::from_millis(300));
+    go_slow.open();
+    wait(slow);
+    wait(tr);
+    wait(tw);
+    finish();
+    assert!(
+        !early,
+        "the finish of a task whose last reference went before its hold notified p's waiter"
+    );
+}

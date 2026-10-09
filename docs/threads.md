@@ -1138,12 +1138,28 @@ native has no unlock. So:
   on `queue_cv`, where natively it would be by then. It is in `hook_idle`
   meanwhile: an enqueue or a raise of the limit that would wake an idle
   worker (`wake_one`, `m_queue_cv.notify_one()`) wakes a worker that waits
-  on `queue_cv` if there is one, and otherwise hands the queue's next task
-  to the worker in its hook (`take`, into `handed`), which counts busy from
-  then on and runs it once its hook returns. So a worker counts as idle in
-  its hook only while no task is there for it, as natively. Never the
-  calling thread's own worker: a hook that queued a task for itself would
-  wait for itself;
+  on `queue_cv` if there is one, and otherwise counts a wake (`wakes`).
+  When the hold ends (`hand_off`, run by the lock's guard when it is
+  dropped and before a wait lets the lock go), each wake hands the queue's
+  next task to a worker in its hook (`take`, into `handed`), which counts
+  busy from then on and runs it once its hook returns. So a worker counts
+  as idle in its hook only while no task is there for it, as natively.
+  Never the calling thread's own worker: a hook that queued a task for
+  itself would wait for itself;
+- the hand-offs wait for the end of the hold (fixes-24, hunt HMT3-01), as
+  natively a woken worker takes a task only once it holds the lock again.
+  A walk is one hold, from the finish to its end, a worker's own walk
+  through its take step, unless a `sync` dependent's job splits it (its
+  unlock ends the hold, as natively `run_task`'s unlock around the
+  closure lets woken workers go). Within the hold the workers in their
+  hooks stay idle, so every enqueue of the walk finds them idle and makes
+  no worker, and a finishing worker takes the queue's first task (the
+  first dependent its walk queued, when the queue held nothing before)
+  before the walk's other wakes are handed out. A wake left over (fewer
+  workers in hooks or queued tasks than wakes, or the limit) is lost, as a
+  `notify_one` that reaches no waiter is natively. Within a hold no worker
+  joins the waiters on `queue_cv` (that needs the lock), so either every
+  wake of the hold is counted or none is;
 - every walk's `task_end` comes before its notification of the waiters
   (`finished_cv`), as part of the task's run, as its job's unlock is: a
   waiter woken by a `sync` dependent, the last task of its source's walk,
@@ -1170,7 +1186,17 @@ finishes). Unit tests: `hmt2_01_a_worker_takes_its_next_task_before_its_task_end
 `hmt2_01_a_task_queued_during_a_workers_task_end_is_handed_to_it` (queued
 during the hook: the hand-off); `end_running_task`'s:
 `hmt2_03_end_running_task_wakes_its_waiters_once_the_worker_is_idle`. Each
-fails with its part of the fix undone. The `live - idle >= max` test counts a
+fails with its part of the fix undone. Before fixes-24 `wake_one` handed
+the task at once, in the middle of the hold: the worker in its hook
+counted busy before the walk's next enqueue, which made a new worker
+(`main` resolves a promise with two pool dependents while the lone worker
+is in its hook: 2 workers, native 1), and on a worker's own walk the
+first dependent went to the worker in its hook, not to the finishing
+worker (`IO.getTID`, per-thread state: native runs it on the finishing
+worker in every run, program `hmt3_01b.lean` of the hunt). Unit tests:
+`hmt3_01a_a_walk_that_queues_two_tasks_during_a_hook_makes_no_worker` and
+`hmt3_01b_a_walk_on_a_worker_keeps_its_first_dependent_while_another_is_in_its_hook`;
+each fails with the hand-off made at once. The `live - idle >= max` test counts a
 worker in its hook as idle, as native's worker is by then; the shutdown,
 which ends a worker once the queue is empty, takes it out of `idle` and
 `live` as before.
@@ -1188,6 +1214,13 @@ Limits:
   after the hook (a hook that waits for such a task waits for good). No
   hook in this repository waits (the threads-mode driver's checks the
   hook pairs);
+- the hook must not block. A task handed to its worker runs only once it
+  returns, so a hook that never returns loses that task (its waiters wait
+  for good), where natively the worker would have been on `queue_cv` and
+  taken it. A hook can block without waiting on purpose: the drop of an
+  unresolved promise there runs the `sync` dependents of its result on
+  this thread (`resolve`), and `Promise.result!`'s dependent blocks
+  forever after its panic message;
 - a thread that is not waiting yet and reads a `sync` dependent finished
   during that dependent's hook goes on while the worker is busy; natively
   the dependent is finished only under the lock, which the worker then
@@ -1200,18 +1233,21 @@ Limits:
   while the worker is busy: a blocked waiter checks only that the task
   left the table, which the call's hold did. No threads-mode glue calls it
   today;
-- `wake_one` hands a task to a worker in its hook only when no other
-  worker counts idle (`idle == hook_idle.len()`). A worker on `queue_cv`
+- `wake_one` counts a wake for the workers in their hooks (`hand_off`
+  serves it when the hold ends) only when no other worker counts idle
+  (`idle == hook_idle.len()`). A worker on `queue_cv`
   already signalled for an earlier task, and not yet back under the lock,
   still counts idle: a second enqueue or a raise then signals nobody new,
   and its task waits until the hook returns or another worker frees. A
   delay, never a hang while hooks return;
-- a hand-off counts the hooked worker busy at once, where natively a woken
-  worker counts idle until it holds the lock again and takes the task. So
-  two enqueues in a row during a hook make a second worker (the second
-  finds `idle == 0`); natively that needs the woken worker to take the
-  first task between the two enqueues, a possible schedule but not the
-  usual one.
+- a hand-off counts the hooked worker busy at the end of the hold that
+  queued the task, where natively the woken worker counts idle until it
+  holds the lock again and takes the task, a moment later. So two
+  enqueues in two holds during a hook (two `spawn`s in a row) make a
+  second worker (the second finds `idle == 0`); natively that needs the
+  woken worker to take the first task between the two holds, a possible
+  schedule but not the usual one. Two enqueues in one hold (a walk) make
+  none, as natively.
 
 The other unlocks between a task's finish and the worker's next task are
 native's own: around the jobs of `sync` dependents, the drop of a released
@@ -1235,7 +1271,14 @@ the answers that confirm). The crate's call for it is
 It answers true only once the removing hold has ended (or during a
 `sync` dependent's job, which splits that hold, as natively), so every
 later call of the scheduler sees the worker idle or busy with its next
-task.
+task. The drop of a task's last reference calls `release(id)` unless the
+task is confirmed, whatever the slot holds (fixes-24, hunt HMT3-02): in
+the gap the task is natively unfinished, so the drop deletes it and its
+finish notifies nobody; ids are never reused, so `release` of a finished
+task's id is a lookup. Unit test:
+`hmt3_02_a_task_dropped_after_its_store_notifies_nobody`, which shows the
+scheduler's answer to a `release` in the gap; the change itself is in the
+glues' `drop`.
 
 Memory order: the job's store comes before the worker's lock in `run_one`,
 and that hold's unlock synchronizes with the reader's lock, so the slot's

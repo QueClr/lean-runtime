@@ -63,7 +63,10 @@ The loop thread exists only after the program's first use of <code>Std.Internal.
     The waiters of a task wake when the walk of its dependents ends, as natively.</li>
   <li><strong>The next task.</strong> A worker that finishes a task takes its next queued task in the same lock hold, as natively.
     The glue's <code>task_end</code> hook runs after that.
-    A task queued during the hook goes to that worker at once, and the worker starts it when the hook returns.</li>
+    A task queued during the hook goes to that worker when the lock hold that queued it ends.
+    The worker starts it when the hook returns.
+    So a walk that queues several tasks makes no new worker for them, and the finishing worker takes the first one, as natively.
+    The hook must not block: a task that went to its worker runs only after the hook.</li>
   <li><strong>The loop thread.</strong> <code>Std.Internal.UV</code>'s timers and signals run on a thread of their own, as natively (T2).
     That thread resolves their promises.
     With <code>net</code>, the sockets and the name lookups run there too (N).</li>
@@ -109,7 +112,8 @@ Each socket has a lock of its own, which only the holder of the loop lock takes.
     The job fills the slot.
     The glue reads a full slot as finished only after the scheduler confirms it, once per task, with <code>full_slot_finished</code>.
     So a task that the glue queues next finds the worker idle, as natively.
-    The last drop of an unfinished task calls <code>release</code>, on any thread.</li>
+    The last drop of a task calls <code>release</code>, on any thread, unless the scheduler has confirmed that the task finished.
+    A full slot alone is not enough: the task is unfinished until that confirmation, so its drop deletes it, as natively.</li>
   <li><strong>References.</strong> <code>IO.Ref</code> follows Lean 4.35's rule, as <code>sched::Ref</code>: a lock and a condition variable.
     While a <code>modify</code> function runs, <code>get</code>, <code>take</code>, <code>set</code> and <code>swap</code> wait for its store.
     So a <code>set</code> is never lost (<a href="lean-bugs.html#lb-01">LB-01</a>).

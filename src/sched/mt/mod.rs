@@ -135,11 +135,20 @@ pub trait Glue: Send + Sync {
     /// no worker on account of its own, which counts idle, and runs only
     /// once another worker is free (a hook that waits for it stalls until
     /// then, or for good at the limit); and a task another thread queues
-    /// meanwhile may be handed to this worker, which runs it only after the
-    /// hook. It may queue tasks, release and resolve; keep it short (a task
-    /// handed to the worker meanwhile starts when it returns). A `resolve`
-    /// here runs the promise's `sync` dependents here, on this worker: their
-    /// waits count as the hook's.
+    /// meanwhile may be handed to this worker (when that thread's hold of
+    /// the scheduler's lock ends), which runs it only after the hook. It may
+    /// queue tasks, release and resolve; keep it short (a task handed to the
+    /// worker meanwhile starts when it returns). A `resolve` here runs the
+    /// promise's `sync` dependents here, on this worker: their waits count
+    /// as the hook's.
+    ///
+    /// The hook must not block: a hook that never returns loses the task
+    /// handed to its worker (it never runs, and its waiters wait for good),
+    /// where natively the worker would have taken it. A hook that drops
+    /// translator values hangs only where the program hangs natively: an
+    /// unresolved promise dropped here runs its result's `sync` dependents on
+    /// this thread, and `Promise.result!`'s blocks forever after its panic
+    /// message (docs/threads.md, 1.3, the limits).
     fn task_end(&self, _own_thread: bool) {}
 
     /// The task manager's finalization has ended its standard workers
@@ -397,8 +406,12 @@ pub fn end_running_task(id: TaskId) {
 /// finish of a task released before it finished notifies nobody (natively
 /// it is deleted then, `m_deleted`, without `resolve_core`'s `notify_all`).
 /// A deleted task's job is dropped here, outside the scheduler's lock, so it
-/// may release its own source in turn. Nothing for a finished task's id:
-/// inlined down to that comparison (review AR-23).
+/// may release its own source in turn. The glue calls it unless it has
+/// confirmed that the task finished, a full slot not confirmed included
+/// (docs/sched.md, "The glue", item 3; hunt HMT3-02): ids are never reused,
+/// so for a finished task's id it is a lookup under the lock, and for
+/// `TaskId::FINISHED` nothing, inlined down to that comparison (review
+/// AR-23).
 #[inline]
 pub fn release(id: TaskId) {
     if id != TaskId::FINISHED {

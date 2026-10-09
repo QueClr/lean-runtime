@@ -114,8 +114,10 @@ impl<T> TaskObj<T> {
 
 impl<T> Drop for TaskObj<T> {
     fn drop(&mut self) {
-        // Lean's `deactivate_task`
-        if self.slot.get().is_none() {
+        // Lean's `deactivate_task`: `release` unless confirmed (docs/sched.md,
+        // "The glue", item 3; hunt HMT3-02: a full slot not confirmed can be
+        // a task before the hold that finishes it)
+        if !self.confirmed() {
             sched::release(self.id);
         }
     }
