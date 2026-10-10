@@ -1011,6 +1011,14 @@ other pure tasks, the task is only marked *started* (`pick`,
   - nothing else can go on, and no sleeper will wake (`last_resort`);
   - `main` returns (`finish`, before the queued tasks).
 
+**A dependent of a started pure task** waits until the started task runs.
+Until then the program can still delete it (`release`), and then it never
+runs. Natively the source usually finishes at once, and a worker runs the
+dependent: a deleted dependent's debug output (`dbgTrace`, a `panic!`
+message) is then missing here. Native gives the same outcome when the
+source's worker is slow, so it is one of native's schedules (lean2rr's
+hunt HTSK2).
+
 **A started pure task keeps its worker** (review AR-25, from lean2rr's
 switch to the crate). Natively a worker runs the task it dequeues to its
 end before it dequeues another (the worker loop, `object.cpp` 863-865:

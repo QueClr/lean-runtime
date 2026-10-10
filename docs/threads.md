@@ -171,7 +171,11 @@ same field under the lock (813, 815), and `get_task_state` reads it
 (1085-1097). Its effects are a leaked continuation (a queued inner pure
 task then runs to completion) and a `waiting` or `running` answer that
 can flip mid-transition; both are within native's schedules, so it is no
-LB (no wrong output). `sched::mt` returns the continuation in the job's
+LB (no wrong output). The leak needs no race: a bind task released while
+its function runs is deactivated before the store, with no continuation
+to drop yet (813-815); `task_bind_fn1` then stores it, and `run_task`
+frees the deleted task with `free_task` (906-910), which does not release
+`m_closure` (lean2rr's hunt HTSK2). `sched::mt` returns the continuation in the job's
 result (`Outcome::Continue`) and stores it, or drops it for a released
 task, under the lock (both reviews of T1, 2026-10-04).
 
